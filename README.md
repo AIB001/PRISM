@@ -87,19 +87,19 @@ python /path/to/PRISM/prism/builder.py
 1. **Using GAFF (default)**:
 
    ```bash
-   python prism_builder.py protein.pdb ligand.mol2 -o output_dir
+   prism protein.pdb ligand.mol2 -o output_dir
    ```
 
 2. **Using OpenFF**:
 
    ```bash
-   python prism_builder.py protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff
+   prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff
    ```
 
 3. **With custom configuration**:
 
    ```bash
-   python prism_builder.py protein.pdb ligand.mol2 -o output_dir --config my_config.yaml
+   prism protein.pdb ligand.mol2 -o output_dir --config my_config.yaml
    ```
 
 ### Running MD Simulations
