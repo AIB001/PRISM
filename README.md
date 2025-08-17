@@ -71,7 +71,9 @@ conda install -c conda-forge rdkit
 2. Install in development mode:
 
    ```bash
-   cd PRISMpip install -e .
+   cd PRISM
+
+   pip install -e .
    ```
 
 Or use directly without installation:
@@ -206,3 +208,4 @@ If you use PRISM in your research, please cite:
 ## License
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
+
