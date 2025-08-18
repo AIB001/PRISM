@@ -27,7 +27,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    conda install -c bioconda gromacs
    ```
 
-2. **Python 3.8+** with required packages:
+2. **Python 3.8+** (python 3.12 is recommended) with required packages:
 
    ```bash
    pip install pyyaml numpy
@@ -45,7 +45,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 
 ```bash
 # AmberTools (required)
-conda install -c conda-forge ambertools
+conda install dacase::ambertools-dac=25
 
 # ACPYPE (required)
 pip install acpype
@@ -63,6 +63,8 @@ conda install -c conda-forge openff-toolkit openff-interchange
 # RDKit (required for SDF handling)
 conda install -c conda-forge rdkit
 ```
+
+_openbabel is recommended_
 
 ### Installing PRISM
 
@@ -208,4 +210,5 @@ If you use PRISM in your research, please cite:
 ## License
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
+
 
