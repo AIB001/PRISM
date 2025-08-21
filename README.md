@@ -114,12 +114,12 @@ After PRISM completes, you can run the simulations:
 cd output_dir/GMX_PROLIG_MD
 
 # Energy minimization
-gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -p topol.top -o em.tpr
-gmx mdrun -deffnm em
+gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o em.tpr -maxwarn 2
+gmx mdrun -deffnm em -ntmpi 1 -ntomp 16
 
 # NVT equilibration
-gmx grompp -f ../mdps/nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr
-gmx mdrun -deffnm nvt
+gmx grompp -f ../mdps/nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr -maxwarn 2
+gmx mdrun -deffnm nvt -ntmpi 1 -ntomp 16
 
 # NPT equilibration
 gmx grompp -f ../mdps/npt.mdp -c nvt.gro -r nvt.gro -t nvt.cpt -p topol.top -o npt.tpr
