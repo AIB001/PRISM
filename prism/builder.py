@@ -350,9 +350,13 @@ Example usage:
         """
     )
 
-    # Positional arguments
+    # Positional arguments (allow mixed order with options)
     parser.add_argument("protein", nargs='?', help="Path to protein PDB file")
     parser.add_argument("ligand", nargs='?', help="Path to ligand file (MOL2/SDF)")
+    
+    # Alternative way to specify input files
+    parser.add_argument("--protein-file", "-pf", help="Path to protein PDB file (alternative to positional)")
+    parser.add_argument("--ligand-file", "-lf", help="Path to ligand file (alternative to positional)")
 
     # Basic options
     basic = parser.add_argument_group('Basic options')
@@ -551,9 +555,16 @@ pressure_coupling:
             print(f"Error detecting force fields: {e}")
         sys.exit(0)
 
-    # Check required arguments
-    if not args.protein or not args.ligand:
-        parser.error("Both protein and ligand files are required")
+    # Check required arguments - handle alternative input methods
+    protein_path = args.protein or args.protein_file
+    ligand_path = args.ligand or args.ligand_file
+    
+    if not protein_path or not ligand_path:
+        parser.error("Both protein and ligand files are required. Use positional arguments or --protein-file/--ligand-file flags")
+    
+    # Update args to use resolved paths
+    args.protein = protein_path
+    args.ligand = ligand_path
 
     # Build kwargs from command-line arguments
     kwargs = {}

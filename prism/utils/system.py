@@ -280,21 +280,22 @@ class SystemBuilder:
                 if self.config['ions']['concentration'] > 0:
                     genion_cmd.extend(["-conc", str(self.config['ions']['concentration'])])
 
-                # Try different group numbers for SOL
-                success = False
-                for group in ["15", "14", "13"]:  # Try SOL group first
+                # Find the water group dynamically
+                water_group = self._find_water_group()
+                
+                if water_group is not None:
                     try:
-                        output = self.run_command(genion_cmd, input_text=group, check=False)
-                        if "Number of (3-atomic) solvent molecules:" in output:
-                            print(f"Successfully added ions using group {group}")
-                            success = True
-                            break
-                    except:
-                        continue
-
-                if not success:
-                    # If no suitable water group found, it might be because no ions are needed
-                    print("Warning: Could not add ions. This might be because the system is already neutral.")
+                        output = self.run_command(genion_cmd, input_text=str(water_group), check=False)
+                        if "Number of (3-atomic) solvent molecules:" in output or os.path.exists("solv_ions.gro"):
+                            print(f"Successfully added ions using group {water_group}")
+                        else:
+                            print("Warning: Ion addition completed but no confirmation message found")
+                    except Exception as e:
+                        print(f"Error during ion addition: {e}")
+                        print("Copying solvated structure without ions...")
+                        shutil.copy("solv.gro", "solv_ions.gro")
+                else:
+                    print("Warning: Could not find water group for ion addition.")
                     print("Copying solvated structure without ions...")
                     shutil.copy("solv.gro", "solv_ions.gro")
             else:
@@ -304,6 +305,68 @@ class SystemBuilder:
 
         os.chdir(current_dir)
 
+    def _find_water_group(self):
+        """Find the water group number for genion"""
+        try:
+            # Run gmx genion with dry run to get available groups
+            cmd = [
+                self.gmx_command, "genion", "-s", "ions.tpr", "-o", "temp_test.gro",
+                "-p", "topol.top", "-neutral"
+            ]
+            
+            # Run with echo "q" to quit immediately and get group list
+            output = self.run_command(cmd, input_text="q\n", check=False)
+            
+            lines = output.split('\n')
+            water_keywords = ['SOL', 'Water', 'WAT', 'TIP3P', 'TIP4P', 'SPC']
+            
+            for line in lines:
+                # Look for lines like "Group 15 ( SOL) has 12345 elements"
+                if 'Group' in line and 'has' in line and 'elements' in line:
+                    for keyword in water_keywords:
+                        if keyword in line:
+                            # Extract group number
+                            parts = line.split()
+                            for i, part in enumerate(parts):
+                                if part == "Group" and i+1 < len(parts):
+                                    try:
+                                        group_num = int(parts[i+1])
+                                        print(f"Found water group: {group_num} ({keyword})")
+                                        return group_num
+                                    except ValueError:
+                                        continue
+            
+            # Fallback: try common group numbers
+            print("Could not automatically detect water group, trying common values...")
+            for group in [15, 14, 13, 12, 16]:
+                try:
+                    # Test with a dry run to see if group exists
+                    test_cmd = [
+                        self.gmx_command, "genion", "-s", "ions.tpr", "-o", "temp_test.gro",
+                        "-p", "topol.top", "-neutral"
+                    ]
+                    test_output = self.run_command(test_cmd, input_text=f"{group}\nq\n", check=False)
+                    if "Will try to add" in test_output or "Number of" in test_output:
+                        print(f"Found working water group: {group}")
+                        return group
+                except:
+                    continue
+                    
+            return None
+            
+        except Exception as e:
+            print(f"Error finding water group: {e}")
+            return None
+        finally:
+            # Clean up temporary files
+            temp_files = ["temp_test.gro", "#temp_test.gro.1#"]
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+    
     def _check_ion_requirements(self):
         """Check if ions are actually needed"""
         # This is a simple check - you might want to enhance this
