@@ -13,6 +13,7 @@ __author__ = "PRISM Development Team"
 from .builder import PRISMBuilder
 from .core import PRISMSystem
 from .sim import model
+from .analysis import TrajAnalysis
 
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
@@ -182,5 +183,6 @@ __all__ = [
     "check_dependencies",
     "list_forcefields",
     "get_version",
-    "__version__"
+    "__version__",
+    "TrajAnalysis",
 ]
