@@ -1,455 +1,466 @@
-#!/usr/bin/env python3
+# !filepath: prism/utils/system.py
+
+# !/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
-PRISM System Builder - Build the GROMACS model system
+PRISM System Builder - Handles GROMACS system setup, solvation, and ion addition.
 """
 
 import os
-import subprocess
+import re
 import shutil
-from .mdp import MDPGenerator
+import subprocess
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 
 class SystemBuilder:
-    """Build the GROMACS model system"""
+    """
+    Builds a complete protein-ligand system for GROMACS simulations.
 
-    def __init__(self, config, output_dir, overwrite=False):
+    This class encapsulates the GROMACS commands needed to process a protein,
+    combine it with a ligand, create a simulation box, solvate it, and add ions.
+    It is designed to be robust, especially in handling the output of GROMACS
+    tools to ensure consistency between coordinate and topology files.
+    """
+
+    def __init__(self, config: Dict, output_dir: str, overwrite: bool = False):
+        """
+        Initializes the SystemBuilder.
+
+        Args:
+            config: A dictionary containing the simulation configuration.
+            output_dir: The root directory for all output files.
+            overwrite: If True, overwrite existing files.
+        """
         self.config = config
-        self.output_dir = output_dir
+        self.output_dir = Path(output_dir)
         self.overwrite = overwrite
-        self.model_dir = os.path.join(output_dir, "GMX_PROLIG_MD")
-        self.gmx_command = config['general']['gmx_command']
+        self.gmx_command = self.config.get("general", {}).get("gmx_command", "gmx")
 
-    def build(self, cleaned_protein, lig_ff_dir, forcefield_idx, water_model_idx):
-        """Build the complete system"""
-        print("\n=== Building GROMACS Model ===")
+        self.model_dir = self.output_dir / "GMX_PROLIG_MD"
+        self.model_dir.mkdir(exist_ok=True)
 
-        if os.path.exists(os.path.join(self.model_dir, "solv_ions.gro")) and not self.overwrite:
-            print(f"Final model file solv_ions.gro already exists in {self.model_dir}, skipping model building")
-            return self.model_dir
+    def _run_command(self, command: list, work_dir: str, input_str: Optional[str] = None) -> Tuple[str, str]:
+        """
+        Executes a shell command and handles errors.
 
-        os.makedirs(self.model_dir, exist_ok=True)
+        Args:
+            command: The command to execute as a list of strings.
+            work_dir: The directory in which to run the command.
+            input_str: A string to be passed to the command's stdin.
 
-        # Step 1: Fix protein
-        fixed_pdb = self._fix_protein(cleaned_protein)
+        Returns:
+            A tuple containing the stdout and stderr of the command.
 
-        # Step 2: Generate topology
-        self._generate_topology(fixed_pdb, forcefield_idx, water_model_idx)
+        Raises:
+            RuntimeError: If the command returns a non-zero exit code.
+        """
+        cmd_str = ' '.join(map(str, command))
+        print(f"Executing in {work_dir}: {cmd_str}")
 
-        # Step 3: Combine protein and ligand
-        self._combine_protein_ligand(lig_ff_dir)
+        process = subprocess.Popen(
+            command,
+            cwd=work_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, stderr = process.communicate(input=input_str)
 
-        # Step 4: Fix topology
-        self._fix_topology(lig_ff_dir)
+        if process.returncode != 0:
+            print("--- STDOUT ---")
+            print(stdout)
+            print("--- STDERR ---")
+            print(stderr)
+            raise RuntimeError(f"Command failed with exit code {process.returncode}: {cmd_str}")
 
-        # Step 5: Create box
-        self._create_box()
+        return stdout, stderr
 
-        # Step 6: Solvate
-        self._solvate()
+    def build(self, cleaned_protein_path: str, lig_ff_dir: str, ff_idx: int, water_idx: int) -> str:
+        """
+        Runs the full system building workflow.
 
-        # Step 7: Add ions
-        self._add_ions()
+        Args:
+            cleaned_protein_path: Path to the cleaned protein PDB file.
+            lig_ff_dir: Path to the directory containing ligand force field files.
+            ff_idx: The index of the protein force field to use.
+            water_idx: The index of the water model to use.
 
-        print(f"\nModel build completed. System files are in {self.model_dir}")
-        return self.model_dir
+        Returns:
+            The path to the directory containing the final model files.
+        """
+        try:
+            print("\n=== Building GROMACS Model ===")
 
-    def _fix_protein(self, cleaned_protein):
-        """Fix missing atoms in protein"""
-        fixed_pdb = os.path.join(self.model_dir, "fixed_clean_protein.pdb")
+            if (self.model_dir / "solv_ions.gro").exists() and not self.overwrite:
+                print(f"Final model file solv_ions.gro already exists in {self.model_dir}, skipping model building.")
+                return str(self.model_dir)
 
-        if not os.path.exists(fixed_pdb) or self.overwrite:
-            print("Running pdbfixer to fix missing atoms...")
-            self.run_command([
-                "pdbfixer",
-                cleaned_protein, "--add-residues",
-                "--output", fixed_pdb,
-                "--add-atoms", "heavy",
-                "--keep-heterogens", "none",
-                f"--ph={self.config['simulation']['pH']}"
-            ])
-        else:
-            print(f"Fixed protein PDB already exists at {fixed_pdb}, skipping pdbfixer")
+            fixed_pdb = self._fix_protein(cleaned_protein_path)
+            protein_gro, topol_top = self._generate_topology(fixed_pdb, ff_idx, water_idx)
+            self._fix_topology(topol_top, lig_ff_dir)
 
-        return fixed_pdb
+            complex_gro = self._combine_protein_ligand(protein_gro, lig_ff_dir)
+            boxed_gro = self._create_box(complex_gro)
+            solvated_gro = self._solvate(boxed_gro, topol_top)
+            self._add_ions(solvated_gro, topol_top)
 
-    def _generate_topology(self, fixed_pdb, forcefield_idx, water_model_idx):
-        """Generate topology using pdb2gmx"""
-        current_dir = os.getcwd()
-        os.chdir(self.model_dir)
+            print("\nSystem building completed successfully.")
+            print(f"System files are in {self.model_dir}")
+            return str(self.model_dir)
 
-        pro_gro = os.path.join(self.model_dir, "pro.gro")
-        if not os.path.exists(pro_gro) or self.overwrite:
-            histidine_count = self._count_histidines(fixed_pdb)
+        except (RuntimeError, FileNotFoundError) as e:
+            print(f"\nError during system build: {e}")
+            import traceback
+            traceback.print_exc()
+            return ""
 
-            input_lines = [str(forcefield_idx), str(water_model_idx)]
+    def _fix_protein(self, cleaned_protein: str) -> str:
+        """Fix missing atoms in protein using pdbfixer."""
+        print("\nStep 1: Fixing protein with pdbfixer...")
+        fixed_pdb = self.model_dir / "fixed_clean_protein.pdb"
 
-            if histidine_count > 0:
-                print(f"Found {histidine_count} histidine residue(s), defaulting to HIE")
-                for _ in range(histidine_count):
-                    input_lines.append("1")  # HIE
+        if fixed_pdb.exists() and not self.overwrite:
+            print(f"Fixed protein PDB already exists at {fixed_pdb}, skipping pdbfixer.")
+            return str(fixed_pdb)
 
-            input_text = '\n'.join(input_lines) + '\n'
+        # Check if pdbfixer is available
+        if not shutil.which("pdbfixer"):
+            print("Warning: pdbfixer command not found. Skipping protein fixing step.")
+            print("Please install it (e.g., 'conda install -c conda-forge pdbfixer') for better results.")
+            shutil.copy(cleaned_protein, fixed_pdb)
+            return str(fixed_pdb)
 
-            print(f"Running pdb2gmx with force field #{forcefield_idx} and water model #{water_model_idx}")
-            self.run_command(
-                [self.gmx_command, "pdb2gmx", "-f", "fixed_clean_protein.pdb", "-o", "pro.gro", "-ignh"],
-                input_text=input_text
-            )
-        else:
-            print(f"Protein topology already generated at {pro_gro}, skipping pdb2gmx")
+        command = [
+            "pdbfixer",
+            cleaned_protein,
+            "--add-residues",
+            "--output", str(fixed_pdb),
+            "--add-atoms=heavy",
+            "--keep-heterogens=none",
+            f"--ph={self.config['simulation']['pH']}"
+        ]
+        self._run_command(command, str(self.model_dir.parent))
+        return str(fixed_pdb)
 
-        os.chdir(current_dir)
+    def _generate_topology(self, fixed_pdb: str, ff_idx: int, water_idx: int) -> Tuple[str, str]:
+        """Generate topology using pdb2gmx, handling histidines."""
+        print("\nStep 2: Generating topology with pdb2gmx...")
+        protein_gro = self.model_dir / "pro.gro"
+        topol_top = self.model_dir / "topol.top"
 
-    def _combine_protein_ligand(self, lig_ff_dir):
-        """Combine protein and ligand coordinates"""
-        pro_lig_gro = os.path.join(self.model_dir, "pro_lig.gro")
+        if protein_gro.exists() and not self.overwrite:
+            print(f"Protein topology already generated at {protein_gro}, skipping pdb2gmx.")
+            return str(protein_gro), str(topol_top)
 
-        if not os.path.exists(pro_lig_gro) or self.overwrite:
-            print("Combining protein and ligand coordinates...")
+        histidine_count = self._count_histidines(fixed_pdb)
+        input_lines = [str(ff_idx), str(water_idx)]
 
-            pro_gro = os.path.join(self.model_dir, "pro.gro")
-            lig_gro = os.path.join(lig_ff_dir, "LIG.gro")
+        if histidine_count > 0:
+            print(f"Found {histidine_count} histidine residue(s), defaulting to HIE protonation state.")
+            # HIE is typically the first and most common choice for neutral pH.
+            input_lines.extend(["1"] * histidine_count)
 
-            # Read ligand
-            with open(lig_gro, 'r') as f:
-                lines = f.readlines()
-                lig_atom_count = int(lines[1].strip())
-                lig_coords = ''.join(lines[2:-1])
+        input_text = '\n'.join(input_lines)+'\n'
 
-            # Read protein
-            with open(pro_gro, 'r') as f:
-                lines = f.readlines()
-                protein_atom_count = int(lines[1].strip())
-                gro_header = lines[0]
-                gro_box = lines[-1]
-                protein_coords = ''.join(lines[2:-1])
+        command = [
+            self.gmx_command, "pdb2gmx",
+            "-f", fixed_pdb,
+            "-o", str(protein_gro),
+            "-p", str(topol_top),
+            "-ignh"
+        ]
+        self._run_command(command, str(self.model_dir), input_str=input_text)
+        return str(protein_gro), str(topol_top)
 
-            # Write combined
-            total_atom_count = protein_atom_count + lig_atom_count
-            with open(pro_lig_gro, 'w') as f:
-                f.write(gro_header)
-                f.write(f"{total_atom_count}\n")
-                f.write(protein_coords)
-                f.write(lig_coords)
-                f.write(gro_box)
+    def _fix_topology(self, topol_path: str, lig_ff_dir: str):
+        """Includes ligand parameters into the main topology file."""
+        print("\nStep 3: Including ligand parameters in topology...")
 
-            print("Protein-ligand complex created")
+        lig_ff_path = Path(lig_ff_dir)
+        lig_itp_path = lig_ff_path / "LIG.itp"
+        atomtypes_itp_path = lig_ff_path / "atomtypes_LIG.itp"
 
-    def _fix_topology(self, lig_ff_dir):
-        """Fix topology file to include ligand parameters"""
-        topol_path = os.path.join(self.model_dir, "topol.top")
+        if not lig_itp_path.exists():
+            raise FileNotFoundError(f"Ligand ITP file not found: {lig_itp_path}")
+        if not atomtypes_itp_path.exists():
+            raise FileNotFoundError(f"Ligand atomtypes file not found: {atomtypes_itp_path}")
 
-        if os.path.exists(topol_path):
-            print("Fixing topology file...")
+        with open(topol_path, 'r') as f:
+            lines = f.readlines()
 
-            with open(topol_path, 'r') as f:
+        # Check if already included to prevent duplication
+        if any(f'#include "../{lig_ff_path.name}/LIG.itp"' in line for line in lines):
+            print("Topology already includes ligand parameters.")
+            return
+
+        with open(atomtypes_itp_path, 'r') as f:
+            atomtypes_content = f.read()
+
+        new_lines = []
+        molecules_added = False
+        for line in lines:
+            new_lines.append(line)
+            # Insert atomtypes and ligand ITP after the main forcefield include
+            if '#include' in line and '.ff/forcefield.itp' in line:
+                new_lines.append("\n; Include ligand atomtypes\n")
+                new_lines.append(atomtypes_content)
+                new_lines.append("\n; Include ligand topology\n")
+                new_lines.append(f'#include "../{lig_ff_path.name}/LIG.itp"\n')
+
+            # Add ligand to the molecules section
+            if line.strip() == "[ molecules ]":
+                # This flag ensures we add the ligand after the [ molecules ] header
+                molecules_added = True
+            elif molecules_added and line.strip() and not line.strip().startswith(';'):
+                # Insert LIG before the first molecule (e.g., Protein_chain_A)
+                new_lines.insert(-1, "LIG                 1\n")
+                molecules_added = False  # Prevent adding it again
+
+        with open(topol_path, 'w') as f:
+            f.writelines(new_lines)
+        print("Topology file updated with ligand parameters.")
+
+    def _combine_protein_ligand(self, protein_gro: str, lig_ff_dir: str) -> str:
+        """Combines protein and ligand GRO files into a complex."""
+        print("\nStep 4: Combining protein and ligand coordinates...")
+        complex_gro = self.model_dir / "pro_lig.gro"
+        lig_gro_path = Path(lig_ff_dir) / "LIG.gro"
+
+        if complex_gro.exists() and not self.overwrite:
+            print("Using existing complex.gro file.")
+            return str(complex_gro)
+
+        with open(protein_gro, "r") as f_prot, open(lig_gro_path, "r") as f_lig, open(complex_gro, "w") as f_out:
+            prot_lines = f_prot.readlines()
+            lig_lines = f_lig.readlines()
+
+            total_atoms = int(prot_lines[1].strip())+int(lig_lines[1].strip())
+
+            f_out.write("Complex Protein-Ligand\n")
+            f_out.write(f"{total_atoms:5d}\n")
+            
+            # Write ligand coordinates first (to match topology molecule order)
+            lig_coords = lig_lines[2:-1]
+            f_out.writelines(lig_coords)
+            
+            # Write protein coordinates second, renumbering atoms sequentially
+            prot_coords = prot_lines[2:-1]
+            lig_atom_count = len(lig_coords)
+            
+            for line in prot_coords:
+                # Update atom numbering to be sequential after ligand atoms
+                parts = list(line)
+                # Extract current atom number (positions 15-20 in GRO format)
+                current_num = int(line[15:20].strip())
+                new_num = current_num + lig_atom_count
+                # Replace atom number in the line
+                new_line = line[:15] + f"{new_num:5d}" + line[20:]
+                f_out.write(new_line)
+                
+            f_out.write(prot_lines[-1])  # Box vectors
+
+        return str(complex_gro)
+
+    def _create_box(self, complex_gro: str) -> str:
+        """Creates the simulation box."""
+        print("\nStep 5: Creating simulation box...")
+        boxed_gro = self.model_dir / "pro_lig_newbox.gro"
+
+        if boxed_gro.exists() and not self.overwrite:
+            print("Using existing boxed.gro file.")
+            return str(boxed_gro)
+
+        box_cfg = self.config['box']
+        command = [
+            self.gmx_command, "editconf",
+            "-f", complex_gro,
+            "-o", str(boxed_gro),
+            "-bt", box_cfg['shape'],
+            "-d", str(box_cfg['distance'])
+        ]
+        if box_cfg.get('center', True):
+            command.append("-c")
+
+        self._run_command(command, str(self.model_dir))
+        return str(boxed_gro)
+
+    def _solvate(self, boxed_gro: str, topol_top: str) -> str:
+        """Solvates the system."""
+        print("\nStep 6: Solvating the system...")
+        solvated_gro = self.model_dir / "solv.gro"
+
+        if solvated_gro.exists() and not self.overwrite:
+            print("Using existing solv.gro file.")
+            return str(solvated_gro)
+
+        command = [
+            self.gmx_command, "solvate",
+            "-cp", boxed_gro,
+            "-cs", "spc216.gro",  # Standard solvent box
+            "-o", str(solvated_gro),
+            "-p", topol_top
+        ]
+        self._run_command(command, str(self.model_dir))
+        return str(solvated_gro)
+
+    def _add_ions(self, solvated_gro: str, topol_top: str):
+        """
+        Adds ions to neutralize the system and achieve a target salt concentration.
+        This method uses a single, robust call to `gmx genion`.
+        """
+        print("\nStep 7: Adding ions...")
+        ions_gro = self.model_dir / "solv_ions.gro"
+
+        if ions_gro.exists() and not self.overwrite:
+            print("Using existing solv_ions.gro file.")
+            return
+
+        ions_cfg = self.config['ions']
+        temp_tpr = self.model_dir / "ions.tpr"
+
+        # A minimal mdp is needed for grompp
+        ions_mdp_path = self.model_dir / "ions.mdp"
+        with open(ions_mdp_path, "w") as f:
+            f.write("integrator=steep\nnsteps=0")
+
+        grompp_cmd = [
+            self.gmx_command, "grompp",
+            "-f", str(ions_mdp_path),
+            "-c", solvated_gro,
+            "-p", topol_top,
+            "-o", str(temp_tpr),
+            "-maxwarn", "5"  # Allow some warnings
+        ]
+        self._run_command(grompp_cmd, str(self.model_dir))
+
+        genion_cmd = [
+            self.gmx_command, "genion",
+            "-s", str(temp_tpr),
+            "-o", str(ions_gro),
+            "-p", topol_top,
+            "-pname", ions_cfg['positive_ion'],
+            "-nname", ions_cfg['negative_ion'],
+        ]
+        if ions_cfg.get('neutral', True):
+            genion_cmd.append("-neutral")
+        if ions_cfg.get('concentration', 0) > 0:
+            genion_cmd.extend(["-conc", str(ions_cfg['concentration'])])
+
+        # Provide "SOL" (the typical name for water) as input to stdin
+        stdout, _ = self._run_command(genion_cmd, str(self.model_dir), input_str="SOL")
+
+        # --- CRITICAL STEP: Parse genion output and fix topology ---
+        self._update_topology_molecules(topol_top, stdout)
+
+        # Clean up temporary files
+        temp_tpr.unlink()
+        ions_mdp_path.unlink()
+
+    def _update_topology_molecules(self, topol_path: str, genion_stdout: str):
+        """
+        Parses the stdout of `gmx genion` and updates the `[ molecules ]`
+        section of the topology file to ensure consistency.
+        
+        Modern GROMACS versions (2024+) automatically update the topology when using -p flag,
+        so we verify the update was successful rather than parsing stdout.
+        """
+        print("Checking topology update from genion...")
+
+        # First try to parse traditional output format for backward compatibility
+        mol_counts = {}
+        pattern = re.compile(r'^\s*([A-Z0-9_]+)\s+:\s+(\d+)')
+        parsing = False
+        
+        for line in genion_stdout.splitlines():
+            if 'Number of molecules:' in line:
+                parsing = True
+                continue
+            if parsing:
+                match = pattern.match(line)
+                if match:
+                    mol_name, count = match.groups()
+                    mol_counts[mol_name] = int(count)
+                elif not line.strip():
+                    break
+
+        # If parsing failed, check if GROMACS already updated the topology (modern versions)
+        if not mol_counts:
+            print("Modern GROMACS detected - topology should be auto-updated by genion -p flag.")
+            # Verify the topology has ions by checking the [molecules] section
+            with open(topol_path, "r") as f:
                 content = f.read()
-
-            # Get the correct directory name based on force field
-            lig_dir_name = os.path.basename(lig_ff_dir)
-
-            if f"{lig_dir_name}/LIG.itp" in content:
-                print("Topology already includes ligand parameters")
+            
+            if any(ion in content for ion in ['NA ', 'CL ', 'K ', 'BR ', 'CA ']):
+                print("Topology successfully updated with ions.")
+                return
+            else:
+                print("Warning: Could not verify ion addition in topology. Manual check recommended.")
                 return
 
-            atomtypes_path = os.path.join(lig_ff_dir, "atomtypes_LIG.itp")
-            with open(atomtypes_path, 'r') as f:
-                atomtypes_content = f.read()
+        with open(topol_path, "r") as f:
+            top_lines = f.readlines()
 
-            new_content = []
-            lines = content.split('\n')
-            i = 0
+        # Find the [ molecules ] section
+        start_index, end_index = -1, -1
+        for i, line in enumerate(top_lines):
+            if line.strip() == "[ molecules ]":
+                start_index = i
+            elif start_index != -1 and line.strip().startswith('['):
+                end_index = i
+                break
+        if start_index != -1 and end_index == -1:
+            end_index = len(top_lines)
 
-            while i < len(lines):
-                line = lines[i]
-                new_content.append(line)
+        if start_index == -1:
+            raise RuntimeError("Could not find [ molecules ] section in topology file.")
 
-                if '#include' in line and '.ff/forcefield.itp' in line:
-                    new_content.append("")
-                    new_content.append("; Ligand atomtypes")
-                    new_content.extend(atomtypes_content.strip().split('\n'))
-                    new_content.append("")
-                    new_content.append("; Ligand topology")
-                    new_content.append(f'#include "../{lig_dir_name}/LIG.itp"')
-                    new_content.append("")
+        # Reconstruct the section
+        new_molecules_section = [top_lines[start_index]]
 
-                if '[ molecules ]' in line:
-                    j = i + 1
-                    while j < len(lines) and lines[j].strip() and not lines[j].startswith('['):
-                        new_content.append(lines[j])
-                        j += 1
-                    new_content.append("LIG                 1")
-                    i = j - 1
+        # Preserve non-ion/water molecules from the original file
+        original_mols = {}
+        for i in range(start_index+1, end_index):
+            line = top_lines[i].strip()
+            if not line or line.startswith(';'): continue
+            parts = line.split()
+            if len(parts) >= 2:
+                mol_name = parts[0]
+                if mol_name not in mol_counts:
+                    original_mols[mol_name] = parts[1]
 
-                i += 1
+        # Write preserved molecules first
+        for mol, count in original_mols.items():
+            new_molecules_section.append(f"{mol:<18} {count}\n")
 
-            with open(topol_path, 'w') as f:
-                f.write('\n'.join(new_content))
+        # Then write the updated counts from genion
+        for mol, count in mol_counts.items():
+            if count > 0:
+                new_molecules_section.append(f"{mol:<18} {count}\n")
 
-            print("Topology file updated with ligand parameters")
+        # Replace the old section with the new one
+        final_lines = top_lines[:start_index]+new_molecules_section+top_lines[end_index:]
 
-    def _create_box(self):
-        """Create simulation box"""
-        current_dir = os.getcwd()
-        os.chdir(self.model_dir)
+        with open(topol_path, "w") as f:
+            f.writelines(final_lines)
 
-        box_gro = os.path.join(self.model_dir, "pro_lig_newbox.gro")
-        if not os.path.exists(box_gro) or self.overwrite:
-            box_cmd = [
-                self.gmx_command, "editconf",
-                "-f", "pro_lig.gro",
-                "-o", "pro_lig_newbox.gro"
-            ]
+        print("Topology `[ molecules ]` section has been successfully updated.")
 
-            if self.config['box']['center']:
-                box_cmd.append("-c")
-
-            # Add box shape
-            if self.config['box']['shape'] == 'dodecahedron':
-                box_cmd.extend(["-bt", "dodecahedron"])
-            elif self.config['box']['shape'] == 'octahedron':
-                box_cmd.extend(["-bt", "octahedron"])
-
-            # Add distance
-            box_cmd.extend(["-d", str(self.config['box']['distance'])])
-
-            self.run_command(box_cmd)
-
-        os.chdir(current_dir)
-
-    def _solvate(self):
-        """Solvate the system"""
-        current_dir = os.getcwd()
-        os.chdir(self.model_dir)
-
-        solv_gro = os.path.join(self.model_dir, "solv.gro")
-        if not os.path.exists(solv_gro) or self.overwrite:
-            self.run_command([
-                self.gmx_command, "solvate",
-                "-cp", "pro_lig_newbox.gro",
-                "-p", "topol.top",
-                "-o", "solv.gro"
-            ])
-
-        os.chdir(current_dir)
-
-    def _add_ions(self):
-        """Add ions to neutralize system"""
-        current_dir = os.getcwd()
-        os.chdir(self.model_dir)
-
-        # Generate ions.mdp if needed
-        ions_mdp = os.path.join(self.model_dir, "ions.mdp")
-        if not os.path.exists(ions_mdp) or self.overwrite:
-            mdp_gen = MDPGenerator(self.config, self.output_dir)
-            mdp_gen._generate_ions_mdp()
-            # Move to model directory
-            shutil.move(os.path.join(mdp_gen.mdp_dir, "ions.mdp"), ions_mdp)
-
-        # Generate TPR
-        ions_tpr = os.path.join(self.model_dir, "ions.tpr")
-        if not os.path.exists(ions_tpr) or self.overwrite:
-            self.run_command([
-                self.gmx_command, "grompp",
-                "-f", ions_mdp,
-                "-c", "solv.gro",
-                "-p", "topol.top",
-                "-o", "ions.tpr",
-                "-maxwarn", "99999"
-            ])
-
-        # Add ions
-        solv_ions_gro = os.path.join(self.model_dir, "solv_ions.gro")
-        if not os.path.exists(solv_ions_gro) or self.overwrite:
-            print("Adding ions...")
-
-            # First, check if we need to add ions at all
-            if self._check_ion_requirements():
-                genion_cmd = [
-                    self.gmx_command, "genion", "-s", "ions.tpr", "-o", "solv_ions.gro",
-                    "-p", "topol.top",
-                    "-pname", self.config['ions']['positive_ion'],
-                    "-nname", self.config['ions']['negative_ion']
-                ]
-
-                if self.config['ions']['neutral']:
-                    genion_cmd.append("-neutral")
-
-                if self.config['ions']['concentration'] > 0:
-                    genion_cmd.extend(["-conc", str(self.config['ions']['concentration'])])
-
-                # Find the water group dynamically
-                water_group = self._find_water_group()
-                
-                if water_group is not None:
-                    try:
-                        output = self.run_command(genion_cmd, input_text=str(water_group), check=False)
-                        if "Number of (3-atomic) solvent molecules:" in output or os.path.exists("solv_ions.gro"):
-                            print(f"Successfully added ions using group {water_group}")
-                        else:
-                            print("Warning: Ion addition completed but no confirmation message found")
-                    except Exception as e:
-                        print(f"Error during ion addition: {e}")
-                        print("Copying solvated structure without ions...")
-                        shutil.copy("solv.gro", "solv_ions.gro")
-                else:
-                    print("Warning: Could not find water group for ion addition.")
-                    print("Copying solvated structure without ions...")
-                    shutil.copy("solv.gro", "solv_ions.gro")
-            else:
-                # Just copy the solvated structure if no ions needed
-                print("System is already neutral, no ions needed.")
-                shutil.copy("solv.gro", "solv_ions.gro")
-
-        os.chdir(current_dir)
-
-    def _find_water_group(self):
-        """Find the water group number for genion"""
-        try:
-            # Run gmx genion with dry run to get available groups
-            cmd = [
-                self.gmx_command, "genion", "-s", "ions.tpr", "-o", "temp_test.gro",
-                "-p", "topol.top", "-neutral"
-            ]
-            
-            # Run with echo "q" to quit immediately and get group list
-            output = self.run_command(cmd, input_text="q\n", check=False)
-            
-            lines = output.split('\n')
-            water_keywords = ['SOL', 'Water', 'WAT', 'TIP3P', 'TIP4P', 'SPC']
-            
-            for line in lines:
-                # Look for lines like "Group 15 ( SOL) has 12345 elements"
-                if 'Group' in line and 'has' in line and 'elements' in line:
-                    for keyword in water_keywords:
-                        if keyword in line:
-                            # Extract group number
-                            parts = line.split()
-                            for i, part in enumerate(parts):
-                                if part == "Group" and i+1 < len(parts):
-                                    try:
-                                        group_num = int(parts[i+1])
-                                        print(f"Found water group: {group_num} ({keyword})")
-                                        return group_num
-                                    except ValueError:
-                                        continue
-            
-            # Fallback: try common group numbers
-            print("Could not automatically detect water group, trying common values...")
-            for group in [15, 14, 13, 12, 16]:
-                try:
-                    # Test with a dry run to see if group exists
-                    test_cmd = [
-                        self.gmx_command, "genion", "-s", "ions.tpr", "-o", "temp_test.gro",
-                        "-p", "topol.top", "-neutral"
-                    ]
-                    test_output = self.run_command(test_cmd, input_text=f"{group}\nq\n", check=False)
-                    if "Will try to add" in test_output or "Number of" in test_output:
-                        print(f"Found working water group: {group}")
-                        return group
-                except:
-                    continue
-                    
-            return None
-            
-        except Exception as e:
-            print(f"Error finding water group: {e}")
-            return None
-        finally:
-            # Clean up temporary files
-            temp_files = ["temp_test.gro", "#temp_test.gro.1#"]
-            for temp_file in temp_files:
-                if os.path.exists(temp_file):
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
-    
-    def _check_ion_requirements(self):
-        """Check if ions are actually needed"""
-        # This is a simple check - you might want to enhance this
-        # by actually reading the topology to determine charge
-        return self.config['ions']['neutral'] or self.config['ions']['concentration'] > 0
-
-    def run_command(self, cmd, input_text=None, cwd=None, check=True, shell=False):
-        """Run a shell command with optional input"""
-        cmd_str = ' '.join(cmd) if isinstance(cmd, list) else cmd
-        print(f"Running: {cmd_str}")
-
-        try:
-            if input_text is not None:
-                if shell:
-                    process = subprocess.Popen(
-                        cmd_str,
-                        cwd=cwd,
-                        shell=True,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                else:
-                    process = subprocess.Popen(
-                        cmd,
-                        cwd=cwd,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True
-                    )
-                stdout, stderr = process.communicate(input=input_text)
-
-                if process.returncode != 0 and check:
-                    print(f"Error: {stderr}")
-                    raise subprocess.CalledProcessError(process.returncode, cmd, stdout, stderr)
-
-                return stdout
-            else:
-                if shell:
-                    result = subprocess.run(
-                        cmd_str,
-                        cwd=cwd,
-                        shell=True,
-                        check=check,
-                        capture_output=True,
-                        text=True
-                    )
-                else:
-                    result = subprocess.run(
-                        cmd,
-                        cwd=cwd,
-                        check=check,
-                        capture_output=True,
-                        text=True
-                    )
-                return result.stdout
-
-        except subprocess.CalledProcessError as e:
-            print(f"Command failed: {cmd_str}")
-            print(f"Error: {e.stderr}")
-            if check:
-                raise
-            return e.stdout if hasattr(e, 'stdout') else ""
-
-    def _count_histidines(self, pdb_file):
-        """Count histidine residues in PDB file"""
-        his_count = 0
-        his_residues = []
-
+    def _count_histidines(self, pdb_file: str) -> int:
+        """Counts unique histidine residues in a PDB file."""
+        his_residues = set()
         with open(pdb_file, 'r') as f:
             for line in f:
                 if line.startswith('ATOM') and line[17:20].strip() in ['HIS', 'HID', 'HIE', 'HIP']:
                     resnum = line[22:26].strip()
                     chain = line[21].strip()
                     res_id = f"{chain}:{resnum}" if chain else resnum
+                    his_residues.add(res_id)
+        return len(his_residues)
 
-                    if res_id not in his_residues:
-                        his_residues.append(res_id)
-                        his_count += 1
 
-        if his_count > 0:
-            print(f"Histidine residues found: {', '.join(his_residues)}")
-
-        return his_count
+if __name__ == '__main__':
+    print("This script is intended to be used as a module within the PRISM package.")

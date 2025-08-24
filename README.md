@@ -27,7 +27,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    conda install -c bioconda gromacs
    ```
 
-2. **Python 3.8+** with required packages:
+2. **Python 3.8+** (python 3.12 is recommended) with required packages:
 
    ```bash
    pip install pyyaml numpy
@@ -45,7 +45,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 
 ```bash
 # AmberTools (required)
-conda install -c conda-forge ambertools
+conda install dacase::ambertools-dac=25
 
 # ACPYPE (required)
 pip install acpype
@@ -64,6 +64,8 @@ conda install -c conda-forge openff-toolkit openff-interchange
 conda install -c conda-forge rdkit
 ```
 
+_openbabel is recommended_
+
 ### Installing PRISM
 
 1. Clone or download the PRISM package
@@ -71,7 +73,9 @@ conda install -c conda-forge rdkit
 2. Install in development mode:
 
    ```bash
-   cd PRISMpip install -e .
+   cd PRISM
+
+   pip install -e .
    ```
 
 Or use directly without installation:
@@ -109,13 +113,14 @@ After PRISM completes, you can run the simulations:
 ```bash
 cd output_dir/GMX_PROLIG_MD
 
+function run_md {
 # Energy minimization
-gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -p topol.top -o em.tpr
-gmx mdrun -deffnm em
+gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o em.tpr -maxwarn 2
+gmx mdrun -deffnm em -ntmpi 1 -ntomp 16
 
 # NVT equilibration
-gmx grompp -f ../mdps/nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr
-gmx mdrun -deffnm nvt
+gmx grompp -f ../mdps/nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr -maxwarn 2
+gmx mdrun -deffnm nvt -ntmpi 1 -ntomp 16
 
 # NPT equilibration
 gmx grompp -f ../mdps/npt.mdp -c nvt.gro -r nvt.gro -t nvt.cpt -p topol.top -o npt.tpr
@@ -124,6 +129,10 @@ gmx mdrun -deffnm npt
 # Production MD
 gmx grompp -f ../mdps/md.mdp -c npt.gro -t npt.cpt -p topol.top -o md.tpr
 gmx mdrun -deffnm md
+}
+
+run_md
+
 ```
 
 ## Configuration
@@ -206,3 +215,5 @@ If you use PRISM in your research, please cite:
 ## License
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
+
+
