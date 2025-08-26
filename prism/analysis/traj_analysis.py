@@ -15,7 +15,7 @@ from .trajectory import TrajectoryManager
 from .contact import ContactAnalyzer
 from .hbond import HydrogenBondAnalyzer
 from .distance import DistanceAnalyzer
-from .visualization import Visualizer
+# from .visualization import Visualizer
 from .io import DataExporter, ReportGenerator
 import numpy as np
 
@@ -340,3 +340,38 @@ class TrajAnalysis:
             self.analyze_contacts(save_data=False)
         
         return self.distance_analyzer.select_top_contacts(self.results['contacts'], n)
+    
+    def generate_html_visualization(self, ligand_file, output_file="contact_analysis.html"):
+        """
+        Generate interactive HTML visualization
+        
+        Parameters
+        ----------
+        ligand_file : str
+            Path to ligand structure file (.sdf, .mol, .mol2)
+        output_file : str
+            Output HTML file path
+            
+        Returns
+        -------
+        str
+            Path to generated HTML file
+        """
+        from .visualization import HTMLGenerator
+        
+        print("\nGenerating interactive HTML visualization...")
+        
+        # Use the loaded trajectory
+        generator = HTMLGenerator(
+            self.trajectory_file,
+            self.topology_file,
+            ligand_file
+        )
+        
+        # Use existing trajectory if already loaded
+        if self.traj is not None:
+            generator.traj = self.traj
+        
+        output_path = generator.generate(output_file)
+        
+        return output_path
