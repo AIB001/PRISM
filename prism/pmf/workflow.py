@@ -32,7 +32,7 @@ class PMFWorkflow:
     """
     
     def __init__(self, system_dir: Union[str, Path], output_dir: Union[str, Path], 
-                 config: Dict):
+                 config: Dict, work_in_place: bool = True):
         """
         Initialize PMF workflow manager
         
@@ -44,19 +44,31 @@ class PMFWorkflow:
             Output directory for PMF calculations
         config : Dict
             PMF configuration dictionary
+        work_in_place : bool, optional
+            Whether to work directly in MD results directory (default: True)
         """
         self.system_dir = Path(system_dir)
         self.output_dir = Path(output_dir)
         self.config = config
+        self.work_in_place = work_in_place
         
         # Locate MD results directory
         self.md_results_dir = self._locate_md_results()
         
         # Create output structure
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.smd_dir = self.output_dir / "smd"
-        self.umbrella_dir = self.output_dir / "umbrella"  
-        self.analysis_dir = self.output_dir / "analysis"
+        
+        if work_in_place:
+            # Work directly in MD results directory, but output results to specified path
+            # This avoids file copying and potential missing files
+            self.smd_dir = self.md_results_dir.parent / "pmf_smd"
+            self.umbrella_dir = self.md_results_dir.parent / "pmf_umbrella"
+            self.analysis_dir = self.output_dir / "analysis"
+        else:
+            # Traditional approach: separate working directories
+            self.smd_dir = self.output_dir / "smd"
+            self.umbrella_dir = self.output_dir / "umbrella"  
+            self.analysis_dir = self.output_dir / "analysis"
         
         # Initialize managers
         self.smd_manager = SMDManager(self)

@@ -30,7 +30,7 @@ class PMFSystem:
     
     def __init__(self, system_dir: str, output_dir: str = "pmf_output",
                  config: Optional[Union[str, Dict]] = None, rebuild_system: bool = False,
-                 **kwargs):
+                 work_in_place: bool = True, **kwargs):
         """
         Initialize a PMF calculation system.
         
@@ -44,12 +44,15 @@ class PMFSystem:
             PMF configuration file path or dictionary
         rebuild_system : bool, optional
             Whether to rebuild system with PMF-optimized geometry (default: False)
+        work_in_place : bool, optional
+            Whether to work directly in MD results directory to avoid file copying (default: True)
         **kwargs : optional
             Additional configuration parameters
         """
         self.system_dir = Path(system_dir).resolve()
         self.output_dir = Path(output_dir).resolve()
         self.rebuild_system = rebuild_system
+        self.work_in_place = work_in_place
         
         # Validate system directory
         self._validate_system()
@@ -62,22 +65,25 @@ class PMFSystem:
         if rebuild_system:
             self.pmf_builder = PMFBuilder(
                 md_results_dir=self.system_dir,
-                output_dir=self.output_dir / "rebuilt_system",
+                output_dir=self.output_dir,
+                work_in_place=work_in_place,
                 config=self.config
             )
         
         # Initialize workflow manager
-        # Use rebuilt system if available, otherwise use original
-        workflow_system_dir = (self.output_dir / "rebuilt_system" / "GMX_PMF_SYSTEM" 
-                              if rebuild_system else self.system_dir)
+        # When work_in_place is True, use the gmx_dir directly
+        # This ensures we work with original files without copying
+        workflow_system_dir = self.gmx_dir if work_in_place else self.system_dir
         
         self.workflow = PMFWorkflow(
             system_dir=workflow_system_dir,
             output_dir=self.output_dir,
+            work_in_place=work_in_place,
             config=self.config
         )
         
         logger.info(f"PMF system initialized: {self.system_dir} -> {self.output_dir}")
+        logger.info(f"Work in place mode: {'enabled' if work_in_place else 'disabled'}")
         if rebuild_system:
             logger.info("PMF builder enabled for system optimization")
     
@@ -408,7 +414,7 @@ class PMFSystem:
 # High-level convenience function following PRISM patterns
 def pmf_system(system_dir: str, output_dir: str = "pmf_output", 
                config: Optional[Union[str, Dict]] = None, rebuild_system: bool = False,
-               **kwargs) -> PMFSystem:
+               work_in_place: bool = True, **kwargs) -> PMFSystem:
     """
     Create a PMF calculation system (convenience function).
     
@@ -422,6 +428,8 @@ def pmf_system(system_dir: str, output_dir: str = "pmf_output",
         Configuration file or dictionary
     rebuild_system : bool, optional
         Whether to rebuild system with PMF-optimized geometry
+    work_in_place : bool, optional
+        Whether to work directly in MD results directory to avoid file copying (default: True)
     **kwargs : optional
         Additional configuration parameters
         
@@ -432,14 +440,18 @@ def pmf_system(system_dir: str, output_dir: str = "pmf_output",
     Examples:
     --------
     >>> import prism
-    >>> # Use existing system as-is
-    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results")
+    >>> # Work in place mode (recommended) - avoids file copying
+    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=True)
     >>> results = pmf.run(mode='manual')
+    
+    >>> # Traditional mode - copies files to separate working directory
+    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=False)
+    >>> results = pmf.run(mode='auto')
     
     >>> # Rebuild system with PMF optimization
     >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", 
-    ...                           rebuild_system=True)
+    ...                           rebuild_system=True, work_in_place=True)
     >>> rebuild_results = pmf.rebuild_system()  # Optimize geometry
     >>> results = pmf.run(mode='auto')          # Run PMF calculation
     """
-    return PMFSystem(system_dir, output_dir, config, rebuild_system, **kwargs)
+    return PMFSystem(system_dir, output_dir, config, rebuild_system, work_in_place, **kwargs)

@@ -27,8 +27,9 @@ The PMF module calculates binding free energies by:
 ```python
 import prism.pmf as pmf
 
-# Using an existing MD system
-system = pmf.pmf_system("./my_md_output", "./pmf_results")
+# Using an existing MD system with work-in-place mode (recommended)
+# This works directly in MD directory to avoid file copying issues
+system = pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=True)
 
 # Run complete automated workflow
 results = system.run(mode='auto')
@@ -40,16 +41,16 @@ print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
 ```python
 import prism.pmf as pmf
 
-# Initialize PMF system
-system = pmf.pmf_system("./my_md_output", "./pmf_results")
+# Initialize PMF system with work-in-place mode
+system = pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=True)
 
 # Step 1: Prepare SMD simulation
 smd_results = system.build(step='smd')
-# Run manually: cd ./pmf_results/smd && bash run_smd.sh
+# Run manually: cd ./gaff_model/pmf_smd && bash run_smd.sh
 
 # Step 2: Prepare umbrella sampling (after SMD completion)
 umbrella_results = system.build_umbrella_step()
-# Run manually: cd ./pmf_results/umbrella && bash run_all_umbrella.sh parallel
+# Run manually: cd ./gaff_model/pmf_umbrella && bash run_all_umbrella.sh parallel
 
 # Step 3: Perform WHAM analysis (after umbrella completion)
 analysis_results = system.build_analysis_step()
@@ -62,13 +63,13 @@ import prism.pmf as pmf
 
 # Run complete workflow with runner
 results = pmf.run_pmf_workflow(
-    md_system_dir="./my_md_output",
+    md_system_dir="./gaff_model",
     output_dir="./pmf_results",
     config="./my_pmf_config.yaml"
 )
 
-# Run individual steps
-smd_results = pmf.run_pmf_step("./system", "./output", "smd")
+# Run individual steps  
+smd_results = pmf.run_pmf_step("./gaff_model", "./pmf_results", "smd")
 ```
 
 ## Configuration
@@ -134,44 +135,81 @@ analysis:
    - Python packages: numpy, matplotlib, scipy
    - Optional: GPU drivers for acceleration
 
-### Output Structure
+### Working Directory Strategy
 
+The PMF module supports two working modes to optimize file handling:
+
+#### Work-in-Place Mode (Recommended)
+```
+gaff_model/                       # Original MD results directory
+├── GMX_PROLIG_MD/               # Original MD system files (unchanged)
+│   ├── solv_ions.gro           # → Used directly, no copying
+│   ├── topol.top               # → Used directly, no copying
+│   └── prod/md.xtc             # → Original trajectory files
+├── pmf_smd/                     # SMD working directory (created here)
+│   ├── smd.mdp                 
+│   ├── run_smd.sh              
+│   └── results/
+└── pmf_umbrella/                # Umbrella working directory (created here)
+    ├── window_0/
+    └── run_all_umbrella.sh
+
+pmf_results/                     # Specified output directory
+├── analysis/                    # Final analysis results
+│   ├── pmf.xvg                 # PMF data
+│   ├── pmf_curve.png           # Plots and reports
+│   └── pmf_analysis_report.txt
+└── pmf_config_used.yaml        # Configuration backup
+```
+
+#### Traditional Mode
 ```
 pmf_results/
-├── smd/                          # SMD simulation
-│   ├── smd.mdp                  # SMD parameters
-│   ├── run_smd.sh               # Execution script
-│   └── results/
-│       ├── smd_pullf.xvg        # Force vs time
-│       ├── smd_pullx.xvg        # Distance vs time
-│       └── smd.gro              # Final structure
-├── umbrella/                     # Umbrella sampling
-│   ├── window_0/                # Individual windows
-│   ├── window_1/
-│   ├── ...
-│   └── run_all_umbrella.sh      # Parallel execution script
+├── smd/                          # SMD simulation (files copied)
+├── umbrella/                     # Umbrella sampling (files copied) 
 ├── analysis/                     # WHAM analysis
-│   ├── pmf.xvg                  # PMF data
-│   ├── pmferror.xvg             # Error estimates
-│   ├── pmf_curve.png            # PMF plot
-│   ├── force_profile.png        # Force vs distance
-│   ├── energy_landscape.png     # Energy surface
-│   └── pmf_analysis_report.txt  # Summary report
 └── pmf_config_used.yaml         # Configuration used
 ```
 
+**Advantages of Work-in-Place Mode:**
+- **No File Copying**: Avoids potential missing files or copy errors
+- **Disk Space**: Saves significant disk space by reusing original files
+- **Consistency**: Works directly with original MD system files
+- **Speed**: Faster setup since no file copying is required
+
 ## Advanced Usage
+
+### Choosing Working Mode
+
+```python
+import prism.pmf as pmf
+
+# Work-in-place mode (recommended for most cases)
+system = pmf.pmf_system(
+    "./gaff_model", 
+    "./pmf_results",
+    work_in_place=True  # Default: True
+)
+
+# Traditional mode (if you need isolated working directories) 
+system = pmf.pmf_system(
+    "./gaff_model",
+    "./pmf_results", 
+    work_in_place=False
+)
+```
 
 ### System Rebuilding with PMF Optimization
 
 For optimal PMF calculations, rebuild your system with PMF-specific settings:
 
 ```python
-# Enable system rebuilding during PMF setup
+# Enable system rebuilding with work-in-place mode
 system = pmf.pmf_system(
-    "./my_md_output", 
+    "./gaff_model", 
     "./pmf_results",
-    rebuild_system=True  # Rebuild with PMF optimization
+    rebuild_system=True,   # Rebuild with PMF optimization
+    work_in_place=True     # Work directly in MD directory
 )
 
 # Or rebuild manually with specific settings
@@ -304,7 +342,7 @@ High-level runner for complete PMF workflows.
 
 ### Convenience Functions
 
-- `pmf_system(system_dir, output_dir, config=None, rebuild_system=False, **kwargs)` - Create PMF system
+- `pmf_system(system_dir, output_dir, config=None, rebuild_system=False, work_in_place=True, **kwargs)` - Create PMF system
 - `run_pmf_workflow(md_system_dir, output_dir, config=None, steps=None)` - Run complete workflow
 - `run_pmf_step(md_system_dir, output_dir, step, config=None)` - Run individual step
 - `create_pmf_config(output_file, template="default")` - Create configuration file
@@ -320,8 +358,12 @@ import prism
 system = prism.system("protein.pdb", "ligand.mol2")
 build_results = system.build()
 
-# Calculate PMF with integrated module
-pmf_system = prism.pmf.pmf_system(build_results['output_dir'], "./pmf_results")
+# Calculate PMF with integrated module using work-in-place mode
+pmf_system = prism.pmf.pmf_system(
+    build_results['output_dir'], 
+    "./pmf_results",
+    work_in_place=True  # Recommended for avoiding file copying issues
+)
 pmf_results = pmf_system.run(mode='auto')
 
 print(f"System built: {build_results['output_dir']}")
