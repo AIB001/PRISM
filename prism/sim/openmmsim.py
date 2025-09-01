@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-OpenMM simulator for PRISM MD simulations
+OpenMM simulator for PRISM MD simulations with enhanced CUDA support and progress bars
 """
 
 import os
@@ -10,7 +10,9 @@ import sys
 import subprocess
 import tempfile
 import re
+import time
 from pathlib import Path
+from datetime import datetime, timedelta
 
 try:
     import openmm as mm
@@ -21,6 +23,64 @@ try:
 except ImportError:
     OPENMM_AVAILABLE = False
     print("Warning: OpenMM not available. Install with: conda install -c conda-forge openmm")
+
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    print("Info: tqdm not available for progress bars. Install with: pip install tqdm")
+
+
+class ProgressReporter:
+    """Custom reporter for displaying simulation progress with tqdm"""
+    
+    def __init__(self, total_steps, update_interval=1000, desc="Simulation"):
+        self.total_steps = total_steps
+        self.update_interval = update_interval
+        self.desc = desc
+        self.start_time = None
+        self.pbar = None
+        
+    def __enter__(self):
+        if TQDM_AVAILABLE:
+            self.pbar = tqdm(total=self.total_steps, desc=self.desc, 
+                           unit='steps', unit_scale=True)
+        self.start_time = time.time()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.pbar:
+            self.pbar.close()
+    
+    def update(self, current_step):
+        if self.pbar:
+            increment = current_step - self.pbar.n
+            if increment > 0:
+                self.pbar.update(increment)
+        else:
+            # Fallback to simple text progress
+            if current_step % (self.total_steps // 20) == 0 or current_step == self.total_steps:
+                elapsed = time.time() - self.start_time
+                progress = current_step / self.total_steps * 100
+                eta = elapsed / (current_step / self.total_steps) - elapsed if current_step > 0 else 0
+                print(f"{self.desc}: {progress:.1f}% ({current_step}/{self.total_steps} steps) "
+                      f"ETA: {timedelta(seconds=int(eta))}")
+
+
+class TqdmReporter:
+    """OpenMM reporter that updates tqdm progress bar"""
+    
+    def __init__(self, progress_reporter, reportInterval):
+        self.progress_reporter = progress_reporter
+        self.reportInterval = reportInterval
+        
+    def describeNextReport(self, simulation):
+        steps = self.reportInterval - simulation.currentStep % self.reportInterval
+        return (steps, False, False, False, False, None)
+    
+    def report(self, simulation, state):
+        self.progress_reporter.update(simulation.currentStep)
 
 
 class OpenMMSimulator:
@@ -57,10 +117,70 @@ class OpenMMSimulator:
         # Parse MDP files to get simulation parameters
         self.mdp_params = self._parse_mdp_files()
         
+        # Check CUDA availability at initialization
+        self.cuda_info = self._check_cuda_availability()
+        
         print("OpenMM simulator initialized")
-        print(f"  Platform: {self._get_platform_info()}")
+        print(f"  Platforms available: {self._get_platform_info()}")
+        if self.cuda_info['available']:
+            print(f"  CUDA: Available (Driver: {self.cuda_info['driver_version']}, "
+                  f"Devices: {self.cuda_info['device_count']})")
+        else:
+            print(f"  CUDA: Not available ({self.cuda_info['reason']})")
         if self.gmx_data_dir:
             print(f"  GROMACS data directory: {self.gmx_data_dir}")
+    
+    def _check_cuda_availability(self):
+        """Check CUDA availability and version"""
+        cuda_info = {
+            'available': False,
+            'driver_version': None,
+            'device_count': 0,
+            'devices': [],
+            'reason': 'Not checked'
+        }
+        
+        try:
+            # Check if CUDA platform is available in OpenMM
+            for i in range(mm.Platform.getNumPlatforms()):
+                platform = mm.Platform.getPlatform(i)
+                if platform.getName() == 'CUDA':
+                    cuda_info['available'] = True
+                    cuda_info['reason'] = 'CUDA platform found'
+                    
+                    # Try to get CUDA device information
+                    try:
+                        # Get device count
+                        cuda_info['device_count'] = int(platform.getPropertyDefaultValue('DeviceIndex')) + 1
+                    except:
+                        cuda_info['device_count'] = 1
+                    
+                    # Try to get driver version using nvidia-smi
+                    try:
+                        result = subprocess.run(['nvidia-smi', '--query-gpu=driver_version', 
+                                               '--format=csv,noheader'], 
+                                              capture_output=True, text=True)
+                        if result.returncode == 0:
+                            cuda_info['driver_version'] = result.stdout.strip().split('\n')[0]
+                            
+                        # Get device names
+                        result = subprocess.run(['nvidia-smi', '--query-gpu=name', 
+                                               '--format=csv,noheader'], 
+                                              capture_output=True, text=True)
+                        if result.returncode == 0:
+                            cuda_info['devices'] = result.stdout.strip().split('\n')
+                    except:
+                        pass
+                    
+                    break
+            
+            if not cuda_info['available']:
+                cuda_info['reason'] = 'CUDA platform not found in OpenMM'
+                
+        except Exception as e:
+            cuda_info['reason'] = str(e)
+        
+        return cuda_info
     
     def _diagnose_topology_includes(self, top_file):
         """Diagnose include statements in topology file"""
@@ -246,30 +366,6 @@ class OpenMMSimulator:
         print(f"  WARNING: Could not resolve: {include_file}")
         return include_file
     
-    def _create_minimal_topology(self, content):
-        """Create a minimal topology by extracting essential parts"""
-        # This is a fallback method that comments out problematic includes
-        # and tries to work with what's available
-        print("Creating minimal topology file...")
-        
-        lines = content.split('\n')
-        modified_lines = []
-        
-        for line in lines:
-            # Comment out force field includes that might not be found
-            if re.match(r'#include\s+"[^/]+\.ff/', line):
-                modified_lines.append(f'; {line}  ; Commented out by OpenMM simulator')
-                # Add a note
-                if 'forcefield.itp' in line:
-                    modified_lines.append('; Force field parameters should be included via other means')
-            else:
-                modified_lines.append(line)
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.top', delete=False) as tmp:
-            tmp.write('\n'.join(modified_lines))
-            return tmp.name
-    
     def _get_platform_info(self):
         """Get information about available OpenMM platforms"""
         platforms = []
@@ -326,7 +422,7 @@ class OpenMMSimulator:
         
         return params
     
-    def run(self, stages=None, platform='CUDA', device_index=0, gmx_data_dir=None, **kwargs):
+    def run(self, stages=None, platform='auto', device_index=0, num_threads=10, gmx_data_dir=None, **kwargs):
         """
         Run OpenMM MD simulation.
         
@@ -336,9 +432,12 @@ class OpenMMSimulator:
             List of stages to run ['em', 'nvt', 'npt', 'prod']
             If None, runs all stages
         platform : str
-            OpenMM platform to use ('CUDA', 'OpenCL', 'CPU')
+            OpenMM platform to use ('auto', 'CUDA', 'OpenCL', 'CPU')
+            'auto' will try CUDA first, then fall back to CPU with multiple threads
         device_index : int
             GPU device index (default: 0)
+        num_threads : int
+            Number of CPU threads to use (default: 10)
         gmx_data_dir : str, optional
             Manual path to GROMACS data directory (e.g., '/usr/share/gromacs/top')
         **kwargs : dict
@@ -364,19 +463,14 @@ class OpenMMSimulator:
         
         # If CUDA failed and we fell back, inform the user
         if platform == 'CUDA' and platform_obj[0].getName() != 'CUDA':
-            print(f"\nNote: Using {platform_obj[0].getName()} platform instead of CUDA")
-            print("To fix CUDA compatibility:")
-            print("1. Update CUDA drivers: nvidia-smi")
-            print("2. Or reinstall OpenMM with matching CUDA version:")
+            print(f"\n{'='*60}")
+            print(f"Note: Using {platform_obj[0].getName()} platform instead of CUDA")
+            print("To fix CUDA compatibility issues:")
+            print("1. Check CUDA driver version: nvidia-smi")
+            print("2. Reinstall OpenMM with matching CUDA version:")
             print("   conda install -c conda-forge openmm cudatoolkit=11.7")
             print("3. Or explicitly use CPU: sim.run(engine='openmm', platform='CPU')")
-            print()
-        # Default stages
-        if stages is None:
-            stages = ['em', 'nvt', 'npt', 'prod']
-        
-        # Setup platform
-        platform_obj = self._setup_platform(platform, device_index)
+            print(f"{'='*60}\n")
         
         # Load system from GROMACS files
         print("Loading GROMACS system...")
@@ -448,7 +542,9 @@ class OpenMMSimulator:
             box_vectors = gro.getPeriodicBoxVectors()
             
             for stage in stages:
-                print(f"\n--- Running {stage.upper()} stage ---")
+                print(f"\n{'='*60}")
+                print(f" Running {stage.upper()} stage")
+                print(f"{'='*60}")
                 
                 if stage == 'em':
                     positions, box_vectors = self._run_minimization(
@@ -486,7 +582,7 @@ class OpenMMSimulator:
                 os.unlink(modified_top)
     
     def _setup_platform(self, platform_name, device_index):
-        """Setup OpenMM platform with automatic fallback"""
+        """Setup OpenMM platform with automatic fallback and better diagnostics"""
         try:
             platform = mm.Platform.getPlatformByName(platform_name)
             
@@ -494,6 +590,8 @@ class OpenMMSimulator:
                 properties = {'DeviceIndex': str(device_index)}
                 if platform_name == 'CUDA':
                     properties['Precision'] = 'mixed'
+                    # Add more CUDA-specific optimizations
+                    properties['UseCpuPme'] = 'false'
                 
                 # Test if the platform actually works
                 try:
@@ -502,27 +600,43 @@ class OpenMMSimulator:
                     test_system.addParticle(1.0)
                     test_integrator = mm.VerletIntegrator(1.0)
                     test_context = mm.Context(test_system, test_integrator, platform, properties)
+                    
+                    # If CUDA, get device info
+                    if platform_name == 'CUDA' and self.cuda_info['devices']:
+                        device_name = self.cuda_info['devices'][device_index] if device_index < len(self.cuda_info['devices']) else 'Unknown'
+                        print(f"Successfully initialized {platform_name} platform on device {device_index}: {device_name}")
+                    else:
+                        print(f"Successfully initialized {platform_name} platform")
+                    
                     del test_context
                     del test_integrator
                     del test_system
-                    print(f"Successfully initialized {platform_name} platform")
                     return platform, properties
+                    
                 except Exception as e:
-                    if "CUDA_ERROR_UNSUPPORTED_PTX_VERSION" in str(e):
-                        print(f"\nWarning: CUDA version incompatibility detected!")
+                    error_msg = str(e)
+                    if "CUDA_ERROR_UNSUPPORTED_PTX_VERSION" in error_msg:
+                        print(f"\n⚠️  CUDA version incompatibility detected!")
                         print("Your CUDA driver is too old for this version of OpenMM.")
+                        print(f"Current driver version: {self.cuda_info.get('driver_version', 'Unknown')}")
                         print("Falling back to OpenCL platform...")
                         
                         # Try OpenCL
                         if platform_name == 'CUDA':
                             return self._setup_platform('OpenCL', device_index)
+                    elif "CUDA_ERROR" in error_msg:
+                        print(f"\n⚠️  CUDA error: {error_msg}")
+                        print("Falling back to OpenCL platform...")
+                        if platform_name == 'CUDA':
+                            return self._setup_platform('OpenCL', device_index)
                     else:
                         raise
             else:
+                print(f"Using {platform_name} platform (no GPU acceleration)")
                 return platform, {}
                 
         except Exception as e:
-            print(f"Warning: {platform_name} platform not available: {e}")
+            print(f"⚠️  {platform_name} platform not available: {e}")
             if platform_name != 'CPU':
                 print("Falling back to CPU platform...")
                 return mm.Platform.getPlatformByName('CPU'), {}
@@ -571,7 +685,7 @@ class OpenMMSimulator:
                 app.PDBFile.writeFile(topology, positions, f)
     
     def _run_minimization(self, system, topology, positions, box_vectors, platform_info):
-        """Run energy minimization"""
+        """Run energy minimization with progress bar"""
         platform, properties = platform_info
         
         # Get parameters from MDP
@@ -579,7 +693,8 @@ class OpenMMSimulator:
         max_iterations = int(em_params.get('nsteps', 10000))
         tolerance = float(em_params.get('emtol', 200.0)) * unit.kilojoules_per_mole/unit.nanometer
         
-        print(f"Running energy minimization ({max_iterations} steps)...")
+        print(f"Running energy minimization (max {max_iterations} steps)...")
+        print(f"Tolerance: {tolerance}")
         
         # Create integrator
         integrator = mm.VerletIntegrator(1.0*unit.femtoseconds)
@@ -589,13 +704,43 @@ class OpenMMSimulator:
         simulation.context.setPositions(positions)
         simulation.context.setPeriodicBoxVectors(*box_vectors)
         
-        # Minimize
-        simulation.minimizeEnergy(tolerance=tolerance, maxIterations=max_iterations)
+        # Get initial energy
+        state = simulation.context.getState(getEnergy=True)
+        initial_energy = state.getPotentialEnergy()
+        print(f"Initial potential energy: {initial_energy}")
+        
+        # Minimize with progress tracking
+        with ProgressReporter(max_iterations, desc="Energy Minimization") as progress:
+            # We'll do minimization in chunks to show progress
+            chunk_size = max(100, max_iterations // 100)
+            remaining_iterations = max_iterations
+            
+            while remaining_iterations > 0:
+                current_chunk = min(chunk_size, remaining_iterations)
+                simulation.minimizeEnergy(tolerance=tolerance, maxIterations=current_chunk)
+                
+                # Update progress
+                progress.update(max_iterations - remaining_iterations + current_chunk)
+                
+                # Check if converged
+                state = simulation.context.getState(getEnergy=True)
+                current_energy = state.getPotentialEnergy()
+                
+                # Simple convergence check
+                if abs((current_energy - initial_energy) / initial_energy) < 1e-6:
+                    print(f"\nConverged at step {max_iterations - remaining_iterations + current_chunk}")
+                    break
+                    
+                remaining_iterations -= current_chunk
         
         # Get minimized positions
-        state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
+        state = simulation.context.getState(getPositions=True, getEnergy=True, enforcePeriodicBox=True)
         positions = state.getPositions()
         box_vectors = state.getPeriodicBoxVectors()
+        final_energy = state.getPotentialEnergy()
+        
+        print(f"Final potential energy: {final_energy}")
+        print(f"Energy change: {final_energy - initial_energy}")
         
         # Save minimized structure
         output_file = os.path.join(self.gmx_dir, 'em_openmm.gro')
@@ -606,7 +751,7 @@ class OpenMMSimulator:
         return positions, box_vectors
     
     def _run_nvt(self, system, topology, positions, box_vectors, platform_info):
-        """Run NVT equilibration"""
+        """Run NVT equilibration with progress bar"""
         platform, properties = platform_info
         
         # Get parameters from MDP
@@ -615,7 +760,11 @@ class OpenMMSimulator:
         nsteps = int(nvt_params.get('nsteps', 250000))
         temperature = float(nvt_params.get('ref_t', '310').split()[0]) * unit.kelvin
         
-        print(f"Running NVT equilibration ({nsteps} steps at {temperature})...")
+        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
+        print(f"Running NVT equilibration")
+        print(f"  Steps: {nsteps:,}")
+        print(f"  Time: {total_time}")
+        print(f"  Temperature: {temperature}")
         
         # Create integrator with thermostat
         integrator = mm.LangevinIntegrator(
@@ -635,14 +784,18 @@ class OpenMMSimulator:
         simulation.reporters.append(
             app.StateDataReporter(
                 log_file, 5000, step=True, time=True, 
-                temperature=True, progress=True, 
-                remainingTime=True, speed=True,
+                temperature=True, progress=False,  # Disable built-in progress
+                remainingTime=False, speed=True,
                 totalSteps=nsteps, separator='\t'
             )
         )
         
-        # Run simulation
-        simulation.step(nsteps)
+        # Add progress bar reporter
+        with ProgressReporter(nsteps, desc="NVT Equilibration") as progress:
+            simulation.reporters.append(TqdmReporter(progress, 1000))
+            
+            # Run simulation
+            simulation.step(nsteps)
         
         # Get final state
         state = simulation.context.getState(
@@ -661,7 +814,7 @@ class OpenMMSimulator:
         return positions, velocities, box_vectors
     
     def _run_npt(self, system, topology, positions, velocities, box_vectors, platform_info):
-        """Run NPT equilibration"""
+        """Run NPT equilibration with progress bar"""
         platform, properties = platform_info
         
         # Get parameters from MDP
@@ -671,7 +824,12 @@ class OpenMMSimulator:
         temperature = float(npt_params.get('ref_t', '310').split()[0]) * unit.kelvin
         pressure = float(npt_params.get('ref_p', 1.0)) * unit.bar
         
-        print(f"Running NPT equilibration ({nsteps} steps at {temperature}, {pressure})...")
+        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
+        print(f"Running NPT equilibration")
+        print(f"  Steps: {nsteps:,}")
+        print(f"  Time: {total_time}")
+        print(f"  Temperature: {temperature}")
+        print(f"  Pressure: {pressure}")
         
         # Add barostat
         barostat = mm.MonteCarloBarostat(pressure, temperature, 25)
@@ -699,13 +857,17 @@ class OpenMMSimulator:
             app.StateDataReporter(
                 log_file, 5000, step=True, time=True,
                 temperature=True, volume=True, density=True,
-                progress=True, remainingTime=True, speed=True,
+                progress=False, remainingTime=False, speed=True,
                 totalSteps=nsteps, separator='\t'
             )
         )
         
-        # Run simulation
-        simulation.step(nsteps)
+        # Add progress bar reporter
+        with ProgressReporter(nsteps, desc="NPT Equilibration") as progress:
+            simulation.reporters.append(TqdmReporter(progress, 1000))
+            
+            # Run simulation
+            simulation.step(nsteps)
         
         # Get final state
         state = simulation.context.getState(
@@ -724,7 +886,7 @@ class OpenMMSimulator:
         return positions, velocities, box_vectors
     
     def _run_production(self, system, topology, positions, velocities, box_vectors, platform_info):
-        """Run production MD"""
+        """Run production MD with progress bar"""
         platform, properties = platform_info
         
         # Get parameters from MDP
@@ -737,8 +899,13 @@ class OpenMMSimulator:
         # Output frequency
         nstxtcout = int(md_params.get('nstxtcout', 250000))
         
-        print(f"Running production MD ({nsteps} steps)...")
-        print(f"Total simulation time: {(nsteps * dt).in_units_of(unit.nanoseconds)}")
+        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
+        print(f"Running production MD")
+        print(f"  Steps: {nsteps:,}")
+        print(f"  Time: {total_time}")
+        print(f"  Temperature: {temperature}")
+        print(f"  Pressure: {pressure}")
+        print(f"  Frame output interval: {nstxtcout} steps")
         
         # Add barostat
         barostat = mm.MonteCarloBarostat(pressure, temperature, 25)
@@ -772,13 +939,30 @@ class OpenMMSimulator:
                 log_file, 5000, step=True, time=True,
                 temperature=True, volume=True, density=True,
                 potentialEnergy=True, kineticEnergy=True,
-                progress=True, remainingTime=True, speed=True,
+                progress=False, remainingTime=False, speed=True,
                 totalSteps=nsteps, separator='\t'
             )
         )
         
-        # Run simulation
-        simulation.step(nsteps)
+        # Add progress bar reporter with checkpoint saving
+        checkpoint_interval = 1000000  # Save checkpoint every 1M steps
+        checkpoint_file = os.path.join(self.gmx_dir, 'prod_openmm.chk')
+        
+        with ProgressReporter(nsteps, desc="Production MD") as progress:
+            simulation.reporters.append(TqdmReporter(progress, 1000))
+            
+            # Run simulation with periodic checkpointing
+            steps_completed = 0
+            while steps_completed < nsteps:
+                steps_to_run = min(checkpoint_interval, nsteps - steps_completed)
+                simulation.step(steps_to_run)
+                steps_completed += steps_to_run
+                
+                # Save checkpoint
+                if steps_completed % checkpoint_interval == 0:
+                    simulation.saveCheckpoint(checkpoint_file)
+                    if not TQDM_AVAILABLE:
+                        print(f"Checkpoint saved at step {steps_completed}")
         
         # Save final structure
         state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
@@ -789,7 +973,8 @@ class OpenMMSimulator:
         self._write_gro_file(output_gro, topology, final_positions, final_box_vectors,
                             title="Production MD final structure")
         
-        print(f"Production MD completed!")
-        print(f"Trajectory saved to: {dcd_file}")
-        print(f"Log file saved to: {log_file}")
-        print(f"Final structure saved to: {output_gro}")
+        print(f"\n✅ Production MD completed!")
+        print(f"  Trajectory: {dcd_file}")
+        print(f"  Log file: {log_file}")
+        print(f"  Final structure: {output_gro}")
+        print(f"  Checkpoint: {checkpoint_file}")
