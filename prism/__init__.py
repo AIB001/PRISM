@@ -85,6 +85,97 @@
 #     system_obj = PRISMSystem(protein_path, ligand_path, output_dir=output_dir, **kwargs)
 #     return system_obj.build()
 
+# def visualize_trajectory(trajectory, topology, ligand, output="contact_analysis.html", **kwargs):
+#     """
+#     Generate interactive HTML visualization of protein-ligand contacts from MD trajectory.
+    
+#     This function creates an interactive HTML file that visualizes the contact
+#     patterns between protein and ligand throughout the trajectory.
+    
+#     Parameters:
+#     -----------
+#     trajectory : str
+#         Path to trajectory file (.xtc, .dcd, .trr, etc.)
+#     topology : str
+#         Path to topology/structure file (.pdb, .gro, etc.)
+#     ligand : str
+#         Path to ligand structure file (.sdf, .mol, .mol2)
+#     output : str, optional
+#         Output HTML file path (default: "contact_analysis.html")
+#     **kwargs : optional
+#         Additional parameters for visualization
+        
+#     Returns:
+#     --------
+#     str
+#         Path to the generated HTML file
+        
+#     Examples:
+#     ---------
+#     >>> import prism as pm
+#     >>> # Basic visualization
+#     >>> pm.visualize_trajectory("md.xtc", "system.gro", "ligand.sdf")
+    
+#     >>> # Custom output file
+#     >>> pm.visualize_trajectory("trajectory.xtc", "topology.pdb", "ligand.mol2",
+#     ...                        output="my_analysis.html")
+    
+#     Notes:
+#     ------
+#     The generated HTML file is self-contained and can be opened in any modern
+#     web browser. It includes interactive features like:
+#     - Drag to reposition residues
+#     - Zoom in/out
+#     - Toggle between 2D and 3D views
+#     - Export high-resolution images
+#     """
+#     try:
+#         from .analysis.visualization import generate_html
+#     except ImportError as e:
+#         raise ImportError(
+#             "Visualization module not available. "
+#             "Please ensure mdtraj is installed: pip install mdtraj"
+#         ) from e
+    
+#     return generate_html(trajectory, topology, ligand, output, **kwargs)
+
+# def analyze_trajectory(topology, trajectory, ligand_resname="LIG", output_dir="analysis_results"):
+#     """
+#     Perform comprehensive trajectory analysis with visualization.
+    
+#     This is a convenience function that combines trajectory analysis with
+#     HTML visualization generation.
+    
+#     Parameters:
+#     -----------
+#     topology : str
+#         Path to topology/structure file (.pdb, .gro, etc.)
+#     trajectory : str
+#         Path to trajectory file (.xtc, .dcd, .trr, etc.)
+#     ligand_resname : str, optional
+#         Residue name of ligand (default: "LIG")
+#     output_dir : str, optional
+#         Output directory for analysis results (default: "analysis_results")
+        
+#     Returns:
+#     --------
+#     TrajAnalysis
+#         Analysis object with results
+        
+#     Examples:
+#     ---------
+#     >>> import prism as pm
+#     >>> analysis = pm.analyze_trajectory("system.gro", "md.xtc")
+#     >>> # Results are saved in analysis_results/ directory
+    
+#     >>> # Custom ligand residue name
+#     >>> analysis = pm.analyze_trajectory("complex.pdb", "trajectory.dcd",
+#     ...                                  ligand_resname="MOL")
+#     """
+#     traj = TrajAnalysis(topology, trajectory, ligand_resname=ligand_resname)
+#     traj.analyze_all(output_dir=output_dir)
+#     return traj
+
 # def check_dependencies():
 #     """
 #     Check if all required dependencies are available.
@@ -99,7 +190,7 @@
 #     >>> import prism as pm
 #     >>> deps = pm.check_dependencies()
 #     >>> print(deps)
-#     {'gromacs': True, 'pdbfixer': True, 'antechamber': True, 'openff': False}
+#     {'gromacs': True, 'pdbfixer': True, 'antechamber': True, 'openff': False, 'mdtraj': True}
 #     """
 #     from .utils.environment import GromacsEnvironment
 #     import subprocess
@@ -108,7 +199,9 @@
 #         'gromacs': False,
 #         'pdbfixer': False,
 #         'antechamber': False,
-#         'openff': False
+#         'openff': False,
+#         'mdtraj': False,
+#         'rdkit': False
 #     }
 
 #     # Check GROMACS
@@ -136,6 +229,20 @@
 #     try:
 #         import openff.toolkit
 #         dependencies['openff'] = True
+#     except:
+#         pass
+    
+#     # Check MDTraj (for visualization)
+#     try:
+#         import mdtraj
+#         dependencies['mdtraj'] = True
+#     except:
+#         pass
+    
+#     # Check RDKit (optional for enhanced visualization)
+#     try:
+#         import rdkit
+#         dependencies['rdkit'] = True
 #     except:
 #         pass
 
@@ -173,6 +280,33 @@
 #     """Get PRISM version."""
 #     return __version__
 
+# # Lazy import for visualization classes to avoid import errors if dependencies missing
+# def get_html_generator():
+#     """
+#     Get HTMLGenerator class for advanced visualization usage.
+    
+#     Returns:
+#     --------
+#     HTMLGenerator
+#         The HTML generator class
+        
+#     Example:
+#     --------
+#     >>> import prism as pm
+#     >>> HTMLGen = pm.get_html_generator()
+#     >>> generator = HTMLGen("trajectory.xtc", "topology.gro", "ligand.sdf")
+#     >>> generator.analyze()
+#     >>> generator.generate("output.html")
+#     """
+#     try:
+#         from .analysis.visualization import HTMLGenerator
+#         return HTMLGenerator
+#     except ImportError as e:
+#         raise ImportError(
+#             "HTMLGenerator not available. "
+#             "Please ensure mdtraj is installed: pip install mdtraj"
+#         ) from e
+
 # # Export main classes and functions
 # __all__ = [
 #     "PRISMBuilder",
@@ -185,6 +319,9 @@
 #     "get_version",
 #     "__version__",
 #     "TrajAnalysis",
+#     "visualize_trajectory",
+#     "analyze_trajectory",
+#     "get_html_generator",
 # ]
 
 #!/usr/bin/env python3
@@ -196,13 +333,13 @@ PRISM - Protein Receptor Interaction Simulation Modeler
 A comprehensive tool for building protein-ligand systems for molecular dynamics simulations.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 __author__ = "PRISM Development Team"
 
 from .builder import PRISMBuilder
 from .core import PRISMSystem
 from .sim import model
-from .analysis import TrajAnalysis
+from .analysis import IntegratedProteinLigandAnalyzer as TrajAnalysis
 
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
@@ -469,7 +606,6 @@ def get_version():
     """Get PRISM version."""
     return __version__
 
-# Lazy import for visualization classes to avoid import errors if dependencies missing
 def get_html_generator():
     """
     Get HTMLGenerator class for advanced visualization usage.
@@ -498,17 +634,26 @@ def get_html_generator():
 
 # Export main classes and functions
 __all__ = [
+    # Core classes
     "PRISMBuilder",
     "PRISMSystem",
+    "TrajAnalysis",
+    
+    # High-level API functions
     "system",
     "build_system",
     "model",
+    
+    # Analysis functions
+    "analyze_trajectory",
+    "visualize_trajectory",
+    "get_html_generator",
+    
+    # Utility functions
     "check_dependencies",
     "list_forcefields",
     "get_version",
+    
+    # Version info
     "__version__",
-    "TrajAnalysis",
-    "visualize_trajectory",
-    "analyze_trajectory",
-    "get_html_generator",
 ]
