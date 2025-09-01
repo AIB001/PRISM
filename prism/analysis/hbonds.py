@@ -16,6 +16,8 @@ class HBondAnalyzer:
         self.protein_residues = []
         self.ligand_acceptors = []
         self.hbond_stats = {}
+        self.traj = None
+        self.ligand_residue = None
           
     def set_trajectory_data(self, traj, ligand_residue, protein_residues=None):  
         self.traj = traj
@@ -38,9 +40,6 @@ class HBondAnalyzer:
             logger.warning(f"Hydrogen bond analysis prepared with {len(self.protein_residues)} protein residues")
         except Exception as e:
             logger.warning(f"Failed to prepare hydrogen bond analysis: {e}")
-            logger.warning(f"Ligand residue: {self.ligand_residue}")
-            logger.warning(f"Protein residues count: {len(self.protein_residues)}")
-            logger.warning(f"Trajectory frames: {traj.n_frames if hasattr(traj, 'n_frames') else 'unknown'}")
         
     def _prepare_hbond_analysis(self):
         try:
@@ -102,6 +101,7 @@ class HBondAnalyzer:
                     continue
     
     def analyze_hydrogen_bonds(self, universe) -> List[Tuple[str, float, float, float]]:
+        """Optimized hydrogen bond analysis using batch processing"""
         if not hasattr(self, 'traj') or self.traj is None:
             logger.warning("No MDTraj trajectory available for hydrogen bond analysis")
             return []
@@ -115,7 +115,8 @@ class HBondAnalyzer:
         total_frames = self.traj.n_frames
         hbond_stats = {}
         
-        hbond_stats = self._analyze_hbonds_serial(hbond_pairs, hbond_triplets, hbond_stats)
+        # Use optimized batch analysis
+        hbond_stats = self._analyze_hbonds_batch(hbond_pairs, hbond_triplets, hbond_stats)
         
         return self._calculate_hbond_frequencies(hbond_stats, total_frames)
     
@@ -156,51 +157,80 @@ class HBondAnalyzer:
             except (AttributeError, IndexError):
                 continue
     
-    def _analyze_hbonds_serial(self, hbond_pairs: List, hbond_triplets: List,
-                             hbond_stats: Dict) -> Dict:
-        logger.warning(f"Analyzing hydrogen bonds for {self.traj.n_frames} frames...")
+    def _analyze_hbonds_batch(self, hbond_pairs: List, hbond_triplets: List,
+                              hbond_stats: Dict) -> Dict:
+        """Optimized batch analysis of hydrogen bonds"""
+        n_frames = self.traj.n_frames
+        n_pairs = len(hbond_pairs)
         
-        frame_step = max(1, self.traj.n_frames // 500)
+        if n_pairs == 0:
+            return hbond_stats
         
-        for frame_idx in range(0, self.traj.n_frames, frame_step):
-            try:
-                frame_stats = self._compute_hbonds_for_frame(frame_idx, hbond_pairs, hbond_triplets)
-                for key, data in frame_stats.items():
-                    if key not in hbond_stats:
-                        hbond_stats[key] = {'count': 0, 'distance': [], 'angle': []}
-                    hbond_stats[key]['count'] += data['count']
-                    hbond_stats[key]['distance'].extend(data['distance'])
-                    hbond_stats[key]['angle'].extend(data['angle'])
-            except Exception as e:
-                logger.warning(f"Error processing frame {frame_idx}: {e}")
-                continue
-                
-        return hbond_stats
-    
-    def _compute_hbonds_for_frame(self, frame_idx: int, hbond_pairs: List, 
-                                hbond_triplets: List) -> Dict:
-        frame_stats = {}
-        try:
-            dists = md.compute_distances(self.traj[frame_idx], hbond_pairs, periodic=False)
-            angles = md.compute_angles(self.traj[frame_idx], hbond_triplets, periodic=False)
+        logger.warning(f"Analyzing {n_pairs} potential H-bond pairs across {n_frames} frames...")
+        
+        # Process in chunks for memory efficiency
+        chunk_size = min(100, n_frames)  # Process 100 frames at a time
+        
+        # Pre-allocate arrays for batch processing
+        distance_cutoff = self.config.hbond_distance_cutoff_nm
+        angle_cutoff = self.config.hbond_angle_cutoff_deg
+        
+        # Initialize statistics
+        for idx, pair in enumerate(hbond_pairs):
+            key = self._create_hbond_key(pair)
+            hbond_stats[key] = {'count': 0, 'distance': [], 'angle': []}
+        
+        # Process trajectory in chunks
+        for chunk_start in range(0, n_frames, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, n_frames)
+            chunk_frames = chunk_end - chunk_start
             
-            for idx, pair in enumerate(hbond_pairs):
-                dist = dists[0][idx]
-                angle = np.degrees(angles[0][idx])
+            # Show progress every 10%
+            if chunk_start % max(1, n_frames // 10) == 0:
+                progress = (chunk_start / n_frames) * 100
+                logger.warning(f"  Progress: {progress:.0f}%")
+            
+            # Get trajectory chunk
+            traj_chunk = self.traj[chunk_start:chunk_end]
+            
+            # Compute all distances and angles for this chunk at once
+            try:
+                # Batch compute distances
+                distances = md.compute_distances(traj_chunk, hbond_pairs, periodic=False)
                 
-                if (dist < self.config.hbond_distance_cutoff_nm and 
-                    angle > self.config.hbond_angle_cutoff_deg):
+                # Batch compute angles
+                angles = md.compute_angles(traj_chunk, hbond_triplets, periodic=False)
+                angles_deg = np.degrees(angles)
+                
+                # Vectorized H-bond detection
+                is_hbond = (distances < distance_cutoff) & (angles_deg > angle_cutoff)
+                
+                # Update statistics for detected H-bonds
+                for frame_idx in range(chunk_frames):
+                    hbond_indices = np.where(is_hbond[frame_idx])[0]
                     
-                    key = self._create_hbond_key(pair)
-                    if key not in frame_stats:
-                        frame_stats[key] = {'count': 0, 'distance': [], 'angle': []}
-                    
-                    frame_stats[key]['count'] += 1
-                    frame_stats[key]['distance'].append(dist * 10.0)
-                    frame_stats[key]['angle'].append(angle)
-        except Exception as e:
-            logger.warning(f"Error processing frame {frame_idx}: {e}")
-        return frame_stats
+                    for idx in hbond_indices:
+                        key = self._create_hbond_key(hbond_pairs[idx])
+                        hbond_stats[key]['count'] += 1
+                        hbond_stats[key]['distance'].append(distances[frame_idx, idx] * 10.0)  # Convert to Angstrom
+                        hbond_stats[key]['angle'].append(angles_deg[frame_idx, idx])
+                        
+            except Exception as e:
+                logger.warning(f"Error processing chunk {chunk_start}-{chunk_end}: {e}")
+                continue
+        
+        logger.warning(f"  Progress: 100%")
+        
+        # Filter out H-bonds with very low occurrence
+        min_occurrence = max(1, int(0.001 * n_frames))  # At least 0.1% of frames
+        filtered_stats = {}
+        for key, data in hbond_stats.items():
+            if data['count'] >= min_occurrence:
+                filtered_stats[key] = data
+        
+        logger.warning(f"Found {len(filtered_stats)} significant H-bonds (out of {len(hbond_stats)} checked)")
+        
+        return filtered_stats
     
     def _create_hbond_key(self, pair: List[int]) -> str:
         try:
