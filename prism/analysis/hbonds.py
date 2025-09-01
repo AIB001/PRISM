@@ -52,12 +52,8 @@ class HBondAnalyzer:
                 logger.warning("No protein residues found for hydrogen bond analysis")
                 return
 
-            self._find_donors_acceptors(frame0, self.protein_residues, is_protein=True)
-
-            if self.ligand_residue:
-                self._find_donors_acceptors(frame0, [self.ligand_residue], is_protein=False)
-            else:
-                logger.warning("No ligand residue found for hydrogen bond analysis")
+            # OPTIMIZATION: Only find donors/acceptors near the ligand
+            self._find_nearby_donors_acceptors(frame0)
         
             logger.warning(f"Found - Protein donors: {len(self.protein_donors)}, acceptors: {len(self.protein_acceptors)}")
             logger.warning(f"Found - Ligand donors: {len(self.ligand_donors)}, acceptors: {len(self.ligand_acceptors)}")
@@ -73,6 +69,41 @@ class HBondAnalyzer:
             import traceback
             logger.error(traceback.format_exc())
             logger.warning("Hydrogen bond analysis will be skipped")
+    
+    def _find_nearby_donors_acceptors(self, frame0: np.ndarray):
+        """OPTIMIZED: Only find donors/acceptors within reasonable distance of ligand"""
+        # Get ligand center
+        ligand_atoms = list(self.ligand_residue.atoms) if self.ligand_residue else []
+        if not ligand_atoms:
+            # Fallback to original method if no ligand
+            self._find_donors_acceptors(frame0, self.protein_residues, is_protein=True)
+            if self.ligand_residue:
+                self._find_donors_acceptors(frame0, [self.ligand_residue], is_protein=False)
+            return
+            
+        ligand_positions = [frame0[atom.index] for atom in ligand_atoms]
+        ligand_center = np.mean(ligand_positions, axis=0)
+        
+        # OPTIMIZATION: Only consider residues within 1.0 nm of ligand
+        DISTANCE_CUTOFF = 1.0  # nm
+        
+        nearby_residues = []
+        for residue in self.protein_residues:
+            residue_atoms = list(residue.atoms)
+            if residue_atoms:
+                residue_center = np.mean([frame0[atom.index] for atom in residue_atoms], axis=0)
+                dist = np.linalg.norm(residue_center - ligand_center)
+                if dist < DISTANCE_CUTOFF:
+                    nearby_residues.append(residue)
+        
+        logger.warning(f"Filtering: {len(nearby_residues)} nearby residues out of {len(self.protein_residues)} total")
+        
+        # Find donors/acceptors only in nearby residues
+        self._find_donors_acceptors(frame0, nearby_residues, is_protein=True)
+        
+        # Find ligand donors/acceptors
+        if self.ligand_residue:
+            self._find_donors_acceptors(frame0, [self.ligand_residue], is_protein=False)
     
     def _find_donors_acceptors(self, frame0: np.ndarray, residues: List, is_protein: bool):
         donor_list = self.protein_donors if is_protein else self.ligand_donors
@@ -101,7 +132,7 @@ class HBondAnalyzer:
                     continue
     
     def analyze_hydrogen_bonds(self, universe) -> List[Tuple[str, float, float, float]]:
-        """Optimized hydrogen bond analysis using batch processing"""
+        """OPTIMIZED hydrogen bond analysis with frame skipping"""
         if not hasattr(self, 'traj') or self.traj is None:
             logger.warning("No MDTraj trajectory available for hydrogen bond analysis")
             return []
@@ -112,11 +143,29 @@ class HBondAnalyzer:
             logger.warning("No hydrogen bond pairs found")
             return []
         
+        # OPTIMIZATION: Limit number of pairs analyzed
+        MAX_PAIRS = 500  # Limit to 500 most likely pairs
+        if len(hbond_pairs) > MAX_PAIRS:
+            logger.warning(f"Limiting analysis to {MAX_PAIRS} pairs (from {len(hbond_pairs)})")
+            # Prioritize pairs by initial distance
+            frame0 = self.traj.xyz[0]
+            pair_distances = []
+            for i, pair in enumerate(hbond_pairs):
+                dist = np.linalg.norm(frame0[pair[0]] - frame0[pair[1]])
+                pair_distances.append((i, dist))
+            
+            # Sort by distance and keep closest pairs
+            pair_distances.sort(key=lambda x: x[1])
+            selected_indices = [idx for idx, _ in pair_distances[:MAX_PAIRS]]
+            
+            hbond_pairs = [hbond_pairs[i] for i in selected_indices]
+            hbond_triplets = [hbond_triplets[i] for i in selected_indices]
+        
         total_frames = self.traj.n_frames
         hbond_stats = {}
         
-        # Use optimized batch analysis
-        hbond_stats = self._analyze_hbonds_batch(hbond_pairs, hbond_triplets, hbond_stats)
+        # Use optimized analysis with frame skipping
+        hbond_stats = self._analyze_hbonds_fast(hbond_pairs, hbond_triplets, hbond_stats)
         
         return self._calculate_hbond_frequencies(hbond_stats, total_frames)
     
@@ -137,6 +186,9 @@ class HBondAnalyzer:
             
         frame0 = self.traj.xyz[0]
         
+        # OPTIMIZATION: Pre-filter by distance in first frame
+        MAX_INITIAL_DISTANCE = 0.5  # nm
+        
         for donor_idx in donors:
             try:
                 donor_atom = self.traj.topology.atom(donor_idx)
@@ -152,14 +204,17 @@ class HBondAnalyzer:
                 if hydrogens:
                     hydrogen_idx = hydrogens[0]
                     for acceptor_idx in acceptors:
-                        hbond_pairs.append([donor_idx, acceptor_idx])
-                        hbond_triplets.append([hydrogen_idx, donor_idx, acceptor_idx])
+                        # OPTIMIZATION: Check initial distance
+                        initial_dist = np.linalg.norm(frame0[donor_idx] - frame0[acceptor_idx])
+                        if initial_dist < MAX_INITIAL_DISTANCE:
+                            hbond_pairs.append([donor_idx, acceptor_idx])
+                            hbond_triplets.append([hydrogen_idx, donor_idx, acceptor_idx])
             except (AttributeError, IndexError):
                 continue
     
-    def _analyze_hbonds_batch(self, hbond_pairs: List, hbond_triplets: List,
-                              hbond_stats: Dict) -> Dict:
-        """Optimized batch analysis of hydrogen bonds"""
+    def _analyze_hbonds_fast(self, hbond_pairs: List, hbond_triplets: List,
+                             hbond_stats: Dict) -> Dict:
+        """FAST analysis using frame skipping and vectorization"""
         n_frames = self.traj.n_frames
         n_pairs = len(hbond_pairs)
         
@@ -168,10 +223,13 @@ class HBondAnalyzer:
         
         logger.warning(f"Analyzing {n_pairs} potential H-bond pairs across {n_frames} frames...")
         
-        # Process in chunks for memory efficiency
-        chunk_size = min(100, n_frames)  # Process 100 frames at a time
+        # OPTIMIZATION: Skip frames for faster analysis
+        FRAME_SKIP = max(1, n_frames // 100)  # Analyze ~100 frames max
+        frames_to_analyze = list(range(0, n_frames, FRAME_SKIP))
+        n_analyzed_frames = len(frames_to_analyze)
         
-        # Pre-allocate arrays for batch processing
+        logger.warning(f"  Analyzing every {FRAME_SKIP} frames ({n_analyzed_frames} total frames)")
+        
         distance_cutoff = self.config.hbond_distance_cutoff_nm
         angle_cutoff = self.config.hbond_angle_cutoff_deg
         
@@ -180,55 +238,38 @@ class HBondAnalyzer:
             key = self._create_hbond_key(pair)
             hbond_stats[key] = {'count': 0, 'distance': [], 'angle': []}
         
-        # Process trajectory in chunks
-        for chunk_start in range(0, n_frames, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, n_frames)
-            chunk_frames = chunk_end - chunk_start
+        # OPTIMIZATION: Process all pairs at once for each frame
+        for frame_idx in frames_to_analyze:
+            # Get single frame
+            frame = self.traj[frame_idx]
             
-            # Show progress every 10%
-            if chunk_start % max(1, n_frames // 10) == 0:
-                progress = (chunk_start / n_frames) * 100
-                logger.warning(f"  Progress: {progress:.0f}%")
-            
-            # Get trajectory chunk
-            traj_chunk = self.traj[chunk_start:chunk_end]
-            
-            # Compute all distances and angles for this chunk at once
+            # Compute all distances and angles at once
             try:
-                # Batch compute distances
-                distances = md.compute_distances(traj_chunk, hbond_pairs, periodic=False)
+                distances = md.compute_distances(frame, hbond_pairs, periodic=False)[0]
+                angles = np.degrees(md.compute_angles(frame, hbond_triplets, periodic=False)[0])
                 
-                # Batch compute angles
-                angles = md.compute_angles(traj_chunk, hbond_triplets, periodic=False)
-                angles_deg = np.degrees(angles)
+                # Find H-bonds
+                is_hbond = (distances < distance_cutoff) & (angles > angle_cutoff)
                 
-                # Vectorized H-bond detection
-                is_hbond = (distances < distance_cutoff) & (angles_deg > angle_cutoff)
-                
-                # Update statistics for detected H-bonds
-                for frame_idx in range(chunk_frames):
-                    hbond_indices = np.where(is_hbond[frame_idx])[0]
+                # Update statistics only for detected H-bonds
+                for idx in np.where(is_hbond)[0]:
+                    key = self._create_hbond_key(hbond_pairs[idx])
+                    hbond_stats[key]['count'] += FRAME_SKIP  # Account for skipped frames
+                    hbond_stats[key]['distance'].append(distances[idx] * 10.0)
+                    hbond_stats[key]['angle'].append(angles[idx])
                     
-                    for idx in hbond_indices:
-                        key = self._create_hbond_key(hbond_pairs[idx])
-                        hbond_stats[key]['count'] += 1
-                        hbond_stats[key]['distance'].append(distances[frame_idx, idx] * 10.0)  # Convert to Angstrom
-                        hbond_stats[key]['angle'].append(angles_deg[frame_idx, idx])
-                        
             except Exception as e:
-                logger.warning(f"Error processing chunk {chunk_start}-{chunk_end}: {e}")
+                logger.warning(f"Error processing frame {frame_idx}: {e}")
                 continue
         
-        logger.warning(f"  Progress: 100%")
-        
         # Filter out H-bonds with very low occurrence
-        min_occurrence = max(1, int(0.001 * n_frames))  # At least 0.1% of frames
+        min_occurrence = max(1, int(0.01 * n_frames))  # At least 1% of frames
         filtered_stats = {}
         for key, data in hbond_stats.items():
             if data['count'] >= min_occurrence:
                 filtered_stats[key] = data
         
-        logger.warning(f"Found {len(filtered_stats)} significant H-bonds (out of {len(hbond_stats)} checked)")
+        logger.warning(f"Found {len(filtered_stats)} significant H-bonds")
         
         return filtered_stats
     

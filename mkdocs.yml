@@ -144,7 +144,7 @@ nav:
     - getting-started/index.md
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
-    - Basic Concepts: getting-started/concepts.md
+    # - Basic Concepts: getting-started/concepts.md
   - User Guide:
     - user-guide/index.md
     - Configuration: user-guide/configuration.md

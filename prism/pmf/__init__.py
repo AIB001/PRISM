@@ -2,76 +2,23 @@
 # -*- coding: utf-8 -*-
 
 """
-PRISM PMF Module
+PMF calculation module for PRISM
 
-This module provides comprehensive PMF calculation capabilities following
-PRISM architectural patterns, with support for both automated and manual
-execution modes.
-
-Features:
-- Integrated PMF workflow management
-- SMD and umbrella sampling preparation
-- WHAM analysis with error estimation
-- Advanced visualization and reporting
-- Flexible configuration system
+This module provides tools for calculating potential of mean force (PMF)
+through steered molecular dynamics (SMD) and umbrella sampling.
 """
 
-# Core classes following PRISM patterns
-from .core import PMFSystem, pmf_system
-from .workflow import PMFWorkflow  
-from .pmf_builder import PMFBuilder, pmf_builder
 from .smd import SMDManager, SMDBuilder
 from .umbrella import UmbrellaManager, WindowSelector
 from .analyzer import PMFAnalyzer, WhamRunner
-from .equilibration import PMFEquilibrationManager
-from .runner import PMFRunner, run_pmf_workflow, run_pmf_step, create_pmf_config
+from .workflow import PMFSystem
 
 __all__ = [
-    # High-level interface (main entry points)
     "PMFSystem",
-    "pmf_system",
-    
-    # Unified workflow runner (recommended API)
-    "PMFRunner",
-    "run_pmf_workflow",
-    "run_pmf_step",
-    "create_pmf_config",
-    
-    # Workflow management
-    "PMFWorkflow",
-    
-    # System building
-    "PMFBuilder",
-    "pmf_builder",
-    
-    # Component managers
-    "SMDManager", 
-    "SMDBuilder",
+    "SMDManager",
+    "SMDBuilder", 
     "UmbrellaManager",
-    "WindowSelector", 
+    "WindowSelector",
     "PMFAnalyzer",
-    "WhamRunner",
-    "PMFEquilibrationManager",
-    
-    # Utility functions
-    "get_pmf_info",
+    "WhamRunner"
 ]
-
-
-def get_pmf_info():
-    """Get information about PRISM PMF module"""
-    info = {
-        'version': '1.0.0',
-        'architecture': 'PRISM-compatible',
-        'execution_modes': ['automated', 'step_by_step'],
-        'supported_forcefields': ['GAFF', 'OpenFF'],
-        'analysis_features': [
-            'SMD preparation and execution',
-            'Adaptive umbrella window selection',
-            'WHAM analysis with bootstrap errors',
-            'PMF visualization and reporting',
-            'Binding energy calculation'
-        ],
-        'integration': 'Seamless PRISM workflow integration'
-    }
-    return info
