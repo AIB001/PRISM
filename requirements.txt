@@ -1,0 +1,18 @@
+# Core requirements
+numpy>=1.19.0
+pyyaml>=5.0
+
+# For GAFF support (optional)
+# Uncomment if using GAFF force field
+# acpype>=2021.0
+
+# For OpenFF support (optional)
+# Uncomment if using OpenFF force field
+# openff-toolkit>=0.10.0
+# openff-interchange>=0.2.0
+# rdkit>=2021.0
+
+# System dependencies (install separately)
+# - GROMACS
+# - AmberTools (for GAFF)
+# - PDBFixer
