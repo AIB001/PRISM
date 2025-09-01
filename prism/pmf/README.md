@@ -1,431 +1,342 @@
 # PRISM PMF Module
 
+The PMF (Potential of Mean Force) module provides comprehensive tools for calculating protein-ligand binding free energies through steered molecular dynamics (SMD) and umbrella sampling methodologies. This module integrates seamlessly with PRISM's architecture to deliver accurate binding energy calculations with automated workflows.
+
 ## Overview
 
-The PRISM PMF module provides comprehensive protein-ligand binding free energy calculations that are fully compatible with the PRISM project's architectural design patterns. This module refactors the functionality from the original pmf.py script into a modular, maintainable codebase that follows PRISM standards.
+The PMF module calculates binding free energies by:
+1. **System Optimization**: Rebuilding MD systems with PMF-optimized geometry and extended simulation boxes
+2. **Steered MD (SMD)**: Pulling the ligand away from the protein at constant velocity to generate reaction coordinates
+3. **Umbrella Sampling**: Running multiple simulations at different protein-ligand distances with harmonic restraints  
+4. **WHAM Analysis**: Using the Weighted Histogram Analysis Method to calculate the potential of mean force
+5. **Visualization**: Generating comprehensive plots and reports of binding energetics
 
-## Core Features
+## Key Features
 
-### 🏗️ PRISM Architecture Compatibility
-- **Unified Interface**: Follows PRISM's `system.build()` design pattern
-- **Modular Design**: Cleanly separated component managers
-- **Configuration Management**: Fully compatible with PRISM configuration system
-- **Error Handling**: Unified exception handling and logging
-
-### 🔄 Dual Execution Modes
-- **Automated Mode**: One-click execution of complete PMF calculation workflow
-- **Step Control Mode**: Manual control over each calculation step
-- **State Management**: Complete workflow state tracking and recovery
-
-### 🏗️ PMF System Builder
-- **Smart Reconstruction**: Extract and reconstruct systems from MD results
-- **Geometry Optimization**: Automatic center-of-mass calculation and Z-axis alignment
-- **Box Extension**: Automatic Z-axis extension to accommodate pulling process
-- **Structure Extraction**: Automatic separation of Protein and LIG components
-- **Complete Equilibration**: Automatic EM→NVT→NPT full equilibration process
-
-### 📊 Complete Analysis Functionality
-- **SMD Simulation**: Automated setup and execution
-- **Umbrella Sampling**: Adaptive window selection and parallel execution
-- **WHAM Analysis**: Comprehensive statistical analysis and error estimation
-- **Visualization**: Professional-grade result plots and reports
+- **Automated Workflow**: Complete PMF calculations with minimal user intervention
+- **Force Field Support**: Compatible with GAFF and OpenFF force fields used by PRISM
+- **Adaptive Window Selection**: Intelligent selection of umbrella sampling windows based on SMD results
+- **Error Analysis**: Bootstrap error estimation for statistical reliability
+- **GPU Acceleration**: Full support for GPU-accelerated simulations
+- **Comprehensive Visualization**: Automated generation of PMF curves, force profiles, and energy landscapes
 
 ## Quick Start
 
-### Basic Usage (PRISM Style)
+### Basic Usage
 
 ```python
-import prism
+import prism.pmf as pmf
 
-# 1. Build system (using PRISM standard workflow)
-system = prism.system("protein.pdb", "ligand.mol2")
-build_results = system.build()
+# Using an existing MD system
+system = pmf.pmf_system("./my_md_output", "./pmf_results")
 
-# 2. PMF calculation (integrated into PRISM workflow)
-pmf = prism.pmf.pmf_system(build_results['output_dir'], "./pmf_results")
-
-# Automated execution
-results = pmf.run(mode='auto')
+# Run complete automated workflow
+results = system.run(mode='auto')
 print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
 ```
 
-### Using PMF System Builder
+### Step-by-Step Execution
 
 ```python
-import prism
+import prism.pmf as pmf
 
-# 1. Reconstruct PMF-optimized system from existing MD results
-pmf = prism.pmf.pmf_system("./existing_md_results", "./pmf_optimized", 
-                          rebuild_system=True)
+# Initialize PMF system
+system = pmf.pmf_system("./my_md_output", "./pmf_results")
 
-# 2. Reconstruct system (auto extract, align, extend box, equilibrate)
-rebuild_results = pmf.rebuild_system(frame=-1)  # Use last frame, auto equilibrate
-print(f"Initial distance: {rebuild_results['alignment']['initial_distance']:.3f} nm")
-print(f"System aligned to Z-axis, box extended, EM/NVT/NPT equilibration completed")
+# Step 1: Prepare SMD simulation
+smd_results = system.build(step='smd')
+# Run manually: cd ./pmf_results/smd && bash run_smd.sh
 
-# 3. Run PMF calculation 
-results = pmf.run(mode='auto')
-print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
+# Step 2: Prepare umbrella sampling (after SMD completion)
+umbrella_results = system.build_umbrella_step()
+# Run manually: cd ./pmf_results/umbrella && bash run_all_umbrella.sh parallel
+
+# Step 3: Perform WHAM analysis (after umbrella completion)
+analysis_results = system.build_analysis_step()
 ```
 
-### Direct PMF Builder Usage
+### High-Level Runner API
 
 ```python
-import prism
+import prism.pmf as pmf
 
-# Independent PMF builder usage
-builder = prism.pmf.pmf_builder("./md_results", "./pmf_system")
+# Run complete workflow with runner
+results = pmf.run_pmf_workflow(
+    md_system_dir="./my_md_output",
+    output_dir="./pmf_results",
+    config="./my_pmf_config.yaml"
+)
 
-# Configure build parameters
-config = {
-    'reference_group': 'Protein',
-    'moving_group': 'LIG', 
-    'box': {'z_extension': 3.0}  # Larger Z-axis extension
-}
-
-# Build PMF-optimized system (with complete equilibration)
-build_results = builder.build(equilibrate=True)
-print(f"PMF system built and equilibrated: {build_results['system_dir']}")
-print(f"Equilibration status: {build_results['status']}")  # pmf_ready_equilibrated
-
-# Or step-by-step equilibration control
-build_results = builder.build(equilibrate=False)  # Build only, no equilibration
-print("=== Manual equilibration control ===")
-em_results = builder.run_equilibration_step('em')    # Energy minimization
-nvt_results = builder.run_equilibration_step('nvt')  # NVT equilibration
-npt_results = builder.run_equilibration_step('npt')  # NPT equilibration
-
-# Get final equilibrated system
-final_system = builder.get_equilibrated_system()
-print(f"Final equilibrated system: {final_system['structure']}")
+# Run individual steps
+smd_results = pmf.run_pmf_step("./system", "./output", "smd")
 ```
 
-### Equilibration Process Control
+## Configuration
+
+### Default Configuration
+
+The module uses sensible defaults for production PMF calculations:
+
+- **SMD**: 5 ns simulation with 0.005 nm/ps pull rate
+- **Umbrella Sampling**: 22 ns per window (2 ns equilibration + 20 ns production)
+- **Window Selection**: Adaptive spacing (0.1 nm close, 0.2 nm far)
+- **Analysis**: 50 bootstrap iterations for error estimation
+
+### Creating Custom Configurations
 
 ```python
-import prism
-
-# Detailed equilibration process control
-builder = prism.pmf.pmf_builder("./md_results", "./pmf_system")
-
-# 1. Build system geometry only
-build_results = builder.build(equilibrate=False)
-print("System geometry built, starting equilibration process...")
-
-# 2. Check equilibration status
-status = builder.get_equilibration_status()
-print(f"Current status: {status['status']}")
-
-# 3. Step-by-step equilibration
-if status['em_ready']:
-    em_results = builder.run_equilibration_step('em')
-    print(f"✅ Energy minimization completed: {em_results['analysis']['final_energy']}")
-
-if status['nvt_ready']:
-    nvt_results = builder.run_equilibration_step('nvt') 
-    print(f"✅ NVT equilibration completed: {nvt_results['analysis']['avg_temperature']} K")
-
-if status['npt_ready']:
-    npt_results = builder.run_equilibration_step('npt')
-    print(f"✅ NPT equilibration completed: {npt_results['analysis']['avg_pressure']} bar")
-
-# 4. Get final system
-equilibrated_system = builder.get_equilibrated_system()
-print(f"Equilibration complete! Final system: {equilibrated_system['structure']}")
+# Create configuration templates
+pmf.create_pmf_config("my_config.yaml", template="default")  # Standard
+pmf.create_pmf_config("fast_config.yaml", template="fast")   # Quick testing
+pmf.create_pmf_config("accurate_config.yaml", template="accurate")  # High accuracy
 ```
 
-### Step Control Mode
+### Configuration Parameters
+
+Key configuration sections:
+
+```yaml
+# System rebuilding settings
+builder:
+  rebuild_system: true
+  z_extension: 2.5  # Extra box length for pulling (nm)
+  
+# SMD simulation parameters  
+smd:
+  pull_rate: 0.005      # nm/ps
+  pull_k: 1000.0        # kJ/mol/nm²
+  nsteps: 2500000       # 5 ns simulation
+
+# Umbrella sampling parameters
+umbrella:
+  sample_interval_near: 0.1     # nm, close distances
+  sample_interval_far: 0.2      # nm, far distances
+  production_time_ps: 20000     # 20 ns per window
+
+# WHAM analysis parameters
+analysis:
+  begin_time_ps: 2000           # Skip first 2 ns
+  bootstrap_iterations: 50      # Error analysis
+  energy_unit: "kCal"          # Output unit
+```
+
+## System Requirements
+
+### Input Requirements
+
+1. **Completed MD System**: A PRISM-generated system directory containing:
+   - `GMX_PROLIG_MD/solv_ions.gro` - System structure
+   - `GMX_PROLIG_MD/topol.top` - System topology
+   - MD trajectory files (optional, for system rebuilding)
+
+2. **Software Dependencies**:
+   - GROMACS (2018 or newer) with PMF tools
+   - Python packages: numpy, matplotlib, scipy
+   - Optional: GPU drivers for acceleration
+
+### Output Structure
+
+```
+pmf_results/
+├── smd/                          # SMD simulation
+│   ├── smd.mdp                  # SMD parameters
+│   ├── run_smd.sh               # Execution script
+│   └── results/
+│       ├── smd_pullf.xvg        # Force vs time
+│       ├── smd_pullx.xvg        # Distance vs time
+│       └── smd.gro              # Final structure
+├── umbrella/                     # Umbrella sampling
+│   ├── window_0/                # Individual windows
+│   ├── window_1/
+│   ├── ...
+│   └── run_all_umbrella.sh      # Parallel execution script
+├── analysis/                     # WHAM analysis
+│   ├── pmf.xvg                  # PMF data
+│   ├── pmferror.xvg             # Error estimates
+│   ├── pmf_curve.png            # PMF plot
+│   ├── force_profile.png        # Force vs distance
+│   ├── energy_landscape.png     # Energy surface
+│   └── pmf_analysis_report.txt  # Summary report
+└── pmf_config_used.yaml         # Configuration used
+```
+
+## Advanced Usage
+
+### System Rebuilding with PMF Optimization
+
+For optimal PMF calculations, rebuild your system with PMF-specific settings:
 
 ```python
-import prism
+# Enable system rebuilding during PMF setup
+system = pmf.pmf_system(
+    "./my_md_output", 
+    "./pmf_results",
+    rebuild_system=True  # Rebuild with PMF optimization
+)
 
-# Build system using PRISM
-system = prism.system("protein.pdb", "ligand.mol2")
-system_output = system.build()
-
-# Create PMF system
-pmf = prism.pmf.PMFSystem(system_output['output_dir'], "./pmf_output")
-
-# Step 1: Prepare SMD
-print("=== Step 1: SMD Preparation ===")
-smd_results = pmf.build(step='smd')
-print(f"Execute SMD: {smd_results['instructions']}")
-
-# Run SMD manually then continue
-# bash {pmf_output}/smd/run_smd.sh
-
-# Step 2: Prepare umbrella sampling  
-print("=== Step 2: Umbrella Sampling Preparation ===")
-umbrella_results = pmf.build(step='umbrella')
-print(f"Execute umbrella sampling: {umbrella_results['instructions']}")
-
-# Run umbrella sampling manually then continue
-# bash {pmf_output}/umbrella/run_all_umbrella.sh parallel
-
-# Step 3: Analysis
-print("=== Step 3: WHAM Analysis ===")
-analysis_results = pmf.build(step='analysis')
+# Or rebuild manually with specific settings
+rebuild_results = system.rebuild_system(frame=-1)  # Use last MD frame
 ```
 
-### Advanced Configuration
+### Custom Analysis and Visualization
 
 ```python
-import prism
+# Analyze SMD results after completion
+smd_analysis = system.analyze_smd()
 
-# Custom configuration
-config = {
-    'reference_group': 'Protein',
-    'moving_group': 'LIG',
-    'smd': {
-        'pull_rate': 0.01,      # Faster pulling velocity
-        'pull_k': 2000.0        # Stronger force constant
-    },
-    'umbrella': {
-        'sample_interval_near': 0.05,  # Dense sampling at close distances
-        'production_time_ps': 30000    # Extended sampling time
-    }
-}
+# Detailed PMF analysis with custom plots
+pmf_analysis = system.analyze_pmf()
 
-pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", config=config)
-results = pmf.run(mode='manual')  # Step control mode
+# Export current configuration
+system.export_config("./my_saved_config.yaml")
 ```
 
-## Architecture Design
+### Workflow Status and Monitoring
 
-### Module Structure
-
-```
-prism/pmf/
-├── core.py          # High-level PMF interface (similar to prism.core)
-├── workflow.py      # Workflow manager
-├── pmf_builder.py   # PMF system builder (reconstruct from MD results)
-├── equilibration.py # System equilibration manager (EM/NVT/NPT)
-├── smd.py          # SMD simulation management
-├── umbrella.py     # Umbrella sampling management
-├── analyzer.py     # WHAM analysis and visualization
-└── utils.py        # Utility functions
-```
-
-### Core Class Design
-
-#### `PMFSystem` (High-level Interface)
 ```python
-class PMFSystem:
-    """High-level PMF interface, similar to PRISMSystem"""
-    
-    def __init__(self, system_dir, output_dir, config=None)
-    def build(self, step=None)        # Prepare calculation components
-    def build_step_by_step()          # Step-controlled building
-    def run(self, mode='auto')        # Execute calculations
-    def get_status()                  # Get status
-    def analyze_smd()                 # SMD analysis
-    def analyze_pmf()                 # PMF analysis
+# Check workflow status
+status = system.get_status()
+print(f"Current stage: {status['current_stage']}")
+print(f"Next action: {status['next_action']}")
+
+# Clean up specific components
+system.clean(['smd'])  # Remove SMD results only
+system.clean()         # Remove all PMF results
 ```
 
-#### `PMFWorkflow` (Workflow Management)
-```python
-class PMFWorkflow:
-    """PMF workflow manager, similar to PRISMBuilder"""
-    
-    def prepare_smd()                 # Prepare SMD
-    def prepare_umbrella()            # Prepare umbrella sampling
-    def prepare_analysis()            # Prepare analysis
-    def run_analysis()                # Execute WHAM analysis
-    def run_complete()                # Complete workflow
+## Performance Optimization
+
+### Hardware Recommendations
+
+- **CPU**: Multi-core processor (8+ cores recommended)
+- **GPU**: CUDA-compatible GPU for acceleration (optional but recommended)
+- **Memory**: 16+ GB RAM for typical systems
+- **Storage**: Fast SSD with sufficient space (50+ GB for complete workflow)
+
+### Parallel Execution
+
+```bash
+# Umbrella sampling supports parallel execution
+cd pmf_results/umbrella
+bash run_all_umbrella.sh parallel  # Run windows in parallel
+bash run_all_umbrella.sh sequential  # Run windows sequentially
 ```
 
-#### `PMFBuilder` (System Builder)
-```python
-class PMFBuilder:
-    """PMF system builder, reconstruct optimized system from MD results"""
-    
-    def build(frame=None, equilibrate=True)  # Build PMF-optimized system
-    def extract_structures()          # Extract protein and ligand structures
-    def calculate_alignment_geometry() # Calculate center-of-mass and alignment vectors
-    def rebuild_aligned_system()      # Reconstruct aligned and extended system
-    def run_equilibration()           # Run complete equilibration process (EM→NVT→NPT)
-    def run_equilibration_step(step)  # Run individual equilibration step
-    def get_equilibration_status()    # Get equilibration status
-    def get_equilibrated_system()     # Get final equilibrated system
-    def get_system_info()             # Get system information
-    def clean()                       # Clean temporary files
-```
+### Time Estimates
 
-#### `PMFEquilibrationManager` (Equilibration Manager)
-```python
-class PMFEquilibrationManager:
-    """PMF system equilibration manager, handles EM/NVT/NPT complete equilibration workflow"""
-    
-    def run_complete_equilibration()  # Run complete equilibration workflow
-    def run_energy_minimization()     # Run energy minimization
-    def run_nvt_equilibration()       # Run NVT equilibration
-    def run_npt_equilibration()       # Run NPT equilibration
-    def get_equilibration_status()    # Get equilibration status
-    def get_final_equilibrated_system() # Get final equilibrated system
-```
+Typical calculation times (protein-ligand complex with ~50,000 atoms):
+
+- **SMD (5 ns)**: 1-6 hours (depending on hardware)
+- **Umbrella Sampling**: Several hours to days (depends on number of windows and parallelization)
+- **WHAM Analysis**: Minutes to hours (depends on bootstrap iterations)
+
+## Troubleshooting
+
+### Common Issues
+
+1. **SMD Preparation Fails**
+   ```
+   Error: Could not locate GMX_PROLIG_MD directory
+   ```
+   - Ensure your input system was built with PRISM
+   - Check that `solv_ions.gro` and `topol.top` exist
+
+2. **Insufficient Pulling Distance**
+   - Increase `z_extension` in configuration
+   - Check that ligand fully unbinds during SMD
+
+3. **Poor Window Selection**
+   - Reduce `sample_interval_near` and `sample_interval_far`
+   - Check SMD trajectory for proper unbinding pathway
+
+4. **WHAM Analysis Fails**
+   - Ensure at least 80% of umbrella windows completed successfully
+   - Check umbrella sampling trajectories for proper convergence
+
+### Performance Issues
+
+- **Memory Errors**: Reduce system size or increase available memory
+- **Slow Simulations**: Enable GPU acceleration or reduce simulation times
+- **Disk Space**: Monitor storage usage, especially for trajectory files
+
+### Getting Help
+
+For technical issues:
+1. Check log files in each step directory
+2. Verify GROMACS installation and GPU drivers
+3. Ensure all input files are properly formatted
+4. Review configuration parameters for your system size
+
+## API Reference
+
+### Main Classes
+
+#### `PMFSystem`
+High-level interface for PMF calculations following PRISM patterns.
+
+**Methods:**
+- `build(step=None)` - Prepare PMF calculation components
+- `run(mode='auto')` - Execute PMF workflow
+- `rebuild_system(frame=None)` - Rebuild system with PMF optimization
+- `get_status()` - Get workflow status
+- `analyze_smd()` - Analyze SMD results
+- `analyze_pmf()` - Analyze final PMF results
+- `clean(components=None)` - Clean calculation results
+
+#### `PMFBuilder`
+System builder for PMF-optimized structures.
+
+**Methods:**
+- `build(equilibrate=True)` - Build PMF system with equilibration
+- `extract_structures()` - Extract protein and ligand structures
+- `rebuild_aligned_system()` - Reconstruct aligned system
+- `run_equilibration()` - Run complete equilibration process
+
+#### `PMFRunner`
+High-level runner for complete PMF workflows.
+
+**Methods:**
+- `run_complete_workflow(md_system_dir, output_dir, steps=None)` - Run complete workflow
+- `_run_builder_step()` - Execute system builder step
+- `_run_smd_step()` - Execute SMD simulation step
+- `_run_umbrella_step()` - Execute umbrella sampling step
+- `_run_analysis_step()` - Execute WHAM analysis step
+
+### Convenience Functions
+
+- `pmf_system(system_dir, output_dir, config=None, rebuild_system=False, **kwargs)` - Create PMF system
+- `run_pmf_workflow(md_system_dir, output_dir, config=None, steps=None)` - Run complete workflow
+- `run_pmf_step(md_system_dir, output_dir, step, config=None)` - Run individual step
+- `create_pmf_config(output_file, template="default")` - Create configuration file
 
 ## Integration with PRISM
 
-### Seamless Integration Example
+The PMF module integrates seamlessly with PRISM workflows:
 
 ```python
 import prism
 
-# Standard PRISM workflow
-def complete_pmf_workflow(protein_file, ligand_file, output_base):
-    """Complete PRISM + PMF workflow"""
-    
-    # 1. System building (PRISM standard)
-    system = prism.system(protein_file, ligand_file, 
-                         output_dir=f"{output_base}/system")
-    build_results = system.build()
-    print(f"✓ System building completed: {build_results['output_dir']}")
-    
-    # 2. PMF calculation (integrated)
-    pmf = prism.pmf.pmf_system(
-        build_results['output_dir'], 
-        f"{output_base}/pmf"
-    )
-    pmf_results = pmf.run(mode='auto')
-    print(f"✓ PMF calculation completed: {pmf_results['binding_energy']['value']:.2f} kcal/mol")
-    
-    return {
-        'system': build_results,
-        'pmf': pmf_results
-    }
+# Build system with PRISM
+system = prism.system("protein.pdb", "ligand.mol2")
+build_results = system.build()
 
-# Usage example
-results = complete_pmf_workflow("protein.pdb", "ligand.mol2", "./analysis")
+# Calculate PMF with integrated module
+pmf_system = prism.pmf.pmf_system(build_results['output_dir'], "./pmf_results")
+pmf_results = pmf_system.run(mode='auto')
+
+print(f"System built: {build_results['output_dir']}")
+print(f"Binding energy: {pmf_results['binding_energy']['value']:.2f} kcal/mol")
 ```
 
-### Configuration System Compatibility
+## Citation
 
-```python
-# Using PRISM configuration file
-pmf = prism.pmf.pmf_system("./system", "./pmf", config="pmf_config.yaml")
-
-# Or using PRISM configuration dictionary
-config = prism.config.load_config("prism_config.yaml")
-pmf_config = config.get('pmf', {})
-pmf = prism.pmf.pmf_system("./system", "./pmf", config=pmf_config)
-```
-
-## Output Structure
-
-The PMF module follows PRISM's output organization pattern:
+When using the PRISM PMF module in research, please cite:
 
 ```
-pmf_output/
-├── smd/                    # SMD results
-│   ├── run_smd.sh         # Execution script
-│   ├── smd.mdp            # SMD parameters
-│   ├── results/           # SMD results
-│   └── analysis/          # SMD analysis
-├── umbrella/              # Umbrella sampling
-│   ├── run_all_umbrella.sh
-│   ├── window_000/        # Sampling windows
-│   ├── window_001/
-│   └── ...
-├── analysis/              # Final analysis
-│   ├── pmf.xvg           # PMF data
-│   ├── pmf_curve.png     # PMF plot
-│   └── pmf_analysis_report.txt
-└── workflow_state.yaml   # Workflow state
+PRISM: Protein Receptor Interaction Simulation Modeler
+PMF Module for Binding Free Energy Calculations
 ```
 
-## State Management
+## License
 
-### Status Monitoring
-
-```python
-pmf = prism.pmf.pmf_system("./system", "./pmf")
-
-# Get detailed status
-status = pmf.get_status()
-print(f"Current stage: {status['current_stage']}")
-print(f"Next action: {status['next_action']}")
-print(f"File status: {status['files']}")
-```
-
-### Recovery and Cleanup
-
-```python
-# Clean specific components
-pmf.clean(['smd'])              # Clean SMD results
-pmf.clean(['umbrella', 'analysis'])  # Clean subsequent steps
-
-# State recovery
-pmf = prism.pmf.pmf_system("./system", "./pmf")  # Auto-recover state
-```
-
-## Error Handling
-
-The PMF module adopts PRISM's error handling pattern:
-
-```python
-try:
-    pmf = prism.pmf.pmf_system("./system", "./pmf")
-    results = pmf.run(mode='auto')
-except FileNotFoundError as e:
-    print(f"System files missing: {e}")
-except RuntimeError as e:
-    print(f"Workflow error: {e}")
-    # Get current status for debugging
-    status = pmf.get_status()
-    print(f"Stopped at: {status['current_stage']}")
-```
-
-## Advanced Features
-
-### Custom Analysis
-
-```python
-# SMD results analysis
-smd_analysis = pmf.analyze_smd()
-print(f"SMD analysis completed: {smd_analysis['plots']}")
-
-# Detailed PMF analysis
-pmf_analysis = pmf.analyze_pmf()
-print(f"PMF statistics: {pmf_analysis['pmf_statistics']}")
-```
-
-### Parameter Validation
-
-```python
-from prism.pmf import SMDBuilder
-
-# Parameter validation
-validation = SMDBuilder.validate_smd_parameters(config)
-if not validation['valid']:
-    print(f"Parameter issues: {validation['issues']}")
-    print(f"Suggestions: {validation['warnings']}")
-```
-
-## Performance and Best Practices
-
-### Recommended Workflow
-
-1. **Development and Testing**: Use step control mode for easy debugging
-2. **Production Calculations**: Use automated mode for efficiency
-3. **Parameter Optimization**: Test with short times first, then long calculations
-4. **Parallel Execution**: Use parallel mode for umbrella sampling
-
-### System Requirements
-
-- **GROMACS**: Version 2020+, with pull code support
-- **Python Packages**: numpy, matplotlib, pyyaml
-- **Computational Resources**: GPU recommended for umbrella sampling
-- **Storage Space**: Sufficient space for trajectory storage
-
-## Summary
-
-The refactored PRISM PMF module provides the following advantages:
-
-1. **Architectural Consistency**: Fully compliant with PRISM design patterns
-2. **Code Quality**: Modular, maintainable, highly readable  
-3. **Complete Functionality**: Complete workflow from SMD to WHAM
-4. **Ease of Use**: High-level interface simplifies complex operations
-5. **Flexibility**: Supports both automated and manual control modes
-6. **Integration**: Seamless integration with PRISM ecosystem
-
-This refactoring truly integrates PMF calculations into PRISM's core architecture, providing professional, reliable, and user-friendly PMF calculation capabilities!
+This module is part of the PRISM package and follows the same licensing terms.
