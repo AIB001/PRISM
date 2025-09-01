@@ -7,13 +7,13 @@ PRISM - Protein Receptor Interaction Simulation Modeler
 A comprehensive tool for building protein-ligand systems for molecular dynamics simulations.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
 __author__ = "PRISM Development Team"
 
 from .builder import PRISMBuilder
 from .core import PRISMSystem
 from .sim import model
-from .analysis import TrajAnalysis
+from .analysis import IntegratedProteinLigandAnalyzer as TrajAnalysis
 
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
@@ -280,7 +280,6 @@ def get_version():
     """Get PRISM version."""
     return __version__
 
-# Lazy import for visualization classes to avoid import errors if dependencies missing
 def get_html_generator():
     """
     Get HTMLGenerator class for advanced visualization usage.
@@ -309,17 +308,26 @@ def get_html_generator():
 
 # Export main classes and functions
 __all__ = [
+    # Core classes
     "PRISMBuilder",
     "PRISMSystem",
+    "TrajAnalysis",
+    
+    # High-level API functions
     "system",
     "build_system",
     "model",
+    
+    # Analysis functions
+    "analyze_trajectory",
+    "visualize_trajectory",
+    "get_html_generator",
+    
+    # Utility functions
     "check_dependencies",
     "list_forcefields",
     "get_version",
+    
+    # Version info
     "__version__",
-    "TrajAnalysis",
-    "visualize_trajectory",
-    "analyze_trajectory",
-    "get_html_generator",
 ]
