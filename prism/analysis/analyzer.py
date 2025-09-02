@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.WARNING, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 class IntegratedProteinLigandAnalyzer:
-    """Integrated protein-ligand analysis tool with new calculation methods and fixed multi-system analysis"""
+    """Integrated protein-ligand analysis tool"""
     
     def __init__(self, base_dir: Optional[str] = None, topology_file: Optional[str] = None, 
                  trajectory_file: Optional[str] = None, config: Optional[AnalysisConfig] = None,
@@ -121,17 +121,15 @@ class IntegratedProteinLigandAnalyzer:
 
             self.hbond_analyzer.set_trajectory_data(
                 self.traj, 
-            mdtraj_ligand_residue, 
-            mdtraj_protein_residues
-         )
+                mdtraj_ligand_residue, 
+                mdtraj_protein_residues
+            )
         
             logger.warning(f"Found {len(self.ligand_atoms)} ligand atoms, {len(self.protein_atoms)} protein atoms")
             logger.warning(f"Found {len(self.protein_residues)} protein residues for analysis")
         
         except Exception as e:
             logger.error(f"Failed to prepare system: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             raise
     
     def calculate_contact_proportions(self) -> Dict[str, float]:
@@ -196,7 +194,6 @@ class IntegratedProteinLigandAnalyzer:
                 'std': float(std_estimate)
             }
         
-        logger.warning(f"Generated distance statistics for {len(distance_stats)} residues")
         return distance_stats
     
     def analyze_hydrogen_bonds(self) -> List[Tuple[str, float, float, float]]:
@@ -204,7 +201,7 @@ class IntegratedProteinLigandAnalyzer:
         return self.hbond_analyzer.analyze_hydrogen_bonds(self.universe)
     
     def analyze_residue_contact(self, residue_id: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Analyze specific residue contact situation with real distance calculation"""
+        """Analyze specific residue contact with distance calculation"""
         try:
             if ' ' in residue_id:
                 res_name, res_num_str = residue_id.split()
@@ -233,8 +230,6 @@ class IntegratedProteinLigandAnalyzer:
             if not target_residue_atoms:
                 logger.error(f"No heavy atoms found for residue {residue_id}")
                 return None, None
-        
-            logger.warning(f"Calculating real distances for {residue_id}: {len(ligand_atoms)} ligand atoms vs {len(target_residue_atoms)} residue atoms")
 
             atom_pairs = []
             for lig_atom in ligand_atoms:
@@ -242,10 +237,8 @@ class IntegratedProteinLigandAnalyzer:
                     atom_pairs.append([lig_atom, res_atom])
 
             import mdtraj as md
-            all_distances = md.compute_distances(self.traj, atom_pairs)  # shape: (n_frames, n_pairs)
-
-            min_distances = np.min(all_distances, axis=1)  
-
+            all_distances = md.compute_distances(self.traj, atom_pairs)
+            min_distances = np.min(all_distances, axis=1)
             contact_states = (min_distances < self.config.contact_enter_threshold_nm).astype(int)
 
             contact_frames = np.sum(contact_states)
@@ -259,17 +252,15 @@ class IntegratedProteinLigandAnalyzer:
         
         except Exception as e:
             logger.error(f"Failed to analyze residue contact for {residue_id}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None, None
 
     def analyze_single_system(self, output_dir: Optional[str] = None,
-                         distance_plot_dir: Optional[str] = None, 
-                         parallel_hbonds: bool = True,
-                         save_data: bool = True,
-                         selected_residues: Optional[List[str]] = None,
-                         generate_report: bool = True,
-                         save_frame_data: bool = True):  
+                            distance_plot_dir: Optional[str] = None, 
+                            parallel_hbonds: bool = True,
+                            save_data: bool = True,
+                            selected_residues: Optional[List[str]] = None,
+                            generate_report: bool = True,
+                            save_frame_data: bool = True):  
         if self.traj is None:
             raise ValueError("Requires topology and trajectory files")
 
@@ -284,7 +275,7 @@ class IntegratedProteinLigandAnalyzer:
             residues_to_analyze = [(res.strip(), contact_proportions.get(res.strip(), 0.0)) 
                                    for res in selected_residues if res.strip() in contact_proportions]
         else:
-            residues_to_analyze = self.select_top_contacts(contact_proportions)[:3]
+            residues_to_analyze = self.select_top_contacts(contact_proportions)[:10]
 
         if save_data:
             contact_csv_path = os.path.join(output_dir, "contact_proportions.csv")
@@ -292,10 +283,16 @@ class IntegratedProteinLigandAnalyzer:
 
         if save_frame_data:
             frame_contact_path = os.path.join(output_dir, "frame_by_frame_contacts.csv")
-            selected_res_for_frame = selected_residues if selected_residues else [res[0] for res in residues_to_analyze]
+            if selected_residues:
+                selected_res_for_frame = selected_residues
+            else:
+                top_contact_residues = self.select_top_contacts(contact_proportions, top_n=10)
+                selected_res_for_frame = [res[0] for res in top_contact_residues]
+            
             DataExporter.save_frame_by_frame_contacts(self, frame_contact_path, selected_res_for_frame)
 
-        for residue_id, _ in residues_to_analyze:
+        top_3_for_plots = residues_to_analyze[:3]
+        for residue_id, _ in top_3_for_plots:
             distances, contact_states = self.analyze_residue_contact(residue_id)
 
             if distances is None:
@@ -316,7 +313,8 @@ class IntegratedProteinLigandAnalyzer:
 
         if save_frame_data:
             frame_hbond_path = os.path.join(output_dir, "frame_by_frame_hbonds.csv")
-            DataExporter.save_frame_by_frame_hbonds(self, frame_hbond_path)
+            top_hbonds = hbond_frequencies[:10] if len(hbond_frequencies) > 10 else hbond_frequencies
+            DataExporter.save_frame_by_frame_hbonds(self, frame_hbond_path, top_hbonds)
 
         distance_stats = {}
         if self.config.distance_analysis:
@@ -329,7 +327,17 @@ class IntegratedProteinLigandAnalyzer:
 
             if save_frame_data:
                 frame_distance_path = os.path.join(output_dir, "frame_by_frame_distances.csv")
-                selected_res_for_distance = selected_residues if selected_residues else [res[0] for res in residues_to_analyze[:5]]
+                if selected_residues:
+                    selected_res_for_distance = selected_residues
+                else:
+                    if distance_stats:
+                        closest_residues = sorted(distance_stats.items(), 
+                                               key=lambda x: x[1]['min'])[:5]
+                        selected_res_for_distance = [res[0] for res in closest_residues]
+                    else:
+                        top_5_contacts = self.select_top_contacts(contact_proportions, top_n=5)
+                        selected_res_for_distance = [res[0] for res in top_5_contacts]
+                
                 DataExporter.save_frame_by_frame_distances(self, frame_distance_path, selected_res_for_distance)
 
         if generate_report and distance_stats:
@@ -343,15 +351,15 @@ class IntegratedProteinLigandAnalyzer:
         logger.warning("Analysis complete! Files generated:")
         logger.warning(f"  - Contact proportions: contact_proportions.csv")
         if save_frame_data:
-            logger.warning(f"  - Frame-by-frame contacts: frame_by_frame_contacts.csv")
+            logger.warning(f"  - Frame-by-frame contacts: frame_by_frame_contacts.csv (top 10)")
         if hbond_frequencies:
             logger.warning(f"  - Hydrogen bonds: hydrogen_bonds.csv")
             if save_frame_data:
-                logger.warning(f"  - Frame-by-frame H-bonds: frame_by_frame_hbonds.csv")
+                logger.warning(f"  - Frame-by-frame H-bonds: frame_by_frame_hbonds.csv (top 10)")
         if distance_stats:
             logger.warning(f"  - Distance statistics: distance_stats.csv")
             if save_frame_data:
-                logger.warning(f"  - Frame-by-frame distances: frame_by_frame_distances.csv")
+                logger.warning(f"  - Frame-by-frame distances: frame_by_frame_distances.csv (top 5)")
 
         return contact_proportions, hbond_frequencies, distance_stats
     
@@ -369,12 +377,12 @@ class IntegratedProteinLigandAnalyzer:
         if output_file is None:
             output_file = f"multi_system_{analysis_type}.png"
         
-        cutoff_nm = cutoff_angstrom *0.1
+        cutoff_nm = cutoff_angstrom * 0.1
         
         if analysis_type == "overview":
             ylabel = "Number of Unique Contact Types"
             title = "Contact Convergence Across All Systems"
-        else:  # decay
+        else:
             ylabel = "Number of Retained Initial Contacts"
             title = "Initial Contact Stability Across All Systems"
         
@@ -418,7 +426,6 @@ class IntegratedProteinLigandAnalyzer:
         
         logger.warning(f"Successfully processed {len(all_data)} systems")
         
-        # Save data if requested
         if save_data:
             output_dir = os.path.dirname(output_file) or "multi_system_results"
             parameters = {
@@ -433,7 +440,6 @@ class IntegratedProteinLigandAnalyzer:
                 analysis_type, parameters, output_dir
             )
         
-        # Create visualization
         self.visualizer.plot_multi_system(
             all_data, all_times, system_names, weights, color_mode,
             ylabel, title, output_file, self.config
@@ -499,16 +505,16 @@ class IntegratedProteinLigandAnalyzer:
                 
                     f.write(f"  Residues with mean distance < {self.config.distance_cutoff_nm:.2f} nm: "
                            f"{residues_close}\n")
-                    f.write(f"  Average minimum distance: {np.mean(all_min_dists):.2f} Ã…\n")
-                    f.write(f"  Average mean distance: {np.mean(all_mean_dists):.2f} Ã…\n")
-                    f.write(f"  Average maximum distance: {np.mean(all_max_dists):.2f} Ã…\n")
-                    f.write(f"  Closest residue: {closest_residue} (min distance: {closest_stats.get('min', 0):.2f} Ã…)\n\n")
+                    f.write(f"  Average minimum distance: {np.mean(all_min_dists):.2f} Å\n")
+                    f.write(f"  Average mean distance: {np.mean(all_mean_dists):.2f} Å\n")
+                    f.write(f"  Average maximum distance: {np.mean(all_max_dists):.2f} Å\n")
+                    f.write(f"  Closest residue: {closest_residue} (min distance: {closest_stats.get('min', 0):.2f} Å)\n\n")
                 
                     f.write("  TOP 5 CLOSEST RESIDUES:\n")
                     closest_residues = sorted(distance_stats.items(), 
                                              key=lambda x: x[1]['min'])[:5]
                     for i, (residue, stats) in enumerate(closest_residues, 1):
-                        f.write(f"    {i:2d}. {residue:<15} Min: {stats['min']:.2f} Ã…  Mean: {stats['mean']:.2f} Ã…\n")
+                        f.write(f"    {i:2d}. {residue:<15} Min: {stats['min']:.2f} Å  Mean: {stats['mean']:.2f} Å\n")
                     f.write("\n")
             
                 f.write("HYDROGEN BOND ANALYSIS RESULTS:\n")
@@ -527,7 +533,7 @@ class IntegratedProteinLigandAnalyzer:
                     for i, hb in enumerate(hbond_frequencies[:10], 1):
                         key, freq, avg_dist, avg_angle = hb
                         f.write(f"    {i:2d}. {key}\n")
-                        f.write(f"        Frequency: {freq * 100:>8.2f}%  Distance: {avg_dist:>6.2f} Ã…  Angle: {avg_angle:>6.1f}Â°\n")
+                        f.write(f"        Frequency: {freq * 100:>8.2f}%  Distance: {avg_dist:>6.2f} Å  Angle: {avg_angle:>6.1f}°\n")
 
                 f.write("\n" + "=" * 80 + "\n")
         
@@ -543,7 +549,7 @@ def analyze_and_visualize(topology_file, trajectory_file,
                          output_dir="analysis_results", verbose=True,
                          save_all_data=True, return_detailed=False,
                          generate_report=True, use_new_method=True):
-    """Simplified analysis interface function with new calculation methods"""
+    """Simplified analysis interface function"""
     os.makedirs(output_dir, exist_ok=True)
     
     config = AnalysisConfig(

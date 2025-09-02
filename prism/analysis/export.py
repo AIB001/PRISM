@@ -110,7 +110,6 @@ class DataExporter:
         try:
             os.makedirs(output_dir, exist_ok=True)
             
-            # Save detailed data
             multi_data = {
                 'system_names': system_names,
                 'molecular_weights': weights,
@@ -131,7 +130,6 @@ class DataExporter:
                 json.dump(multi_data, f, indent=2)
             logger.warning(f"Multi-system data saved: {data_path}")
             
-            # Save summary CSV
             summary_data = []
             for name, data, times, weight in zip(system_names, all_data, all_times, weights):
                 if len(data) > 0:
@@ -156,7 +154,6 @@ class DataExporter:
             logger.error(f"Failed to save multi-system data: {e}")
             return None, None
 
-    
     @staticmethod
     def save_frame_by_frame_contacts(analyzer, output_path: str, selected_residues=None):
         try:
@@ -182,8 +179,6 @@ class DataExporter:
             if not contact_frequencies:
                 logger.warning("No contacts found for selected residues")
                 return None
-                
-            logger.warning(f"Analyzing frame-by-frame contacts for {len(contact_frequencies)} atom-residue pairs")
 
             atom_pairs = []
             pair_info = []
@@ -207,8 +202,6 @@ class DataExporter:
             if not atom_pairs:
                 logger.warning("No atom pairs found for analysis")
                 return None
-                
-            logger.warning(f"Calculating distances for {len(atom_pairs)} atom pairs across {analyzer.traj.n_frames} frames")
 
             distances = md.compute_distances(analyzer.traj, atom_pairs)
             contact_threshold = analyzer.config.contact_enter_threshold_nm
@@ -249,101 +242,176 @@ class DataExporter:
             
         except Exception as e:
             logger.error(f"Failed to save frame-by-frame contact data: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None
     
     @staticmethod
-    def save_frame_by_frame_hbonds(analyzer, output_path: str):
+    def save_frame_by_frame_hbonds(analyzer, output_path: str, selected_hbonds=None):
+        """Optimized frame-by-frame hydrogen bond data export"""
         try:
             if not hasattr(analyzer.hbond_analyzer, 'traj') or analyzer.hbond_analyzer.traj is None:
                 logger.warning("No hydrogen bond analysis data available")
                 return None
-                
+            
             hbond_analyzer = analyzer.hbond_analyzer
             traj = hbond_analyzer.traj
 
             hbond_pairs, hbond_triplets = hbond_analyzer._prepare_hbond_pairs()
-            
+        
             if not hbond_pairs:
                 logger.warning("No hydrogen bond pairs found")
                 return None
-                
-            logger.warning(f"Analyzing frame-by-frame hydrogen bonds for {len(hbond_pairs)} pairs across {traj.n_frames} frames")
+
+            if selected_hbonds:
+                selected_keys = set(hb[0] for hb in selected_hbonds)
             
+                filtered_pairs = []
+                filtered_triplets = []
+                filtered_keys = []
+
+                for idx, pair in enumerate(hbond_pairs):
+                    donor_idx, acceptor_idx = pair
+                    donor_atom = traj.topology.atom(donor_idx)
+                    acceptor_atom = traj.topology.atom(acceptor_idx)
+
+                    if donor_idx in hbond_analyzer.protein_donors:
+                        hbond_key = f"{donor_atom.residue.name} {donor_atom.residue.resSeq} ({donor_atom.name}) -> Ligand"
+                    else:
+                        hbond_key = f"Ligand -> {acceptor_atom.residue.name} {acceptor_atom.residue.resSeq} ({acceptor_atom.name})"
+
+                    if hbond_key in selected_keys:
+                        filtered_pairs.append(pair)
+                        filtered_triplets.append(hbond_triplets[idx])
+                        filtered_keys.append(hbond_key)
+
+                hbond_pairs = filtered_pairs
+                hbond_triplets = filtered_triplets
+                hbond_keys = filtered_keys
+
+                if not hbond_pairs:
+                    logger.warning("No hydrogen bond pairs found for selected bonds")
+                    return None
+            else:
+                hbond_keys = []
+                for pair in hbond_pairs:
+                    donor_idx, acceptor_idx = pair
+                    donor_atom = traj.topology.atom(donor_idx)
+                    acceptor_atom = traj.topology.atom(acceptor_idx)
+
+                    if donor_idx in hbond_analyzer.protein_donors:
+                        hbond_key = f"{donor_atom.residue.name} {donor_atom.residue.resSeq} ({donor_atom.name}) -> Ligand"
+                    else:
+                        hbond_key = f"Ligand -> {acceptor_atom.residue.name} {acceptor_atom.residue.resSeq} ({acceptor_atom.name})"
+
+                    hbond_keys.append(hbond_key)
+
+            logger.warning(f"Computing hydrogen bonds for {len(hbond_pairs)} pairs across {traj.n_frames} frames")
+
+            try:
+                all_distances = md.compute_distances(traj, hbond_pairs, periodic=False)
+
+                all_angles_rad = md.compute_angles(traj, hbond_triplets, periodic=False)
+                all_angles_deg = np.degrees(all_angles_rad)
+
+                distance_mask = all_distances < hbond_analyzer.config.hbond_distance_cutoff_nm
+                angle_mask = all_angles_deg > hbond_analyzer.config.hbond_angle_cutoff_deg
+                is_hbond_matrix = distance_mask & angle_mask  
+
+                logger.warning(f"Batch computation complete. Processing results...")
+
+            except Exception as e:
+                logger.error(f"Error in batch computation: {e}")
+                return None
+
             frame_data = []
+            n_frames, n_pairs = all_distances.shape
 
-            for frame_idx in range(traj.n_frames):
-                frame_time = frame_idx * 0.5  
-                
-                try:
-                    dists = md.compute_distances(traj[frame_idx], hbond_pairs, periodic=False)
-                    angles = md.compute_angles(traj[frame_idx], hbond_triplets, periodic=False)
-                    
-                    for idx, pair in enumerate(hbond_pairs):
-                        donor_idx, acceptor_idx = pair
-                        distance_nm = dists[0][idx]
-                        distance_angstrom = distance_nm * 10.0
-                        angle_rad = angles[0][idx]
-                        angle_deg = np.degrees(angle_rad)
-
-                        is_hbond = (distance_nm < hbond_analyzer.config.hbond_distance_cutoff_nm and 
-                                   angle_deg > hbond_analyzer.config.hbond_angle_cutoff_deg)
-
-                        donor_atom = traj.topology.atom(donor_idx)
-                        acceptor_atom = traj.topology.atom(acceptor_idx)
-
-                        if donor_idx in hbond_analyzer.protein_donors:
-                            donor_type = "protein"
-                            acceptor_type = "ligand"
-                            hbond_key = f"{donor_atom.residue.name} {donor_atom.residue.resSeq} ({donor_atom.name}) -> Ligand"
-                        else:
-                            donor_type = "ligand"
-                            acceptor_type = "protein"
-                            hbond_key = f"Ligand -> {acceptor_atom.residue.name} {acceptor_atom.residue.resSeq} ({acceptor_atom.name})"
-                        
-                        frame_data.append({
-                            'frame': frame_idx,
-                            'time_ns': frame_time,
-                            'donor_atom_index': donor_idx,
-                            'donor_atom_name': donor_atom.name,
-                            'donor_residue_name': donor_atom.residue.name,
-                            'donor_residue_number': donor_atom.residue.resSeq,
-                            'donor_type': donor_type,
-                            'acceptor_atom_index': acceptor_idx,
-                            'acceptor_atom_name': acceptor_atom.name,
-                            'acceptor_residue_name': acceptor_atom.residue.name,
-                            'acceptor_residue_number': acceptor_atom.residue.resSeq,
-                            'acceptor_type': acceptor_type,
-                            'hbond_key': hbond_key,
-                            'distance_nm': distance_nm,
-                            'distance_angstrom': distance_angstrom,
-                            'angle_degrees': angle_deg,
-                            'is_hbond': is_hbond
-                        })
-                        
-                except Exception as e:
-                    logger.warning(f"Error processing hydrogen bonds in frame {frame_idx}: {e}")
-                    continue
+            pair_info = []
+            for idx, (pair, key) in enumerate(zip(hbond_pairs, hbond_keys)):
+                donor_idx, acceptor_idx = pair
+                donor_atom = traj.topology.atom(donor_idx)
+                acceptor_atom = traj.topology.atom(acceptor_idx)
             
+                if donor_idx in hbond_analyzer.protein_donors:
+                    donor_type = "protein"
+                    acceptor_type = "ligand"
+                else:
+                    donor_type = "ligand"
+                    acceptor_type = "protein"
+            
+                pair_info.append({
+                'donor_idx': donor_idx,
+                'acceptor_idx': acceptor_idx,
+                'donor_name': donor_atom.name,
+                'donor_residue_name': donor_atom.residue.name,
+                'donor_residue_number': donor_atom.residue.resSeq,
+                'donor_type': donor_type,
+                'acceptor_name': acceptor_atom.name,
+                'acceptor_residue_name': acceptor_atom.residue.name,
+                'acceptor_residue_number': acceptor_atom.residue.resSeq,
+                'acceptor_type': acceptor_type,
+                'hbond_key': key
+            })
+
+            frame_indices = np.arange(n_frames)
+            pair_indices = np.arange(n_pairs)
+
+            frame_grid, pair_grid = np.meshgrid(frame_indices, pair_indices, indexing='ij')
+
+            flat_frames = frame_grid.flatten()
+            flat_pairs = pair_grid.flatten()
+            flat_times = flat_frames * 0.5  
+        
+            flat_distances_nm = all_distances.flatten()
+            flat_distances_angstrom = flat_distances_nm * 10.0
+            flat_angles = all_angles_deg.flatten()
+            flat_is_hbond = is_hbond_matrix.flatten()
+
+            for i in range(len(flat_frames)):
+                frame_idx = flat_frames[i]
+                pair_idx = flat_pairs[i]
+                info = pair_info[pair_idx]
+            
+                frame_data.append({
+                'frame': frame_idx,
+                'time_ns': flat_times[i],
+                'donor_atom_index': info['donor_idx'],
+                'donor_atom_name': info['donor_name'],
+                'donor_residue_name': info['donor_residue_name'],
+                'donor_residue_number': info['donor_residue_number'],
+                'donor_type': info['donor_type'],
+                'acceptor_atom_index': info['acceptor_idx'],
+                'acceptor_atom_name': info['acceptor_name'],
+                'acceptor_residue_name': info['acceptor_residue_name'],
+                'acceptor_residue_number': info['acceptor_residue_number'],
+                'acceptor_type': info['acceptor_type'],
+                'hbond_key': info['hbond_key'],
+                'distance_nm': flat_distances_nm[i],
+                'distance_angstrom': flat_distances_angstrom[i],
+                'angle_degrees': flat_angles[i],
+                'is_hbond': flat_is_hbond[i]
+            })
+        
             if not frame_data:
                 logger.warning("No hydrogen bond data generated")
                 return None
 
             df = pd.DataFrame(frame_data)
             df.to_csv(output_path, index=False, float_format='%.4f')
-            logger.warning(f"Frame-by-frame hydrogen bond data saved: {output_path} ({len(frame_data)} records)")
-            
+        
+            if selected_hbonds:
+                logger.warning(f"Frame-by-frame hydrogen bond data saved: {output_path} ({len(frame_data)} records for {len(selected_hbonds)} selected H-bonds)")
+            else:
+                logger.warning(f"Frame-by-frame hydrogen bond data saved: {output_path} ({len(frame_data)} records)")
+        
             return df
-            
+        
         except Exception as e:
             logger.error(f"Failed to save frame-by-frame hydrogen bond data: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None
-    
+
     @staticmethod 
-    def save_frame_by_frame_distances(analyzer, output_path: str, selected_residues=None, max_residues=10):
+    def save_frame_by_frame_distances(analyzer, output_path: str, selected_residues=None, max_residues=5):
+        """Save frame-by-frame distance data"""
         try:
             if not analyzer.traj:
                 logger.warning("No trajectory data available")
@@ -351,6 +419,7 @@ class DataExporter:
 
             if hasattr(analyzer, '_new_method_results') and analyzer._new_method_results:
                 contact_proportions = analyzer._new_method_results.get('residue_proportions', {})
+                residue_avg_distances = analyzer._new_method_results.get('residue_avg_distances', {})
             else:
                 logger.warning("No contact results available for distance analysis")
                 return None
@@ -374,19 +443,22 @@ class DataExporter:
                         logger.warning(f"Selected residue {sel_res} not found in contact results")
                     
             else:
-                if contact_proportions:
+                if residue_avg_distances:
+                    sorted_by_distance = sorted(residue_avg_distances.items(), key=lambda x: x[1])
+                    residues_to_analyze = []
+                    for residue_id, avg_dist in sorted_by_distance[:max_residues]:
+                        contact_prop = contact_proportions.get(residue_id, 0.0)
+                        residues_to_analyze.append((residue_id, contact_prop))
+                elif contact_proportions:
                     top_contacts = sorted(contact_proportions.items(), key=lambda x: x[1], reverse=True)
                     residues_to_analyze = top_contacts[:max_residues]
-                    logger.warning(f"Auto-selected top {len(residues_to_analyze)} residues for distance analysis")
                 else:
-                    logger.warning("No contact proportions available")
+                    logger.warning("No contact proportions or distance data available")
                     return None
 
             if not residues_to_analyze:
                 logger.warning("No residues selected for distance analysis")
                 return None
-
-            logger.warning(f"Calculating frame-by-frame distances for {len(residues_to_analyze)} residues")
 
             ligand_atoms = analyzer._new_method_results.get('ligand_atoms', [])
             if not ligand_atoms:
@@ -466,6 +538,4 @@ class DataExporter:
 
         except Exception as e:
             logger.error(f"Failed to save frame-by-frame distance data: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return None
