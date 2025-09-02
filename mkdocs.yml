@@ -146,12 +146,16 @@ nav:
     - Quick Start: getting-started/quickstart.md
     # - Basic Concepts: getting-started/concepts.md
   - User Guide:
-    - user-guide/index.md
+    - Overview: user-guide/index.md
     - Configuration: user-guide/configuration.md
     - Input Files: user-guide/input-files.md
-    - Output Files: user-guide/output-files.md
+    - Building Systems: user-guide/building-systems.md
+    - Force Fields: user-guide/force-fields.md
+    - Running Simulations: user-guide/running-simulations.md
     - Analysis Tools: user-guide/analysis-tools.md
-    - Visualization: user-guide/visualization.md
+    - Output Files: user-guide/output-files.md
+    - Advanced Usage: user-guide/advanced-usage.md
+    - Troubleshooting: user-guide/troubleshooting.md
   - Tutorials:
     - tutorials/index.md
     - Basic Tutorial: tutorials/basic-tutorial.md

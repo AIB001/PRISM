@@ -12,27 +12,27 @@
 }
 
 /* ============================================
-   FIX: Bottom Content Cutoff (Balanced)
+   FIX: Bottom Content Cutoff
    ============================================ */
 
-/* Add moderate padding to content to prevent cutoff */
+/* Add padding to content to prevent cutoff */
 .md-content__inner {
-  padding-bottom: 60px !important;
+  padding-bottom: 120px !important;
 }
 
 /* Add margin to last element */
 .md-content__inner > :last-child {
-  margin-bottom: 30px !important;
+  margin-bottom: 80px !important;
 }
 
 /* Ensure article has enough bottom space */
 .md-content article {
-  padding-bottom: 40px !important;
+  padding-bottom: 100px !important;
 }
 
 /* Make sure footer doesn't overlap */
 .md-footer {
-  margin-top: 20px !important;
+  margin-top: 50px !important;
   position: relative !important;
 }
 
@@ -40,11 +40,11 @@
   position: relative !important;
 }
 
-/* Add small spacer after main content */
+/* Add spacer after main content */
 .md-main::after {
   content: "";
   display: block;
-  height: 30px;
+  height: 100px;
   clear: both;
 }
 
@@ -318,12 +318,12 @@
 }
 
 /* ============================================
-   CRITICAL FIX: Prevent Bottom Cutoff (Balanced)
+   CRITICAL FIX: Prevent Bottom Cutoff
    ============================================ */
 
 /* Multiple layers of protection against bottom cutoff */
 html {
-  scroll-padding-bottom: 40px;
+  scroll-padding-bottom: 100px;
 }
 
 body {
@@ -333,26 +333,26 @@ body {
 
 /* Ensure main content area has enough space */
 .md-main {
-  padding-bottom: 40px !important;
+  padding-bottom: 100px !important;
 }
 
 /* Extra padding for content wrapper */
 .md-content {
-  padding-bottom: 30px !important;
+  padding-bottom: 80px !important;
 }
 
-/* Force small space before footer */
+/* Force space before footer */
 .md-content::after {
   content: "";
   display: block;
-  height: 40px;
+  height: 100px;
   clear: both;
 }
 
 /* Make absolutely sure last element is visible */
 .md-typeset > *:last-child {
-  margin-bottom: 40px !important;
-  padding-bottom: 20px !important;
+  margin-bottom: 100px !important;
+  padding-bottom: 50px !important;
 }
 
 /* Footer should never be fixed */
@@ -366,7 +366,7 @@ body {
 /* Add visual separator before footer */
 .md-footer {
   border-top: 1px solid rgba(0, 0, 0, 0.1);
-  margin-top: 30px !important;
+  margin-top: 80px !important;
 }
 
 [data-md-color-scheme="slate"] .md-footer {
