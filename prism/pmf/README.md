@@ -27,9 +27,8 @@ The PMF module calculates binding free energies by:
 ```python
 import prism.pmf as pmf
 
-# Using an existing MD system with work-in-place mode (recommended)
-# This works directly in MD directory to avoid file copying issues
-system = pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=True)
+# Using an existing MD system - uses files directly to avoid copying
+system = pmf.pmf_system("./gaff_model", "./pmf_results")
 
 # Run complete automated workflow
 results = system.run(mode='auto')
@@ -41,8 +40,8 @@ print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
 ```python
 import prism.pmf as pmf
 
-# Initialize PMF system with work-in-place mode
-system = pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=True)
+# Initialize PMF system
+system = pmf.pmf_system("./gaff_model", "./pmf_results")
 
 # Step 1: Prepare SMD simulation
 smd_results = system.build(step='smd')
