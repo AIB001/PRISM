@@ -25,6 +25,7 @@ from .umbrella import UmbrellaManager, WindowSelector
 from .analyzer import PMFAnalyzer, WhamRunner
 from .equilibration import PMFEquilibrationManager
 from .runner import PMFRunner, run_pmf_workflow, run_pmf_step, create_pmf_config
+from .md_validator import MDResultsValidator, validate_md_results, ValidationLevel
 
 __all__ = [
     # High-level interface (main entry points)
@@ -53,7 +54,10 @@ __all__ = [
     "WhamRunner",
     "PMFEquilibrationManager",
     
-    # Utility functions
+    # Validation and utilities
+    "MDResultsValidator",
+    "validate_md_results", 
+    "ValidationLevel",
     "get_pmf_info",
 ]
 
@@ -61,16 +65,29 @@ __all__ = [
 def get_pmf_info():
     """Get information about PRISM PMF module"""
     info = {
-        'version': '1.0.0',
-        'architecture': 'PRISM-compatible',
-        'execution_modes': ['automated', 'step_by_step'],
+        'version': '1.1.0',
+        'architecture': 'PRISM-compatible with enhanced box remodeling',
+        'execution_modes': ['automated', 'step_by_step', 'pmf_optimized'],
         'supported_forcefields': ['GAFF', 'OpenFF'],
+        'pmf_enhancements': [
+            'Z-axis alignment for optimal pulling',
+            'Extended box design for PMF calculations',
+            'Protein+LIG extraction and remodeling',
+            'Equilibration scripts (localrun.sh-style)',
+            'PMF-optimized SMD protocols'
+        ],
         'analysis_features': [
             'SMD preparation and execution',
             'Adaptive umbrella window selection',
             'WHAM analysis with bootstrap errors',
             'PMF visualization and reporting',
             'Binding energy calculation'
+        ],
+        'key_features': [
+            'Automated box extension based on pulling distance',
+            'Quality control through force field detection',
+            'GROMACS built-in algorithms for box creation',
+            'Support for equilibrated and unequilibrated systems'
         ],
         'integration': 'Seamless PRISM workflow integration'
     }

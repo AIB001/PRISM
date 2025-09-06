@@ -24,29 +24,49 @@ class SMDManager:
         self.pmf_system = pmf_system
         self.smd_dir = pmf_system.smd_dir
         self.config = pmf_system.config
+        
+        # Check if PMF system has been properly built with box remodeling
+        self.pmf_system_built = self._check_pmf_system_built()
     
-    def prepare(self, **kwargs):
+    def prepare(self, use_pmf_rebuilt_system: bool = True, **kwargs):
         """
         Prepare SMD simulation (step-by-step compatible)
         
-        Returns directory and files needed for manual execution
+        Parameters:
+        -----------
+        use_pmf_rebuilt_system : bool, optional
+            Whether to use PMF-rebuilt system (default: True)
+            If True, uses the PMF-optimized system with Z-axis alignment
+            If False, uses the original MD results
+        
+        Returns:
+        --------
+        Dict : SMD preparation results with execution instructions
         """
         logger.info("Preparing SMD simulation...")
+        
+        if use_pmf_rebuilt_system and not self.pmf_system_built:
+            logger.warning("PMF-rebuilt system not found. Consider running PMF builder first.")
+            logger.warning("Falling back to original MD results...")
+            use_pmf_rebuilt_system = False
         
         # Create SMD directory
         self.smd_dir.mkdir(exist_ok=True)
         
-        # Copy necessary files
-        self._prepare_files()
+        # Copy necessary files (use PMF system if available)
+        if use_pmf_rebuilt_system:
+            self._prepare_files_from_pmf_system()
+        else:
+            self._prepare_files_from_md_results()
         
         # Create index file
         self._create_index_file()
         
-        # Generate SMD MDP file
-        self._create_smd_mdp()
+        # Generate SMD MDP file (optimized for Z-axis pulling if using PMF system)
+        self._create_smd_mdp(use_z_axis_optimized=use_pmf_rebuilt_system)
         
         # Generate run script
-        run_script = self._generate_run_script()
+        run_script = self._generate_run_script(use_pmf_rebuilt_system)
         
         # Generate analysis script
         analysis_script = self._generate_analysis_script()
@@ -56,11 +76,14 @@ class SMDManager:
             'smd_mdp': str(self.smd_dir / "smd.mdp"),
             'run_script': str(run_script),
             'analysis_script': str(analysis_script),
+            'system_type': 'pmf_rebuilt' if use_pmf_rebuilt_system else 'original_md',
+            'z_axis_optimized': use_pmf_rebuilt_system,
             'status': 'prepared',
             'next_step': f'Run SMD simulation using: {run_script}'
         }
         
-        logger.info(f"SMD preparation completed. Run: {run_script}")
+        logger.info(f"SMD preparation completed. System type: {'PMF-rebuilt (Z-optimized)' if use_pmf_rebuilt_system else 'Original MD'}")
+        logger.info(f"Run SMD: {run_script}")
         return results
     
     def run(self, pull_groups=None, direction=None, rate=None, force=None):
@@ -95,92 +118,83 @@ class SMDManager:
         
         logger.info(f"SMD completed. Results in: {self.smd_dir}")
     
-    def _prepare_files(self):
-        """Prepare file references for SMD simulation using existing files"""
+    def _check_pmf_system_built(self) -> bool:
+        """Check if PMF system has been properly built"""
+        pmf_system_dir = getattr(self.pmf_system, 'rebuilt_system_dir', None)
+        
+        if pmf_system_dir is None:
+            return False
+        
+        pmf_system_path = Path(pmf_system_dir)
+        required_files = [
+            pmf_system_path / "solv_ions.gro",
+            pmf_system_path / "topol.top"
+        ]
+        
+        return all(f.exists() for f in required_files)
+    
+    def _prepare_files_from_pmf_system(self):
+        """Prepare files from PMF-rebuilt system"""
+        logger.info("Using PMF-rebuilt system (Z-axis optimized)")
+        
+        pmf_system_dir = Path(self.pmf_system.rebuilt_system_dir)
+        
+        # Check for equilibrated system first
+        equilibrated_structure = pmf_system_dir.parent / "equilibration" / "npt" / "npt_final.gro"
+        equilibrated_checkpoint = pmf_system_dir.parent / "equilibration" / "npt" / "npt_final.cpt"
+        
+        if equilibrated_structure.exists():
+            logger.info("Using equilibrated PMF system")
+            shutil.copy2(equilibrated_structure, self.smd_dir / "md.gro")
+            if equilibrated_checkpoint.exists():
+                shutil.copy2(equilibrated_checkpoint, self.smd_dir / "equilibrated.cpt")
+        else:
+            logger.info("Using unequilibrated PMF-rebuilt system")
+            shutil.copy2(pmf_system_dir / "solv_ions.gro", self.smd_dir / "md.gro")
+            
+        # Copy topology
+        shutil.copy2(pmf_system_dir / "topol.top", self.smd_dir / "topol.top")
+        
+        # Copy other necessary files
+        for file_name in ["posre.itp"]:
+            source_file = pmf_system_dir / file_name
+            if source_file.exists():
+                shutil.copy2(source_file, self.smd_dir / file_name)
+        
+        # Copy ligand force field directory
+        self._copy_ligand_forcefield_dir(pmf_system_dir.parent)
+        
+        logger.info("PMF-rebuilt system files prepared")
+    
+    def _prepare_files_from_md_results(self):
+        """Prepare files from original MD results (fallback)"""
+        logger.info("Using original MD results (fallback mode)")
+        
         # Get MD results directory
         md_dir = getattr(self.pmf_system, 'md_results_dir', self.pmf_system.system_dir)
         
-        # Use existing files directly with symbolic links
-        self._prepare_files_use_existing(md_dir)
-    
-    def _prepare_files_use_existing(self, md_dir):
-        """Prepare files using existing files mode with symbolic links"""
-        logger.info("Using existing files mode - creating symbolic links")
-        
-        # Map of files to reference
-        file_mapping = {
-            'gro': {
-                'sources': ['solv_ions.gro', 'prod/md.gro', 'md.gro'],
-                'dest': 'md.gro',
-                'description': 'MD structure file'
-            },
-            'top': {
-                'sources': ['topol.top'],
-                'dest': 'topol.top', 
-                'description': 'Topology file'
-            },
-            'posre': {
-                'sources': ['posre.itp'],
-                'dest': 'posre.itp',
-                'description': 'Position restraint file'
-            }
-        }
-        
-        # Store file references for later use
-        self.file_references = {}
-        
-        for file_type, file_info in file_mapping.items():
-            found = False
-            for source_name in file_info['sources']:
-                source_file = md_dir / source_name
-                if source_file.exists():
-                    # Store reference to original file
-                    self.file_references[file_info['dest']] = str(source_file)
-                    
-                    # Create symbolic link instead of copying
-                    dest_file = self.smd_dir / file_info['dest']
-                    if dest_file.exists():
-                        dest_file.unlink()  # Remove existing file/link
-                    
-                    try:
-                        # Create relative symbolic link
-                        rel_source = os.path.relpath(source_file, self.smd_dir)
-                        dest_file.symlink_to(rel_source)
-                        logger.info(f"✓ Created symlink {file_info['description']}: {source_name} -> {file_info['dest']}")
-                    except OSError:
-                        # Fallback: create hard link if symlink fails
-                        dest_file.hardlink_to(source_file)
-                        logger.info(f"✓ Created hardlink {file_info['description']}: {source_name} -> {file_info['dest']}")
-                    
-                    found = True
-                    break
-            
-            if not found:
-                raise FileNotFoundError(
-                    f"Could not find {file_info['description']}. "
-                    f"Tried: {file_info['sources']} in {md_dir}"
-                )
-        
-        # Reference LIG force field directory - create symlink if needed
-        for lig_dir_name in ['LIG.amb2gmx', 'LIG.openff2gmx']:
-            lig_source = md_dir.parent / lig_dir_name
-            if lig_source.exists():
-                self.file_references['lig_dir'] = str(lig_source)
-                logger.info(f"✓ Referenced ligand directory: {lig_dir_name}")
-                # Note: LIG directory is accessed via relative path, no symlink needed
-                break
+        # Copy files to SMD directory
+        self._prepare_files_copy_mode(md_dir)
     
     def _prepare_files_copy_mode(self, md_dir):
-        """Prepare files in traditional copy mode"""
-        logger.info("Using traditional copy mode")
+        """Prepare files by copying them to SMD directory with proper preprocessing"""
+        logger.info("Preparing files for SMD simulation with preprocessing")
         
-        # Map of files to copy
+        # Step 1: Copy necessary files first
+        self._copy_essential_files(md_dir)
+        
+        # Step 2: Preprocess structure file (remove PBC, center system)
+        self._preprocess_structure_file(md_dir)
+        
+        # Step 3: Copy additional files
+        self._copy_additional_files(md_dir)
+    
+    def _copy_essential_files(self, md_dir):
+        """Copy essential files for PMF calculation"""
+        logger.info("Copying essential files for PMF simulation")
+        
+        # Map of essential files to copy
         file_mapping = {
-            'gro': {
-                'sources': ['solv_ions.gro', 'prod/md.gro', 'md.gro'],
-                'dest': 'md.gro',
-                'description': 'MD structure file'
-            },
             'top': {
                 'sources': ['topol.top'],
                 'dest': 'topol.top',
@@ -190,6 +204,11 @@ class SMDManager:
                 'sources': ['posre.itp'],
                 'dest': 'posre.itp',
                 'description': 'Position restraint file'
+            },
+            'tpr': {
+                'sources': ['prod/md.tpr', 'md.tpr'],
+                'dest': 'md.tpr',
+                'description': 'MD binary file (required for trjconv)'
             }
         }
         
@@ -201,34 +220,117 @@ class SMDManager:
                     dest_file = self.smd_dir / file_info['dest']
                     if not dest_file.exists():
                         shutil.copy2(source_file, dest_file)
-                        logger.info(f"✓ Copied {file_info['description']}: {source_name}")
+                        logger.info(f"Copied {file_info['description']}: {source_name}")
                     else:
-                        logger.info(f"✓ Using existing {file_info['description']}: {source_name}")
+                        logger.info(f"Using existing {file_info['description']}: {source_name}")
                     copied = True
                     break
             
             if not copied:
-                raise FileNotFoundError(
-                    f"Could not find {file_info['description']}. "
-                    f"Tried: {file_info['sources']} in {md_dir}"
-                )
+                # TPR file is optional for some operations, others are required
+                if file_type == 'tpr':
+                    logger.warning(f"Could not find {file_info['description']}. Some advanced features may not work.")
+                    logger.warning(f"Tried: {file_info['sources']} in {md_dir}")
+                else:
+                    raise FileNotFoundError(
+                        f"Could not find {file_info['description']}. "
+                        f"Tried: {file_info['sources']} in {md_dir}"
+                    )
+    
+    def _preprocess_structure_file(self, md_dir):
+        """Preprocess structure file: remove PBC effects from MD final frame"""
+        logger.info("Preprocessing structure file for PMF calculation")
         
+        # Find structure file (MD final frame)
+        structure_sources = ['prod/md.gro', 'md.gro']
+        tpr_sources = ['prod/md.tpr', 'md.tpr']
+        
+        source_structure = None
+        source_tpr = None
+        
+        # Find structure file
+        for source_name in structure_sources:
+            source_file = md_dir / source_name
+            if source_file.exists():
+                source_structure = source_file
+                break
+        
+        if not source_structure:
+            raise FileNotFoundError(
+                f"Could not find MD structure file. "
+                f"Tried: {structure_sources} in {md_dir}"
+            )
+        
+        # Find TPR file (for PBC processing)
+        for tpr_name in tpr_sources:
+            tpr_file = md_dir / tpr_name
+            if tpr_file.exists():
+                source_tpr = tpr_file
+                break
+        
+        dest_structure = self.smd_dir / "md.gro"
+        
+        # Process structure file to remove PBC
+        self._process_structure_with_pbc_removal(source_structure, source_tpr, dest_structure)
+    
+    def _process_structure_with_pbc_removal(self, structure_file, tpr_file, output_file):
+        """Process structure file to remove PBC effects"""
+        logger.info(f"Processing structure file for PBC removal: {structure_file.name}")
+        
+        try:
+            # Use gmx trjconv to remove PBC - unified approach for any structure file
+            cmd = [
+                "gmx", "trjconv",
+                "-f", str(structure_file),  # Input can be .gro, .xtc, etc.
+                "-s", str(tpr_file) if tpr_file else str(structure_file),
+                "-o", str(output_file),
+                "-pbc", "mol",
+                "-quiet"
+            ]
+            
+            process = subprocess.run(
+                cmd,
+                text=True,
+                capture_output=True,
+                cwd=str(self.smd_dir),
+                check=True
+            )
+            
+            logger.info(f"Successfully processed structure with PBC removal: {output_file.name}")
+            
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"PBC removal failed: {e.stderr}")
+            logger.info("Using direct file copy as fallback")
+            shutil.copy2(structure_file, output_file)
+            logger.info(f"Copied structure file: {output_file.name}")
+    
+    def _copy_additional_files(self, md_dir):
+        """Copy additional files after preprocessing"""
+        logger.info("Copying additional force field files")
+        self._copy_ligand_forcefield_dir(md_dir.parent)
+    
+    def _copy_ligand_forcefield_dir(self, parent_dir):
+        """Copy ligand force field directory"""
         # Copy LIG force field directory
         for lig_dir_name in ['LIG.amb2gmx', 'LIG.openff2gmx']:
-            lig_source = md_dir.parent / lig_dir_name
+            lig_source = parent_dir / lig_dir_name
             if lig_source.exists():
                 lig_dest = self.smd_dir.parent / lig_dir_name
                 if not lig_dest.exists():
                     shutil.copytree(lig_source, lig_dest)
-                    logger.info(f"✓ Copied ligand directory: {lig_dir_name}")
+                    logger.info(f"Copied ligand directory: {lig_dir_name}")
+                else:
+                    logger.info(f"Using existing ligand directory: {lig_dir_name}")
                 break
+        else:
+            logger.warning("No ligand force field directory found")
     
     def _create_index_file(self):
         """Create GROMACS index file automatically"""
         index_file = self.smd_dir / "index.ndx"
         
         if index_file.exists():
-            logger.info("✓ Index file already exists")
+            logger.info("Index file already exists")
             return
         
         moving_group = self.config.get('moving_group', 'LIG')
@@ -255,18 +357,18 @@ class SMDManager:
             stdout, stderr = process.communicate(input=input_commands)
             
             if process.returncode == 0:
-                logger.info("✓ Index file created successfully")
+                logger.info("Index file created successfully")
             else:
                 # Fallback to basic index
                 basic_cmd = ["gmx", "make_ndx", "-f", "md.gro", "-o", "index.ndx"]
                 subprocess.run(basic_cmd, input="q\n", text=True, cwd=str(self.smd_dir), check=True)
-                logger.info("✓ Basic index file created")
+                logger.info("Basic index file created")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to create index file: {e}")
             raise RuntimeError(f"Index file creation failed: {e}")
     
-    def _create_smd_mdp(self):
+    def _create_smd_mdp(self, use_z_axis_optimized: bool = True):
         """Create SMD MDP file with current configuration"""
         # Get configuration parameters
         reference_group = self.config.get('reference_group', 'Protein')
@@ -284,25 +386,42 @@ class SMDManager:
         nsteps = int(smd_time_ps / dt)
         output_interval = int(5.0 / dt)  # Output every 5 ps
         
-        # Generate MDP content
+        # Generate MDP content (Z-axis optimized if using PMF system)
         mdp_content = self._generate_smd_mdp_content(
             reference_group, moving_group, pull_rate, pull_k, 
-            nsteps, dt, output_interval, distance_range, smd_time_ps
+            nsteps, dt, output_interval, distance_range, smd_time_ps,
+            z_axis_optimized=use_z_axis_optimized
         )
         
         smd_mdp_file = self.smd_dir / "smd.mdp"
         with open(smd_mdp_file, 'w') as f:
             f.write(mdp_content)
         
-        logger.info(f"✓ SMD MDP file created: {smd_mdp_file}")
+        optimization_note = " (Z-axis optimized)" if use_z_axis_optimized else " (general geometry)"
+        logger.info(f"SMD MDP file created{optimization_note}: {smd_mdp_file}")
     
     def _generate_smd_mdp_content(self, reference_group, moving_group, pull_rate, pull_k, 
-                                 nsteps, dt, output_interval, distance_range, smd_time_ps):
+                                 nsteps, dt, output_interval, distance_range, smd_time_ps,
+                                 z_axis_optimized: bool = True):
         """Generate SMD MDP file content"""
         temp = self.config.get('simulation', {}).get('temperature', 310.0)
         pressure = self.config.get('simulation', {}).get('pressure', 1.0)
         
-        return f"""; SMD (Steered Molecular Dynamics) Parameters
+        # Pull direction: Z-axis for PMF-optimized systems, all directions for general
+        pull_dim = "N N Y" if z_axis_optimized else "Y Y Y"
+        system_note = "Z-axis optimized" if z_axis_optimized else "general geometry"
+        
+        # For PMF systems, we can use more aggressive settings
+        if z_axis_optimized:
+            # Optimized for PMF-rebuilt systems
+            continuation = "no"  # Start fresh from equilibrated PMF system
+            gen_vel = "yes"  # Generate new velocities for clean SMD start
+        else:
+            # Conservative settings for original MD systems
+            continuation = "yes"
+            gen_vel = "no"
+        
+        return f"""; SMD (Steered Molecular Dynamics) Parameters - {system_note}
 title               = SMD simulation ({distance_range:.2f} nm in {smd_time_ps:.1f} ps)
 define              = -DPOSRE
 integrator          = md
@@ -316,7 +435,7 @@ nstenergy           = 0
 nstlog              = {output_interval}
 
 ; Bonds and constraints
-continuation        = yes
+continuation        = {continuation}
 constraint_algorithm = lincs
 constraints         = h-bonds
 lincs_iter          = 1
@@ -352,14 +471,16 @@ pbc                 = xyz
 DispCorr            = EnerPres
 
 ; Velocity generation
-gen_vel             = no
+gen_vel             = {gen_vel}
+{'gen_temp        = ' + str(temp) if gen_vel == 'yes' else ''}
+{'gen_seed        = -1' if gen_vel == 'yes' else ''}
 
 ; COM motion removal
 refcoord_scaling    = com
 comm-mode           = Linear
 comm-grps           = Protein Non-Protein
 
-; Pull code for SMD
+; Pull code for SMD - {'Z-axis pulling' if z_axis_optimized else 'distance pulling'}
 pull                = yes
 pull_ncoords        = 1
 pull_ngroups        = 2
@@ -367,7 +488,7 @@ pull_group1_name    = {reference_group}
 pull_group2_name    = {moving_group}
 pull_coord1_type    = umbrella
 pull_coord1_geometry = distance
-pull_coord1_dim     = Y Y Y
+pull_coord1_dim     = {pull_dim}{'  ; Z-axis optimized pulling' if z_axis_optimized else '  ; general distance pulling'}
 pull_coord1_groups  = 1 2
 pull_coord1_start   = yes
 pull_coord1_rate    = {pull_rate}
@@ -375,7 +496,7 @@ pull_coord1_k       = {pull_k}
 pull-pbc-ref-prev-step-com = yes
 """
     
-    def _generate_run_script(self):
+    def _generate_run_script(self, use_pmf_system: bool = True):
         """Generate shell script to run SMD simulation"""
         distance_start = self.config.get('distance', {}).get('start', 0.3)
         distance_end = self.config.get('distance', {}).get('end', 2.0)
@@ -384,47 +505,66 @@ pull-pbc-ref-prev-step-com = yes
         distance_range = distance_end - distance_start
         smd_time_ps = distance_range / pull_rate
         
-        # Get file paths using existing files references
-        if hasattr(self, 'file_references'):
-            # Use original file paths
-            md_gro = self.file_references.get('md.gro', 'md.gro')
-            topol_top = self.file_references.get('topol.top', 'topol.top')
-            posre_itp = self.file_references.get('posre.itp', 'posre.itp')
-        else:
-            # Use local copies
-            md_gro = 'md.gro'
-            topol_top = 'topol.top'
-            posre_itp = 'posre.itp'
+        # Get file paths for script generation
+        md_gro = 'md.gro'
+        topol_top = 'topol.top'
+        
+        # Additional parameters for PMF systems
+        system_type = "PMF-rebuilt (Z-optimized)" if use_pmf_system else "Original MD"
+        checkpoint_option = "-t equilibrated.cpt" if use_pmf_system and (self.smd_dir / "equilibrated.cpt").exists() else ""
         
         script_content = f"""#!/bin/bash
 ######################################################
-# SMF SIMULATION SCRIPT
+# SMD SIMULATION SCRIPT - {system_type}
 # Distance: {distance_start:.2f} -> {distance_end:.2f} nm
 # Pull rate: {pull_rate} nm/ps
 # Simulation time: {smd_time_ps:.1f} ps
-# Using existing files directly
+{'# System: Z-axis optimized for efficient pulling' if use_pmf_system else '# System: General MD results'}
 ######################################################
 
 set -e
-echo "=== SMD Simulation ==="
+echo "=== SMD Simulation ({system_type}) ==="
+{'echo "Using Z-axis optimized PMF system for efficient pulling"' if use_pmf_system else 'echo "Using original MD results"'}
+echo ""
+
+# Set GROMACS environment
+export GMX_MAXBACKUP=-1  # Disable backup files
+NCPU=10  # Adjust as needed
 
 # Create results directory
 mkdir -p results
 
 echo "Step 1: Generating TPR file..."
-gmx grompp -f smd.mdp -c "{md_gro}" -n index.ndx -p "{topol_top}" -r "{md_gro}" -o smd.tpr -maxwarn 10
+# Check for equilibrated checkpoint
+if [ -f "equilibrated.cpt" ]; then
+    echo "Using equilibrated checkpoint for optimal SMD start"
+    gmx grompp -f smd.mdp -c "{md_gro}" -n index.ndx -p "{topol_top}" -r "{md_gro}" {checkpoint_option} -o smd.tpr -maxwarn 10
+else
+    echo "Starting from structure file"
+    gmx grompp -f smd.mdp -c "{md_gro}" -n index.ndx -p "{topol_top}" -r "{md_gro}" -o smd.tpr -maxwarn 10
+fi
 
 echo "Step 2: Running SMD simulation..."
 echo "This may take a while depending on your system size and simulation time..."
-gmx mdrun -s smd.tpr -deffnm smd -ntmpi 1 -ntomp 10 -v
+echo "Pull direction: {'Z-axis (optimized)' if use_pmf_system else 'distance (general)'}"
+
+# Try GPU first, fallback to CPU
+if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+    echo "Using GPU acceleration"
+    gmx mdrun -s smd.tpr -deffnm smd -ntmpi 1 -ntomp $NCPU -nb gpu -pme gpu -v
+else
+    echo "Using CPU only"
+    gmx mdrun -s smd.tpr -deffnm smd -ntmpi 1 -ntomp $NCPU -v
+fi
 
 echo "Step 3: Moving results to results directory..."
 mv smd.* results/
 
 echo "Step 4: Basic result check..."
 if [ -f "results/smd.gro" ] && [ -f "results/smd.xtc" ] && [ -f "results/smd_pullf.xvg" ]; then
-    echo "✓ SMD simulation completed successfully!"
-    echo "✓ Generated files:"
+    echo "SMD simulation completed successfully!"
+    echo "System type: {system_type}"
+    echo "Generated files:"
     echo "  - results/smd.gro (final structure)"
     echo "  - results/smd.xtc (trajectory)"
     echo "  - results/smd_pullf.xvg (pull force)"
@@ -445,7 +585,7 @@ fi
             f.write(script_content)
         
         os.chmod(run_script, 0o755)
-        logger.info(f"✓ SMD run script created: {run_script}")
+        logger.info(f"SMD run script created: {run_script}")
         
         return run_script
     
@@ -474,8 +614,8 @@ mkdir -p analysis
 cp results/smd_pullf.xvg analysis/
 cp results/smd_pullx.xvg analysis/
 
-echo "✓ SMD analysis files prepared"
-echo "✓ Files available for plotting:"
+echo "SMD analysis files prepared"
+echo "Files available for plotting:"
 echo "  - analysis/smd_pullf.xvg (force vs time)"
 echo "  - analysis/smd_pullx.xvg (distance vs time)"
 echo ""
@@ -487,7 +627,7 @@ echo "Use Python analysis functions for detailed plots"
             f.write(script_content)
         
         os.chmod(analysis_script, 0o755)
-        logger.info(f"✓ SMD analysis script created: {analysis_script}")
+        logger.info(f"SMD analysis script created: {analysis_script}")
         
         return analysis_script
     
@@ -556,7 +696,7 @@ echo "Use Python analysis functions for detailed plots"
             
             # Count extracted frames
             extracted_frames = len(list(conf_dir.glob("frame*.gro")))
-            logger.info(f"✓ Extracted {extracted_frames} trajectory frames")
+            logger.info(f"Extracted {extracted_frames} trajectory frames")
             
         except subprocess.CalledProcessError as e:
             logger.error(f"Frame extraction failed: {e}")
@@ -622,8 +762,8 @@ echo "Use Python analysis functions for detailed plots"
                 for frame, distance in sorted(distance_data):
                     f.write(f"{frame} {distance:.6f}\n")
             
-            logger.info(f"✓ Distance calculation completed: {len(distance_data)} frames")
-            logger.info(f"✓ Results saved to: {distances_file}")
+            logger.info(f"Distance calculation completed: {len(distance_data)} frames")
+            logger.info(f"Results saved to: {distances_file}")
             
         finally:
             # Clean up temporary directory
@@ -745,7 +885,7 @@ pull-pbc-ref-prev-step-com = yes
         with open(output_file, 'w') as f:
             f.write(mdp_content)
         
-        logger.info(f"✓ Custom SMD MDP file created: {output_file}")
+        logger.info(f"Custom SMD MDP file created: {output_file}")
     
     @staticmethod
     def estimate_simulation_time(distance_start, distance_end, pull_rate):

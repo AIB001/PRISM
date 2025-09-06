@@ -30,6 +30,7 @@ class PMFWorkflow:
     
     Manages the complete PMF calculation workflow with support for both
     automated and step-by-step execution modes, following PRISM patterns.
+    Enhanced with PMF-specific box remodeling capabilities.
     """
     
     def __init__(self, system_dir: Union[str, Path], output_dir: Union[str, Path], 
@@ -56,10 +57,9 @@ class PMFWorkflow:
         # Create output structure
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Use existing files directly in MD results directory, output results to specified path
-        # This avoids file copying and potential missing files
-        self.smd_dir = self.md_results_dir.parent / "pmf_smd"
-        self.umbrella_dir = self.md_results_dir.parent / "pmf_umbrella"
+        # Set up working directories
+        self.smd_dir = self.output_dir / "smd"
+        self.umbrella_dir = self.output_dir / "umbrella"
         self.analysis_dir = self.output_dir / "analysis"
         
         # Initialize managers
@@ -67,8 +67,13 @@ class PMFWorkflow:
         self.umbrella_manager = UmbrellaManager(self)
         self.analyzer = PMFAnalyzer(self)
         
-        # Track workflow state
+        # Load existing workflow state if available
+        self._load_workflow_state()
+        
+        # Track workflow state (enhanced with PMF system building)
         self.state = {
+            'pmf_system_built': False,
+            'pmf_system_equilibrated': False,
             'smd_prepared': False,
             'smd_completed': False,
             'umbrella_prepared': False, 
@@ -76,9 +81,14 @@ class PMFWorkflow:
             'analysis_completed': False
         }
         
+        # PMF system builder (created when needed)
+        self.pmf_builder = None
+        self.rebuilt_system_dir = self.output_dir / "GMX_PMF_SYSTEM"
+        
         logger.info(f"PMF workflow initialized")
         logger.info(f"  System: {self.md_results_dir}")
         logger.info(f"  Output: {self.output_dir}")
+        logger.info(f"  Enhanced: PMF box remodeling enabled")
     
     def _locate_md_results(self) -> Path:
         """Locate MD results directory using enhanced validator"""
@@ -146,23 +156,92 @@ class PMFWorkflow:
             "Please ensure the system has been built with PRISM."
         )
     
-    def prepare_smd(self) -> Dict:
+    def build_pmf_system(self, equilibrate: bool = True, **kwargs) -> Dict:
+        """
+        Build PMF-optimized system with Z-axis alignment and extended box (Step 0)
+        
+        Parameters:
+        -----------
+        equilibrate : bool, optional
+            Whether to run equilibration after building (default: True)
+        **kwargs : optional
+            Additional PMF builder parameters (pulling_distance, box_distance, etc.)
+            
+        Returns:
+        --------
+        Dict : PMF system build results
+        """
+        logger.info("=== Building PMF-Optimized System ===")
+        logger.info("This step extracts Protein+LIG, aligns to Z-axis, and extends box for pulling")
+        
+        # Import PMF builder here to avoid circular imports
+        from .pmf_builder import PMFBuilder
+        
+        # Create PMF builder if not exists
+        if not self.pmf_builder:
+            self.pmf_builder = PMFBuilder(
+                md_results_dir=self.md_results_dir,
+                output_dir=self.output_dir,
+                config=self.config,
+                **kwargs
+            )
+        
+        # Build PMF-optimized system
+        build_results = self.pmf_builder.build(equilibrate=equilibrate)
+        
+        # Update state
+        self.state['pmf_system_built'] = True
+        if equilibrate:
+            self.state['pmf_system_equilibrated'] = True
+        
+        # Update system references
+        self.rebuilt_system_dir = Path(build_results['system_dir'])
+        
+        # Save state
+        self._save_workflow_state()
+        
+        results = {
+            **build_results,
+            'workflow_step': 'pmf_system_build',
+            'next_step': 'prepare_smd() - Use PMF-optimized system for SMD'
+        }
+        
+        logger.info("PMF system build completed")
+        logger.info(f"   PMF system: {self.rebuilt_system_dir}")
+        logger.info(f"   Z-axis aligned: {build_results.get('alignment', {}).get('z_axis_aligned', True)}")
+        logger.info(f"   Equilibrated: {'Yes' if equilibrate else 'No'}")
+        
+        return results
+    
+    def prepare_smd(self, use_pmf_system: bool = True) -> Dict:
         """
         Prepare SMD simulation (Step 1)
         
+        Parameters:
+        -----------
+        use_pmf_system : bool, optional
+            Whether to use PMF-rebuilt system (default: True)
+            
         Returns:
         --------
         Dict : SMD preparation results with execution instructions
         """
         logger.info("=== Preparing SMD Simulation ===")
         
-        result = self.smd_manager.prepare()
+        # Check if PMF system should be used but doesn't exist
+        if use_pmf_system and not self.state['pmf_system_built']:
+            logger.warning("PMF system not built yet. Consider running build_pmf_system() first.")
+            logger.warning("Proceeding with PMF system build...")
+            self.build_pmf_system(equilibrate=True)
+        
+        result = self.smd_manager.prepare(use_pmf_rebuilt_system=use_pmf_system)
         self.state['smd_prepared'] = True
         
         # Save state
         self._save_workflow_state()
         
         logger.info("SMD preparation completed")
+        logger.info(f"System type: {'PMF-rebuilt (Z-optimized)' if use_pmf_system else 'Original MD'}")
         logger.info(f"Run SMD: cd {result['smd_dir']} && bash run_smd.sh")
         
         return result
@@ -264,20 +343,34 @@ class PMFWorkflow:
         
         return results
     
-    def run_complete(self) -> Dict:
+    def run_complete(self, build_pmf_system: bool = True, equilibrate_pmf_system: bool = True) -> Dict:
         """
         Run complete PMF workflow (automated mode)
         
+        Parameters:
+        -----------
+        build_pmf_system : bool, optional
+            Whether to build PMF-optimized system first (default: True)
+        equilibrate_pmf_system : bool, optional
+            Whether to equilibrate PMF system after building (default: True)
+            
         Returns:
         --------
         Dict : Complete workflow results
         """
         logger.info("=== Running Complete PMF Workflow ===")
+        logger.info(f"Enhanced workflow: {'With PMF system building' if build_pmf_system else 'Using existing system'}")
         
         try:
+            # Step 0: Build PMF-optimized system (optional but recommended)
+            if build_pmf_system and not self.state['pmf_system_built']:
+                logger.info("Step 0: Building PMF-optimized system...")
+                pmf_build_results = self.build_pmf_system(equilibrate=equilibrate_pmf_system)
+                logger.info("PMF system ready for calculations")
+            
             # Step 1: Prepare and run SMD
             if not self.state['smd_completed']:
-                smd_prep = self.prepare_smd() 
+                smd_prep = self.prepare_smd(use_pmf_system=build_pmf_system) 
                 logger.info("Running SMD simulation...")
                 self._run_smd_automated()
                 self.state['smd_completed'] = True
@@ -295,7 +388,18 @@ class PMFWorkflow:
             else:
                 results = self._load_existing_results()
             
+            # Add workflow summary
+            results['workflow_summary'] = {
+                'pmf_system_used': build_pmf_system,
+                'system_equilibrated': equilibrate_pmf_system if build_pmf_system else False,
+                'z_axis_optimized': build_pmf_system,
+                'total_stages': 4 if build_pmf_system else 3
+            }
+            
             logger.info("Complete PMF workflow finished successfully!")
+            if build_pmf_system:
+                logger.info("   Used PMF-optimized system with Z-axis alignment")
+            
             return results
             
         except Exception as e:
@@ -306,7 +410,7 @@ class PMFWorkflow:
     
     def get_status(self) -> Dict:
         """Get comprehensive workflow status"""
-        # Determine current stage
+        # Determine current stage (enhanced with PMF system building)
         if self.state['analysis_completed']:
             current_stage = "completed"
         elif self.state['umbrella_completed'] or self._check_umbrella_completion():
@@ -317,15 +421,18 @@ class PMFWorkflow:
             current_stage = "ready_for_umbrella"
         elif self.state['smd_prepared']:
             current_stage = "running_smd"
+        elif self.state['pmf_system_built']:
+            current_stage = "pmf_system_ready"
         else:
             current_stage = "ready_to_start"
         
         # Check file status
         file_status = self._check_file_status()
         
-        # Get next action
+        # Get next action (enhanced with PMF system building)
         next_actions = {
-            "ready_to_start": "Call prepare_smd()",
+            "ready_to_start": "Call build_pmf_system() [recommended] or prepare_smd(use_pmf_system=False)",
+            "pmf_system_ready": "Call prepare_smd() to use PMF-optimized system",
             "running_smd": f"Run SMD: cd {self.smd_dir} && bash run_smd.sh",
             "ready_for_umbrella": "Call prepare_umbrella()",
             "running_umbrella": f"Run umbrella: cd {self.umbrella_dir} && bash run_all_umbrella.sh parallel",
@@ -337,6 +444,11 @@ class PMFWorkflow:
             'current_stage': current_stage,
             'state': self.state.copy(),
             'files': file_status,
+            'pmf_system_info': {
+                'built': self.state['pmf_system_built'],
+                'equilibrated': self.state.get('pmf_system_equilibrated', False),
+                'path': str(self.rebuilt_system_dir) if self.state['pmf_system_built'] else None
+            },
             'next_action': next_actions.get(current_stage, "Unknown")
         }
     
@@ -456,8 +568,19 @@ class PMFWorkflow:
             'errors': len(validation_result.errors)
         }
         
+        # Check PMF system files
+        pmf_system_files = {
+            'built': self.state['pmf_system_built'],
+            'structure_exists': (self.rebuilt_system_dir / "solv_ions.gro").exists() if self.rebuilt_system_dir.exists() else False,
+            'topology_exists': (self.rebuilt_system_dir / "topol.top").exists() if self.rebuilt_system_dir.exists() else False,
+            'equilibrated': self.state.get('pmf_system_equilibrated', False),
+            'equilibration_structure': (self.output_dir / "equilibration" / "npt" / "npt_final.gro").exists(),
+            'equilibration_checkpoint': (self.output_dir / "equilibration" / "npt" / "npt_final.cpt").exists()
+        }
+        
         return {
             'system_files': system_files,
+            'pmf_system_files': pmf_system_files,
             'smd_files': {
                 'prepared': (self.smd_dir / "smd.mdp").exists() if self.smd_dir.exists() else False,
                 'completed': self._check_smd_completion()

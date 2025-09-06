@@ -192,7 +192,7 @@ class PMFRunner:
         equilibrate = builder_config.get('run_equilibration', True)
         build_results = builder.build(equilibrate=equilibrate)
         
-        logger.info("✅ System builder completed")
+        logger.info("System builder completed")
         
         # Return results with final system directory
         results = {
@@ -210,7 +210,7 @@ class PMFRunner:
         
         smd_results = pmf.build(step='smd')
         
-        logger.info("✅ SMD preparation completed")
+        logger.info("SMD preparation completed")
         logger.info(f"Manual execution: cd {smd_results.get('smd_dir', 'N/A')} && bash run_smd.sh")
         
         return {
@@ -225,7 +225,7 @@ class PMFRunner:
         
         umbrella_results = pmf.build(step='umbrella')
         
-        logger.info("✅ Umbrella sampling preparation completed")
+        logger.info("Umbrella sampling preparation completed")
         umbrella_dir = umbrella_results.get('umbrella_dir', 'N/A')
         logger.info(f"Manual execution: cd {umbrella_dir} && bash run_all_umbrella.sh parallel")
         
@@ -241,7 +241,7 @@ class PMFRunner:
         
         analysis_results = pmf.build(step='analysis')
         
-        logger.info("✅ WHAM analysis completed")
+        logger.info("WHAM analysis completed")
         
         return {
             'status': 'completed',

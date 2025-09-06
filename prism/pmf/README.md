@@ -4,12 +4,14 @@ The PMF (Potential of Mean Force) module provides comprehensive tools for calcul
 
 ## Overview
 
-The PMF module calculates binding free energies by:
-1. **System Optimization**: Rebuilding MD systems with PMF-optimized geometry and extended simulation boxes
-2. **Steered MD (SMD)**: Pulling the ligand away from the protein at constant velocity to generate reaction coordinates
-3. **Umbrella Sampling**: Running multiple simulations at different protein-ligand distances with harmonic restraints  
-4. **WHAM Analysis**: Using the Weighted Histogram Analysis Method to calculate the potential of mean force
-5. **Visualization**: Generating comprehensive plots and reports of binding energetics
+The PMF module calculates binding free energies using a optimized workflow:
+1. **File Preparation**: Copy essential files (topology, restraints) from MD results
+2. **Structure Preprocessing**: Extract proper frame, remove periodic boundary conditions, center system
+3. **SMD Simulation**: Pull the ligand away from the protein at constant velocity
+4. **Umbrella Sampling**: Run multiple simulations at different protein-ligand distances with harmonic restraints
+5. **WHAM Analysis**: Use the Weighted Histogram Analysis Method to calculate the potential of mean force
+6. **Visualization**: Generate comprehensive plots and reports of binding energetics
+7. **Optional System Rebuilding**: Advanced system modifications if needed (rarely required)
 
 ## Key Features
 
@@ -27,8 +29,15 @@ The PMF module calculates binding free energies by:
 ```python
 import prism.pmf as pmf
 
-# Using an existing MD system - uses files directly to avoid copying
+# Recommended: PMF calculation with system rebuilding for optimal results
+# Uses default settings with 2.0 nm pulling distance
 system = pmf.pmf_system("./gaff_model", "./pmf_results")
+
+# Customize pulling distance for your specific system
+system = pmf.pmf_system(
+    "./gaff_model", "./pmf_results",
+    pulling_distance=3.5  # Custom 3.5 nm pulling distance
+)
 
 # Run complete automated workflow
 results = system.run(mode='auto')
@@ -40,10 +49,17 @@ print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
 ```python
 import prism.pmf as pmf
 
-# Initialize PMF system
-system = pmf.pmf_system("./gaff_model", "./pmf_results")
+# Initialize PMF system with custom pulling distance
+system = pmf.pmf_system(
+    "./gaff_model", "./pmf_results",
+    pulling_distance=2.5  # Customize pulling distance for your system
+)
 
-# Step 1: Prepare SMD simulation
+# Step 1: Prepare and rebuild system (automatic)
+# - Copy essential files (topology, TPR, position restraints)
+# - Preprocess structure (remove PBC, center system)
+# - Create PMF-optimized box with GROMACS built-in algorithms
+# - Rebuild system with extended box for pulling
 smd_results = system.build(step='smd')
 # Run manually: cd ./gaff_model/pmf_smd && bash run_smd.sh
 
@@ -99,7 +115,8 @@ Key configuration sections:
 # System rebuilding settings
 builder:
   rebuild_system: true
-  z_extension: 2.5  # Extra box length for pulling (nm)
+  pulling_distance: 2.0     # User-customizable pulling distance (nm)
+  box_distance: 1.2         # Fixed dt distance for GROMACS standard box (nm)
   
 # SMD simulation parameters  
 smd:
@@ -119,6 +136,17 @@ analysis:
   bootstrap_iterations: 50      # Error analysis
   energy_unit: "kCal"          # Output unit
 ```
+
+#### PMF Box Creation Algorithm
+
+The PMF module uses GROMACS built-in algorithms for reliable box creation:
+
+1. **Standard Box Creation**: Uses GROMACS `-d` option with fixed `box_distance` (default 1.2 nm)
+2. **Box Extension**: Adds `2 × pulling_distance` to Z-axis dimension
+3. **System Translation**: Moves system by `pulling_distance` in negative Z direction
+4. **Result**: Optimal pulling space in +Z direction with safety margin in -Z direction
+
+This ensures maximum available space for pulling simulations while maintaining system stability.
 
 ## System Requirements
 
@@ -157,34 +185,34 @@ pmf_results/                     # Your specified output directory
 
 ## Advanced Usage
 
-### File Management Options
+### Efficient File Management
 
-By default, PMF calculations work efficiently by using your original MD files directly:
+PMF calculations efficiently manage files by working directly with your MD directory:
 
 ```python
 import prism.pmf as pmf
 
-# Default behavior (recommended)
+# Default behavior - efficient file management
 system = pmf.pmf_system("./gaff_model", "./pmf_results")
-
-# Alternative: isolated working directories (uses more disk space)
-system = pmf.pmf_system("./gaff_model", "./pmf_results", work_in_place=False)
 ```
 
-### System Rebuilding with PMF Optimization
+### Advanced Usage with Optional System Rebuilding
 
-For optimal PMF calculations, rebuild your system with PMF-specific settings:
+For special cases where you want to skip system rebuilding:
 
 ```python
-# Enable system rebuilding during PMF setup
-system = pmf.pmf_system(
-    "./gaff_model", 
-    "./pmf_results",
-    rebuild_system=True   # Rebuild with PMF optimization
-)
+# Advanced: Skip rebuilding (use only for special debugging cases)
+system = pmf.pmf_system("./gaff_model", "./pmf_results", rebuild_system=False)
+results = system.run(mode='auto')
 
-# Or rebuild manually with specific settings
-rebuild_results = system.rebuild_system(frame=-1)  # Use last MD frame
+# Standard recommended workflow (with rebuilding)
+system = pmf.pmf_system("./gaff_model", "./pmf_results")  # rebuild_system=True by default
+
+# Manual control over rebuilding process
+smd_results = system.build(step='smd')          # Preprocesses files first
+rebuild_results = system.rebuild_system()       # Rebuilds with PMF optimization
+umbrella_results = system.build_umbrella_step() # Continue with umbrella sampling
+analysis_results = system.build_analysis_step() # Final analysis
 ```
 
 ### Custom Analysis and Visualization

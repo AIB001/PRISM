@@ -29,8 +29,8 @@ class PMFSystem:
     """
     
     def __init__(self, system_dir: str, output_dir: str = "pmf_output",
-                 config: Optional[Union[str, Dict]] = None, rebuild_system: bool = False,
-                 use_existing_files: bool = True, **kwargs):
+                 config: Optional[Union[str, Dict]] = None, rebuild_system: bool = True,
+                 **kwargs):
         """
         Initialize a PMF calculation system.
         
@@ -43,16 +43,28 @@ class PMFSystem:
         config : str or dict, optional
             PMF configuration file path or dictionary
         rebuild_system : bool, optional
-            Whether to rebuild system with PMF-optimized geometry (default: False)
-        use_existing_files : bool, optional
-            Whether to use existing files directly without copying (default: True)
+            Whether to rebuild system with PMF-optimized geometry (default: True, recommended)
+        pulling_distance : float, optional
+            User-customizable pulling distance for PMF box creation in nm (default: 2.0)
+        box_distance : float, optional
+            Fixed dt distance for GROMACS standard box in nm (default: 1.2)
         **kwargs : optional
-            Additional configuration parameters
+            Additional configuration parameters including PMF-specific options
+        
+        Examples:
+        ---------
+        >>> # Use default settings
+        >>> pmf = PMFSystem("./gaff_model", "./pmf_output")
+        >>>
+        >>> # Customize pulling distance for longer PMF calculations
+        >>> pmf = PMFSystem(
+        ...     "./gaff_model", "./pmf_output",
+        ...     pulling_distance=3.5  # 3.5 nm pulling distance
+        ... )
         """
         self.system_dir = Path(system_dir).resolve()
         self.output_dir = Path(output_dir).resolve()
         self.rebuild_system = rebuild_system
-        self.use_existing_files = use_existing_files
         
         # Validate system directory
         self._validate_system()
@@ -66,14 +78,13 @@ class PMFSystem:
             self.pmf_builder = PMFBuilder(
                 md_results_dir=self.system_dir,
                 output_dir=self.output_dir,
-                use_existing_files=use_existing_files,
-                config=self.config
+                config=self.config,
+                **kwargs  # Pass through kwargs including pulling_distance
             )
         
-        # Initialize workflow manager using existing files directly
-        # This ensures we work with original files without copying
+        # Initialize workflow manager
         self.workflow = PMFWorkflow(
-            system_dir=self.gmx_dir,
+            system_dir=self.system_dir,
             output_dir=self.output_dir,
             config=self.config
         )
@@ -81,6 +92,10 @@ class PMFSystem:
         logger.info(f"PMF system initialized: {self.system_dir} -> {self.output_dir}")
         if rebuild_system:
             logger.info("PMF builder enabled for system optimization")
+            # Log pulling distance if customized
+            pulling_dist = kwargs.get('pulling_distance', 2.0)
+            if pulling_dist != 2.0:
+                logger.info(f"  Custom pulling distance: {pulling_dist:.1f} nm")
     
     def _validate_system(self):
         """Validate system directory structure"""
@@ -179,7 +194,11 @@ class PMFSystem:
     
     def rebuild_system(self, frame: Optional[int] = None) -> Dict:
         """
-        Rebuild system with PMF-optimized geometry
+        Rebuild system with PMF-optimized geometry (optional post-processing step)
+        
+        Note: This is now an optional step that can be performed after initial
+        file preparation and preprocessing. Use only if you need extensive
+        system modifications beyond PBC removal and centering.
         
         Parameters:
         -----------
@@ -197,18 +216,22 @@ class PMFSystem:
                 config=self.config
             )
         
-        logger.info("Rebuilding system with PMF-optimized geometry")
+        logger.info("Rebuilding system with PMF-optimized geometry (optional step)")
+        logger.info("Note: Basic preprocessing (PBC removal, centering) is already done")
         rebuild_results = self.pmf_builder.build(frame)
         
-        # Reinitialize workflow with rebuilt system
-        rebuilt_system_dir = Path(rebuild_results['system_dir'])
-        self.workflow = PMFWorkflow(
-            system_dir=rebuilt_system_dir,
-            output_dir=self.output_dir,
-            config=self.config
-        )
+        # Only reinitialize workflow if rebuild was successful
+        if rebuild_results.get('status') == 'success':
+            rebuilt_system_dir = Path(rebuild_results['system_dir'])
+            self.workflow = PMFWorkflow(
+                system_dir=rebuilt_system_dir,
+                output_dir=self.output_dir,
+                config=self.config
+            )
+            logger.info("PMF workflow updated to use rebuilt system")
+        else:
+            logger.info("Rebuild failed or not needed - continuing with preprocessed files")
         
-        logger.info("PMF workflow updated to use rebuilt system")
         return rebuild_results
     
     def build(self, step: Optional[str] = None) -> Dict:
@@ -408,8 +431,8 @@ class PMFSystem:
 
 # High-level convenience function following PRISM patterns
 def pmf_system(system_dir: str, output_dir: str = "pmf_output", 
-               config: Optional[Union[str, Dict]] = None, rebuild_system: bool = False,
-               use_existing_files: bool = True, **kwargs) -> PMFSystem:
+               config: Optional[Union[str, Dict]] = None, rebuild_system: bool = True,
+               **kwargs) -> PMFSystem:
     """
     Create a PMF calculation system (convenience function).
     
@@ -422,9 +445,7 @@ def pmf_system(system_dir: str, output_dir: str = "pmf_output",
     config : str or dict, optional
         Configuration file or dictionary
     rebuild_system : bool, optional
-        Whether to rebuild system with PMF-optimized geometry
-    use_existing_files : bool, optional
-        Whether to use existing files directly without copying (default: True)
+        Whether to rebuild system with PMF-optimized geometry (default: True, recommended)
     **kwargs : optional
         Additional configuration parameters
         
@@ -435,18 +456,14 @@ def pmf_system(system_dir: str, output_dir: str = "pmf_output",
     Examples:
     --------
     >>> import prism
-    >>> # Use existing files mode (recommended) - avoids file copying
-    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", use_existing_files=True)
-    >>> results = pmf.run(mode='manual')
-    
-    >>> # Traditional mode - copies files to separate working directory
-    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", use_existing_files=False)
+    >>> # Recommended: with system rebuilding for optimal PMF
+    >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results")
     >>> results = pmf.run(mode='auto')
     
-    >>> # Rebuild system with PMF optimization
+    >>> # Advanced: with custom configuration and rebuilding
     >>> pmf = prism.pmf.pmf_system("./gaff_model", "./pmf_results", 
-    ...                           rebuild_system=True, use_existing_files=True)
+    ...                           config="custom_pmf.yaml")
     >>> rebuild_results = pmf.rebuild_system()  # Optimize geometry
     >>> results = pmf.run(mode='auto')          # Run PMF calculation
     """
-    return PMFSystem(system_dir, output_dir, config, rebuild_system, use_existing_files, **kwargs)
+    return PMFSystem(system_dir, output_dir, config, rebuild_system, **kwargs)

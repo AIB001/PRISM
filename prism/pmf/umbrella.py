@@ -64,7 +64,7 @@ class UmbrellaManager:
         frames_dir = self.pmf_system.smd_dir / "trajectory_frames"
         if frames_dir.exists():
             shutil.rmtree(frames_dir)
-            logger.info("✓ Temporary frames cleaned up")
+            logger.info("Temporary frames cleaned up")
         
         results = {
             'umbrella_dir': str(self.umbrella_dir),
@@ -75,7 +75,7 @@ class UmbrellaManager:
             'status': 'ready_for_umbrella'
         }
         
-        logger.info("✓ Umbrella sampling setup completed!")
+        logger.info("Umbrella sampling setup completed!")
         logger.info(f"Generated {len(self.windows)} umbrella windows")
         logger.info(f"Run umbrella sampling using: {run_scripts['master_script']}")
         
@@ -109,10 +109,10 @@ class UmbrellaManager:
                 f"\n\nPlease run the SMD simulation first using: {smd_dir}/run_smd.sh"
             )
         
-        logger.info("✓ SMD results validated")
+        logger.info("SMD results validated")
     
     def _extract_trajectory_frames(self, n_frames=300):
-        """Extract frames from SMD trajectory with fallback for testing"""
+        """Extract frames from SMD trajectory"""
         smd_dir = self.pmf_system.smd_dir
         logger.info(f"Extracting {n_frames} trajectory frames...")
         
@@ -151,16 +151,11 @@ class UmbrellaManager:
             stdout, stderr = process.communicate(input="0\n")  # Select System
             
             if process.returncode != 0:
-                # Check if this is a version compatibility issue
-                if "older than 2.0" in stderr or "Can not read file" in stderr:
-                    logger.warning("GROMACS version compatibility issue detected. Using fallback method...")
-                    return self._extract_frames_fallback(frames_dir, n_frames, frame_interval_ps)
-                else:
-                    raise RuntimeError(f"Frame extraction failed: {stderr}")
+                raise RuntimeError(f"Frame extraction failed: {stderr}")
             
             # Count extracted frames
             extracted_frames = len(list(frames_dir.glob("frame*.gro")))
-            logger.info(f"✓ Extracted {extracted_frames} trajectory frames")
+            logger.info(f"Extracted {extracted_frames} trajectory frames")
             
             return {
                 'frames_dir': str(frames_dir),
@@ -169,75 +164,8 @@ class UmbrellaManager:
             }
             
         except Exception as e:
-            logger.warning(f"Frame extraction failed: {e}")
-            logger.info("Attempting fallback frame extraction method...")
-            return self._extract_frames_fallback(frames_dir, n_frames, frame_interval_ps)
-    
-    def _extract_frames_fallback(self, frames_dir, n_frames, frame_interval_ps):
-        """Fallback frame extraction method for testing/debugging"""
-        logger.info("Using fallback frame extraction (ideal for testing without real trajectories)")
-        
-        smd_dir = self.pmf_system.smd_dir
-        
-        # Use the final SMD structure to generate representative frames
-        smd_final_gro = smd_dir / "results" / "smd.gro"
-        if not smd_final_gro.exists():
-            raise FileNotFoundError(f"Final SMD structure not found: {smd_final_gro}")
-        
-        # Calculate distance points for umbrella windows
-        distance_start = self.config.get('distance', {}).get('start', 0.3)
-        distance_end = self.config.get('distance', {}).get('end', 2.0)
-        
-        # Create uniform distance distribution
-        distances = []
-        for i in range(n_frames):
-            distance = distance_start + (distance_end - distance_start) * i / (n_frames - 1)
-            distances.append(distance)
-        
-        # Copy final structure for each frame (in real scenario, these would be different conformations)
-        logger.info(f"Creating {n_frames} fallback frames based on final SMD structure...")
-        
-        import shutil
-        for i, distance in enumerate(distances):
-            frame_file = frames_dir / f"frame{i}.gro"
-            shutil.copy(smd_final_gro, frame_file)
-        
-        logger.info(f"✓ Generated {n_frames} fallback frames (testing mode)")
-        logger.warning("Note: All frames are identical - suitable for testing workflow only")
-        
-        return {
-            'frames_dir': str(frames_dir),
-            'n_frames': n_frames,
-            'frame_interval_ps': frame_interval_ps,
-            'fallback_mode': True,
-            'distances': distances
-        }
-    
-    def _generate_fallback_distances(self, frames_info):
-        """Generate fallback distance data for testing when GROMACS fails"""
-        logger.info("Generating fallback distance data for umbrella windows")
-        
-        # Use distances from fallback frame extraction if available
-        if frames_info.get('fallback_mode') and 'distances' in frames_info:
-            distances = frames_info['distances']
-            distance_data = [(i, dist) for i, dist in enumerate(distances)]
-            logger.info(f"✓ Generated {len(distance_data)} fallback distance points")
-            return distance_data
-        
-        # Otherwise create uniform distance distribution
-        n_frames = frames_info.get('n_frames', 100)
-        distance_start = self.config.get('distance', {}).get('start', 0.3)
-        distance_end = self.config.get('distance', {}).get('end', 2.0)
-        
-        distance_data = []
-        for i in range(n_frames):
-            distance = distance_start + (distance_end - distance_start) * i / (n_frames - 1)
-            distance_data.append((i, distance))
-        
-        logger.info(f"✓ Generated {len(distance_data)} uniform fallback distances")
-        logger.warning("Using simulated distances - suitable for testing workflow only")
-        
-        return distance_data
+            logger.error(f"Frame extraction failed: {e}")
+            raise
     
     def _run_sequential(self):
         """Run umbrella windows sequentially"""
@@ -286,12 +214,7 @@ class UmbrellaManager:
         
         # Calculate distances for all frames
         logger.info("Calculating distances for frames...")
-        try:
-            distance_data = self._calculate_frame_distances(smd_dir, frames_dir)
-        except Exception as e:
-            logger.warning(f"Distance calculation failed: {e}")
-            logger.info("Using fallback distance generation...")
-            distance_data = self._generate_fallback_distances(frames_info)
+        distance_data = self._calculate_frame_distances(smd_dir, frames_dir)
         
         # Generate adaptive windows
         sample_interval_near = self.config.get('umbrella', {}).get('sample_interval_near', 0.1)
@@ -343,7 +266,7 @@ class UmbrellaManager:
                 'frame_file': frames_dir / f"frame{frame}.gro"
             })
         
-        logger.info(f"✓ Generated {len(windows)} umbrella windows")
+        logger.info(f"Generated {len(windows)} umbrella windows")
         return windows
     
     def _calculate_frame_distances(self, smd_dir, frames_dir):
@@ -393,10 +316,7 @@ class UmbrellaManager:
             # Clean up temporary directory
             shutil.rmtree(temp_dir, ignore_errors=True)
         
-        if not distance_data:
-            raise RuntimeError("No distance data could be calculated from trajectory frames")
-        
-        logger.info(f"✓ Calculated distances for {len(distance_data)} frames")
+        logger.info(f"Calculated distances for {len(distance_data)} frames")
         return distance_data
     
     def _setup_umbrella_directories(self):
@@ -427,7 +347,7 @@ class UmbrellaManager:
             # Update window info with directory
             window['directory'] = window_dir
         
-        logger.info(f"✓ Setup {len(self.windows)} umbrella directories")
+        logger.info(f"Setup {len(self.windows)} umbrella directories")
     
     def _generate_umbrella_mdp_content(self):
         """Generate umbrella sampling MDP template content"""
@@ -566,7 +486,7 @@ mv umbrella.* results/
 
 echo "Step 4: Validating results..."
 if [ -f "results/umbrella.gro" ] && [ -f "results/umbrella_pullf.xvg" ]; then
-    echo "✓ Window {window['window_id']:03d} completed successfully!"
+    echo "Window {window['window_id']:03d} completed successfully!"
 else
     echo "✗ Window {window['window_id']:03d} failed!"
     exit 1
@@ -602,7 +522,7 @@ run_window() {{
     cd "$window_dir"
     
     if bash run_window.sh; then
-        echo "✓ Window $window_id completed"
+        echo "Window $window_id completed"
         cd ..
         return 0
     else
@@ -624,7 +544,7 @@ if [ "$1" = "sequential" ]; then
     done
     
     if [ ${{#failed_windows[@]}} -eq 0 ]; then
-        echo "✓ All windows completed successfully!"
+        echo "All windows completed successfully!"
     else
         echo "✗ Failed windows: ${{failed_windows[*]}}"
         exit 1
@@ -638,7 +558,7 @@ elif [ "$1" = "parallel" ]; then
     # Run windows in parallel (adjust -P based on your system)
     seq 0 {len(self.windows)-1} | xargs -n 1 -P 4 -I {{}} bash -c 'run_window {{}}'
     
-    echo "✓ Parallel execution completed!"
+    echo "Parallel execution completed!"
 
 else
     echo "Usage: $0 [sequential|parallel]"
@@ -657,7 +577,7 @@ fi
         
         os.chmod(master_script, 0o755)
         
-        logger.info("✓ Umbrella run scripts generated")
+        logger.info("Umbrella run scripts generated")
         
         return {
             'master_script': master_script,

@@ -604,13 +604,13 @@ def get_validation_report(system_dir: Union[str, Path],
     report.append(f"Directory: {system_dir}")
     report.append(f"Validation Level: {result.level.value}")
     report.append(f"Score: {result.score:.1f}% (Grade: {result.grade})")
-    report.append(f"Status: {'✅ VALID' if result.is_valid else '❌ INVALID'}")
+    report.append(f"Status: {'VALID' if result.is_valid else 'INVALID'}")
     report.append("")
     
     if result.files_found:
         report.append("Files Found:")
         for file_info in result.files_found:
-            report.append(f"  ✓ {file_info.description}: {file_info.path.name} ({file_info.size_mb:.1f} MB)")
+            report.append(f"  {file_info.description}: {file_info.path.name} ({file_info.size_mb:.1f} MB)")
         report.append("")
     
     if result.files_missing:
@@ -622,13 +622,13 @@ def get_validation_report(system_dir: Union[str, Path],
     if result.errors:
         report.append("Errors:")
         for error in result.errors:
-            report.append(f"  ❌ {error}")
+            report.append(f"  ERROR: {error}")
         report.append("")
     
     if result.warnings:
         report.append("Warnings:")
         for warning in result.warnings:
-            report.append(f"  ⚠️  {warning}")
+            report.append(f"  WARNING: {warning}")
         report.append("")
     
     if result.recommendations:
