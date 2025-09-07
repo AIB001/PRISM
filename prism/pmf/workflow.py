@@ -49,7 +49,9 @@ class PMFWorkflow:
         """
         self.system_dir = Path(system_dir)
         self.output_dir = Path(output_dir)
-        self.config = config
+        
+        # Inherit force field information from original system
+        self.config = self._inherit_system_config(config)
         
         # Locate MD results directory
         self.md_results_dir = self._locate_md_results()
@@ -673,3 +675,144 @@ class PMFWorkflow:
             return self.analyzer.run_wham()
         else:
             raise FileNotFoundError("No existing PMF results found")
+    
+    def _inherit_system_config(self, user_config: Dict) -> Dict:
+        """
+        Inherit force field and system settings from original PRISM system
+        
+        Parameters:
+        -----------
+        user_config : Dict
+            User-provided PMF configuration
+            
+        Returns:
+        --------
+        Dict : Combined configuration with inherited system settings
+        """
+        logger.info("Inheriting system configuration from original PRISM build")
+        
+        # Try to load original prism_config.yaml
+        original_config_path = self.system_dir / "prism_config.yaml"
+        inherited_config = {}
+        
+        if original_config_path.exists():
+            try:
+                with open(original_config_path, 'r') as f:
+                    original_config = yaml.safe_load(f)
+                    
+                # Inherit key sections from original config
+                sections_to_inherit = [
+                    'forcefield', 'water_model', 'ligand_forcefield',
+                    'simulation', 'ions', 'constraints', 'energy_minimization',
+                    'electrostatics', 'vdw', 'temperature_coupling', 'pressure_coupling'
+                ]
+                
+                for section in sections_to_inherit:
+                    if section in original_config:
+                        inherited_config[section] = original_config[section]
+                        logger.debug(f"Inherited {section} configuration from original system")
+                
+                logger.info("Successfully inherited configuration from original PRISM system")
+                
+            except Exception as e:
+                logger.warning(f"Could not load original config: {e}")
+                logger.info("Using PMF template defaults")
+        else:
+            logger.warning(f"Original config not found at: {original_config_path}")
+            logger.info("Using PMF template defaults")
+        
+        # Merge user config with inherited config (user config takes precedence)
+        merged_config = inherited_config.copy()
+        merged_config.update(user_config)
+        
+        # Ensure PMF-specific sections exist
+        pmf_defaults = self._get_pmf_defaults()
+        for section, defaults in pmf_defaults.items():
+            if section not in merged_config:
+                merged_config[section] = defaults
+                logger.debug(f"Added default PMF section: {section}")
+        
+        return merged_config
+    
+    def _get_pmf_defaults(self) -> Dict:
+        """
+        Get default PMF-specific configuration sections
+        
+        Returns:
+        --------
+        Dict : Default PMF configuration sections
+        """
+        return {
+            'box': {
+                'pulling_distance': 3.0
+            },
+            'pmf_system': {
+                'reference_group': 'Protein',
+                'moving_group': 'LIG',
+                'align_axis': 'z',
+                'center_system': True
+            },
+            'extraction': {
+                'frame_number': -1,
+                'output_structure': True
+            },
+            'equilibration': {
+                'mode': 'auto',  # 'auto' or 'manual'
+                'hardware': {
+                    'gpu_id': 0,
+                    'ntmpi': 1,
+                    'ntomp': 10,
+                    'gpu_acceleration': True
+                },
+                'em': {
+                    'integrator': 'steep',
+                    'emtol': 10.0,
+                    'nsteps': 50000,
+                    'maxwarn': 3
+                },
+                'nvt': {
+                    'nsteps': 50000,
+                    'dt': 0.002,
+                    'maxwarn': 3
+                },
+                'npt': {
+                    'nsteps': 100000,
+                    'dt': 0.002,
+                    'maxwarn': 3
+                },
+                'script': {
+                    'filename': 'equilibration_run.sh',
+                    'gpu_optimization': True,
+                    'checkpoint_resume': True,
+                    'verbose_output': True,
+                    'create_directories': True
+                }
+            },
+            'smd': {
+                'pull_rate': 0.005,
+                'pull_k': 1000.0,
+                'nsteps': 600000,
+                'dt': 0.002,
+                'output_interval': 2500
+            },
+            'distance': {
+                'start': 0.3,
+                'end': 3.5
+            },
+            'umbrella': {
+                'window_spacing': 0.1,
+                'force_constant': 1000.0,
+                'nsteps': 250000,
+                'dt': 0.002,
+                'output_interval': 2500,
+                'equilibration_time': 50000
+            },
+            'analysis': {
+                'begin_time_ps': 5000,
+                'bootstrap': 100,
+                'energy_unit': 'kCal',
+                'tolerance': 1e-6,
+                'max_iterations': 10000,
+                'bin_width': 0.01
+            }
+        }
