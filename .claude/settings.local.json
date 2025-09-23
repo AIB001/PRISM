@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gmx genion:*)"
+      "Bash(gmx genion:*)",
+      "Read(//data/gxf1212/work/SciDraft-Studio/**)",
+      "Read(//home/gxf1212/data/work/SciDraft-Studio/MD/**)",
+      "Bash(xargs ls:*)",
+      "Read(//home/gxf1212/data/work/SciDraft-Studio/**)"
     ],
     "deny": [],
     "ask": []

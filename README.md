@@ -20,23 +20,52 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 1. **GROMACS** (required)
 
    ```bash
-   # Ubuntu/Debian
-   sudo apt-get install gromacs
+   # Ubuntu/Debian, CUDA-toolkit is needed, Dependence installation
+   nvcc --version # For check
+   sudo apt-get install gcc
+   sudo apt-get install g++
+   sudo apt-get install cmake
    
-   # Using conda
-   conda install -c bioconda gromacs
+   # Download GROMACS Package
+   wget https://ftp.gromacs.org/gromacs/gromacs-2024.3.tar.gz
+   tar xfz gromacs-2024.3.tar.gz
+   
+   # Prepare to build GROMACS with cmake
+   cd gromacs-2024.3
+   mkdir build
+   cd build
+   
+   # Installation
+   cmake .. -DGMX_MPI=ON \
+   -DGMX_BUILD_OWN_FFTW=ON \
+   -DGMX_GPU=CUDA \
+   -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
+   -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include \
+   -DCUDA_CUDART_LIBRARY=/usr/local/cuda/lib64 \
+   -DCMAKE_INSTALL_PREFIX=/mnt/data/zf/gromacs-2024.3
+   
+   make -j${nproc}
+   make check # Optional but recommended
+   sudo make install
+   source /mnt/data/zf/gromacs-2024.3/bin/GMXRC
+   
+   # install bioconda
+   conda install -c bioconda
    ```
 
-2. **Python 3.8+** (python 3.12 is recommended) with required packages:
+2. **Python 3.10** with required packages:
 
    ```bash
-   pip install pyyaml numpy
+   # create environment 
+   conda create -n prism python=3.10
+   conda activate prism
    ```
 
-3. **PDBFixer** (required)
+3. **PDBFixer and pyyaml** (required)
 
    ```bash
-   conda install -c conda-forge pdbfixer
+   conda install -c conda-forge pdbfixer numpy scipy
+   pip install pyyaml
    ```
 
 ### Force Field Specific Dependencies
@@ -45,11 +74,9 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 
 ```bash
 # AmberTools (required)
-conda install dacase::ambertools-dac=25
-
+conda install conda-forge::ambertools
 # ACPYPE (required)
 pip install acpype
-
 # Optional but recommended
 conda install -c conda-forge rdkit
 ```
@@ -62,9 +89,10 @@ conda install -c conda-forge openff-toolkit openff-interchange
 
 # RDKit (required for SDF handling)
 conda install -c conda-forge rdkit
-```
 
-_openbabel is recommended_
+# OpenBabel (Optional bur Recommended)
+conda install conda-forge::openbabel
+```
 
 ### Installing PRISM
 
@@ -74,7 +102,6 @@ _openbabel is recommended_
 
    ```bash
    cd PRISM
-
    pip install -e .
    ```
 
@@ -112,28 +139,71 @@ After PRISM completes, you can run the simulations:
 
 ```bash
 cd output_dir/GMX_PROLIG_MD
+```
 
-function run_md {
-# Energy minimization
-gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o em.tpr -maxwarn 2
-gmx mdrun -deffnm em -ntmpi 1 -ntomp 16
+Create and save `localrun.sh`:
 
-# NVT equilibration
-gmx grompp -f ../mdps/nvt.mdp -c em.gro -r em.gro -p topol.top -o nvt.tpr -maxwarn 2
-gmx mdrun -deffnm nvt -ntmpi 1 -ntomp 16
+```bash
+#!/bin/bash
 
-# NPT equilibration
-gmx grompp -f ../mdps/npt.mdp -c nvt.gro -r nvt.gro -t nvt.cpt -p topol.top -o npt.tpr
-gmx mdrun -deffnm npt
+######################################################
+# SIMULATION PART
+######################################################
+
+# Energy Minimization (EM)
+mkdir -p em
+if [ -f ./em/em.gro ]; then
+    echo "EM already completed, skipping..."
+elif [ -f ./em/em.tpr ]; then
+    echo "EM tpr file found, continuing from checkpoint..."
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v -cpi ./em/em.cpt
+else
+    echo "Starting EM from scratch..."
+    gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o ./em/em.tpr -maxwarn 999
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v
+fi
+
+# NVT Equilibration
+mkdir -p nvt
+if [ -f ./nvt/nvt.gro ]; then
+    echo "NVT already completed, skipping..."
+elif [ -f ./nvt/nvt.tpr ]; then
+    echo "NVT tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
+else
+    echo "Starting NVT from scratch..."
+    gmx grompp -f ../mdps/nvt.mdp -c ./em/em.gro -r ./em/em.gro -p topol.top -o ./nvt/nvt.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
+fi
+
+# NPT Equilibration
+mkdir -p npt
+if [ -f ./npt/npt.gro ]; then
+    echo "NPT already completed, skipping..."
+elif [ -f ./npt/npt.tpr ]; then
+    echo "NPT tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
+else
+    echo "Starting NPT from scratch..."
+    gmx grompp -f ../mdps/npt.mdp -c ./nvt/nvt.gro -r ./nvt/nvt.gro -t ./nvt/nvt.cpt -p topol.top -o ./npt/npt.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v
+fi
 
 # Production MD
-gmx grompp -f ../mdps/md.mdp -c npt.gro -t npt.cpt -p topol.top -o md.tpr
-gmx mdrun -deffnm md
-}
-
-run_md
-
+mkdir -p prod
+if [ -f ./prod/md.gro ]; then
+    echo "Production MD already completed, skipping..."
+elif [ -f ./prod/md.tpr ]; then
+    echo "Production MD tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
+else
+    echo "Starting Production MD from scratch..."
+    gmx grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
+fi
 ```
+
+run `bash localrun.sh`
 
 ## Configuration
 
@@ -204,7 +274,7 @@ If you use PRISM in your research, please cite:
 
 ```LaTeX
 @software{PRISM,
-  author       = {Institute of Quantitative Biology, Zhejiang University},
+  author       = {Institute of Quantitative Biology, Zhejiang University; Theoretical Chemistry Institute, University of Wisconsin-Madison},
   title        = {PRISM: An Integrated Framework for High-Throughput Protein-Ligand Simulation Setup and Molecular Simulation-Based Drug Virtual Screening},
   year         = {2025},
   publisher    = {GitHub},
@@ -215,5 +285,3 @@ If you use PRISM in your research, please cite:
 ## License
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
-
-

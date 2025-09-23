@@ -76,5 +76,6 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-test/
+test/*
 <import>/
+*.egg-info
