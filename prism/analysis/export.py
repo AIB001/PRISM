@@ -11,7 +11,6 @@ try:
 except ImportError:
     MDTRAJ_AVAILABLE = False
     md = None
-
 logger = logging.getLogger(__name__)
 
 class DataExporter:

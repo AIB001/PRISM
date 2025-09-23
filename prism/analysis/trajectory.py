@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 class TrajectoryManager:
     """Manage trajectory file loading and caching for both MDTraj and MDAnalysis"""
-    
+
     def __init__(self):
         self._cached_mdtraj_trajectories = {}
         self._cached_universes = {}
-    
+
     def load_mdtraj_trajectory(self, topology_file: str, trajectory_file: str, cache_key: Optional[str] = None):
         """Load MDTraj trajectory for new calculation methods"""
         if not MDTRAJ_AVAILABLE:

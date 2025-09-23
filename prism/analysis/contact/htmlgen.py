@@ -9,13 +9,7 @@ Integration with PRISM analysis module
 import argparse
 import sys
 from pathlib import Path
-
-try:
-    import mdtraj as md
-    MDTRAJ_AVAILABLE = True
-except ImportError:
-    MDTRAJ_AVAILABLE = False
-    md = None
+import mdtraj as md
 
 # Import from local modules
 from .contact_analyzer import FastContactAnalyzer
