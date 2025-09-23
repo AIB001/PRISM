@@ -16,9 +16,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
 install_requires = [
     "numpy>=1.19.0",
     "pyyaml>=5.0",
+    "MDAnalysis>=2.0.0",  # Required for analysis
+    "matplotlib>=3.0.0",  # Required for plotting
+    "seaborn>=0.11.0",    # Required for advanced plotting
+    "pandas>=1.0.0",      # Required for data processing
+    "scikit-learn>=1.0.0", # Required for clustering analysis
 ]
 
-# Optional requirements for different force fields
+# Optional requirements for different force fields and advanced features
 extras_require = {
     "gaff": [
         "acpype>=2021.0",
@@ -28,11 +33,17 @@ extras_require = {
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
     ],
+    "analysis": [
+        "mdtraj>=1.9.0",      # Optional for enhanced trajectory analysis
+        "scipy>=1.6.0",       # For statistical analysis
+    ],
     "all": [
         "acpype>=2021.0",
         "openff-toolkit>=0.10.0",
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
+        "mdtraj>=1.9.0",
+        "scipy>=1.6.0",
     ],
 }
 
@@ -76,10 +87,14 @@ setup(
 
 print("Setup complete!")
 print("\nTo install PRISM:")
-print("  pip install -e .                # Basic installation")
+print("  pip install -e .                # Basic installation (includes core analysis)")
 print("  pip install -e .[gaff]          # With GAFF support")
-print("  pip install -e .[openff]        # With OpenFF support") 
-print("  pip install -e .[all]           # With all force fields")
+print("  pip install -e .[openff]        # With OpenFF support")
+print("  pip install -e .[analysis]      # With enhanced analysis (MDTraj, SciPy)")
+print("  pip install -e .[all]           # With all force fields and features")
+print("\nFor SciDraft-Studio integration (no force fields needed):")
+print("  pip install -e .                # Basic installation sufficient")
+print("  pip install -e .[analysis]      # With optional enhanced analysis")
 print("\nBasic usage:")
 print("  import prism as pm")
 print("  system = pm.system('protein.pdb', 'ligand.mol2')")
