@@ -996,9 +996,14 @@ try:
     from openff.units import unit
     import numpy as np
 except ImportError as e:
-    print(f"Error: Missing OpenFF dependencies: {e}")
-    print("Please install: pip install openff-toolkit openff-interchange")
-    sys.exit(1)
+    print(f"Warning: Missing OpenFF dependencies: {e}")
+    print("OpenFF force field generator will not be available.")
+    print("To use OpenFF: pip install openff-toolkit openff-interchange")
+
+    # Create a dummy class to prevent import errors
+    class OpenFFForceFieldGenerator:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("OpenFF dependencies not installed. Install with: pip install openff-toolkit openff-interchange")
 
 
 class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
