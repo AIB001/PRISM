@@ -998,12 +998,19 @@ try:
 except ImportError as e:
     print(f"Warning: Missing OpenFF dependencies: {e}")
     print("OpenFF force field generator will not be available.")
-    print("To use OpenFF: pip install openff-toolkit openff-interchange")
+    print("RECOMMENDED INSTALLATION:")
+    print("  mamba install -c conda-forge openff-toolkit")
+    print("  # OR: conda install -c conda-forge openff-toolkit")
+    print("  # OR: pip install openff-toolkit openff-interchange")
 
     # Create a dummy class to prevent import errors
     class OpenFFForceFieldGenerator:
         def __init__(self, *args, **kwargs):
-            raise ImportError("OpenFF dependencies not installed. Install with: pip install openff-toolkit openff-interchange")
+            raise ImportError("OpenFF dependencies not installed.\n"
+                             "RECOMMENDED INSTALLATION:\n"
+                             "  mamba install -c conda-forge openff-toolkit\n"
+                             "  # OR: conda install -c conda-forge openff-toolkit\n"
+                             "  # OR: pip install openff-toolkit openff-interchange")
 
 
 class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):

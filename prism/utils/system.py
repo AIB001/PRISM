@@ -130,7 +130,9 @@ class SystemBuilder:
         # Check if pdbfixer is available
         if not shutil.which("pdbfixer"):
             print("Warning: pdbfixer command not found. Skipping protein fixing step.")
-            print("Please install it (e.g., 'conda install -c conda-forge pdbfixer') for better results.")
+            print("RECOMMENDED INSTALLATION:")
+            print("  mamba install -c conda-forge pdbfixer")
+            print("  # OR: conda install -c conda-forge pdbfixer")
             shutil.copy(cleaned_protein, fixed_pdb)
             return str(fixed_pdb)
 

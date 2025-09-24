@@ -9,17 +9,56 @@ PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Pytho
 ## Development Commands
 
 ### Installation and Setup
+
+**Recommended Installation Method (2025)**: Use `mamba` for better dependency resolution
+
+**Automatic Parallelization**: PRISM automatically enables OpenMP parallelization using all available CPU cores for trajectory analysis (MDTraj operations like DCD conversion). No additional configuration needed - just import PRISM and get accelerated performance.
+
 ```bash
-# Install in development mode
+# Install mamba (if not already installed)
+conda install -c conda-forge mamba
+
+# Install PRISM in development mode (basic analysis only)
 pip install -e .
 
-# Install with specific force field support
+# Install with specific force field support (RECOMMENDED)
+# Method 1: Using mamba (preferred for complex dependencies)
+mamba install -c conda-forge openff-toolkit    # Includes openff-interchange
+mamba install -c conda-forge ambertools        # For GAFF support
+
+# Method 2: Using conda (alternative)
+conda install -c conda-forge openff-toolkit ambertools
+
+# Method 3: Using pip (works but not recommended for scientific dependencies)
+pip install openff-toolkit openff-interchange
+
+# Install PRISM with extras after dependencies
+pip install -e .[openff]        # OpenFF support only
 pip install -e .[gaff]          # GAFF support only
-pip install -e .[openff]        # OpenFF support only  
 pip install -e .[all]           # All force fields
 
-# Basic installation
+# Basic installation (analysis only, no force field generation)
 pip install -r requirements.txt
+```
+
+**Installation Troubleshooting**: If you encounter conda dependency conflicts:
+
+```bash
+# Create isolated environment (HIGHLY RECOMMENDED)
+mamba create -n prism-env -c conda-forge python=3.9 openff-toolkit ambertools
+conda activate prism-env
+pip install -e .
+
+# Alternative: Use conda-forge channel priority
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+conda install openff-toolkit ambertools
+
+# For conda channel conflicts
+conda install conda-forge::openff-toolkit conda-forge::ambertools
+
+# Check installation
+python -c "import prism as pm; print(pm.check_dependencies())"
 ```
 
 ### Running PRISM
@@ -160,9 +199,169 @@ output_dir/
    - Verify GROMACS can find solvent groups in the topology
    - Check log output for specific error messages
 
-3. **Force field errors**: Ensure dependencies are installed:
-   - **GAFF**: Requires AmberTools and ACPYPE
-   - **OpenFF**: Requires openff-toolkit and openff-interchange
+3. **Force field errors**: Ensure dependencies are installed properly:
+
+   **For GAFF support**:
+   ```bash
+   # Recommended installation
+   mamba install -c conda-forge ambertools
+   # Alternative
+   conda install -c conda-forge ambertools
+   # Last resort
+   pip install ambertools  # May have dependency issues
+   ```
+
+   **For OpenFF support**:
+   ```bash
+   # Recommended installation (includes openff-interchange automatically)
+   mamba install -c conda-forge openff-toolkit
+   # Alternative
+   conda install -c conda-forge openff-toolkit
+   # Using pip (not recommended but works)
+   pip install openff-toolkit openff-interchange
+   ```
+
+   **Common conda installation issues**:
+   - Error: `ambertools does not exist`: Use `conda-forge::ambertools` or create new environment
+   - Error: `PackagesNotFoundError`: Add conda-forge channel and set priority
+   - Error: `Solving environment failed`: Use mamba instead of conda
+   - Error: Channel conflicts: Create isolated environment with `mamba create -n newenv`
+
+## Installation Troubleshooting Guide (2025)
+
+### Common Installation Problems and Solutions
+
+#### 1. **Conda/Mamba Channel Issues**
+
+**Problem**: `PackagesNotFoundError: The following packages are not available from current channels`
+
+**Solutions**:
+```bash
+# Solution A: Fix channel configuration
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+
+# Solution B: Use explicit channel syntax
+conda install conda-forge::openff-toolkit conda-forge::ambertools
+
+# Solution C: Create clean environment
+mamba create -n prism-clean -c conda-forge python=3.9 openff-toolkit ambertools
+conda activate prism-clean
+pip install -e .
+```
+
+#### 2. **AmberTools "does not exist" Error**
+
+**Problem**: `ambertools does not exist (perhaps a typo or a missing channel)`
+
+**Solutions**:
+```bash
+# Recommended: Use mamba (better dependency solver)
+mamba install -c conda-forge ambertools
+
+# Alternative: Force conda-forge channel
+conda install conda-forge::ambertools
+
+# Check available versions
+mamba search ambertools -c conda-forge
+```
+
+#### 3. **Environment Conflicts**
+
+**Problem**: `Solving environment failed` or dependency conflicts
+
+**Solutions**:
+```bash
+# Create isolated environment (BEST PRACTICE)
+mamba create -n prism-env -c conda-forge python=3.9
+conda activate prism-env
+mamba install -c conda-forge openff-toolkit ambertools
+pip install -e .
+
+# Reset base environment if corrupted
+conda clean --all
+conda update conda
+```
+
+#### 4. **Platform-Specific Issues**
+
+**macOS Apple Silicon**:
+```bash
+# Use native arm64 architecture
+mamba create -n prism-env -c conda-forge python=3.9 openff-toolkit ambertools
+# Avoid Rosetta/x86_64 unless absolutely necessary
+```
+
+**Windows Users**:
+```bash
+# Use Windows Subsystem for Linux (WSL)
+# OpenFF does not officially support native Windows
+```
+
+**Linux**:
+```bash
+# Usually works without issues
+mamba install -c conda-forge openff-toolkit ambertools
+```
+
+#### 5. **Mixed Installation Issues**
+
+**Problem**: Mixing pip and conda installations causes conflicts
+
+**Solutions**:
+```bash
+# Clean approach: Use conda/mamba for scientific packages
+mamba install -c conda-forge openff-toolkit ambertools mdtraj
+pip install -e .  # Only install PRISM via pip
+
+# If you must use pip for everything:
+pip install openff-toolkit openff-interchange mdtraj
+pip install -e .[all]
+```
+
+#### 6. **Verification Commands**
+
+After installation, verify everything works:
+```bash
+# Check PRISM installation
+python -c "import prism as pm; print(pm.check_dependencies())"
+
+# Test basic functionality
+python -c "
+import prism as pm
+deps = pm.check_dependencies()
+print('✓ GROMACS:', deps.get('gromacs', False))
+print('✓ OpenFF:', deps.get('openff', False))
+print('✓ AmberTools:', deps.get('antechamber', False))
+print('✓ MDTraj:', deps.get('mdtraj', False))
+"
+
+# Test force field availability
+python -c "
+from prism.builder import PRISMBuilder
+print('Available force fields:')
+builder = PRISMBuilder()
+print(builder.list_ligand_forcefields())
+"
+```
+
+### Quick Fix Commands
+
+For the most common issues, try these in order:
+
+```bash
+# 1. Quick fix for conda channel issues
+mamba install -c conda-forge openff-toolkit ambertools
+
+# 2. If mamba not available, install it first
+conda install -c conda-forge mamba
+mamba install -c conda-forge openff-toolkit ambertools
+
+# 3. Nuclear option: fresh environment
+mamba create -n prism-fresh -c conda-forge python=3.9 openff-toolkit ambertools mdtraj
+conda activate prism-fresh
+pip install -e .
+```
 
 4. **Memory errors**: Large systems may require more RAM during parameterization
 

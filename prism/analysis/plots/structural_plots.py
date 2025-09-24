@@ -624,4 +624,281 @@ def plot_rmsd_rmsf_combined(rmsd_data: Dict[str, np.ndarray],
         fig.savefig(save_path, dpi=300, bbox_inches='tight')
         logger.info(f"Combined RMSD/RMSF plot saved: {save_path}")
 
+def plot_multi_chain_rmsf(chain_rmsf_data: Dict[str, Tuple[np.ndarray, np.ndarray]],
+                           title: str = "Multi-Chain RMSF Analysis",
+                           figsize: Optional[Tuple[float, float]] = None,
+                           save_path: Optional[str] = None,
+                           cols: int = 2) -> Tuple[plt.Figure, List[plt.Axes]]:
+    """
+    Create multi-chain RMSF subplots with automatic layout.
+
+    Parameters
+    ----------
+    chain_rmsf_data : dict
+        Dictionary mapping chain names to (rmsf_values, residue_ids) tuples
+    title : str
+        Overall plot title
+    figsize : tuple, optional
+        Figure size. If None, calculated automatically.
+    save_path : str, optional
+        Path to save figure
+    cols : int
+        Number of columns in subplot grid
+
+    Returns
+    -------
+    tuple
+        (figure, axes_list) objects
+    """
+    n_chains = len(chain_rmsf_data)
+    if n_chains == 0:
+        raise ValueError("No chain data provided")
+
+    # Calculate subplot layout
+    rows = (n_chains + cols - 1) // cols
+
+    # Auto-calculate figure size if not provided
+    if figsize is None:
+        figsize = (6 * cols, 4 * rows)
+
+    fig, axes = plt.subplots(rows, cols, figsize=figsize)
+    if n_chains == 1:
+        axes = [axes]
+    elif rows == 1:
+        axes = list(axes) if hasattr(axes, '__iter__') else [axes]
+    else:
+        axes = axes.flatten()
+
+    # Colors for different chain types
+    protein_colors = plt.cm.Blues(np.linspace(0.4, 0.9, sum(1 for name in chain_rmsf_data.keys() if 'Protein' in name or 'Chain' in name)))
+    nucleic_colors = plt.cm.Reds(np.linspace(0.4, 0.9, sum(1 for name in chain_rmsf_data.keys() if 'Nucleic' in name)))
+
+    protein_idx, nucleic_idx = 0, 0
+
+    for i, (chain_name, (rmsf_values, residue_ids)) in enumerate(chain_rmsf_data.items()):
+        ax = axes[i]
+
+        # Choose color based on chain type
+        if 'Nucleic' in chain_name:
+            color = nucleic_colors[nucleic_idx] if nucleic_idx < len(nucleic_colors) else 'red'
+            nucleic_idx += 1
+        else:
+            color = protein_colors[protein_idx] if protein_idx < len(protein_colors) else 'blue'
+            protein_idx += 1
+
+        # Plot RMSF
+        ax.plot(residue_ids, rmsf_values, color=color, linewidth=2, alpha=0.8)
+        ax.fill_between(residue_ids, rmsf_values, alpha=0.3, color=color)
+
+        # Formatting
+        ax.set_xlabel('Residue/Nucleotide Number')
+        ax.set_ylabel('RMSF (Å)')
+        ax.set_title(f'{chain_name} (n={len(rmsf_values)})')
+        ax.grid(True, alpha=0.3)
+
+        # Add statistics
+        mean_rmsf = np.mean(rmsf_values)
+        std_rmsf = np.std(rmsf_values)
+        stats_text = f"Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å"
+
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                verticalalignment='top', fontsize=9,
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    # Hide unused subplots
+    for i in range(n_chains, len(axes)):
+        axes[i].set_visible(False)
+
+    plt.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Multi-chain RMSF plot saved: {save_path}")
+
+    return fig, axes[:n_chains]
+
+
+def plot_separate_rmsd(protein_rmsd: np.ndarray,
+                       ligand_rmsd: np.ndarray,
+                       times: Optional[np.ndarray] = None,
+                       protein_title: str = "Protein RMSD (PR1 Chain)",
+                       ligand_title: str = "Ligand RMSD (after protein alignment)",
+                       figsize: Tuple[float, float] = (12, 8),
+                       protein_save_path: Optional[str] = None,
+                       ligand_save_path: Optional[str] = None) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
+    """
+    Create separate RMSD plots for protein and ligand.
+
+    Parameters
+    ----------
+    protein_rmsd : np.ndarray
+        Protein RMSD values
+    ligand_rmsd : np.ndarray
+        Ligand RMSD values
+    times : np.ndarray, optional
+        Time points. If None, use frame indices.
+    protein_title : str
+        Title for protein RMSD plot
+    ligand_title : str
+        Title for ligand RMSD plot
+    figsize : tuple
+        Figure size
+    protein_save_path : str, optional
+        Path to save protein RMSD plot
+    ligand_save_path : str, optional
+        Path to save ligand RMSD plot
+
+    Returns
+    -------
+    tuple
+        (figure, (protein_ax, ligand_ax)) objects
+    """
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
+
+    if times is None:
+        times = np.arange(len(protein_rmsd))  # Frame numbers (no unit conversion needed)
+
+    # Protein RMSD plot
+    ax1.plot(times[:len(protein_rmsd)], protein_rmsd, color='blue', linewidth=2, alpha=0.8, label='Protein CA')
+    ax1.fill_between(times[:len(protein_rmsd)], protein_rmsd, alpha=0.3, color='blue')
+    ax1.set_xlabel('Frame')
+    ax1.set_ylabel('RMSD (Å)')
+    ax1.set_title(protein_title)
+    ax1.grid(True, alpha=0.3)
+
+    # Add protein statistics
+    protein_mean = np.mean(protein_rmsd)
+    protein_std = np.std(protein_rmsd)
+    protein_stats = f"Mean: {protein_mean:.3f} ± {protein_std:.3f} Å"
+    ax1.text(0.02, 0.98, protein_stats, transform=ax1.transAxes,
+             verticalalignment='top', fontsize=10,
+             bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+
+    # Ligand RMSD plot
+    ax2.plot(times[:len(ligand_rmsd)], ligand_rmsd, color='red', linewidth=2, alpha=0.8, label='Ligand')
+    ax2.fill_between(times[:len(ligand_rmsd)], ligand_rmsd, alpha=0.3, color='red')
+    ax2.set_xlabel('Frame')
+    ax2.set_ylabel('RMSD (Å)')
+    ax2.set_title(ligand_title)
+    ax2.grid(True, alpha=0.3)
+
+    # Add ligand statistics
+    ligand_mean = np.mean(ligand_rmsd)
+    ligand_std = np.std(ligand_rmsd)
+    ligand_stats = f"Mean: {ligand_mean:.2f} ± {ligand_std:.2f} Å"
+    ax2.text(0.02, 0.98, ligand_stats, transform=ax2.transAxes,
+             verticalalignment='top', fontsize=10,
+             bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.8))
+
+    plt.tight_layout()
+
+    # Save individual plots if paths provided
+    if protein_save_path:
+        # Create individual protein plot
+        fig_protein, ax_protein = plt.subplots(figsize=(10, 5))
+        ax_protein.plot(times[:len(protein_rmsd)], protein_rmsd, color='blue', linewidth=2, alpha=0.8)
+        ax_protein.fill_between(times[:len(protein_rmsd)], protein_rmsd, alpha=0.3, color='blue')
+        ax_protein.set_xlabel('Frame')
+        ax_protein.set_ylabel('RMSD (Å)')
+        ax_protein.set_title(protein_title)
+        ax_protein.grid(True, alpha=0.3)
+        ax_protein.text(0.02, 0.98, protein_stats, transform=ax_protein.transAxes,
+                       verticalalignment='top', fontsize=10,
+                       bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+        plt.tight_layout()
+        fig_protein.savefig(protein_save_path, dpi=300, bbox_inches='tight')
+        plt.close(fig_protein)
+        logger.info(f"Protein RMSD plot saved: {protein_save_path}")
+
+    if ligand_save_path:
+        # Create individual ligand plot
+        fig_ligand, ax_ligand = plt.subplots(figsize=(10, 5))
+        ax_ligand.plot(times[:len(ligand_rmsd)], ligand_rmsd, color='red', linewidth=2, alpha=0.8)
+        ax_ligand.fill_between(times[:len(ligand_rmsd)], ligand_rmsd, alpha=0.3, color='red')
+        ax_ligand.set_xlabel('Frame')
+        ax_ligand.set_ylabel('RMSD (Å)')
+        ax_ligand.set_title(ligand_title)
+        ax_ligand.grid(True, alpha=0.3)
+        ax_ligand.text(0.02, 0.98, ligand_stats, transform=ax_ligand.transAxes,
+                      verticalalignment='top', fontsize=10,
+                      bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.8))
+        plt.tight_layout()
+        fig_ligand.savefig(ligand_save_path, dpi=300, bbox_inches='tight')
+        plt.close(fig_ligand)
+        logger.info(f"Ligand RMSD plot saved: {ligand_save_path}")
+
+    return fig, (ax1, ax2)
+
+
+def plot_multi_repeat_ligand_rmsd(rmsd_data: Dict[str, np.ndarray],
+                                  times: Optional[np.ndarray] = None,
+                                  title: str = "Ligand RMSD - Multiple Repeats",
+                                  figsize: Tuple[float, float] = (12, 6),
+                                  save_path: Optional[str] = None,
+                                  colors: Optional[List[str]] = None) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plot ligand RMSD for multiple repeat experiments.
+
+    Parameters
+    ----------
+    rmsd_data : dict
+        Dictionary mapping repeat names (e.g., 'Repeat 1', 'Repeat 2') to RMSD arrays
+    times : np.ndarray, optional
+        Time points. If None, use frame indices.
+    title : str
+        Plot title
+    figsize : tuple
+        Figure size
+    save_path : str, optional
+        Path to save figure
+    colors : list, optional
+        Colors for each repeat
+
+    Returns
+    -------
+    tuple
+        (figure, axes) objects
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if colors is None:
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+
+    for i, (repeat_name, rmsd_values) in enumerate(rmsd_data.items()):
+        if times is None:
+            plot_times = np.arange(len(rmsd_values))  # Frame numbers (no unit conversion needed)
+        else:
+            plot_times = times[:len(rmsd_values)]
+
+        color = colors[i % len(colors)]
+
+        ax.plot(plot_times, rmsd_values, color=color, linestyle='-',
+               linewidth=2.5, alpha=0.8, label=repeat_name)
+
+    ax.set_xlabel('Frame')
+    ax.set_ylabel('Ligand RMSD (Å)')
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='best')
+
+    # Add overall statistics
+    all_values = np.concatenate([values for values in rmsd_data.values()])
+    overall_mean = np.mean(all_values)
+    overall_std = np.std(all_values)
+    stats_text = f"Overall: {overall_mean:.2f} ± {overall_std:.2f} Å"
+
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+            verticalalignment='top', fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Multi-repeat ligand RMSD plot saved: {save_path}")
+
+    return fig, ax
+
+
     return fig, (ax1, ax2)

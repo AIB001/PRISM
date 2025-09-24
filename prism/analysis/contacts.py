@@ -28,35 +28,9 @@ class ContactAnalyzer:
         self.config = config
     
     def identify_ligand_residue(self, traj):
-        """Automatically identify ligand residue"""
-        ligand_names = ['LIG', 'UNL', 'MOL', 'DRG', 'INH', 'SUB', 'HET']
-        
-        standard_residues = {
-            'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-            'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-            'WAT', 'HOH', 'TIP3', 'SOL', 'NA', 'CL', 'K', 'MG', 'CA', 'ZN'
-        }
-        
-        ligand_residues = []
-        for residue in traj.topology.residues:
-            if (residue.name in ligand_names or 
-                (residue.name not in standard_residues and len(list(residue.atoms)) > 5)):
-                ligand_residues.append(residue)
-        
-        if not ligand_residues:
-            logger.warning("No ligand residue found automatically.")
-            largest_residue = None
-            max_atoms = 0
-            for residue in traj.topology.residues:
-                if residue.name not in standard_residues:
-                    n_atoms = len(list(residue.atoms))
-                    if n_atoms > max_atoms:
-                        max_atoms = n_atoms
-                        largest_residue = residue
-            if largest_residue:
-                ligand_residues = [largest_residue]
-        
-        return ligand_residues[0] if ligand_residues else None
+        """Automatically identify ligand residue using PRISM utilities"""
+        from ..utils.ligand import identify_ligand_residue
+        return identify_ligand_residue(traj)
     
     def get_heavy_atoms(self, residue):
         """Get heavy atom indices from residue"""
@@ -106,7 +80,7 @@ class ContactAnalyzer:
         traj_sample = traj
         frame_indices = np.arange(n_frames)
         
-        distances = md.compute_distances(traj_sample, atom_pairs)        
+        distances = md.compute_distances(traj_sample, atom_pairs, opt=True)
         contact_threshold = self.config.contact_enter_threshold_nm
         contacts = distances < contact_threshold
         

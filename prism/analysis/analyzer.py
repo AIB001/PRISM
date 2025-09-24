@@ -237,7 +237,7 @@ class IntegratedProteinLigandAnalyzer:
                     atom_pairs.append([lig_atom, res_atom])
 
             import mdtraj as md
-            all_distances = md.compute_distances(self.traj, atom_pairs)
+            all_distances = md.compute_distances(self.traj, atom_pairs, opt=True)
             min_distances = np.min(all_distances, axis=1)
             contact_states = (min_distances < self.config.contact_enter_threshold_nm).astype(int)
 

@@ -4,8 +4,19 @@
 Protein-Ligand Analysis Module - Trajectory analysis for protein-ligand systems
 """
 
+import os
+import multiprocessing
+
+# Enable automatic OpenMP parallelization for MDTraj calculations
+# Set OMP_NUM_THREADS to use all available CPU cores by default
+if 'OMP_NUM_THREADS' not in os.environ:
+    n_cores = multiprocessing.cpu_count()
+    os.environ['OMP_NUM_THREADS'] = str(n_cores)
+    print(f"PRISM: Enabled OpenMP parallelization with {n_cores} CPU cores")
+
 from .config import AnalysisConfig, convert_numpy_types
 from .trajectory import TrajectoryManager
+from .trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
 from .multisys import MultiSystemAnalyzer
 from .export import DataExporter
 from .analyzer import IntegratedProteinLigandAnalyzer, analyze_and_visualize
@@ -56,6 +67,9 @@ __all__ = [
 
     # Utilities
     'TrajectoryManager',
+    'TrajectoryProcessor',
+    'process_trajectory_simple',
+    'batch_process_trajectories',
     'DistanceCalculator',
     'DataExporter',
 

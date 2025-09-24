@@ -208,7 +208,7 @@ class DataExporter:
                 logger.warning("No atom pairs found for analysis")
                 return None
 
-            distances = md.compute_distances(analyzer.traj, atom_pairs)
+            distances = md.compute_distances(analyzer.traj, atom_pairs, opt=True)
             contact_threshold = analyzer.config.contact_enter_threshold_nm
             
             frame_data = []
@@ -312,9 +312,9 @@ class DataExporter:
             logger.warning(f"Computing hydrogen bonds for {len(hbond_pairs)} pairs across {traj.n_frames} frames")
 
             try:
-                all_distances = md.compute_distances(traj, hbond_pairs, periodic=False)
+                all_distances = md.compute_distances(traj, hbond_pairs, periodic=False, opt=True)
 
-                all_angles_rad = md.compute_angles(traj, hbond_triplets, periodic=False)
+                all_angles_rad = md.compute_angles(traj, hbond_triplets, periodic=False, opt=True)
                 all_angles_deg = np.degrees(all_angles_rad)
 
                 distance_mask = all_distances < hbond_analyzer.config.hbond_distance_cutoff_nm

@@ -22,7 +22,9 @@ try:
     OPENMM_AVAILABLE = True
 except ImportError:
     OPENMM_AVAILABLE = False
-    print("Warning: OpenMM not available. Install with: conda install -c conda-forge openmm")
+    print("Warning: OpenMM not available. RECOMMENDED INSTALLATION:")
+    print("  mamba install -c conda-forge openmm")
+    print("  # OR: conda install -c conda-forge openmm")
 
 try:
     from tqdm import tqdm
@@ -468,7 +470,8 @@ class OpenMMSimulator:
             print("To fix CUDA compatibility issues:")
             print("1. Check CUDA driver version: nvidia-smi")
             print("2. Reinstall OpenMM with matching CUDA version:")
-            print("   conda install -c conda-forge openmm cudatoolkit=11.7")
+            print("   mamba install -c conda-forge openmm cudatoolkit=11.7")
+            print("   # OR: conda install -c conda-forge openmm cudatoolkit=11.7")
             print("3. Or explicitly use CPU: sim.run(engine='openmm', platform='CPU')")
             print(f"{'='*60}\n")
         

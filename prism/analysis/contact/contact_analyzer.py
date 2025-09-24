@@ -28,38 +28,9 @@ class FastContactAnalyzer:
         return Config()
     
     def identify_ligand_residue(self):
-        """Identify ligand residue in topology"""
-        # Common ligand residue names
-        ligand_names = ['LIG', 'UNL', 'MOL', 'DRG', 'INH', 'SUB', 'HET']
-        
-        # Standard protein/solvent residues to exclude
-        standard_residues = {
-            'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-            'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-            'WAT', 'HOH', 'TIP3', 'SOL', 'NA', 'CL', 'K', 'MG', 'CA', 'ZN'
-        }
-        
-        ligand_residues = []
-        for residue in self.traj.topology.residues:
-            if (residue.name in ligand_names or 
-                (residue.name not in standard_residues and len(list(residue.atoms)) > 5)):
-                ligand_residues.append(residue)
-        
-        if not ligand_residues:
-            print("Warning: No ligand residue found automatically.")
-            # Try to find the largest non-protein residue
-            largest_residue = None
-            max_atoms = 0
-            for residue in self.traj.topology.residues:
-                if residue.name not in standard_residues:
-                    n_atoms = len(list(residue.atoms))
-                    if n_atoms > max_atoms:
-                        max_atoms = n_atoms
-                        largest_residue = residue
-            if largest_residue:
-                ligand_residues = [largest_residue]
-        
-        return ligand_residues[0] if ligand_residues else None
+        """Automatically identify ligand residue using PRISM utilities"""
+        from ...utils.ligand import identify_ligand_residue
+        return identify_ligand_residue(self.traj)
     
     def get_heavy_atoms(self, residue):
         """Get heavy atom indices from residue"""
@@ -121,7 +92,7 @@ class FastContactAnalyzer:
             frame_indices = np.arange(n_frames)
         
         # Calculate all distances at once
-        distances = md.compute_distances(traj_sample, atom_pairs)
+        distances = md.compute_distances(traj_sample, atom_pairs, opt=True)
         print(f"Computed distances shape: {distances.shape}")
         
         # Find contacts
