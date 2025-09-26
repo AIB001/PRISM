@@ -17,14 +17,14 @@ if 'OMP_NUM_THREADS' not in os.environ:
 from .config import AnalysisConfig, convert_numpy_types
 from .trajectory import TrajectoryManager
 from .trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
-from .multisys import MultiSystemAnalyzer
+# from .multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
 from .export import DataExporter
 from .analyzer import IntegratedProteinLigandAnalyzer, analyze_and_visualize
 
 # Import calculation submodule
 from . import calc
 from .calc import (
-    ContactAnalyzer, DistanceCalculator, HBondAnalyzer, DistanceAnalyzer,
+    ContactAnalyzer, HBondAnalyzer, DistanceAnalyzer,
     RMSDAnalyzer, ClusteringAnalyzer, StructuralAnalyzer, SASAAnalyzer, DihedralAnalyzer
 )
 
@@ -56,7 +56,7 @@ __all__ = [
     'ContactAnalyzer',
     'HBondAnalyzer',
     'DistanceAnalyzer',
-    'MultiSystemAnalyzer',
+    # 'MultiSystemAnalyzer',  # TODO: Fix MDTraj conversion
 
     # New analysis modules
     'RMSDAnalyzer',
@@ -70,7 +70,6 @@ __all__ = [
     'TrajectoryProcessor',
     'process_trajectory_simple',
     'batch_process_trajectories',
-    'DistanceCalculator',
     'DataExporter',
 
     # Calculation submodule

@@ -27,7 +27,7 @@ class RMSDAnalyzer:
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
-        self._cache_dir = Path("./analysis_results/rmsd")
+        self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def calculate_rmsd(self,

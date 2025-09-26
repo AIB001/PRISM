@@ -6,10 +6,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .config import AnalysisConfig
 from .trajectory import TrajectoryManager
-from .calc.contacts import ContactAnalyzer, DistanceCalculator
+from .calc.contacts import ContactAnalyzer
 from .calc.distance import DistanceAnalyzer
 from .calc.hbonds import HBondAnalyzer
-from .multisys import MultiSystemAnalyzer
+# from .multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
 from .export import DataExporter
 from .plots.basic import Visualizer
 
@@ -25,11 +25,11 @@ class IntegratedProteinLigandAnalyzer:
         self.config = config or AnalysisConfig()
         
         self.traj_manager = TrajectoryManager()
-        self.distance_calc = DistanceCalculator()
+        # DistanceCalculator removed - using MDTraj directly
         self.contact_analyzer = ContactAnalyzer(self.config)
         self.distance_analyzer = DistanceAnalyzer(self.config)
         self.hbond_analyzer = HBondAnalyzer(self.config)
-        self.multi_analyzer = MultiSystemAnalyzer(self.config)
+        # self.multi_analyzer = MultiSystemAnalyzer(self.config)  # TODO: Fix MDTraj conversion
         self.visualizer = Visualizer()
         
         self.system_files = {}

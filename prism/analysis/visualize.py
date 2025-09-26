@@ -6,6 +6,10 @@ import matplotlib.colors as mcolors
 from typing import List
 from .config import AnalysisConfig
 
+# Import and apply global publication style
+from .plots.publication_utils import apply_publication_style
+apply_publication_style()
+
 logger = logging.getLogger(__name__)
 
 class Visualizer:
@@ -43,7 +47,7 @@ class Visualizer:
             
             ax.set_xlabel("Time (ns)")
             ax.set_ylabel("Distance (Ã…)")
-            ax.set_title(f"Distance to {residue_id}")
+            ax.set_title("")  # Empty title for publication
             ax.legend()
             
             fig.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -126,7 +130,7 @@ class Visualizer:
             
             ax.set_xlabel("Time (ns)", fontweight='bold')
             ax.set_ylabel(ylabel, fontweight='bold')
-            ax.set_title(title, fontweight='bold')
+            ax.set_title("", fontweight='bold')  # Empty title for publication
             
             fig.savefig(output_file, dpi=300, bbox_inches='tight')
             plt.close(fig)

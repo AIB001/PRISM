@@ -23,7 +23,7 @@ class StructuralAnalyzer:
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
-        self._cache_dir = Path("./analysis_results/structural")
+        self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def calculate_radius_of_gyration(self,

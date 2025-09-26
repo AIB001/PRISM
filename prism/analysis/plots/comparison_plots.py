@@ -12,6 +12,10 @@ import seaborn as sns
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 
+# Import and apply global publication style
+from .publication_utils import apply_publication_style
+apply_publication_style()
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,7 +89,7 @@ def _plot_time_series_comparison(data_dict: Dict[str, np.ndarray],
 
     ax.set_xlabel('Time (ns)')
     ax.set_ylabel(property_name)
-    ax.set_title(f'{property_name} Time Series')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -101,7 +105,7 @@ def _plot_distribution_comparison(data_dict: Dict[str, np.ndarray],
 
     ax.set_xlabel(property_name)
     ax.set_ylabel('Density')
-    ax.set_title(f'{property_name} Distribution')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -121,7 +125,7 @@ def _plot_box_comparison(data_dict: Dict[str, np.ndarray],
         patch.set_alpha(0.7)
 
     ax.set_ylabel(property_name)
-    ax.set_title(f'{property_name} Box Plot')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
 
@@ -143,7 +147,7 @@ def _plot_violin_comparison(data_dict: Dict[str, np.ndarray],
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(labels)
     ax.set_ylabel(property_name)
-    ax.set_title(f'{property_name} Violin Plot')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
 
@@ -203,7 +207,7 @@ def plot_correlation_matrix(data_dict: Dict[str, np.ndarray],
             text = ax.text(j, i, f'{corr_matrix.iloc[i, j]:.2f}',
                           ha="center", va="center", color="black")
 
-    ax.set_title(f'Correlation Matrix ({method.capitalize()})')
+    ax.set_title('')  # Empty title for publication
     plt.tight_layout()
 
     if save_path:
@@ -252,7 +256,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
     ax.set_xticks(x_pos)
     ax.set_xticklabels(labels, rotation=45, ha='right')
     ax.set_ylabel(f'{property_name} (Mean ± SD)')
-    ax.set_title('Mean Values Comparison')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
     # 2. Box plot
@@ -264,7 +268,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
         patch.set_alpha(0.7)
     ax.set_xticklabels(labels, rotation=45, ha='right')
     ax.set_ylabel(property_name)
-    ax.set_title('Distribution Comparison')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
     # 3. Cumulative distribution
@@ -275,7 +279,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
         ax.plot(sorted_values, y, color=colors[i], label=label, linewidth=2)
     ax.set_xlabel(property_name)
     ax.set_ylabel('Cumulative Probability')
-    ax.set_title('Cumulative Distribution')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -287,7 +291,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
         sample_size = min(1000, len(values))
         sample = np.random.choice(values, sample_size, replace=False)
         stats.probplot(sample, dist="norm", plot=ax)
-    ax.set_title('Q-Q Plot vs Normal Distribution')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -343,7 +347,7 @@ def plot_difference_analysis(data1: np.ndarray,
     ax.plot(times, data2_trim, label=label2, color='red', alpha=0.7)
     ax.set_xlabel('Time (ns)')
     ax.set_ylabel(property_name)
-    ax.set_title('Time Series Comparison')
+    ax.set_title('')  # Empty title for publication
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -354,7 +358,7 @@ def plot_difference_analysis(data1: np.ndarray,
     ax.fill_between(times, difference, 0, alpha=0.3, color='green')
     ax.set_xlabel('Time (ns)')
     ax.set_ylabel(f'Δ{property_name} ({label2} - {label1})')
-    ax.set_title('Difference Analysis')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
     # 3. Distribution comparison
@@ -363,7 +367,7 @@ def plot_difference_analysis(data1: np.ndarray,
     ax.hist(data2_trim, bins=30, alpha=0.6, label=label2, color='red', density=True)
     ax.set_xlabel(property_name)
     ax.set_ylabel('Density')
-    ax.set_title('Distribution Comparison')
+    ax.set_title('')  # Empty title for publication
     ax.legend()
     ax.grid(True, alpha=0.3)
 
@@ -378,7 +382,7 @@ def plot_difference_analysis(data1: np.ndarray,
 
     ax.set_xlabel(f'{property_name} ({label1})')
     ax.set_ylabel(f'{property_name} ({label2})')
-    ax.set_title('Correlation Plot')
+    ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
 
     # Add correlation coefficient

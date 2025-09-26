@@ -1,30 +1,10 @@
 import logging
 import numpy as np
-import MDAnalysis as mda
 from ..config import AnalysisConfig, convert_numpy_types
-
-try:
-    import mdtraj as md
-    MDTRAJ_AVAILABLE = True
-except ImportError:
-    MDTRAJ_AVAILABLE = False
-    md = None
+import mdtraj as md
 
 logger = logging.getLogger(__name__)
 
-class DistanceCalculator:
-    """Distance calculation utilities"""
-    
-    @staticmethod
-    def calculate_distance_array_mda(group1, group2, box=None):
-        """MDAnalysis distance calculation for multi-system analysis"""
-        try:
-            return mda.lib.distances.distance_array(
-                group1.positions, group2.positions, box=box
-            )
-        except Exception as e:
-            logger.error(f"Error calculating distance array: {e}")
-            raise
 
 
 class ContactAnalyzer:
@@ -177,3 +157,85 @@ class ContactAnalyzer:
         contact_states = np.zeros(len(distances), dtype=int)
         contact_states[distances < self.config.contact_enter_threshold_nm] = 1
         return contact_states
+
+    def calculate_contacts(self, universe, trajectory=None, selection1="", selection2="", cutoff=4.0, step=1, cache_name=None):
+        """
+        Calculate contacts between two selections using pure MDTraj.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file (PDB/GRO)
+        trajectory : str
+            Path to trajectory file (XTC/DCD/TRR)
+        selection1 : str
+            First selection (MDTraj selection syntax)
+        selection2 : str
+            Second selection (MDTraj selection syntax)
+        cutoff : float
+            Contact cutoff distance in Angstrom
+        step : int
+            Step size for trajectory frames
+        cache_name : str
+            Cache name (for compatibility, not used)
+
+        Returns
+        -------
+        np.ndarray
+            Boolean array indicating contacts for each frame
+        """
+        try:
+            # Load trajectory with MDTraj
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)  # For PDB-only cases
+
+            # Apply frame slicing
+            if step > 1:
+                traj = traj[::step]
+
+            # Convert cutoff from Angstrom to nm for MDTraj
+            cutoff_nm = cutoff / 10.0
+
+            # Select atoms using MDTraj selection syntax
+            try:
+                atoms1 = traj.topology.select(selection1)
+                atoms2 = traj.topology.select(selection2)
+            except Exception as e:
+                logger.error(f"Selection error: {e}")
+                logger.error(f"selection1: '{selection1}', selection2: '{selection2}'")
+                return np.array([])
+
+            if len(atoms1) == 0 or len(atoms2) == 0:
+                logger.warning(f"Empty selection: group1={len(atoms1)}, group2={len(atoms2)}")
+                return np.array([])
+
+            logger.info(f"Contact analysis: {len(atoms1)} atoms vs {len(atoms2)} atoms")
+            logger.info(f"Analyzing {traj.n_frames} frames with cutoff {cutoff} Å")
+
+            # Create atom pairs for distance calculation
+            atom_pairs = []
+            for atom1 in atoms1:
+                for atom2 in atoms2:
+                    atom_pairs.append([atom1, atom2])
+
+            if len(atom_pairs) == 0:
+                logger.warning("No atom pairs generated")
+                return np.array([])
+
+            # Calculate distances for all pairs across all frames
+            distances = md.compute_distances(traj, atom_pairs)
+
+            # Check for contacts: any pair within cutoff counts as contact for that frame
+            contacts_per_frame = np.any(distances < cutoff_nm, axis=1)
+
+            logger.info(f"Contact analysis complete: {np.sum(contacts_per_frame)} contact frames out of {traj.n_frames}")
+
+            return contacts_per_frame
+
+        except Exception as e:
+            logger.error(f"Contact calculation failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return np.array([])

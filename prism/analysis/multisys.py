@@ -4,7 +4,7 @@ import numpy as np
 import MDAnalysis as mda
 from typing import Tuple
 from .config import AnalysisConfig
-from .calc.contacts import DistanceCalculator
+# DistanceCalculator removed - using MDTraj directly
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ class MultiSystemAnalyzer:
 
             for ts in universe.trajectory:
                 try:
-                    dist_matrix = DistanceCalculator.calculate_distance_array_mda(
+                    # TODO: Replace with MDTraj implementation
+                    # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
                         group1, group2, universe.dimensions
                     )
                     contact_indices = np.where(dist_matrix < cutoff_angstrom)
@@ -67,7 +68,8 @@ class MultiSystemAnalyzer:
             universe.trajectory[0]
             cutoff_angstrom = cutoff_nm *10.0
             
-            dist_matrix = DistanceCalculator.calculate_distance_array_mda(
+            # TODO: Replace with MDTraj implementation
+            # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
                 group1, group2, universe.dimensions
             )
             contact_indices = np.where(dist_matrix < cutoff_angstrom)
@@ -83,7 +85,8 @@ class MultiSystemAnalyzer:
             remaining_contacts = []
             for ts in universe.trajectory:
                 try:
-                    dist_matrix = DistanceCalculator.calculate_distance_array_mda(
+                    # TODO: Replace with MDTraj implementation
+                    # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
                         group1, group2, universe.dimensions
                     )
                     contact_indices = np.where(dist_matrix < cutoff_angstrom)

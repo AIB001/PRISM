@@ -6,7 +6,7 @@ PRISM Analysis Calculation Module
 Core calculation functions for molecular dynamics trajectory analysis.
 """
 
-from .contacts import ContactAnalyzer, DistanceCalculator
+from .contacts import ContactAnalyzer
 from .hbonds import HBondAnalyzer
 from .distance import DistanceAnalyzer
 from .rmsd import RMSDAnalyzer
@@ -17,7 +17,6 @@ from .dihedral import DihedralAnalyzer
 
 __all__ = [
     'ContactAnalyzer',
-    'DistanceCalculator',
     'HBondAnalyzer',
     'DistanceAnalyzer',
     'RMSDAnalyzer',

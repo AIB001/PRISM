@@ -29,7 +29,7 @@ class DihedralAnalyzer:
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
-        self._cache_dir = Path("./analysis_results/dihedral")
+        self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         if not DIHEDRAL_AVAILABLE:

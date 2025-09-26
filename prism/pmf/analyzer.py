@@ -13,6 +13,10 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Tuple
 import logging
 
+# Import and apply global publication style
+from ..analysis.plots.publication_utils import apply_publication_style
+apply_publication_style()
+
 logger = logging.getLogger(__name__)
 
 
@@ -220,7 +224,7 @@ class PMFAnalyzer:
             
             plt.xlabel('Distance (nm)', fontsize=14)
             plt.ylabel('PMF (kcal/mol)', fontsize=14)
-            plt.title('Potential of Mean Force', fontsize=16)
+            plt.title('', fontsize=16)  # Empty title for publication
             plt.grid(True, alpha=0.3)
             plt.legend()
             
@@ -269,7 +273,7 @@ class PMFAnalyzer:
             
             plt.xlabel('Distance (nm)', fontsize=14)
             plt.ylabel('Force (kcal/mol/nm)', fontsize=14)
-            plt.title('Force Profile (PMF Gradient)', fontsize=16)
+            plt.title('', fontsize=16)  # Empty title for publication
             plt.grid(True, alpha=0.3)
             plt.legend()
             plt.tight_layout()
@@ -316,7 +320,7 @@ class PMFAnalyzer:
             
             plt.xlabel('Distance (nm)', fontsize=14)
             plt.ylabel('PMF (kcal/mol)', fontsize=14)
-            plt.title('Energy Landscape for Protein-Ligand Binding', fontsize=16)
+            plt.title('', fontsize=16)  # Empty title for publication
             plt.grid(True, alpha=0.3)
             plt.legend()
             plt.tight_layout()

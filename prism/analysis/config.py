@@ -23,14 +23,7 @@ def convert_numpy_types(obj):
     else:
         return obj
 
-plt.rcParams.update({
-    'font.size': 14,
-    'font.family': 'Times New Roman',
-    'axes.titlesize': 18,
-    'axes.labelsize': 16,
-    'xtick.labelsize': 14,
-    'ytick.labelsize': 14
-})
+# Removed hardcoded rcParams - global publication style is now applied by individual plotting modules
 
 @dataclass
 class AnalysisConfig:
