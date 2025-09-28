@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Union, Optional, Dict, Tuple
 import time
 
-from ..utils.environment import GromacsEnvironment
+from ...utils.environment import GromacsEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -504,7 +504,7 @@ class TrajectoryProcessor:
             Ligand atom indices
         """
         try:
-            from ..utils.ligand import identify_ligand_residue
+            from ...utils.ligand import identify_ligand_residue
 
             # Use PRISM ligand detection
             ligand = identify_ligand_residue(traj, ligand_name)
@@ -571,7 +571,7 @@ class TrajectoryProcessor:
         """Find special chains like P (primary) or Q by context."""
         try:
             # Look for chains with ligand nearby
-            from ..utils.ligand import identify_ligand_residue
+            from ...utils.ligand import identify_ligand_residue
 
             ligand = identify_ligand_residue(traj)
             if ligand:
@@ -655,7 +655,7 @@ class TrajectoryProcessor:
         """
         try:
             # Use PRISM ligand detection first
-            from ..utils.ligand import identify_ligand_residue
+            from ...utils.ligand import identify_ligand_residue
             import mdtraj as md
 
             topo_path = Path(topology)

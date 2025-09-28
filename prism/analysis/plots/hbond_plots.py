@@ -6,16 +6,17 @@ Hydrogen bond plotting utilities for PRISM analysis module.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 # Import publication style
-from .publication_utils import apply_publication_style
+from .publication_utils import apply_publication_style, get_standard_figsize
 
 
 def plot_hbond_analysis(hbond_results: Dict,
                        output_path: str,
-                       title: str = "Hydrogen Bond Analysis") -> bool:
+                       title: str = "") -> bool:
     """
     Plot hydrogen bond analysis results for multiple trajectories.
 
@@ -34,9 +35,10 @@ def plot_hbond_analysis(hbond_results: Dict,
         True if successful, False otherwise
     """
     try:
+        print("🔗 Hydrogen bond 4-panel analysis: time series, distribution, averages, and statistics")
         apply_publication_style()
 
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig, axes = plt.subplots(2, 2, figsize=get_standard_figsize('quad'))
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
 
         # Plot 1: H-bond count time series
@@ -50,8 +52,7 @@ def plot_hbond_analysis(hbond_results: Dict,
                             label=traj_name, linewidth=2, alpha=0.8)
 
         ax1.set_xlabel('Time (ns)', fontfamily='Times New Roman')
-        ax1.set_ylabel('Hydrogen Bond Count', fontfamily='Times New Roman')
-        ax1.set_title('Hydrogen Bond Count vs Time', fontfamily='Times New Roman', fontweight='bold')
+        ax1.set_ylabel('H-bonds', fontfamily='Times New Roman')
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
@@ -68,7 +69,6 @@ def plot_hbond_analysis(hbond_results: Dict,
             ax2.hist(all_counts, bins=15, alpha=0.7, color='lightgreen', edgecolor='black')
             ax2.set_xlabel('Hydrogen Bond Count', fontfamily='Times New Roman')
             ax2.set_ylabel('Frequency', fontfamily='Times New Roman')
-            ax2.set_title('H-bond Count Distribution', fontfamily='Times New Roman', fontweight='bold')
             ax2.grid(True, alpha=0.3)
 
         # Plot 3: Average H-bond count per trajectory
@@ -88,8 +88,7 @@ def plot_hbond_analysis(hbond_results: Dict,
         if traj_names:
             bars = ax3.bar(traj_names, avg_counts, yerr=std_counts,
                           color=colors[:len(traj_names)], alpha=0.7, capsize=5)
-            ax3.set_ylabel('Average H-bond Count', fontfamily='Times New Roman')
-            ax3.set_title('Average H-bond Count per Trajectory', fontfamily='Times New Roman', fontweight='bold')
+            ax3.set_ylabel('Avg H-bonds', fontfamily='Times New Roman')
             ax3.grid(True, alpha=0.3, axis='y')
 
         # Plot 4: H-bond distance distribution (if available)
@@ -105,7 +104,6 @@ def plot_hbond_analysis(hbond_results: Dict,
             ax4.hist(all_distances, bins=30, alpha=0.7, color='orange', edgecolor='black')
             ax4.set_xlabel('H-bond Distance (Å)', fontfamily='Times New Roman')
             ax4.set_ylabel('Frequency', fontfamily='Times New Roman')
-            ax4.set_title('H-bond Distance Distribution', fontfamily='Times New Roman', fontweight='bold')
             ax4.grid(True, alpha=0.3)
         else:
             ax4.text(0.5, 0.5, 'No Distance Data', ha='center', va='center',
@@ -148,9 +146,10 @@ def plot_key_residue_hbonds(hbond_results: Dict,
         True if successful, False otherwise
     """
     try:
+        print("🔗 Key residue hydrogen bond analysis: frequency and stability comparison")
         apply_publication_style()
 
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
 
         # Plot 1: Key residue H-bond frequencies
@@ -172,9 +171,8 @@ def plot_key_residue_hbonds(hbond_results: Dict,
         if residue_names:
             bars = ax1.bar(residue_names, avg_counts, yerr=std_counts,
                           color='skyblue', alpha=0.7, capsize=5)
-            ax1.set_ylabel('Average H-bond Count', fontfamily='Times New Roman')
+            ax1.set_ylabel('Avg H-bonds', fontfamily='Times New Roman')
             ax1.set_xlabel('Key Residues', fontfamily='Times New Roman')
-            ax1.set_title('Key Residue H-bond Frequencies', fontfamily='Times New Roman', fontweight='bold')
             ax1.grid(True, alpha=0.3, axis='y')
             plt.setp(ax1.get_xticklabels(), rotation=45)
 
@@ -189,8 +187,7 @@ def plot_key_residue_hbonds(hbond_results: Dict,
                             label=traj_name, linewidth=2, alpha=0.8)
 
         ax2.set_xlabel('Time (ns)', fontfamily='Times New Roman')
-        ax2.set_ylabel('H-bond Stability', fontfamily='Times New Roman')
-        ax2.set_title('H-bond Stability Over Time', fontfamily='Times New Roman', fontweight='bold')
+        ax2.set_ylabel('Stability', fontfamily='Times New Roman')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
 
@@ -202,4 +199,191 @@ def plot_key_residue_hbonds(hbond_results: Dict,
 
     except Exception as e:
         print(f"Error in key residue hydrogen bond plotting: {e}")
+        return False
+
+
+def plot_hbond_raincloud(hbond_data: Dict[str, Dict[str, float]],
+                        output_path: str,
+                        title: str = "Key Residue Hydrogen Bond Analysis") -> bool:
+    """
+    Create raincloud-style plots for key residue hydrogen bonds.
+
+    Creates raincloud plots showing H-bond frequency distributions for key residues
+    interacting with the LIG ligand, with violin, box, and scatter components.
+
+    Parameters
+    ----------
+    hbond_data : dict
+        Dictionary with residue names as keys and H-bond frequency data as nested dict
+        Format: {'ASP623': {'Repeat1': 0.85, 'Repeat2': 0.92, 'Repeat3': 0.78}, ...}
+    output_path : str
+        Path to save the figure
+    title : str
+        Main plot title
+
+    Returns
+    -------
+    bool
+        True if successful
+    """
+    try:
+        print("🎻 Key residue hydrogen bond violin plot showing distribution comparison across trajectories")
+        apply_publication_style()
+
+        # Define key residues for H-bond analysis
+        key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759', 'THR680', 'LYS551', 'ARG553', 'ARG555']
+
+        # Filter to only include key residues that have data
+        available_residues = [res for res in key_residues if res in hbond_data]
+
+        if not available_residues:
+            print("No key residue H-bond data available for raincloud plot")
+            return False
+
+        # Prepare data for raincloud plot
+        all_data = []
+        residue_labels = []
+
+        for residue in available_residues:
+            # Convert frequencies to percentages for consistency
+            values = [hbond_data[residue].get(f'Repeat{i}', 0.0) * 100 for i in [1, 2, 3]]
+            # Remove zero values to avoid empty distributions
+            non_zero_values = [v for v in values if v > 0]
+            if non_zero_values:
+                all_data.append(non_zero_values)
+                residue_labels.append(residue)
+            else:
+                # If all values are zero, add a small value for visualization
+                all_data.append([0.1] * 3)
+                residue_labels.append(residue)
+
+        if not all_data:
+            return False
+
+        # Create raincloud plot
+        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+
+        # Color scheme for the raincloud plot
+        colors = [
+            '#E8F4F8',  # Light blue
+            '#F0E8F4',  # Light purple
+            '#E8F8F0',  # Light green
+            '#F8F0E8',  # Light orange
+            '#F4E8E8',  # Light red
+            '#F5F5DC',  # Beige
+            '#E6E6FA',  # Lavender
+            '#F0FFF0',  # Honeydew
+            '#FFF5EE'   # Seashell
+        ]
+
+        edge_colors = [
+            '#4A90A4',  # Dark blue
+            '#8E44AD',  # Dark purple
+            '#27AE60',  # Dark green
+            '#E67E22',  # Dark orange
+            '#E74C3C',  # Dark red
+            '#D2B48C',  # Tan
+            '#9370DB',  # Medium purple
+            '#2E8B57',  # Sea green
+            '#CD853F'   # Peru
+        ]
+
+        positions = np.arange(len(residue_labels))
+
+        # 1. Create half violin plots (right side)
+        for i, data in enumerate(all_data):
+            # Create violin plot manually for half-violin effect
+            if len(data) > 1:
+                try:
+                    from scipy import stats
+                    density = stats.gaussian_kde(data)
+                    y_data = np.linspace(min(data), max(data), 100)
+                    x_data = density(y_data)
+
+                    # Normalize and scale the violin width
+                    x_data = x_data / np.max(x_data) * 0.3
+
+                    # Plot right half of violin
+                    ax.fill_betweenx(y_data, positions[i], positions[i] + x_data,
+                                   color=colors[i % len(colors)], alpha=0.7, zorder=1)
+                except:
+                    # Fallback to simple violin if KDE fails
+                    parts = ax.violinplot([data], positions=[positions[i]],
+                                         showmeans=False, showmedians=False, showextrema=False)
+                    for pc in parts['bodies']:
+                        pc.set_facecolor(colors[i % len(colors)])
+                        pc.set_alpha(0.7)
+                        # Modify to make it half-violin
+                        verts = pc.get_paths()[0].vertices
+                        verts[:, 0] = np.where(verts[:, 0] < positions[i], positions[i], verts[:, 0])
+
+        # 2. Create box plots
+        for i, data in enumerate(all_data):
+            pos = positions[i]
+            if len(data) > 0:
+                q1, median, q3 = np.percentile(data, [25, 50, 75])
+                iqr = q3 - q1
+                lower_whisker = max(min(data), q1 - 1.5 * iqr)
+                upper_whisker = min(max(data), q3 + 1.5 * iqr)
+
+                box_width = 0.1
+                box = plt.Rectangle((pos - box_width / 2, q1), box_width, q3 - q1,
+                                    facecolor='white', edgecolor=edge_colors[i % len(edge_colors)],
+                                    linewidth=2, alpha=0.7, zorder=3)
+                ax.add_patch(box)
+
+                # Median line
+                ax.plot([pos - box_width / 2, pos + box_width / 2], [median, median],
+                        color=edge_colors[i % len(edge_colors)], linewidth=3, zorder=4)
+
+                # Whiskers
+                ax.plot([pos, pos], [q3, upper_whisker], color=edge_colors[i % len(edge_colors)], linewidth=2, zorder=3)
+                ax.plot([pos, pos], [q1, lower_whisker], color=edge_colors[i % len(edge_colors)], linewidth=2, zorder=3)
+                ax.plot([pos - 0.02, pos + 0.02], [upper_whisker, upper_whisker],
+                        color=edge_colors[i % len(edge_colors)], linewidth=2, zorder=3)
+                ax.plot([pos - 0.02, pos + 0.02], [lower_whisker, lower_whisker],
+                        color=edge_colors[i % len(edge_colors)], linewidth=2, zorder=3)
+
+        # 3. Create scatter plots (rain) - left side
+        for i, data in enumerate(all_data):
+            pos = positions[i]
+            n_points = len(data)
+            if n_points > 0:
+                y_data = np.array(data)
+
+                # Add jitter to x positions for scatter
+                x_jitter = np.random.normal(pos - 0.15, 0.05, n_points)  # Left side with jitter
+                x_jitter = np.clip(x_jitter, pos - 0.3, pos - 0.05)  # Keep within bounds
+
+                ax.scatter(x_jitter, y_data, s=30, alpha=0.6,
+                          color=edge_colors[i % len(edge_colors)], edgecolors='white',
+                          linewidth=0.5, zorder=2)
+
+        # 4. Formatting with proper tick alignment
+        ax.set_xticks(positions)
+        ax.set_xticklabels(residue_labels, rotation=45, ha='center', fontsize=18)
+        ax.set_ylabel('Frequency (%)', fontsize=21, fontweight='bold')
+        ax.set_xlabel('Key Residues', fontsize=21, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor('#FAFAFA')
+
+        # Set y-axis limits
+        all_values = [item for sublist in all_data for item in sublist]
+        if all_values:
+            ax.set_ylim(0, max(all_values) * 1.1)
+
+        # Style axes
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_axisbelow(True)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        plt.close()
+
+        return True
+
+    except Exception as e:
+        print(f"Error in H-bond raincloud plot: {e}")
         return False

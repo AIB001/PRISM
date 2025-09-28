@@ -1,7 +1,8 @@
 import logging
 import numpy as np
 from typing import List, Tuple, Dict
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
+from ..core.parallel import default_processor
 
 try:
     import mdtraj as md
@@ -90,8 +91,12 @@ class HBondAnalyzer:
 
             self._find_donors_acceptors_vectorized(frame0, self.protein_residues, is_protein=True)
 
-            if self.ligand_residue:
-                self._find_donors_acceptors_vectorized(frame0, [self.ligand_residue], is_protein=False)
+            if self.ligand_residue is not None:
+                # Validate that ligand_residue is a proper residue object, not a string
+                if hasattr(self.ligand_residue, 'index') and hasattr(self.ligand_residue, 'atoms'):
+                    self._find_donors_acceptors_vectorized(frame0, [self.ligand_residue], is_protein=False)
+                else:
+                    logger.warning(f"Invalid ligand residue object: {type(self.ligand_residue)}")
             else:
                 logger.warning("No ligand residue found for hydrogen bond analysis")
         
@@ -112,8 +117,13 @@ class HBondAnalyzer:
         """Vectorized donor/acceptor finding"""
         donor_list = self.protein_donors if is_protein else self.ligand_donors
         acceptor_list = self.protein_acceptors if is_protein else self.ligand_acceptors
-        
+
         for residue in residues:
+            # Validate residue object
+            if not hasattr(residue, 'index') or not hasattr(residue, 'atoms'):
+                logger.warning(f"Invalid residue object: {type(residue)} - {residue}")
+                continue
+
             residue_idx = residue.index
             h_indices = self._residue_h_atoms.get(residue_idx, [])
             

@@ -1,7 +1,6 @@
 import os
 import logging
 import numpy as np
-import MDAnalysis as mda
 from typing import Tuple
 from .config import AnalysisConfig
 # DistanceCalculator removed - using MDTraj directly
@@ -33,8 +32,8 @@ class MultiSystemAnalyzer:
                 try:
                     # TODO: Replace with MDTraj implementation
                     # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
-                        group1, group2, universe.dimensions
-                    )
+                    #     group1, group2, universe.dimensions
+                    # )
                     contact_indices = np.where(dist_matrix < cutoff_angstrom)
 
                     # Use atom-residue contacts instead of just atom-atom
@@ -70,8 +69,8 @@ class MultiSystemAnalyzer:
             
             # TODO: Replace with MDTraj implementation
             # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
-                group1, group2, universe.dimensions
-            )
+            #     group1, group2, universe.dimensions
+            # )
             contact_indices = np.where(dist_matrix < cutoff_angstrom)
             initial_contacts = {
                 (group1[i].index, group2[j].resid)
@@ -87,8 +86,8 @@ class MultiSystemAnalyzer:
                 try:
                     # TODO: Replace with MDTraj implementation
                     # dist_matrix = DistanceCalculator.calculate_distance_array_mda(
-                        group1, group2, universe.dimensions
-                    )
+                    #     group1, group2, universe.dimensions
+                    # )
                     contact_indices = np.where(dist_matrix < cutoff_angstrom)
                     current_contacts = {
                         (group1[i].index, group2[j].resid)

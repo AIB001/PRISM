@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from typing import List
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
 
 # Import and apply global publication style
 from .publication_utils import apply_publication_style

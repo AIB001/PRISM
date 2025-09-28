@@ -19,7 +19,7 @@ try:
 except ImportError:
     SASA_AVAILABLE = False
 
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
 
 logger = logging.getLogger(__name__)
 

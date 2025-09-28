@@ -19,7 +19,8 @@ from typing import List, Union, Optional, Tuple, Dict
 import logging
 import pickle
 
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
+from ..core.parallel import default_processor
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,10 @@ class ClusteringAnalyzer:
         md.Trajectory
             Aligned trajectory
         """
-        # Load trajectory - handle frame slicing separately
+        # Load trajectory with parallel processing configuration
         # For large files, limit frames to avoid memory issues
-        traj = md.load(trajectory, top=topology)
+        with default_processor.configure_omp_threads():
+            traj = md.load(trajectory, top=topology)
 
         # Apply frame slicing after loading
         if end_frame is None:
@@ -119,8 +121,9 @@ class ClusteringAnalyzer:
         if len(align_indices) == 0:
             raise ValueError(f"No atoms found for alignment selection: {align_selection}")
 
-        # Align trajectory to first frame
-        traj.superpose(traj, frame=0, atom_indices=align_indices)
+        # Align trajectory to first frame with parallel processing
+        with default_processor.configure_omp_threads():
+            traj.superpose(traj, frame=0, atom_indices=align_indices)
 
         logger.info(f"Loaded and aligned trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
         logger.info(f"Alignment atoms: {len(align_indices)} atoms")
@@ -581,15 +584,16 @@ class ClusteringAnalyzer:
         else:
             rmsd_indices = traj.topology.select(cluster_selection)
 
-        # Calculate pairwise RMSD matrix
+        # Calculate pairwise RMSD matrix with parallel processing
         rmsd_matrix = np.zeros((traj.n_frames, traj.n_frames))
 
-        for i in range(traj.n_frames):
-            for j in range(i, traj.n_frames):
-                # Calculate RMSD between frames i and j
-                rmsd_val = md.rmsd(traj[i:i+1], traj[j:j+1], atom_indices=rmsd_indices)[0]
-                rmsd_matrix[i, j] = rmsd_val
-                rmsd_matrix[j, i] = rmsd_val  # Symmetric matrix
+        with default_processor.configure_omp_threads():
+            for i in range(traj.n_frames):
+                for j in range(i, traj.n_frames):
+                    # Calculate RMSD between frames i and j
+                    rmsd_val = md.rmsd(traj[i:i+1], traj[j:j+1], atom_indices=rmsd_indices)[0]
+                    rmsd_matrix[i, j] = rmsd_val
+                    rmsd_matrix[j, i] = rmsd_val  # Symmetric matrix
 
         logger.info(f"Calculated RMSD matrix: {rmsd_matrix.shape}")
         return rmsd_matrix

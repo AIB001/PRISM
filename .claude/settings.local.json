@@ -13,7 +13,12 @@
       "Bash(python3 -c \"\nimport mdtraj as md\nimport numpy as np\n\nprint(''✓ mdtraj imported successfully'')\n\n# Check available analysis functions\nanalysis_functions = [\n    ''compute_distances'', ''compute_contacts'', ''rmsd'', ''rmsf'', \n    ''compute_dihedrals'', ''compute_angles'', ''superpose''\n]\n\nfor func in analysis_functions:\n    if hasattr(md, func):\n        print(f''✓ md.{func}: available'')\n    else:\n        print(f''✗ md.{func}: NOT available'')\n\n# Test trajectory loading\ntry:\n    traj = md.load(''../data/repeat1_processed.xtc'', top=''../data/system.pdb'')\n    print(f''✓ Full trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms'')\n    \n    # Test slicing\n    traj_slice = traj[::10]  # Every 10th frame\n    print(f''✓ Frame slicing: {traj_slice.n_frames} frames (every 10th)'')\n    \n    print(f''✓ Topology info: {traj.topology.n_residues} residues, {traj.topology.n_chains} chains'')\n    \nexcept Exception as e:\n    print(f''✗ Trajectory operations failed: {e}'')\n\")",
       "Read(//data/gxf1212/work/PRISM/test/analysis/rdrp/docs/materials/**)",
       "WebSearch",
-      "WebFetch(domain:mdtraj.org)"
+      "WebFetch(domain:mdtraj.org)",
+      "Read(//data/gxf1212/work/SciDraft-Studio/projects/RdRp/data/docs/**)",
+      "Read(//data/gxf1212/work/PRISM/test/analysis/rdrp/docs/example_figures/**)",
+      "Read(//home/gxf1212/.claude/**)",
+      "Bash(python3:*)",
+      "Read(///**)"
     ],
     "deny": [],
     "ask": []

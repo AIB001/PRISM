@@ -13,7 +13,8 @@ from typing import List, Union, Optional, Tuple, Dict
 import logging
 from pathlib import Path
 
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
+from ..core.parallel import default_processor
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,9 @@ class LigandDynamicsAnalyzer:
             Dictionary containing dynamics analysis results
         """
         try:
-            # Load trajectory - simpler approach
-            traj = md.load(str(trajectory), top=str(topology))
+            # Load trajectory with parallel processing configuration
+            with default_processor.configure_omp_threads():
+                traj = md.load(str(trajectory), top=str(topology))
             if step > 1:
                 traj = traj[::step]
             logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
@@ -67,7 +69,8 @@ class LigandDynamicsAnalyzer:
             mdtraj_alignment_sel = alignment_selection.replace("segid PR1", "chainid 0").replace(" and name CA", " and name CA")
             alignment_atoms = traj.topology.select(mdtraj_alignment_sel)
             if len(alignment_atoms) > 0:
-                traj.superpose(traj, frame=0, atom_indices=alignment_atoms)
+                with default_processor.configure_omp_threads():
+                    traj.superpose(traj, frame=0, atom_indices=alignment_atoms)
                 logger.info(f"Aligned trajectory using {len(alignment_atoms)} atoms")
 
             # Find ligand atoms
@@ -125,8 +128,9 @@ class LigandDynamicsAnalyzer:
         distance_data = {}
 
         try:
-            # Calculate ligand center of mass
-            ligand_com = md.compute_center_of_mass(traj.atom_slice(ligand_atoms))
+            # Calculate ligand center of mass with parallel processing
+            with default_processor.configure_omp_threads():
+                ligand_com = md.compute_center_of_mass(traj.atom_slice(ligand_atoms))
 
             for res in key_residues:
                 try:
@@ -146,7 +150,9 @@ class LigandDynamicsAnalyzer:
                                 res_atoms = test_atoms
 
                     if len(res_atoms) > 0:
-                        res_com = md.compute_center_of_mass(traj.atom_slice(res_atoms))
+                        # Calculate residue center of mass with parallel processing
+                        with default_processor.configure_omp_threads():
+                            res_com = md.compute_center_of_mass(traj.atom_slice(res_atoms))
                         distances = np.linalg.norm(ligand_com - res_com, axis=1)
                         distance_data[res] = distances
                         logger.debug(f"Distance to {res}: {np.mean(distances):.2f} ± {np.std(distances):.2f} nm")

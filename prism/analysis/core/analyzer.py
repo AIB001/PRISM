@@ -6,12 +6,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .config import AnalysisConfig
 from .trajectory import TrajectoryManager
-from .calc.contacts import ContactAnalyzer
-from .calc.distance import DistanceAnalyzer
-from .calc.hbonds import HBondAnalyzer
+from ..calc.contacts import ContactAnalyzer
+from ..calc.distance import DistanceAnalyzer
+from ..calc.hbonds import HBondAnalyzer
 # from .multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
 from .export import DataExporter
-from .plots.basic import Visualizer
+from ..plots.basic import Visualizer
 
 logging.basicConfig(level=logging.WARNING, format='%(message)s')
 logger = logging.getLogger(__name__)

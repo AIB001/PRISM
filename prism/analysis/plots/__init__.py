@@ -15,6 +15,10 @@ from .structural_plots import (
     plot_contact_probability_barplot, plot_contact_probability_heatmap,
     plot_contact_distance_distribution, plot_hydrogen_bond_analysis
 )
+from .rmsd_plots import (
+    plot_rmsd_simple_timeseries, plot_rmsd_analysis, plot_rmsf_analysis,
+    plot_rmsf_with_auto_chains
+)
 from .comparison_plots import (
     plot_multi_system_comparison, plot_correlation_matrix,
     plot_statistical_comparison, plot_difference_analysis
@@ -43,6 +47,12 @@ __all__ = [
     'plot_multi_chain_rmsf',
     'plot_separate_rmsd',
     'plot_multi_repeat_ligand_rmsd',
+
+    # RMSD plotting
+    'plot_rmsd_simple_timeseries',
+    'plot_rmsd_analysis',
+    'plot_rmsf_analysis',
+    'plot_rmsf_with_auto_chains',
 
     # Contact analysis plotting
     'plot_contact_probability_barplot',

@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 import pickle
 
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
 
 logger = logging.getLogger(__name__)
 

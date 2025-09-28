@@ -25,7 +25,19 @@ PUBLICATION_FONTS = {
     'legend': 24,          # Legend text
     'annotation': 22,      # Statistical annotations
     'colorbar': 24,        # Colorbar labels
-    'value_text': 24       # Heatmap cell values - much larger for readability
+    'value_text': 18,      # Heatmap cell values - reduced for better fit in cells
+    'bar_annotation': 18   # Bar chart annotations - smaller to reduce visual clutter
+}
+
+# 标准panel尺寸定义 - 确保所有单个panel图片字体相对大小一致
+STANDARD_PANEL_SIZES = {
+    'single': (8, 6),        # 单panel标准尺寸 - 所有单个图片统一使用
+    'horizontal': (12, 6),   # 水平排列两panel (1x2)
+    'vertical': (8, 12),     # 垂直排列两panel (2x1)
+    'quad': (12, 10),        # 2x2四panel
+    'wide': (16, 6),         # 宽format单panel (特殊情况)
+    'tall': (8, 10),         # 高format单panel (特殊情况)
+    'distribution': (12, 8)  # 分布图专用 - 增加高度改善比例
 }
 
 # Color palettes for scientific publications
@@ -33,7 +45,8 @@ PUBLICATION_COLORS = {
     'default': ['#4A90E2', '#F5A623', '#7ED321', '#D0021B', '#9013FE'],  # Professional
     'nature': ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'],   # Nature-style
     'science': ['#0173B2', '#DE8F05', '#029E73', '#CC78BC', '#CA9161'],  # Science-style
-    'accessible': ['#0173B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442'] # Colorblind-friendly
+    'accessible': ['#0173B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442'], # Colorblind-friendly
+    'example': ['#A8DADC', '#D4A574', '#E9C46A', '#457B9D', '#F1FAEE']    # Matching example figure.py
 }
 
 def get_publication_style(style_type: str = 'default') -> Dict[str, Any]:
@@ -60,6 +73,10 @@ def get_publication_style(style_type: str = 'default') -> Dict[str, Any]:
         'xtick.labelsize': PUBLICATION_FONTS['tick_label'],
         'ytick.labelsize': PUBLICATION_FONTS['tick_label'],
         'legend.fontsize': PUBLICATION_FONTS['legend'],
+
+        # Additional text elements for better control
+        'figure.titlesize': PUBLICATION_FONTS['title'],        # Figure suptitle
+        'axes.labelpad': 8,                                   # Space between axis labels and ticks
 
         # Bold axis labels by default for scientific publications
         'axes.labelweight': 'bold',
@@ -109,6 +126,26 @@ def get_publication_style(style_type: str = 'default') -> Dict[str, Any]:
     }
 
     return base_style
+
+def get_standard_figsize(panel_type: str = 'single') -> Tuple[float, float]:
+    """
+    获取标准panel尺寸，确保所有图片字体相对大小一致。
+
+    Parameters
+    ----------
+    panel_type : str
+        Panel类型: 'single', 'horizontal', 'vertical', 'quad', 'wide', 'tall'
+
+    Returns
+    -------
+    tuple
+        标准figure尺寸 (width, height)
+    """
+    if panel_type in STANDARD_PANEL_SIZES:
+        return STANDARD_PANEL_SIZES[panel_type]
+    else:
+        logger.warning(f"Unknown panel type '{panel_type}', using 'single' as default")
+        return STANDARD_PANEL_SIZES['single']
 
 def validate_figure_size(figsize: Tuple[float, float], dpi: int = 150) -> Tuple[float, float]:
     """
@@ -172,15 +209,18 @@ def get_color_palette(palette: str = 'default', n_colors: int = 5) -> list:
 
     return colors[:n_colors]
 
-def setup_publication_figure(figsize: Tuple[float, float] = (12, 8),
-                           style_type: str = 'default', title: str = '') -> Tuple[plt.Figure, plt.Axes]:
+def setup_publication_figure(figsize: Optional[Tuple[float, float]] = None,
+                           panel_type: str = 'single', style_type: str = 'default',
+                           title: str = '') -> Tuple[plt.Figure, plt.Axes]:
     """
-    Create a publication-ready figure with proper styling.
+    Create a publication-ready figure with proper styling and standard sizing.
 
     Parameters
     ----------
-    figsize : tuple
-        Figure size in inches
+    figsize : tuple, optional
+        Figure size in inches. If None, uses standard size for panel_type
+    panel_type : str
+        Panel type for standard sizing: 'single', 'horizontal', 'vertical', 'quad'
     style_type : str
         Style type for publication
     title : str
@@ -191,6 +231,9 @@ def setup_publication_figure(figsize: Tuple[float, float] = (12, 8),
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize(panel_type)
+
     plt.style.use('default')  # Reset first
     with plt.rc_context(get_publication_style(style_type)):
         fig, ax = plt.subplots(figsize=figsize)

@@ -93,6 +93,9 @@ plt.plot(...)        # 禁止
 
 **缓存利用**：在 debug 模式下，利用已有的计算结果缓存，避免重复计算。
 
+no titles in any plots...just print or add minimal legends to explain what the plot is. apply to all plots.
+axis labels: also, not too long. you can print, like the publication figure captions. print inside PRISM, not test scripts.
+
 ## 可视化规范
 
 ### 出版级标准
@@ -100,6 +103,7 @@ plt.plot(...)        # 禁止
 **图表质量**：所有 PRISM 生成的图表必须达到科研出版级别，适合直接用于学术论文。
 
 **样式统一**：强制使用全局统一的绘图样式 (`get_publication_style` 函数)，确保所有 PRISM 组件的视觉一致性。
+apply_publication_style，注意要控制所有单个panel的图的大小差不多，这样才能让所有图字体一致且相对于图的大小一致
 
 **字体规范**：
 - 统一使用 **Times New Roman** 字体

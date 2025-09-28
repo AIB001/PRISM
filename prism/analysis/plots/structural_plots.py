@@ -18,8 +18,9 @@ from .publication_utils import (
     get_publication_style, get_color_palette, fix_rotated_labels,
     add_statistical_annotations, style_axes_for_publication,
     save_publication_figure, validate_figure_size, PUBLICATION_FONTS, PUBLICATION_COLORS,
-    apply_publication_style, setup_publication_figure
+    apply_publication_style, setup_publication_figure, get_standard_figsize
 )
+from pathlib import Path
 
 # Apply global publication style on import
 apply_publication_style()
@@ -31,7 +32,7 @@ def plot_violin_comparison(data_dict: Dict[str, List[float]],
                           title: str = "",
                           xlabel: str = "Category",
                           ylabel: str = "Value",
-                          figsize: Tuple[float, float] = (10, 6),
+                          figsize: Optional[Tuple[float, float]] = None,
                           save_path: Optional[str] = None,
                           colors: Optional[List[str]] = None,
                           show_points: bool = True,
@@ -66,6 +67,8 @@ def plot_violin_comparison(data_dict: Dict[str, List[float]],
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     # Set colors
@@ -102,7 +105,7 @@ def plot_violin_comparison(data_dict: Dict[str, List[float]],
     ax.set_xticklabels(list(data_dict.keys()))
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
 
     # Add statistics text
@@ -127,7 +130,7 @@ def plot_violin_comparison(data_dict: Dict[str, List[float]],
 def plot_ramachandran(phi_angles: np.ndarray,
                      psi_angles: np.ndarray,
                      title: str = "",
-                     figsize: Tuple[float, float] = (8, 8),
+                     figsize: Optional[Tuple[float, float]] = None,
                      save_path: Optional[str] = None,
                      density: bool = True,
                      alpha: float = 0.6) -> Tuple[plt.Figure, plt.Axes]:
@@ -156,6 +159,8 @@ def plot_ramachandran(phi_angles: np.ndarray,
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     # Flatten arrays if needed
@@ -188,7 +193,7 @@ def plot_ramachandran(phi_angles: np.ndarray,
     ax.set_ylim(-180, 180)
     ax.set_xlabel('φ (degrees)')
     ax.set_ylabel('ψ (degrees)')
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -209,7 +214,7 @@ def plot_dihedral_time_series(angles: np.ndarray,
                              times: Optional[np.ndarray] = None,
                              title: str = "",
                              ylabel: str = "Angle (degrees)",
-                             figsize: Tuple[float, float] = (12, 6),
+                             figsize: Optional[Tuple[float, float]] = None,
                              save_path: Optional[str] = None,
                              residue_ids: Optional[List[int]] = None,
                              max_traces: int = 10) -> Tuple[plt.Figure, plt.Axes]:
@@ -240,6 +245,8 @@ def plot_dihedral_time_series(angles: np.ndarray,
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     if times is None:
@@ -256,7 +263,7 @@ def plot_dihedral_time_series(angles: np.ndarray,
 
     ax.set_xlabel('Time (ns)' if times is not None else 'Frame')
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
 
     if n_residues <= 10:
@@ -273,7 +280,7 @@ def plot_dihedral_time_series(angles: np.ndarray,
 
 def plot_sasa_comparison(sasa_data: Dict[str, np.ndarray],
                         title: str = "",
-                        figsize: Tuple[float, float] = (10, 6),
+                        figsize: Optional[Tuple[float, float]] = None,
                         save_path: Optional[str] = None,
                         plot_type: str = "box") -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -297,6 +304,8 @@ def plot_sasa_comparison(sasa_data: Dict[str, np.ndarray],
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     if plot_type == "box":
@@ -330,7 +339,7 @@ def plot_sasa_comparison(sasa_data: Dict[str, np.ndarray],
         ax.legend()
 
     ax.set_ylabel('SASA (Ų)')
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -346,7 +355,7 @@ def plot_property_distribution(values: np.ndarray,
                               title: str = "",
                               xlabel: str = "Value",
                               ylabel: str = "Frequency",
-                              figsize: Tuple[float, float] = (8, 6),
+                              figsize: Optional[Tuple[float, float]] = None,
                               save_path: Optional[str] = None,
                               bins: int = 50,
                               show_stats: bool = True) -> Tuple[plt.Figure, plt.Axes]:
@@ -377,6 +386,8 @@ def plot_property_distribution(values: np.ndarray,
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     # Create histogram
@@ -407,7 +418,7 @@ def plot_property_distribution(values: np.ndarray,
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -423,7 +434,7 @@ def plot_property_distribution(values: np.ndarray,
 def plot_rmsd_time_series(rmsd_data: Dict[str, np.ndarray],
                          times: Optional[np.ndarray] = None,
                          title: str = "",
-                         figsize: Tuple[float, float] = (12, 6),
+                         figsize: Optional[Tuple[float, float]] = None,
                          save_path: Optional[str] = None,
                          colors: Optional[List[str]] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -449,6 +460,8 @@ def plot_rmsd_time_series(rmsd_data: Dict[str, np.ndarray],
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     if colors is None:
@@ -465,7 +478,7 @@ def plot_rmsd_time_series(rmsd_data: Dict[str, np.ndarray],
 
     ax.set_xlabel('Time (ns)')
     ax.set_ylabel('RMSD (nm)')
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -481,7 +494,7 @@ def plot_rmsd_time_series(rmsd_data: Dict[str, np.ndarray],
 def plot_rmsf_per_residue(rmsf_values: np.ndarray,
                          residue_ids: Optional[np.ndarray] = None,
                          title: str = "",
-                         figsize: Tuple[float, float] = (12, 6),
+                         figsize: Optional[Tuple[float, float]] = None,
                          save_path: Optional[str] = None,
                          highlight_threshold: Optional[float] = None,
                          secondary_structure: Optional[Dict] = None) -> Tuple[plt.Figure, plt.Axes]:
@@ -510,6 +523,8 @@ def plot_rmsf_per_residue(rmsf_values: np.ndarray,
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     if residue_ids is None:
@@ -537,7 +552,7 @@ def plot_rmsf_per_residue(rmsf_values: np.ndarray,
 
     ax.set_xlabel('Residue Number')
     ax.set_ylabel('RMSF (nm)')
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
 
     # Add statistics
@@ -566,7 +581,7 @@ def plot_rmsd_rmsf_combined(rmsd_data: Dict[str, np.ndarray],
                            times: Optional[np.ndarray] = None,
                            residue_ids: Optional[np.ndarray] = None,
                            title: str = "",
-                           figsize: Tuple[float, float] = (15, 8),
+                           figsize: Optional[Tuple[float, float]] = None,
                            save_path: Optional[str] = None) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
     """
     Create combined RMSD time series and RMSF plots.
@@ -609,7 +624,7 @@ def plot_rmsd_rmsf_combined(rmsd_data: Dict[str, np.ndarray],
 
     ax1.set_xlabel('Time (ns)')
     ax1.set_ylabel('RMSD (nm)')
-    ax1.set_title('')  # Empty title for publication
+
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
@@ -625,7 +640,7 @@ def plot_rmsd_rmsf_combined(rmsd_data: Dict[str, np.ndarray],
 
     ax2.set_xlabel('Residue Number')
     ax2.set_ylabel('RMSF (nm)')
-    ax2.set_title('')  # Empty title for publication
+
     ax2.grid(True, alpha=0.3)
     ax2.legend()
 
@@ -702,9 +717,9 @@ def plot_multi_chain_rmsf(chain_rmsf_data: Dict[str, Tuple[np.ndarray, np.ndarra
         ax.fill_between(residue_ids, rmsf_values, alpha=0.3, color=color)
 
         # Formatting
-        ax.set_xlabel('Residue/Nucleotide Number')
+        ax.set_xlabel('Residue Number')
         ax.set_ylabel('RMSF (Å)')
-        ax.set_title('')  # Empty title for publication
+
         ax.grid(True, alpha=0.3)
 
         # Add statistics
@@ -1011,7 +1026,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
                        times: Optional[np.ndarray] = None,
                        protein_title: str = "",
                        ligand_title: str = "",
-                       figsize: Tuple[float, float] = (12, 8),
+                       figsize: Optional[Tuple[float, float]] = None,
                        protein_save_path: Optional[str] = None,
                        ligand_save_path: Optional[str] = None) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
     """
@@ -1051,7 +1066,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
     ax1.fill_between(times[:len(protein_rmsd)], protein_rmsd, alpha=0.3, color='blue')
     ax1.set_xlabel('Frame')
     ax1.set_ylabel('RMSD (Å)')
-    ax1.set_title(protein_title)
+
     ax1.grid(True, alpha=0.3)
 
     # Add protein statistics
@@ -1067,7 +1082,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
     ax2.fill_between(times[:len(ligand_rmsd)], ligand_rmsd, alpha=0.3, color='red')
     ax2.set_xlabel('Frame')
     ax2.set_ylabel('RMSD (Å)')
-    ax2.set_title(ligand_title)
+
     ax2.grid(True, alpha=0.3)
 
     # Add ligand statistics
@@ -1088,7 +1103,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
         ax_protein.fill_between(times[:len(protein_rmsd)], protein_rmsd, alpha=0.3, color='blue')
         ax_protein.set_xlabel('Frame')
         ax_protein.set_ylabel('RMSD (Å)')
-        ax_protein.set_title(protein_title)
+
         ax_protein.grid(True, alpha=0.3)
         ax_protein.text(0.02, 0.98, protein_stats, transform=ax_protein.transAxes,
                        verticalalignment='top', fontsize=10,
@@ -1105,7 +1120,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
         ax_ligand.fill_between(times[:len(ligand_rmsd)], ligand_rmsd, alpha=0.3, color='red')
         ax_ligand.set_xlabel('Frame')
         ax_ligand.set_ylabel('RMSD (Å)')
-        ax_ligand.set_title(ligand_title)
+
         ax_ligand.grid(True, alpha=0.3)
         ax_ligand.text(0.02, 0.98, ligand_stats, transform=ax_ligand.transAxes,
                       verticalalignment='top', fontsize=10,
@@ -1121,7 +1136,7 @@ def plot_separate_rmsd(protein_rmsd: np.ndarray,
 def plot_multi_repeat_ligand_rmsd(rmsd_data: Dict[str, np.ndarray],
                                   times: Optional[np.ndarray] = None,
                                   title: str = "",
-                                  figsize: Tuple[float, float] = (12, 6),
+                                  figsize: Optional[Tuple[float, float]] = None,
                                   save_path: Optional[str] = None,
                                   colors: Optional[List[str]] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -1147,6 +1162,8 @@ def plot_multi_repeat_ligand_rmsd(rmsd_data: Dict[str, np.ndarray],
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
     fig, ax = plt.subplots(figsize=figsize)
 
     if colors is None:
@@ -1165,7 +1182,7 @@ def plot_multi_repeat_ligand_rmsd(rmsd_data: Dict[str, np.ndarray],
 
     ax.set_xlabel('Frame')
     ax.set_ylabel('Ligand RMSD (Å)')
-    ax.set_title(title)
+
     ax.grid(True, alpha=0.3)
     ax.legend(loc='best')
 
@@ -1194,7 +1211,7 @@ def plot_contact_probability_barplot(
     xlabel: str = "Amino Acid Residues",
     ylabel: str = "Contact Probability (%)",
     max_residues: int = 20,
-    figsize: Tuple[float, float] = (18, 12),  # Larger for publication
+    figsize: Optional[Tuple[float, float]] = None,  # Larger for publication
     colors: Optional[List[str]] = None,
     save_path: Optional[str] = None,
     show_error_bars: bool = True,
@@ -1292,6 +1309,8 @@ def plot_contact_probability_barplot(
         if colors is None:
             colors = ['#4A90E2', '#F5A623', '#7ED321'][:n_repeats]  # Professional blue, orange, green
 
+        if figsize is None:
+            figsize = get_standard_figsize("single")
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot bars for each repeat with enhanced styling
@@ -1344,8 +1363,6 @@ def plot_contact_probability_barplot(
                      fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel(ylabel,
                      fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('',  # Empty title for publication
-                     fontsize=PUBLICATION_FONTS['title'], weight='bold', pad=25)
 
         # Fix x-axis labels with proper alignment and spacing
         ax.set_xticks(x_positions)
@@ -1394,7 +1411,7 @@ def plot_contact_probability_heatmap(
     title: str = "",
     xlabel: str = "Amino Acid Residues",
     ylabel: str = "MD Replications",
-    figsize: Tuple[float, float] = (20, 10),  # Larger for publication
+    figsize: Optional[Tuple[float, float]] = None,  # Larger for publication
     save_path: Optional[str] = None,
     show_values: bool = True,
     value_format: str = ".1f",  # Format for cell values
@@ -1443,6 +1460,8 @@ def plot_contact_probability_heatmap(
     # Apply publication style
     plt.style.use('default')  # Reset to default first
     with plt.rc_context(get_publication_style()):
+        if figsize is None:
+            figsize = get_standard_figsize("single")
         fig, ax = plt.subplots(figsize=figsize)
 
         # Create heatmap with publication-quality styling
@@ -1495,8 +1514,6 @@ def plot_contact_probability_heatmap(
                      fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel(ylabel,
                      fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('',  # Empty title for publication
-                     fontsize=PUBLICATION_FONTS['title'], weight='bold', pad=25)
 
         # Remove tick marks but keep labels
         ax.tick_params(which='both', length=0, width=0)
@@ -1523,7 +1540,7 @@ def plot_contact_distance_distribution(
     max_residues: int = 10,
     save_path: Optional[str] = None,
     plot_type: str = 'violin',
-    figsize: Tuple[float, float] = (16, 10),  # Larger for publication
+    figsize: Optional[Tuple[float, float]] = None,  # Larger for publication
     sort_by: str = 'median',  # 'median', 'mean', 'std'
     show_statistics: bool = True,
     label_rotation: float = 45,
@@ -1587,6 +1604,8 @@ def plot_contact_distance_distribution(
                              key=lambda x: x[1][sort_by])[:max_residues]
         residue_names = [item[0] for item in top_residues]
 
+        if figsize is None:
+            figsize = get_standard_figsize("single")
         fig, ax = plt.subplots(figsize=figsize)
 
         if plot_type == 'violin':
@@ -1655,7 +1674,7 @@ def plot_contact_distance_distribution(
         # Enhanced styling
         ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'], weight='bold', pad=20)  # Empty title for publication
+
 
         # Enhanced grid
         ax.grid(True, alpha=0.6, linewidth=0.8, linestyle='-')
@@ -1695,7 +1714,7 @@ def plot_hydrogen_bond_analysis(
     residue_info: Optional[Dict[str, str]] = None,
     title: str = "",
     save_path: Optional[str] = None,
-    figsize: Tuple[float, float] = (14, 8),
+    figsize: Optional[Tuple[float, float]] = None,
     **kwargs
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -1735,7 +1754,7 @@ def plot_hydrogen_bond_analysis(
                 label=repeat_name, linewidth=2, alpha=0.8)
 
     ax1.set_ylabel('H-bond Count', fontsize=12)
-    ax1.set_title('', fontsize=14, weight='bold')  # Empty title for publication
+
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
@@ -1775,7 +1794,7 @@ def plot_key_residue_distances(
     title: str = "",
     xlabel: str = "Key Residues",
     ylabel: str = "Distance (Å)",
-    figsize: Tuple[float, float] = (12, 8),
+    figsize: Optional[Tuple[float, float]] = None,
     save_path: Optional[str] = None,
     colors: Optional[List[str]] = None,
     **kwargs
@@ -1818,6 +1837,8 @@ def plot_key_residue_distances(
     # Apply publication style
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
+        if figsize is None:
+            figsize = get_standard_figsize("single")
         fig, ax = plt.subplots(figsize=figsize)
 
         # Set up colors - professional gradient
@@ -1866,7 +1887,7 @@ def plot_key_residue_distances(
                           weight='bold')
         ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
 
         # Enhanced grid and styling
         ax.grid(True, alpha=0.6, axis='y')
@@ -1892,7 +1913,7 @@ def plot_hydrogen_bond_stability(
     hbond_data: Dict[str, float],
     hbond_timeseries: Dict[str, List[bool]],
     title: str = "",
-    figsize: Tuple[float, float] = (14, 10),
+    figsize: Optional[Tuple[float, float]] = None,
     save_path: Optional[str] = None,
     **kwargs
 ) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
@@ -1968,7 +1989,7 @@ def plot_hydrogen_bond_stability(
                         color='white', weight='bold')
 
         ax1.set_ylabel('Occupancy (%)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax1.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
         ax1.set_xticks(range(len(hbond_names)))
         ax1.set_xticklabels(hbond_names, rotation=45, ha='right',
                            fontsize=PUBLICATION_FONTS['tick_label'])
@@ -2013,7 +2034,7 @@ def plot_distance_time_series(
     distance_data: Dict[str, np.ndarray],
     times: Optional[np.ndarray] = None,
     title: str = "",
-    figsize: Tuple[float, float] = (16, 12),
+    figsize: Optional[Tuple[float, float]] = None,
     save_path: Optional[str] = None,
     **kwargs
 ) -> Tuple[plt.Figure, List[plt.Axes]]:
@@ -2085,7 +2106,7 @@ def plot_distance_time_series(
             # Styling
             ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'])
             ax.set_ylabel('Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'])
-            ax.set_title(interaction, fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
             ax.grid(True, alpha=0.3)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
@@ -2107,7 +2128,7 @@ def plot_distance_time_series(
 def plot_magnesium_coordination(
     mg_data: Dict[str, Tuple[List[float], List[float]]],
     title: str = "",
-    figsize: Tuple[float, float] = (14, 10),
+    figsize: Optional[Tuple[float, float]] = None,
     save_path: Optional[str] = None,
     **kwargs
 ) -> Tuple[plt.Figure, List[plt.Axes]]:
@@ -2159,7 +2180,7 @@ def plot_magnesium_coordination(
         # Style left panel
         ax1.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax1.set_ylabel('Mg²⁺-Ligand Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax1.set_title('Mg²⁺-Ligand Coordination', fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
         ax1.grid(True, alpha=0.3)
         ax1.legend(fontsize=PUBLICATION_FONTS['legend'])
         ax1.spines['top'].set_visible(False)
@@ -2172,7 +2193,7 @@ def plot_magnesium_coordination(
         # Style right panel
         ax2.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax2.set_ylabel('Mg²⁺-Protein Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax2.set_title('Mg²⁺-Protein Coordination', fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
         ax2.grid(True, alpha=0.3)
         ax2.legend(fontsize=PUBLICATION_FONTS['legend'])
         ax2.spines['top'].set_visible(False)
@@ -2201,3 +2222,149 @@ def plot_magnesium_coordination(
             logger.info(f"Magnesium coordination plot saved: {save_path}")
 
     return fig, axes
+
+
+def plot_multi_chain_rmsf_example_style(chain_data: Dict[str, Dict[str, np.ndarray]],
+                                       output_path: str,
+                                       title: str = "",
+                                       separate_panels: bool = False) -> bool:
+    """
+    Create 4-panel RMSF plot exactly matching the example multi-chain layout.
+
+    Expected format: chain_data = {
+        'PR1': {'rmsf': array, 'residue_ids': array, 'n_residues': int},
+        'PR2': {'rmsf': array, 'residue_ids': array, 'n_residues': int},
+        'PR3': {'rmsf': array, 'residue_ids': array, 'n_residues': int},
+        'PR4': {'rmsf': array, 'residue_ids': array, 'n_residues': int}
+    }
+
+    Parameters
+    ----------
+    chain_data : dict
+        Dictionary with chain names as keys and RMSF data as values
+    output_path : str
+        Path to save the figure
+    title : str
+        Main plot title (empty by default for publication style)
+    separate_panels : bool
+        If True, also save individual panel figures
+
+    Returns
+    -------
+    bool
+        True if successful
+    """
+    try:
+        apply_publication_style()
+
+        # Create 2x2 subplot layout matching example
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        # Define expected chains (PR1, PR2, PR3, PR4)
+        chain_names = ['PR1', 'PR2', 'PR3', 'PR4']
+
+        # Check if we have data
+        if not chain_data:
+            print("No chain data available for RMSF plotting")
+            return False
+
+        for i, chain_name in enumerate(chain_names):
+            if i >= 4:  # Max 4 panels
+                break
+
+            ax = axes[i // 2, i % 2]
+
+            if chain_name in chain_data:
+                data = chain_data[chain_name]
+                rmsf_values = data['rmsf']
+                residue_ids = data.get('residue_ids', np.arange(len(rmsf_values)))
+                n_residues = len(rmsf_values)
+
+                # Calculate statistics
+                mean_rmsf = np.mean(rmsf_values)
+                std_rmsf = np.std(rmsf_values)
+
+                # Create filled area plot (exact match to example)
+                ax.fill_between(residue_ids, 0, rmsf_values, alpha=0.6, color='lightblue')
+                ax.plot(residue_ids, rmsf_values, color='steelblue', linewidth=1)
+
+                # Statistics box (matching example exactly)
+                stats_text = f'Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å'
+                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                       verticalalignment='top', horizontalalignment='left',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow',
+                               alpha=0.8, edgecolor='black'),
+                       fontsize=PUBLICATION_FONTS['annotation'], fontweight='normal')
+
+                # Panel title (shorter)
+
+
+                # Set appropriate axis limits
+                ax.set_ylim(0, max(rmsf_values) * 1.1)
+            else:
+                # Empty panel if no data
+                ax.text(0.5, 0.5, f'No data for Chain {chain_name}',
+                       transform=ax.transAxes, ha='center', va='center',
+                       fontsize=PUBLICATION_FONTS['axis_label'], style='italic')
+
+
+            # Common formatting for all panels
+            ax.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+            ax.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+
+        # Save individual panels if requested
+        if separate_panels:
+            base_path = Path(output_path)
+            for i, chain_name in enumerate(chain_names):
+                if chain_name in chain_data:
+                    separate_path = base_path.parent / f"{base_path.stem}_{chain_name.lower()}{base_path.suffix}"
+
+                    # Create individual figure
+                    fig_single, ax_single = plt.subplots(figsize=(8, 6))
+                    data = chain_data[chain_name]
+                    rmsf_values = data['rmsf']
+                    residue_ids = data.get('residue_ids', np.arange(len(rmsf_values)))
+                    n_residues = len(rmsf_values)
+                    mean_rmsf = np.mean(rmsf_values)
+                    std_rmsf = np.std(rmsf_values)
+
+                    ax_single.fill_between(residue_ids, 0, rmsf_values, alpha=0.6, color='lightblue')
+                    ax_single.plot(residue_ids, rmsf_values, color='steelblue', linewidth=1)
+
+                    stats_text = f'Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å'
+                    ax_single.text(0.02, 0.98, stats_text, transform=ax_single.transAxes,
+                                  verticalalignment='top', horizontalalignment='left',
+                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow',
+                                          alpha=0.8, edgecolor='black'),
+                                  fontsize=PUBLICATION_FONTS['annotation'])
+
+                    ax_single.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+                    ax_single.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+                    ax_single.grid(True, alpha=0.3)
+                    ax_single.set_ylim(0, max(rmsf_values) * 1.1)
+
+                    plt.tight_layout()
+                    fig_single.savefig(separate_path, dpi=300, bbox_inches='tight',
+                                      facecolor='white', edgecolor='none')
+                    plt.close(fig_single)
+
+        # Overall title if provided (but empty by default)
+        if title:
+            fig.suptitle(title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold', y=0.95)
+
+        plt.tight_layout()
+        if title:
+            plt.subplots_adjust(top=0.90)  # Make room for title
+
+        # Save main figure
+        fig.savefig(output_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        plt.close(fig)
+
+        return True
+
+    except Exception as e:
+        print(f"Error in multi-chain RMSF plotting: {e}")
+        return False

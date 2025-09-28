@@ -1,7 +1,7 @@
 import logging
 import numpy as np
 from typing import Dict
-from ..config import AnalysisConfig
+from ..core.config import AnalysisConfig
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,10 @@
 import logging
 import numpy as np
-from ..config import AnalysisConfig, convert_numpy_types
+import pickle
+from pathlib import Path
+from ..core.config import AnalysisConfig, convert_numpy_types
 import mdtraj as md
+from ..core.parallel import default_processor
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +15,8 @@ class ContactAnalyzer:
     
     def __init__(self, config: AnalysisConfig):
         self.config = config
+        self._cache_dir = Path("./cache")
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
     
     def identify_ligand_residue(self, traj):
         """Automatically identify ligand residue using PRISM utilities"""
@@ -66,7 +71,9 @@ class ContactAnalyzer:
         traj_sample = traj
         frame_indices = np.arange(n_frames)
         
-        distances = md.compute_distances(traj_sample, atom_pairs, opt=True)        
+        # Configure OpenMP threads for parallel distance computation
+        with default_processor.configure_omp_threads():
+            distances = md.compute_distances(traj_sample, atom_pairs, opt=True)        
         contact_threshold = self.config.contact_enter_threshold_nm
         contacts = distances < contact_threshold
         
@@ -224,8 +231,9 @@ class ContactAnalyzer:
                 logger.warning("No atom pairs generated")
                 return np.array([])
 
-            # Calculate distances for all pairs across all frames
-            distances = md.compute_distances(traj, atom_pairs)
+            # Calculate distances for all pairs across all frames with parallel processing
+            with default_processor.configure_omp_threads():
+                distances = md.compute_distances(traj, atom_pairs)
 
             # Check for contacts: any pair within cutoff counts as contact for that frame
             contacts_per_frame = np.any(distances < cutoff_nm, axis=1)
@@ -239,3 +247,475 @@ class ContactAnalyzer:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return np.array([])
+
+    def analyze_key_residue_contacts(self, universe, trajectory, key_residues=None, cutoff=4.0, step=1, top_n=15, cache_name=None):
+        """
+        Analyze contact probabilities for all protein residues with ligand, then return top N.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file
+        trajectory : str
+            Path to trajectory file
+        key_residues : list, optional
+            If provided, analyze only these specific residues. If None, analyze all protein residues
+        cutoff : float
+            Contact cutoff distance in Angstroms
+        step : int
+            Frame step size
+        top_n : int
+            Number of top residues to return (by contact probability)
+        cache_name : str, optional
+            Custom cache name for storing results
+
+        Returns
+        -------
+        dict
+            Dictionary with residue names as keys and contact probabilities as values
+            Format: {'ASP618': 85.2, 'ASN691': 67.8, ...} (percentages 0-100)
+            Sorted by contact probability (highest first), limited to top_n residues
+        """
+        try:
+            # Create cache key
+            if cache_name is None:
+                traj_name = Path(trajectory).stem if trajectory else "topology_only"
+                key_res_str = "all" if key_residues is None else "_".join(key_residues[:5])  # First 5 residues
+                cache_key = f"key_residue_contacts_{traj_name}_{cutoff}A_{step}step_{top_n}top_{key_res_str}"
+                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
+            else:
+                cache_key = cache_name
+
+            cache_file = self._cache_dir / f"{cache_key}.pkl"
+
+            # Check cache
+            if cache_file.exists():
+                logger.info(f"Loading cached key residue contact results from {cache_file}")
+                with open(cache_file, 'rb') as f:
+                    return pickle.load(f)
+
+            # Load trajectory
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)
+
+            if step > 1:
+                traj = traj[::step]
+
+            cutoff_nm = cutoff / 10.0
+
+            # Identify ligand
+            ligand_selection = "resname LIG"
+            ligand_atoms = traj.topology.select(ligand_selection)
+
+            if len(ligand_atoms) == 0:
+                logger.warning("No ligand atoms found with selection 'resname LIG'")
+                return {}
+
+            # If specific residues provided, use them; otherwise analyze all protein residues
+            if key_residues is not None:
+                logger.info(f"Analyzing {len(key_residues)} specified residues vs {len(ligand_atoms)} ligand atoms")
+                residues_to_analyze = key_residues
+            else:
+                # Get all protein residues
+                logger.info("Analyzing all protein residues vs ligand")
+                protein_residues = []
+                for residue in traj.topology.residues:
+                    if residue.is_protein:
+                        # Format: 'ASP618' (residue name + residue id)
+                        res_name = f"{residue.name}{residue.resSeq}"
+                        protein_residues.append(res_name)
+
+                residues_to_analyze = protein_residues
+                logger.info(f"Found {len(residues_to_analyze)} protein residues to analyze")
+
+            residue_contact_probs = {}
+
+            for residue in residues_to_analyze:
+                try:
+                    # Try different residue selection formats
+                    residue_selections = [
+                        f"resname {residue[:3]} and resid {residue[3:]}",  # ASP618 -> resname ASP and resid 618
+                        f"residue {residue[3:]}",  # ASP618 -> residue 618
+                        f"resSeq {residue[3:]} and resname {residue[:3]}"  # ASP618 -> resSeq 618 and resname ASP
+                    ]
+
+                    residue_atoms = []
+                    for sel in residue_selections:
+                        try:
+                            atoms = traj.topology.select(sel)
+                            if len(atoms) > 0:
+                                residue_atoms = atoms
+                                break
+                        except:
+                            continue
+
+                    if len(residue_atoms) == 0:
+                        logger.warning(f"Could not find residue {residue}")
+                        continue
+
+                    # Create atom pairs for distance calculation
+                    atom_pairs = []
+                    for lig_atom in ligand_atoms:
+                        for res_atom in residue_atoms:
+                            atom_pairs.append([lig_atom, res_atom])
+
+                    if len(atom_pairs) == 0:
+                        continue
+
+                    # Calculate distances with parallel processing
+                    with default_processor.configure_omp_threads():
+                        distances = md.compute_distances(traj, atom_pairs)
+
+                    # Check for contacts: any pair within cutoff counts as contact for that frame
+                    contacts_per_frame = np.any(distances < cutoff_nm, axis=1)
+
+                    # Calculate contact probability as percentage
+                    contact_prob = float(np.mean(contacts_per_frame) * 100)
+                    residue_contact_probs[residue] = min(100.0, max(0.0, contact_prob))
+
+                    logger.info(f"{residue}: {contact_prob:.1f}% contact probability")
+
+                except Exception as e:
+                    logger.warning(f"Error analyzing residue {residue}: {e}")
+                    continue
+
+            logger.info(f"Contact analysis complete: {len(residue_contact_probs)} residues analyzed")
+
+            # If no specific residues were provided (analyzing all), select top N by contact probability
+            if key_residues is None and len(residue_contact_probs) > top_n:
+                # Sort by contact probability (descending) and take top N
+                sorted_residues = sorted(residue_contact_probs.items(), key=lambda x: x[1], reverse=True)
+                top_residues = dict(sorted_residues[:top_n])
+
+                logger.info(f"Selected top {top_n} residues with highest contact probabilities:")
+                for i, (residue, prob) in enumerate(sorted_residues[:top_n], 1):
+                    logger.info(f"  {i:2d}. {residue}: {prob:.1f}%")
+
+                # Cache results
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(top_residues, f)
+                logger.info(f"Cached key residue contact results to {cache_file}")
+
+                return top_residues
+            else:
+                # Cache results
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(residue_contact_probs, f)
+                logger.info(f"Cached key residue contact results to {cache_file}")
+
+                return residue_contact_probs
+
+        except Exception as e:
+            logger.error(f"Key residue contact analysis failed: {e}")
+            return {}
+
+    def analyze_contact_numbers_timeseries(self, universe, trajectory, cutoff=4.0, step=1, cache_name=None):
+        """
+        Analyze contact numbers (atom pairs within cutoff) over time for LIG-protein.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file
+        trajectory : str
+            Path to trajectory file
+        cutoff : float
+            Contact cutoff distance in Angstroms
+        step : int
+            Frame step size
+        cache_name : str, optional
+            Custom cache name for storing results
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'contact_numbers': np.array of contact numbers per frame
+            - 'times': np.array of time points (ns)
+            - 'total_pairs': total number of atom pairs analyzed
+        """
+        try:
+            # Create cache key
+            if cache_name is None:
+                traj_name = Path(trajectory).stem if trajectory else "topology_only"
+                cache_key = f"contact_numbers_timeseries_{traj_name}_{cutoff}A_{step}step"
+                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
+            else:
+                cache_key = cache_name
+
+            cache_file = self._cache_dir / f"{cache_key}.pkl"
+
+            # Check cache
+            if cache_file.exists():
+                logger.info(f"Loading cached contact numbers timeseries from {cache_file}")
+                with open(cache_file, 'rb') as f:
+                    return pickle.load(f)
+
+            # Load trajectory
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)
+
+            if step > 1:
+                traj = traj[::step]
+
+            cutoff_nm = cutoff / 10.0
+
+            # Get ligand and protein atoms
+            ligand_atoms = traj.topology.select("resname LIG")
+            protein_atoms = traj.topology.select("protein")
+
+            if len(ligand_atoms) == 0 or len(protein_atoms) == 0:
+                logger.warning(f"No ligand ({len(ligand_atoms)}) or protein ({len(protein_atoms)}) atoms found")
+                return {}
+
+            # Create all atom pairs
+            atom_pairs = []
+            for lig_atom in ligand_atoms:
+                for prot_atom in protein_atoms:
+                    atom_pairs.append([lig_atom, prot_atom])
+
+            logger.info(f"Analyzing contact numbers: {len(ligand_atoms)} ligand × {len(protein_atoms)} protein = {len(atom_pairs)} pairs")
+
+            # Calculate distances for all pairs across all frames with parallel processing
+            with default_processor.configure_omp_threads():
+                distances = md.compute_distances(traj, atom_pairs)
+
+            # Count contacts per frame
+            contacts_per_frame = np.sum(distances < cutoff_nm, axis=1)
+
+            # Calculate time points (assuming 0.5 ns intervals)
+            times = np.arange(len(contacts_per_frame)) * 0.5 * step
+
+            logger.info(f"Contact numbers range: {np.min(contacts_per_frame)}-{np.max(contacts_per_frame)} contacts")
+
+            results = {
+                'contact_numbers': contacts_per_frame,
+                'times': times,
+                'total_pairs': len(atom_pairs),
+                'n_frames': len(contacts_per_frame)
+            }
+
+            # Cache results
+            with open(cache_file, 'wb') as f:
+                pickle.dump(results, f)
+            logger.info(f"Cached contact numbers timeseries to {cache_file}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Contact numbers timeseries analysis failed: {e}")
+            return {}
+
+    def analyze_residue_contact_numbers(self, universe, trajectory, key_residues=None, cutoff=4.0, step=1):
+        """
+        Analyze contact numbers between ligand and specific residues with normalization.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file
+        trajectory : str
+            Path to trajectory file
+        key_residues : list, optional
+            List of residue names to analyze
+        cutoff : float
+            Contact cutoff distance in Angstroms
+        step : int
+            Frame step size
+
+        Returns
+        -------
+        dict
+            Dictionary with residue names as keys and contact data as values
+            Format: {'ASP618': {'contact_numbers': array, 'normalized': array, 'n_atoms': int}, ...}
+        """
+        try:
+            # Load trajectory
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)
+
+            if step > 1:
+                traj = traj[::step]
+
+            cutoff_nm = cutoff / 10.0
+
+            # Default key residues
+            if key_residues is None:
+                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
+                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+
+            # Get ligand atoms
+            ligand_atoms = traj.topology.select("resname LIG")
+            if len(ligand_atoms) == 0:
+                logger.warning("No ligand atoms found")
+                return {}
+
+            logger.info(f"Analyzing residue contact numbers: {len(ligand_atoms)} ligand atoms")
+
+            residue_contact_data = {}
+
+            for residue in key_residues:
+                try:
+                    # Try different residue selection formats
+                    residue_selections = [
+                        f"resname {residue[:3]} and resid {residue[3:]}",
+                        f"residue {residue[3:]}",
+                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                    ]
+
+                    residue_atoms = []
+                    for sel in residue_selections:
+                        try:
+                            atoms = traj.topology.select(sel)
+                            if len(atoms) > 0:
+                                residue_atoms = atoms
+                                break
+                        except:
+                            continue
+
+                    if len(residue_atoms) == 0:
+                        logger.warning(f"Could not find residue {residue}")
+                        continue
+
+                    # Create atom pairs
+                    atom_pairs = []
+                    for lig_atom in ligand_atoms:
+                        for res_atom in residue_atoms:
+                            atom_pairs.append([lig_atom, res_atom])
+
+                    if len(atom_pairs) == 0:
+                        continue
+
+                    # Calculate distances and contact numbers with parallel processing
+                    with default_processor.configure_omp_threads():
+                        distances = md.compute_distances(traj, atom_pairs)
+                    contact_numbers = np.sum(distances < cutoff_nm, axis=1)
+
+                    # Normalize by residue atom count
+                    normalized_contacts = contact_numbers / len(residue_atoms)
+
+                    residue_contact_data[residue] = {
+                        'contact_numbers': contact_numbers,
+                        'normalized': normalized_contacts,
+                        'n_atoms': len(residue_atoms),
+                        'n_pairs': len(atom_pairs)
+                    }
+
+                    logger.info(f"{residue}: {len(residue_atoms)} atoms, avg contacts={np.mean(contact_numbers):.1f}, normalized={np.mean(normalized_contacts):.2f}")
+
+                except Exception as e:
+                    logger.warning(f"Error analyzing residue {residue}: {e}")
+                    continue
+
+            logger.info(f"Residue contact numbers analysis complete: {len(residue_contact_data)} residues")
+            return residue_contact_data
+
+        except Exception as e:
+            logger.error(f"Residue contact numbers analysis failed: {e}")
+            return {}
+
+    def analyze_contact_distances(self, universe, trajectory, key_residues=None, cutoff=4.0, step=1):
+        """
+        Analyze distribution of contact distances between ligand and residues.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file
+        trajectory : str
+            Path to trajectory file
+        key_residues : list, optional
+            List of residue names to analyze
+        cutoff : float
+            Contact cutoff distance in Angstroms (only pairs within this distance are included)
+        step : int
+            Frame step size
+
+        Returns
+        -------
+        dict
+            Dictionary with residue names as keys and distance arrays as values
+            Format: {'ASP618': distances_array, 'ASN691': distances_array, ...}
+        """
+        try:
+            # Load trajectory
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)
+
+            if step > 1:
+                traj = traj[::step]
+
+            cutoff_nm = cutoff / 10.0
+
+            # Default key residues
+            if key_residues is None:
+                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
+                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+
+            # Get ligand atoms
+            ligand_atoms = traj.topology.select("resname LIG")
+            if len(ligand_atoms) == 0:
+                logger.warning("No ligand atoms found")
+                return {}
+
+            logger.info(f"Analyzing contact distances for {len(key_residues)} residues")
+
+            residue_distances = {}
+
+            for residue in key_residues:
+                try:
+                    # Find residue atoms
+                    residue_selections = [
+                        f"resname {residue[:3]} and resid {residue[3:]}",
+                        f"residue {residue[3:]}",
+                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                    ]
+
+                    residue_atoms = []
+                    for sel in residue_selections:
+                        try:
+                            atoms = traj.topology.select(sel)
+                            if len(atoms) > 0:
+                                residue_atoms = atoms
+                                break
+                        except:
+                            continue
+
+                    if len(residue_atoms) == 0:
+                        continue
+
+                    # Create atom pairs and calculate distances
+                    atom_pairs = []
+                    for lig_atom in ligand_atoms:
+                        for res_atom in residue_atoms:
+                            atom_pairs.append([lig_atom, res_atom])
+
+                    # Calculate distances with parallel processing
+                    with default_processor.configure_omp_threads():
+                        distances = md.compute_distances(traj, atom_pairs)
+
+                    # Filter distances within cutoff and convert to Angstroms
+                    contact_distances = distances[distances < cutoff_nm] * 10.0
+
+                    if len(contact_distances) > 0:
+                        residue_distances[residue] = contact_distances
+                        logger.info(f"{residue}: {len(contact_distances)} contact distances, range {np.min(contact_distances):.1f}-{np.max(contact_distances):.1f} Å")
+
+                except Exception as e:
+                    logger.warning(f"Error analyzing distances for residue {residue}: {e}")
+                    continue
+
+            logger.info(f"Contact distances analysis complete: {len(residue_distances)} residues")
+            return residue_distances
+
+        except Exception as e:
+            logger.error(f"Contact distances analysis failed: {e}")
+            return {}

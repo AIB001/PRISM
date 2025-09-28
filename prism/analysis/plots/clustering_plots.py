@@ -20,7 +20,7 @@ from .publication_utils import (
     get_publication_style, get_color_palette, fix_rotated_labels,
     add_statistical_annotations, style_axes_for_publication,
     save_publication_figure, validate_figure_size, PUBLICATION_FONTS, PUBLICATION_COLORS,
-    apply_publication_style, setup_publication_figure
+    apply_publication_style, setup_publication_figure, get_standard_figsize
 )
 
 # Apply global publication style on import
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def plot_cluster_scatter(clustering_results: Dict[str, Any],
                         title: str = "",
-                        figsize: Tuple[float, float] = (12, 10),
+                        figsize: Optional[Tuple[float, float]] = None,
                         save_path: Optional[str] = None,
                         show_centers: bool = True,
                         show_hulls: bool = False,
@@ -66,6 +66,9 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
 
     coordinates = clustering_results['coordinates_reduced']
     labels = clustering_results['labels']
+
+    if figsize is None:
+        figsize = get_standard_figsize("single")
 
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
@@ -117,7 +120,7 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
         # Styling
         ax.set_xlabel('Principal Component 1', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel('Principal Component 2', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
 
         # Add statistics
         n_clusters = len(unique_labels)
@@ -153,7 +156,7 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
 def plot_cluster_timeline(clustering_results: Dict[str, Any],
                          times: Optional[np.ndarray] = None,
                          title: str = "",
-                         figsize: Tuple[float, float] = (14, 8),
+                         figsize: Optional[Tuple[float, float]] = None,
                          save_path: Optional[str] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot cluster assignment over simulation time.
@@ -183,6 +186,9 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
         times = np.array(frame_indices) * 0.02  # Assume 20 ps timesteps
     else:
         times = times[:len(labels)]
+
+    if figsize is None:
+        figsize = get_standard_figsize("single")
 
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
@@ -233,7 +239,7 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
         # Styling
         ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel('Cluster ID', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
         ax.grid(True, alpha=0.3, axis='x')
 
         # Set y-axis to show all clusters
@@ -255,7 +261,7 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
 
 def plot_cluster_populations(clustering_results: Dict[str, Any],
                            title: str = "",
-                           figsize: Tuple[float, float] = (10, 6),
+                           figsize: Optional[Tuple[float, float]] = None,
                            save_path: Optional[str] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot cluster population distribution as bar chart.
@@ -277,6 +283,9 @@ def plot_cluster_populations(clustering_results: Dict[str, Any],
         (figure, axes) objects
     """
     labels = clustering_results['labels']
+
+    if figsize is None:
+        figsize = get_standard_figsize("single")
 
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
@@ -311,7 +320,7 @@ def plot_cluster_populations(clustering_results: Dict[str, Any],
         # Styling
         ax.set_xlabel('Clusters', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel('Population (%)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
         ax.set_xticks(range(len(unique_labels)))
         ax.set_xticklabels(cluster_names, fontsize=PUBLICATION_FONTS['tick_label'])
         ax.set_ylim(0, max(percentages) * 1.15)  # Add space for labels
@@ -336,7 +345,7 @@ def plot_cluster_populations(clustering_results: Dict[str, Any],
 
 def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
                     title: str = "",
-                    figsize: Tuple[float, float] = (10, 8),
+                    figsize: Optional[Tuple[float, float]] = None,
                     save_path: Optional[str] = None,
                     cmap: str = 'viridis') -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -360,6 +369,9 @@ def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
     tuple
         (figure, axes) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("single")
+
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
         fig, ax = plt.subplots(figsize=figsize)
@@ -376,7 +388,7 @@ def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
         # Styling
         ax.set_xlabel('Frame Index', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax.set_ylabel('Frame Index', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_title('', fontsize=PUBLICATION_FONTS['title'])  # Empty for publication
+
 
         # Add statistics
         mean_rmsd = np.mean(rmsd_matrix)
@@ -400,7 +412,7 @@ def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
 
 def plot_cluster_optimization(optimization_results: Dict[str, Any],
                             title: str = "",
-                            figsize: Tuple[float, float] = (12, 8),
+                            figsize: Optional[Tuple[float, float]] = None,
                             save_path: Optional[str] = None) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
     """
     Plot cluster optimization metrics (elbow method and silhouette scores).
@@ -421,6 +433,9 @@ def plot_cluster_optimization(optimization_results: Dict[str, Any],
     tuple
         (figure, (inertia_ax, silhouette_ax)) objects
     """
+    if figsize is None:
+        figsize = get_standard_figsize("horizontal")
+
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
@@ -437,7 +452,7 @@ def plot_cluster_optimization(optimization_results: Dict[str, Any],
                        label=f'Optimal: {optimal_clusters}')
             ax1.set_xlabel('Number of Clusters', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
             ax1.set_ylabel('Inertia', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-            ax1.set_title('Elbow Method', fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
             ax1.grid(True, alpha=0.3)
             ax1.legend(fontsize=PUBLICATION_FONTS['legend'])
         else:
@@ -453,7 +468,7 @@ def plot_cluster_optimization(optimization_results: Dict[str, Any],
                    linestyle=':', alpha=0.7, label=f'Max Score: {optimization_results["optimal_silhouette"]:.3f}')
         ax2.set_xlabel('Number of Clusters', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
         ax2.set_ylabel('Silhouette Score', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax2.set_title('Silhouette Analysis', fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
         ax2.grid(True, alpha=0.3)
         ax2.legend(fontsize=PUBLICATION_FONTS['legend'])
 
@@ -476,7 +491,7 @@ def plot_cluster_optimization(optimization_results: Dict[str, Any],
 
 def plot_multi_trajectory_clustering(clustering_results_dict: Dict[str, Dict[str, Any]],
                                    title: str = "",
-                                   figsize: Tuple[float, float] = (18, 12),
+                                   figsize: Optional[Tuple[float, float]] = None,
                                    save_path: Optional[str] = None) -> Tuple[plt.Figure, List[plt.Axes]]:
     """
     Plot clustering results for multiple trajectories in a grid.
@@ -500,6 +515,11 @@ def plot_multi_trajectory_clustering(clustering_results_dict: Dict[str, Dict[str
     n_trajs = len(clustering_results_dict)
     cols = min(3, n_trajs)
     rows = (n_trajs + cols - 1) // cols
+
+    if figsize is None:
+        # 使用标准尺寸计算多panel尺寸
+        base_width, base_height = get_standard_figsize('single')
+        figsize = (base_width * cols * 0.8, base_height * rows * 0.8)
 
     plt.style.use('default')
     with plt.rc_context(get_publication_style()):
@@ -544,7 +564,7 @@ def plot_multi_trajectory_clustering(clustering_results_dict: Dict[str, Dict[str
                     ax.scatter(centers[:, 0], centers[:, 1], c='red',
                               marker='x', s=100, linewidths=2)
 
-                ax.set_title(traj_name, fontsize=PUBLICATION_FONTS['subtitle'], weight='bold')
+
                 ax.set_xlabel('PC1', fontsize=PUBLICATION_FONTS['axis_label'])
                 ax.set_ylabel('PC2', fontsize=PUBLICATION_FONTS['axis_label'])
                 ax.grid(True, alpha=0.3)

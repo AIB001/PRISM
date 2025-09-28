@@ -14,12 +14,25 @@ if 'OMP_NUM_THREADS' not in os.environ:
     os.environ['OMP_NUM_THREADS'] = str(n_cores)
     print(f"PRISM: Enabled OpenMP parallelization with {n_cores} CPU cores")
 
-from .config import AnalysisConfig, convert_numpy_types
-from .trajectory import TrajectoryManager
-from .trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
-# from .multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
-from .export import DataExporter
-from .analyzer import IntegratedProteinLigandAnalyzer, analyze_and_visualize
+# Core infrastructure components (maintain backward compatibility)
+from .core.config import AnalysisConfig, convert_numpy_types
+from .core.trajectory import TrajectoryManager
+from .core.trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
+# from .core.multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
+from .core.export import DataExporter
+from .core.analyzer import IntegratedProteinLigandAnalyzer, analyze_and_visualize
+
+# Calculation modules (maintain backward compatibility)
+from .calc.contacts import ContactAnalyzer
+from .calc.hbonds import HBondAnalyzer
+from .calc.distance import DistanceAnalyzer
+from .calc.rmsd import RMSDAnalyzer
+from .calc.clustering import ClusteringAnalyzer
+from .calc.structural import StructuralAnalyzer
+from .calc.sasa import SASAAnalyzer
+from .calc.dihedral import DihedralAnalyzer
+
+# Re-export core components at top level for backward compatibility
 
 # Import calculation submodule
 from . import calc
