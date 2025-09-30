@@ -39,16 +39,16 @@ class ClusteringAnalyzer:
                                   align_selection: str = "protein and name CA",
                                   start_frame: int = 0,
                                   end_frame: Optional[int] = None,
-                                  step: int = 1) -> md.Trajectory:
+                                  step: int = 1) -> Tuple[md.Trajectory, Optional[Dict[str, any]]]:
         """
-        Load and align trajectory using MDTraj.
+        Load and align trajectory using MDTraj. Supports multiple trajectory files.
 
         Parameters
         ----------
         topology : str
             Path to topology file
         trajectory : str or list of str
-            Path(s) to trajectory file(s)
+            Path(s) to trajectory file(s). If list, trajectories are concatenated.
         align_selection : str
             MDTraj selection for alignment
         start_frame : int
@@ -60,26 +60,54 @@ class ClusteringAnalyzer:
 
         Returns
         -------
-        md.Trajectory
-            Aligned trajectory
+        tuple
+            (aligned_trajectory, metadata_dict)
+            metadata_dict contains frame_trajectory_map if multiple trajectories
         """
         # Load trajectory with parallel processing configuration
-        # For large files, limit frames to avoid memory issues
-        with default_processor.configure_omp_threads():
-            traj = md.load(trajectory, top=topology)
+        # Handle both single file and multiple files
+        metadata = None
 
-        # Apply frame slicing after loading
-        if end_frame is None:
-            end_frame = traj.n_frames
+        if isinstance(trajectory, list) and len(trajectory) > 1:
+            # Multiple trajectory files - load and concatenate
+            logger.info(f"Loading {len(trajectory)} trajectory files for combined analysis")
+            trajs = []
+            frame_trajectory_map = []  # Maps frame index to trajectory index
 
-        # In debug/test mode, limit to max 200 frames for performance
-        if step >= 30:  # Debug mode indicator
-            max_frames = min(200, (end_frame - start_frame) // step)
-            end_frame = min(end_frame, start_frame + max_frames * step)
+            with default_processor.configure_omp_threads():
+                for i, traj_file in enumerate(trajectory):
+                    logger.info(f"  Loading trajectory {i+1}/{len(trajectory)}: {Path(traj_file).name}")
+                    traj_single = md.load(traj_file, top=topology)
 
-        traj = traj[start_frame:end_frame:step]
+                    # Apply frame slicing
+                    traj_end = end_frame if end_frame is not None else traj_single.n_frames
+                    traj_single = traj_single[start_frame:traj_end:step]
 
-        logger.info(f"Selected {traj.n_frames} frames from {start_frame}:{end_frame}:{step}")
+                    trajs.append(traj_single)
+                    # Track which trajectory each frame comes from
+                    frame_trajectory_map.extend([i] * traj_single.n_frames)
+                    logger.info(f"    Loaded {traj_single.n_frames} frames")
+
+            # Concatenate all trajectories
+            traj = md.join(trajs)
+            metadata = {
+                'frame_trajectory_map': np.array(frame_trajectory_map),
+                'n_trajectories': len(trajectory),
+                'trajectory_files': [str(Path(t).name) for t in trajectory],
+                'frames_per_trajectory': [t.n_frames for t in trajs]
+            }
+            logger.info(f"Combined trajectory: {traj.n_frames} total frames from {len(trajectory)} trajectories")
+        else:
+            # Single trajectory file
+            with default_processor.configure_omp_threads():
+                traj = md.load(trajectory, top=topology)
+
+            # Apply frame slicing after loading
+            if end_frame is None:
+                end_frame = traj.n_frames
+
+            traj = traj[start_frame:end_frame:step]
+            logger.info(f"Selected {traj.n_frames} frames from {start_frame}:{end_frame}:{step}")
 
         # Parse alignment selection and align trajectory
         if "segid" in align_selection:
@@ -128,7 +156,7 @@ class ClusteringAnalyzer:
         logger.info(f"Loaded and aligned trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
         logger.info(f"Alignment atoms: {len(align_indices)} atoms")
 
-        return traj
+        return traj, metadata
 
     def _extract_coordinates(self,
                            traj: md.Trajectory,
@@ -263,7 +291,7 @@ class ClusteringAnalyzer:
                     return pickle.load(f)
 
             # Load and align trajectory
-            traj = self._load_and_align_trajectory(
+            traj, traj_metadata = self._load_and_align_trajectory(
                 universe, trajectory, align_selection,
                 start_frame, end_frame, step
             )
@@ -291,6 +319,23 @@ class ClusteringAnalyzer:
             # Calculate silhouette score
             silhouette = silhouette_score(coordinates_reduced, labels)
 
+            # Calculate globally continuous frame indices
+            if traj_metadata is not None:
+                # For combined trajectories, create globally continuous frame indices
+                frame_indices = []
+                global_frame = 0
+                for traj_frames in traj_metadata['frames_per_trajectory']:
+                    # Each trajectory contributes frames: [global_frame, global_frame+step, ...]
+                    traj_frame_indices = list(range(global_frame, global_frame + traj_frames * step, step))
+                    frame_indices.extend(traj_frame_indices)
+                    global_frame += traj_frames * step  # Move to next trajectory's starting point
+
+                # Ensure we have exactly the right number of frame indices
+                frame_indices = frame_indices[:len(labels)]
+            else:
+                # For single trajectory, use simple range
+                frame_indices = [start_frame + i * step for i in range(len(labels))]
+
             # Prepare results
             results = {
                 'labels': labels,
@@ -301,8 +346,15 @@ class ClusteringAnalyzer:
                 'scaler': scaler,
                 'pca': pca,
                 'inertia': kmeans.inertia_,
-                'frame_indices': list(range(start_frame, end_frame or traj.n_frames, step))
+                'frame_indices': frame_indices,
+                'timestep_ns': self.config.timestep_ns  # Pass timestep for time axis calculations
             }
+
+            # Add metadata if multiple trajectories were combined
+            if traj_metadata is not None:
+                results['trajectory_metadata'] = traj_metadata
+                logger.info(f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
+                          f"{len(labels)} total frames")
 
             # Cache results
             with open(cache_file, 'wb') as f:
@@ -365,7 +417,7 @@ class ClusteringAnalyzer:
         """
         try:
             # Load and align trajectory
-            traj = self._load_and_align_trajectory(
+            traj, traj_metadata = self._load_and_align_trajectory(
                 universe, trajectory, align_selection,
                 start_frame, end_frame, step
             )
@@ -404,6 +456,23 @@ class ClusteringAnalyzer:
             else:
                 silhouette = -1
 
+            # Calculate globally continuous frame indices
+            if traj_metadata is not None:
+                # For combined trajectories, create globally continuous frame indices
+                frame_indices = []
+                global_frame = 0
+                for traj_frames in traj_metadata['frames_per_trajectory']:
+                    # Each trajectory contributes frames: [global_frame, global_frame+step, ...]
+                    traj_frame_indices = list(range(global_frame, global_frame + traj_frames * step, step))
+                    frame_indices.extend(traj_frame_indices)
+                    global_frame += traj_frames * step  # Move to next trajectory's starting point
+
+                # Ensure we have exactly the right number of frame indices
+                frame_indices = frame_indices[:len(labels)]
+            else:
+                # For single trajectory, use simple range
+                frame_indices = [start_frame + i * step for i in range(len(labels))]
+
             results = {
                 'labels': labels,
                 'n_clusters': n_clusters,
@@ -414,8 +483,15 @@ class ClusteringAnalyzer:
                 'coordinates_reduced': coordinates_reduced,
                 'scaler': scaler,
                 'pca': pca,
-                'frame_indices': list(range(start_frame, end_frame or traj.n_frames, step))
+                'frame_indices': frame_indices,
+                'timestep_ns': self.config.timestep_ns  # Pass timestep for time axis calculations
             }
+
+            # Add metadata if multiple trajectories were combined
+            if traj_metadata is not None:
+                results['trajectory_metadata'] = traj_metadata
+                logger.info(f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
+                          f"{len(labels)} total frames")
 
             logger.info(f"DBSCAN clustering completed. Clusters: {n_clusters}, Noise: {n_noise}")
             return results
@@ -471,7 +547,7 @@ class ClusteringAnalyzer:
         """
         try:
             # Load and align trajectory
-            traj = self._load_and_align_trajectory(
+            traj, traj_metadata = self._load_and_align_trajectory(
                 universe, trajectory, align_selection,
                 start_frame, end_frame, step
             )
@@ -565,7 +641,7 @@ class ClusteringAnalyzer:
             Pairwise RMSD matrix
         """
         # Load and align trajectory
-        traj = self._load_and_align_trajectory(
+        traj, traj_metadata = self._load_and_align_trajectory(
             universe, trajectory, align_selection,
             start_frame, end_frame, step
         )

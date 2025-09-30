@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 class ContactAnalyzer:
     """Contact analysis module"""
-    
+
     def __init__(self, config: AnalysisConfig):
         self.config = config
-        self._cache_dir = Path("./cache")
+        self._cache_dir = Path(config.cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
     
     def identify_ligand_residue(self, traj):
@@ -702,12 +702,13 @@ class ContactAnalyzer:
                     with default_processor.configure_omp_threads():
                         distances = md.compute_distances(traj, atom_pairs)
 
-                    # Filter distances within cutoff and convert to Angstroms
-                    contact_distances = distances[distances < cutoff_nm] * 10.0
+                    # Get minimum distance per frame (closest ligand-residue approach)
+                    # This gives one distance value per frame - no cutoff filtering
+                    min_distances_per_frame = np.min(distances, axis=1) * 10.0  # Convert to Angstroms
 
-                    if len(contact_distances) > 0:
-                        residue_distances[residue] = contact_distances
-                        logger.info(f"{residue}: {len(contact_distances)} contact distances, range {np.min(contact_distances):.1f}-{np.max(contact_distances):.1f} Å")
+                    if len(min_distances_per_frame) > 0:
+                        residue_distances[residue] = min_distances_per_frame
+                        logger.info(f"{residue}: {len(min_distances_per_frame)} frames, distance range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å")
 
                 except Exception as e:
                     logger.warning(f"Error analyzing distances for residue {residue}: {e}")
@@ -718,4 +719,133 @@ class ContactAnalyzer:
 
         except Exception as e:
             logger.error(f"Contact distances analysis failed: {e}")
+            return {}
+
+    def analyze_residue_distance_timeseries(self, universe, trajectory, key_residues=None, step=1, cache_name=None):
+        """
+        Analyze minimum distance timeseries between ligand and specific residues.
+
+        Parameters
+        ----------
+        universe : str
+            Path to topology file
+        trajectory : str
+            Path to trajectory file
+        key_residues : list, optional
+            List of residue names to analyze (e.g., ['ASP618', 'ARG555'])
+        step : int
+            Frame step size
+        cache_name : str, optional
+            Custom cache name for storing results
+
+        Returns
+        -------
+        dict
+            Dictionary with residue names as keys and distance timeseries as values
+            Format: {'ASP618': distances_array[n_frames], 'ARG555': distances_array[n_frames], ...}
+            Also includes 'times' key with time array in nanoseconds
+        """
+        try:
+            # Create cache key
+            if cache_name is None:
+                traj_name = Path(trajectory).stem if trajectory else "topology_only"
+                res_str = "_".join(key_residues[:3]) if key_residues else "default"
+                cache_key = f"residue_distance_timeseries_{traj_name}_{res_str}_{step}step"
+                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
+            else:
+                cache_key = cache_name
+
+            cache_file = self._cache_dir / f"{cache_key}.pkl"
+
+            # Check cache
+            if cache_file.exists():
+                logger.info(f"✓ Loading cached residue distance timeseries from {cache_file.name}")
+                print(f"  ✓ Using cached distance timeseries: {cache_file.name}")
+                with open(cache_file, 'rb') as f:
+                    return pickle.load(f)
+            else:
+                logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
+                print(f"  ⚙ Computing distance timeseries (will cache to: {cache_file.name})")
+
+            # Load trajectory
+            if trajectory:
+                traj = md.load(trajectory, top=universe)
+            else:
+                traj = md.load(universe)
+
+            if step > 1:
+                traj = traj[::step]
+
+            # Default key residues
+            if key_residues is None:
+                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
+                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+
+            # Get ligand atoms
+            ligand_atoms = traj.topology.select("resname LIG")
+            if len(ligand_atoms) == 0:
+                logger.warning("No ligand atoms found")
+                return {}
+
+            logger.info(f"Analyzing distance timeseries for {len(key_residues)} residues over {traj.n_frames} frames")
+
+            residue_timeseries = {}
+
+            for residue in key_residues:
+                try:
+                    # Find residue atoms
+                    residue_selections = [
+                        f"resname {residue[:3]} and resid {residue[3:]}",
+                        f"residue {residue[3:]}",
+                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                    ]
+
+                    residue_atoms = []
+                    for sel in residue_selections:
+                        try:
+                            atoms = traj.topology.select(sel)
+                            if len(atoms) > 0:
+                                residue_atoms = atoms
+                                break
+                        except:
+                            continue
+
+                    if len(residue_atoms) == 0:
+                        logger.warning(f"Could not find residue {residue}")
+                        continue
+
+                    # Create atom pairs
+                    atom_pairs = []
+                    for lig_atom in ligand_atoms:
+                        for res_atom in residue_atoms:
+                            atom_pairs.append([lig_atom, res_atom])
+
+                    # Calculate distances with parallel processing
+                    with default_processor.configure_omp_threads():
+                        distances = md.compute_distances(traj, atom_pairs)
+
+                    # Get minimum distance per frame and convert to Angstroms
+                    min_distances_per_frame = np.min(distances, axis=1) * 10.0
+
+                    residue_timeseries[residue] = min_distances_per_frame
+                    logger.info(f"{residue}: {len(min_distances_per_frame)} frames, range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å")
+
+                except Exception as e:
+                    logger.warning(f"Error analyzing timeseries for residue {residue}: {e}")
+                    continue
+
+            # Add time array
+            times = np.arange(traj.n_frames) * 0.5 * step
+            residue_timeseries['times'] = times
+
+            # Cache results
+            with open(cache_file, 'wb') as f:
+                pickle.dump(residue_timeseries, f)
+            logger.info(f"Cached residue distance timeseries to {cache_file.name}")
+
+            logger.info(f"Distance timeseries analysis complete: {len(residue_timeseries)-1} residues")
+            return residue_timeseries
+
+        except Exception as e:
+            logger.error(f"Distance timeseries analysis failed: {e}")
             return {}

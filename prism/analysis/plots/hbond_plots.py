@@ -387,3 +387,126 @@ def plot_hbond_raincloud(hbond_data: Dict[str, Dict[str, float]],
     except Exception as e:
         print(f"Error in H-bond raincloud plot: {e}")
         return False
+
+
+def plot_hbond_timeseries_multi_trajectory(timeseries_data: Dict[str, Dict[str, np.ndarray]],
+                                           output_path: str,
+                                           time_unit: str = 'ns',
+                                           timestep_ps: float = 20.0,
+                                           title: str = "") -> bool:
+    """
+    Plot hydrogen bond time series for multiple trajectories on the same plot.
+
+    Parameters
+    ----------
+    timeseries_data : dict
+        Nested dictionary: {trajectory_name: {residue_name: boolean_array}}
+        Example: {'Repeat 1': {'ASP623': array([True, False, ...]), ...}, ...}
+    output_path : str
+        Path to save the plot
+    time_unit : str
+        Time unit for x-axis ('ns' or 'ps')
+    timestep_ps : float
+        Timestep in picoseconds (default: 20.0 ps)
+    title : str
+        Plot title
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    try:
+        print("📈 H-bond time series: multi-trajectory comparison for key residues")
+        apply_publication_style()
+
+        # Extract all unique residues
+        all_residues = set()
+        for traj_data in timeseries_data.values():
+            all_residues.update(traj_data.keys())
+
+        if not all_residues:
+            print("  ⚠ No H-bond time series data available")
+            return False
+
+        all_residues = sorted(all_residues)
+        n_residues = len(all_residues)
+
+        # Create subplots (rows for residues)
+        n_cols = 2
+        n_rows = (n_residues + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols, 5 * n_rows))
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1:
+            axes = axes.reshape(1, -1)
+        elif n_cols == 1:
+            axes = axes.reshape(-1, 1)
+
+        # Colors for each trajectory
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+        traj_names = list(timeseries_data.keys())
+
+        # Convert timestep to appropriate unit
+        if time_unit == 'ns':
+            time_conversion = timestep_ps / 1000.0  # ps to ns
+            xlabel = 'Time (ns)'
+        else:
+            time_conversion = timestep_ps
+            xlabel = 'Time (ps)'
+
+        # Plot each residue
+        for idx, residue in enumerate(all_residues):
+            row = idx // n_cols
+            col = idx % n_cols
+            ax = axes[row, col]
+
+            # Plot each trajectory
+            for traj_idx, traj_name in enumerate(traj_names):
+                traj_data = timeseries_data[traj_name]
+
+                if residue in traj_data:
+                    hbond_array = traj_data[residue].astype(float)  # Convert bool to float
+                    n_frames = len(hbond_array)
+                    time_points = np.arange(n_frames) * time_conversion
+
+                    # Plot as line (0/1 for H-bond absence/presence)
+                    ax.plot(time_points, hbond_array, label=traj_name,
+                           color=colors[traj_idx % len(colors)],
+                           linewidth=1.5, alpha=0.8)
+
+            ax.set_xlabel(xlabel, fontfamily='Times New Roman', fontweight='bold')
+            ax.set_ylabel('H-bond Occupancy', fontfamily='Times New Roman', fontweight='bold')
+            ax.text(0.02, 0.98, residue, transform=ax.transAxes,
+                   fontfamily='Times New Roman', fontweight='bold', fontsize=14,
+                   verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+            ax.set_ylim(-0.1, 1.1)
+            ax.set_yticks([0, 1])
+            ax.set_yticklabels(['No', 'Yes'])
+            ax.legend(loc='upper right', fontsize=10)
+            ax.grid(True, alpha=0.3, axis='x')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+        # Hide unused subplots
+        for idx in range(n_residues, n_rows * n_cols):
+            row = idx // n_cols
+            col = idx % n_cols
+            axes[row, col].set_visible(False)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        plt.close()
+
+        print(f"  ✓ Saved H-bond time series plot: {output_path}")
+        return True
+
+    except Exception as e:
+        print(f"Error in H-bond time series plotting: {e}")
+        import traceback
+        traceback.print_exc()
+        return False

@@ -122,17 +122,13 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
         ax.set_ylabel('Principal Component 2', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
 
 
-        # Add statistics
+        # Print statistics (removed from plot to avoid hiding content)
         n_clusters = len(unique_labels)
         if 'silhouette_score' in clustering_results:
             silhouette = clustering_results['silhouette_score']
-            stats_text = f"Clusters: {n_clusters}\nSilhouette: {silhouette:.3f}"
+            print(f"  📊 Clustering statistics: {n_clusters} clusters, Silhouette score = {silhouette:.3f}")
         else:
-            stats_text = f"Clusters: {n_clusters}"
-
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9))
+            print(f"  📊 Clustering statistics: {n_clusters} clusters")
 
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
@@ -182,8 +178,29 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
     labels = clustering_results['labels']
     frame_indices = clustering_results.get('frame_indices', list(range(len(labels))))
 
+    # Debug logging
+    logger.debug(f"Timeline plot: {len(labels)} labels, {len(frame_indices)} frame_indices")
+
+    # Ensure frame_indices matches labels length
+    # DO NOT regenerate - this would lose the actual frame numbers!
+    # If mismatch occurs, it's a bug in clustering.py that should be fixed there
+    if len(frame_indices) != len(labels):
+        logger.error(f"Frame indices length mismatch: {len(frame_indices)} != {len(labels)}")
+        logger.error(f"This is a bug in clustering analysis - frame_indices should match labels length")
+        # Use what we have rather than creating wrong sequential indices
+        if len(frame_indices) < len(labels):
+            # Pad with extrapolated values if needed
+            step = frame_indices[1] - frame_indices[0] if len(frame_indices) > 1 else 1
+            while len(frame_indices) < len(labels):
+                frame_indices.append(frame_indices[-1] + step)
+        else:
+            # Truncate if too long
+            frame_indices = frame_indices[:len(labels)]
+
     if times is None:
-        times = np.array(frame_indices) * 0.02  # Assume 20 ps timesteps
+        # Get timestep from results metadata, fallback to 0.5 ns for backward compatibility
+        timestep_ns = clustering_results.get('timestep_ns', 0.5)
+        times = np.array(frame_indices) * timestep_ns
     else:
         times = times[:len(labels)]
 
@@ -205,17 +222,88 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
         if -1 in color_map:
             color_map[-1] = 'gray'  # Special color for noise
 
-        # Plot timeline
-        for i in range(len(times)):
-            cluster = labels[i]
+        # Plot timeline as thick horizontal bar segments
+        # Group consecutive frames with same cluster into continuous segments
+        segments = []
+
+        if len(labels) == 0:
+            # No data to plot
+            pass
+        elif len(labels) == 1:
+            # Single frame - create a single segment with some width
+            time_width = 0.05 if len(times) == 1 else (times[-1] - times[0]) * 0.1
+            segments.append({
+                'cluster': labels[0],
+                't_start': times[0] - time_width/2,
+                't_end': times[0] + time_width/2,
+                'start_idx': 0,
+                'end_idx': 0
+            })
+        else:
+            # Multiple frames - group into segments
+            start_idx = 0
+
+            for i in range(1, len(labels)):
+                if labels[i] != labels[i-1]:
+                    # Cluster changed, save previous segment
+                    segments.append({
+                        'cluster': labels[start_idx],
+                        't_start': times[start_idx],
+                        't_end': times[i-1],
+                        'start_idx': start_idx,
+                        'end_idx': i-1
+                    })
+                    start_idx = i
+
+            # Add final segment
+            segments.append({
+                'cluster': labels[start_idx],
+                't_start': times[start_idx],
+                't_end': times[-1],
+                'start_idx': start_idx,
+                'end_idx': len(labels)-1
+            })
+
+        # Draw thick horizontal lines for each segment
+        for seg in segments:
+            cluster = seg['cluster']
             color = color_map[cluster]
-            ax.scatter(times[i], cluster, c=[color], s=20, alpha=0.8,
-                      edgecolor='black', linewidth=0.3)
+
+            # Use thick horizontal lines to show cluster occupancy over time
+            ax.hlines(y=cluster, xmin=seg['t_start'], xmax=seg['t_end'],
+                     colors=color, linewidth=10, alpha=0.85, zorder=3)
+
+            # Add small markers at segment boundaries for clarity
+            if seg['start_idx'] == seg['end_idx']:
+                # Single point segment - just add one marker
+                ax.scatter([seg['t_start'] + (seg['t_end'] - seg['t_start'])/2], [cluster],
+                          c=[color], s=60, alpha=0.9,
+                          edgecolor='black', linewidth=0.5, zorder=4)
+            else:
+                # Multi-point segment - add markers at both ends
+                ax.scatter([seg['t_start'], seg['t_end']], [cluster, cluster],
+                          c=[color, color], s=40, alpha=0.9,
+                          edgecolor='black', linewidth=0.5, zorder=4)
+
+        # Add trajectory boundaries if combined trajectories
+        if 'trajectory_metadata' in clustering_results:
+            metadata = clustering_results['trajectory_metadata']
+            frames_per_traj = metadata.get('frames_per_trajectory', [])
+
+            if len(frames_per_traj) > 1:
+                # Calculate boundary positions
+                cumulative_frames = 0
+                for i, n_frames in enumerate(frames_per_traj[:-1]):  # Don't add line after last trajectory
+                    cumulative_frames += n_frames
+                    boundary_time = times[cumulative_frames] if cumulative_frames < len(times) else times[-1]
+                    ax.axvline(x=boundary_time, color='red', linestyle='--',
+                              alpha=0.5, linewidth=2, zorder=1,
+                              label='Trajectory boundary' if i == 0 else '')
 
         # Add horizontal lines for each cluster
         for cluster in unique_labels:
             if cluster != -1:
-                ax.axhline(y=cluster, color='gray', linestyle='--', alpha=0.3, linewidth=1)
+                ax.axhline(y=cluster, color='gray', linestyle='--', alpha=0.2, linewidth=1, zorder=1)
 
         # Calculate cluster populations
         cluster_stats = {}
@@ -224,17 +312,13 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
             percentage = count / len(labels) * 100
             cluster_stats[cluster] = {'count': count, 'percentage': percentage}
 
-        # Add population statistics
-        stats_text = "Cluster populations:\n"
+        # Print population statistics (removed from plot to avoid hiding content)
+        print("  📊 Cluster populations:")
         for cluster in sorted(unique_labels):
             if cluster == -1:
-                stats_text += f"Noise: {cluster_stats[cluster]['percentage']:.1f}%\n"
+                print(f"    Noise: {cluster_stats[cluster]['percentage']:.1f}% ({cluster_stats[cluster]['count']} frames)")
             else:
-                stats_text += f"Cluster {cluster}: {cluster_stats[cluster]['percentage']:.1f}%\n"
-
-        ax.text(0.02, 0.98, stats_text.strip(), transform=ax.transAxes,
-                verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9))
+                print(f"    Cluster {cluster}: {cluster_stats[cluster]['percentage']:.1f}% ({cluster_stats[cluster]['count']} frames)")
 
         # Styling
         ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
@@ -248,6 +332,12 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
             y_max = max(unique_labels) + 0.5
             ax.set_ylim(y_min, y_max)
             ax.set_yticks(unique_labels)
+
+        # Add legend if trajectory boundaries are shown
+        if 'trajectory_metadata' in clustering_results:
+            metadata = clustering_results['trajectory_metadata']
+            if len(metadata.get('frames_per_trajectory', [])) > 1:
+                ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
 
         plt.tight_layout()
 
@@ -395,10 +485,8 @@ def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
         std_rmsd = np.std(rmsd_matrix)
         max_rmsd = np.max(rmsd_matrix)
 
-        stats_text = f"Mean RMSD: {mean_rmsd:.2f} Å\nStd RMSD: {std_rmsd:.2f} Å\nMax RMSD: {max_rmsd:.2f} Å"
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9))
+        # Print RMSD statistics (removed from plot to avoid hiding content)
+        print(f"  📊 RMSD matrix statistics: Mean = {mean_rmsd:.2f} Å, Std = {std_rmsd:.2f} Å, Max = {max_rmsd:.2f} Å")
 
         plt.tight_layout()
 
@@ -589,3 +677,100 @@ def plot_multi_trajectory_clustering(clustering_results_dict: Dict[str, Dict[str
             logger.info(f"Multi-trajectory clustering plot saved: {save_path}")
 
     return fig, axes
+
+
+def plot_cluster_transition_matrix(clustering_results: Dict[str, Any],
+                                   title: str = "",
+                                   figsize: Optional[Tuple[float, float]] = None,
+                                   save_path: Optional[str] = None,
+                                   normalize: bool = True) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plot cluster transition probability matrix.
+
+    Parameters
+    ----------
+    clustering_results : dict
+        Results from ClusteringAnalyzer containing labels
+    title : str
+        Plot title
+    figsize : tuple
+        Figure size
+    save_path : str, optional
+        Path to save figure
+    normalize : bool
+        If True, normalize rows to show transition probabilities
+
+    Returns
+    -------
+    tuple
+        (figure, axes) objects
+    """
+    labels = clustering_results['labels']
+    n_clusters = clustering_results.get('n_clusters', len(set(labels)))
+
+    if figsize is None:
+        figsize = get_standard_figsize("single")
+
+    plt.style.use('default')
+    with plt.rc_context(get_publication_style()):
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Calculate transition matrix
+        transition_matrix = np.zeros((n_clusters, n_clusters))
+
+        for t in range(len(labels) - 1):
+            from_cluster = labels[t]
+            to_cluster = labels[t + 1]
+            if from_cluster >= 0 and to_cluster >= 0:  # Exclude noise (-1) for DBSCAN
+                transition_matrix[from_cluster, to_cluster] += 1
+
+        # Normalize if requested
+        if normalize:
+            row_sums = transition_matrix.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1  # Avoid division by zero
+            transition_matrix = transition_matrix / row_sums
+
+        # Create heatmap
+        im = ax.imshow(transition_matrix, cmap='Blues', vmin=0, vmax=1 if normalize else None,
+                      aspect='auto')
+
+        # Add colorbar
+        cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+        cbar_label = 'Transition Probability' if normalize else 'Transition Count'
+        cbar.set_label(cbar_label, rotation=270, labelpad=25,
+                      fontsize=PUBLICATION_FONTS['colorbar'], weight='bold')
+        cbar.ax.tick_params(labelsize=PUBLICATION_FONTS['tick_label'])
+
+        # Add text annotations
+        for i in range(n_clusters):
+            for j in range(n_clusters):
+                value = transition_matrix[i, j]
+                if normalize:
+                    text = f'{value:.2f}'
+                else:
+                    text = f'{int(value)}'
+
+                # Choose text color based on background
+                text_color = 'white' if value > (0.5 if normalize else transition_matrix.max()/2) else 'black'
+                ax.text(j, i, text, ha='center', va='center',
+                       color=text_color, fontsize=PUBLICATION_FONTS['value_text'])
+
+        # Styling
+        ax.set_xlabel('To Cluster', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+        ax.set_ylabel('From Cluster', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+
+        ax.set_xticks(range(n_clusters))
+        ax.set_yticks(range(n_clusters))
+        ax.set_xticklabels([f'C{i}' for i in range(n_clusters)],
+                          fontsize=PUBLICATION_FONTS['tick_label'])
+        ax.set_yticklabels([f'C{i}' for i in range(n_clusters)],
+                          fontsize=PUBLICATION_FONTS['tick_label'])
+
+        plt.tight_layout()
+
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            logger.info(f"Cluster transition matrix saved: {save_path}")
+
+    return fig, ax

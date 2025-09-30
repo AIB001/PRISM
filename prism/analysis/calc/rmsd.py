@@ -32,7 +32,7 @@ class RMSDAnalyzer:
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
-        self._cache_dir = Path("./cache")
+        self._cache_dir = Path(config.cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def calculate_rmsd(self,
@@ -545,16 +545,22 @@ class RMSDAnalyzer:
                 if calculate_selection is None:
                     calculate_selection = align_selection if align_selection else "protein and name CA"
 
-            # Create cache key
+            # Create cache key with trajectory filename
             if cache_name is None:
+                # Include trajectory filename in cache key
+                if isinstance(trajectory_files, list):
+                    traj_name = Path(trajectory_files[0]).name
+                else:
+                    traj_name = Path(trajectory_files).name
+
                 if single_selection:
                     calc_key = str(calculate_selection if calculate_selection else "protein")
                     align_key = str(align_selection if align_selection else "protein")
-                    cache_key = f"rmsd_mdtraj_align_{align_key}_calc_{calc_key}_{ref_frame}_{start_frame}_{end_frame}_{step}"
+                    cache_key = f"rmsd_mdtraj_{traj_name}_align_{align_key}_calc_{calc_key}_{ref_frame}_{start_frame}_{end_frame}_{step}"
                 else:
                     sel_names = "_".join(sorted(protein_ligand_selections.keys()))
                     align_key = str(align_selection if align_selection else "auto")
-                    cache_key = f"rmsd_mdtraj_align_{align_key}_calc_{sel_names}_{ref_frame}_{start_frame}_{end_frame}_{step}"
+                    cache_key = f"rmsd_mdtraj_{traj_name}_align_{align_key}_calc_{sel_names}_{ref_frame}_{start_frame}_{end_frame}_{step}"
                 cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "").replace("{", "").replace("}", "")
             else:
                 cache_key = str(cache_name)
@@ -563,9 +569,13 @@ class RMSDAnalyzer:
 
             # Check cache
             if cache_file.exists():
-                logger.info(f"Loading cached RMSD results from {cache_file}")
+                logger.info(f"✓ Loading cached RMSD results from {cache_file.name}")
+                print(f"  ✓ Using cached RMSD data: {cache_file.name}")
                 with open(cache_file, 'rb') as f:
                     return pickle.load(f)
+            else:
+                logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
+                print(f"  ⚙ Computing RMSD (will cache to: {cache_file.name})")
 
             # Align trajectory using MDTraj
             if align_selection:
@@ -713,16 +723,22 @@ class RMSDAnalyzer:
                 if calculate_selection is None:
                     calculate_selection = align_selection if align_selection else "name CA"
 
-            # Create cache key
+            # Create cache key with trajectory filename
             if cache_name is None:
+                # Include trajectory filename in cache key
+                if isinstance(trajectory_files, list):
+                    traj_name = Path(trajectory_files[0]).name
+                else:
+                    traj_name = Path(trajectory_files).name
+
                 if single_selection:
                     calc_key = calculate_selection if calculate_selection else "name CA"
                     align_key = align_selection if align_selection else "name CA"
-                    cache_key = f"rmsf_mdtraj_align_{align_key}_calc_{calc_key}_{start_frame}_{end_frame}_{step}"
+                    cache_key = f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{calc_key}_{start_frame}_{end_frame}_{step}"
                 else:
                     chain_names = "_".join(sorted(protein_chains.keys()))
                     align_key = align_selection if align_selection else "auto"
-                    cache_key = f"rmsf_mdtraj_align_{align_key}_calc_{chain_names}_{start_frame}_{end_frame}_{step}"
+                    cache_key = f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{chain_names}_{start_frame}_{end_frame}_{step}"
                 cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
             else:
                 cache_key = cache_name
@@ -731,9 +747,13 @@ class RMSDAnalyzer:
 
             # Check cache
             if cache_file.exists():
-                logger.info(f"Loading cached RMSF results from {cache_file}")
+                logger.info(f"✓ Loading cached RMSF results from {cache_file.name}")
+                print(f"  ✓ Using cached RMSF data: {cache_file.name}")
                 with open(cache_file, 'rb') as f:
                     return pickle.load(f)
+            else:
+                logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
+                print(f"  ⚙ Computing RMSF (will cache to: {cache_file.name})")
 
             # Align trajectory using MDTraj
             if align_selection:

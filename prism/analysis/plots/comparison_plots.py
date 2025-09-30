@@ -198,7 +198,7 @@ def plot_correlation_matrix(data_dict: Dict[str, np.ndarray],
     # Set ticks and labels
     ax.set_xticks(range(len(corr_matrix.columns)))
     ax.set_yticks(range(len(corr_matrix.index)))
-    ax.set_xticklabels(corr_matrix.columns, rotation=45, ha='right')
+    ax.set_xticklabels(corr_matrix.columns, rotation=45, ha='center')
     ax.set_yticklabels(corr_matrix.index)
 
     # Add correlation values as text
@@ -254,7 +254,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
     x_pos = np.arange(len(labels))
     bars = ax.bar(x_pos, means, yerr=stds, capsize=5, color=colors, alpha=0.7)
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_xticklabels(labels, rotation=45, ha='center')
     ax.set_ylabel(f'{property_name} (Mean ± SD)')
     ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)
@@ -266,7 +266,7 @@ def plot_statistical_comparison(data_dict: Dict[str, np.ndarray],
     for patch, color in zip(bp['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_xticklabels(labels, rotation=45, ha='center')
     ax.set_ylabel(property_name)
     ax.set_title('')  # Empty title for publication
     ax.grid(True, alpha=0.3)

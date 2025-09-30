@@ -38,9 +38,11 @@ class AnalysisConfig:
     smooth_window: int = 11
     min_frames_for_smoothing: int = 10
     parallel_workers: Optional[int] = None
-    distance_analysis: bool = True  
-    distance_cutoff_nm: float = 0.5  
-    
+    distance_analysis: bool = True
+    distance_cutoff_nm: float = 0.5
+    cache_dir: str = "./cache"  # Cache directory for analysis results
+    timestep_ns: float = 0.5  # Time between saved trajectory frames in nanoseconds (0.5 ns = 500 ps)
+
     def __post_init__(self):
         if self.parallel_workers is None:
             self.parallel_workers = min(os.cpu_count(), 8)

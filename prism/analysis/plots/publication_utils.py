@@ -22,11 +22,11 @@ PUBLICATION_FONTS = {
     'subtitle': 32,        # Subplot titles
     'axis_label': 32,      # X/Y axis labels - must be readable when tiny
     'tick_label': 26,      # Tick labels - critical for data reading when small
-    'legend': 24,          # Legend text
+    'legend': 14,          # Legend text - reduced to avoid clutter
     'annotation': 22,      # Statistical annotations
     'colorbar': 24,        # Colorbar labels
     'value_text': 18,      # Heatmap cell values - reduced for better fit in cells
-    'bar_annotation': 18   # Bar chart annotations - smaller to reduce visual clutter
+    'bar_annotation': 14    # Bar chart annotations - very small to prevent overlap
 }
 
 # 标准panel尺寸定义 - 确保所有单个panel图片字体相对大小一致

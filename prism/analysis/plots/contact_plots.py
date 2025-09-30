@@ -459,7 +459,7 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
             y='Contact_Probability',
             hue='Residue',
             palette=colors[:len(available_residues)],
-            inner='box',  # Show box plot inside
+            inner=None,  # No inner representation to avoid clutter
             legend=False,
             ax=ax
         )
@@ -561,11 +561,18 @@ def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, floa
         ax.errorbar(residues_sorted, means_sorted, yerr=stderrs_sorted,
                    fmt='none', capsize=6, capthick=1.5, color='#457B9D', alpha=0.8)
 
-        # Add value labels on bars
+        # Add value labels on bars - simple percentage format only
         for i, (bar, mean, se) in enumerate(zip(bars, means_sorted, stderrs_sorted)):
             if mean > 10:  # Only show labels for significant contacts
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + se + 3,
-                       f'{mean:.1f}±{se:.1f}', ha='center', va='bottom',
+                # Simple percentage format - error already shown by error bars
+                if mean >= 99.5:  # Essentially 100%
+                    label_text = '100%'
+                else:  # Show one decimal place for clarity
+                    label_text = f'{mean:.1f}%'
+
+                # Increase y-offset to avoid overlap with error bar caps
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + se + 5,
+                       label_text, ha='center', va='bottom',
                        fontsize=PUBLICATION_FONTS['bar_annotation'], color='#457B9D')
 
         # Formatting with proper tick alignment - apply_publication_style() controls font sizes and bold
@@ -756,7 +763,7 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
             y='Normalized_Contact_Number',
             hue='Residue',
             palette=colors[:len(all_residues)],
-            inner='box',
+            inner=None,  # No inner representation to avoid clutter
             legend=False,
             ax=ax
         )
@@ -795,7 +802,8 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
 
 def plot_contact_distances_violin(distance_data: Dict,
                                  output_path: str,
-                                 title: str = "Contact Distance Distributions") -> bool:
+                                 title: str = "Contact Distance Distributions",
+                                 distance_cutoff: float = -1.0) -> bool:
     """
     Plot violin plots for contact distance distributions.
 
@@ -808,6 +816,10 @@ def plot_contact_distances_violin(distance_data: Dict,
         Path to save the figure
     title : str
         Main plot title
+    distance_cutoff : float, optional
+        Maximum distance to include in plot (in Angstroms).
+        Default: -1.0 (no cutoff, include all distances)
+        Typical values: 6.0 Å for contact analysis
 
     Returns
     -------
@@ -815,7 +827,8 @@ def plot_contact_distances_violin(distance_data: Dict,
         True if successful
     """
     try:
-        print("🎻 Contact distance distributions violin plot showing distance ranges per residue")
+        cutoff_msg = f"(cutoff: {distance_cutoff:.1f} Å)" if distance_cutoff > 0 else "(no cutoff)"
+        print(f"🎻 Contact distance distributions violin plot {cutoff_msg}")
         apply_publication_style()
         import pandas as pd
 
@@ -832,6 +845,14 @@ def plot_contact_distances_violin(distance_data: Dict,
             for residue in all_residues:
                 if residue in residue_data:
                     distances = residue_data[residue]
+
+                    # Apply distance cutoff if specified
+                    if distance_cutoff > 0:
+                        distances = distances[distances <= distance_cutoff]
+
+                    if len(distances) == 0:
+                        continue
+
                     # Sample distances to avoid overloading plot
                     if len(distances) > 1000:
                         sample_indices = np.random.choice(len(distances), 1000, replace=False)
@@ -849,20 +870,20 @@ def plot_contact_distances_violin(distance_data: Dict,
 
         df = pd.DataFrame(plot_data)
 
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+        fig, ax = plt.subplots(figsize=get_standard_figsize('distribution'))
 
         # Define colors
         colors = ['#A8DADC', '#F1FAEE', '#E9C46A', '#D4A574', '#E76F51',
                  '#2A9D8F', '#F4A261', '#E76F51', '#457B9D']
 
-        # Create violin plot
+        # Create violin plot - no scattering by default
         violin_parts = sns.violinplot(
             data=df,
             x='Residue',
             y='Contact_Distance',
             hue='Residue',
             palette=colors[:len(all_residues)],
-            inner='quartile',
+            inner=None,  # No inner representation to avoid scattering
             legend=False,
             ax=ax
         )
@@ -876,8 +897,11 @@ def plot_contact_distances_violin(distance_data: Dict,
         ax.grid(True, alpha=0.3)
         ax.set_facecolor('#FAFAFA')
 
-        # Set y-axis limits to focus on contact range
-        ax.set_ylim(0, 4.5)
+        # Set y-axis limits dynamically based on data
+        if distance_cutoff > 0:
+            ax.set_ylim(0, min(distance_cutoff * 1.1, df['Contact_Distance'].max() * 1.1))
+        else:
+            ax.set_ylim(0, df['Contact_Distance'].max() * 1.1)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches='tight',
@@ -891,11 +915,46 @@ def plot_contact_distances_violin(distance_data: Dict,
         return False
 
 
+def _create_half_violin(ax, data, position, color, alpha=1.0, width=0.35, side='right'):
+    """Create half violin plot using KDE"""
+    from scipy import stats
+
+    # Calculate kernel density estimation
+    density = stats.gaussian_kde(data)
+    y_min, y_max = min(data), max(data)
+    y_range = np.linspace(y_min, y_max, 100)
+    density_values = density(y_range)
+
+    # Normalize density values
+    density_values = density_values / density_values.max() * width
+
+    if side == 'right':
+        # Right half: extend from center to right
+        x_coords = np.concatenate([
+            [position] * len(y_range),  # Center line
+            position + density_values[::-1]  # Right contour
+        ])
+        y_coords = np.concatenate([y_range, y_range[::-1]])
+    else:
+        # Left half: extend from center to left
+        x_coords = np.concatenate([
+            position - density_values,  # Left contour
+            [position] * len(y_range)  # Center line
+        ])
+        y_coords = np.concatenate([y_range, y_range[::-1]])
+
+    # Draw half violin
+    ax.fill(x_coords, y_coords, color=color, alpha=alpha, zorder=1)
+    return ax
+
+
 def plot_contact_distances_raincloud(distance_data: Dict,
                                     output_path: str,
-                                    title: str = "Contact Distance Raincloud") -> bool:
+                                    title: str = "",
+                                    distance_cutoff: float = -1.0) -> bool:
     """
     Plot raincloud plots for contact distance distributions.
+    Follows reference implementation with half violin, box plot, and density-based scatter.
 
     Parameters
     ----------
@@ -905,7 +964,11 @@ def plot_contact_distances_raincloud(distance_data: Dict,
     output_path : str
         Path to save the figure
     title : str
-        Main plot title
+        Main plot title (empty by default for publication)
+    distance_cutoff : float, optional
+        Maximum distance to include in plot (in Angstroms).
+        Default: -1.0 (no cutoff, include all distances)
+        Typical values: 6.0 Å for contact analysis
 
     Returns
     -------
@@ -913,65 +976,128 @@ def plot_contact_distances_raincloud(distance_data: Dict,
         True if successful
     """
     try:
-        print("🌧️ Contact distance raincloud plot combining violin plots with strip plots")
+        cutoff_msg = f"(cutoff: {distance_cutoff:.1f} Å)" if distance_cutoff > 0 else "(no cutoff)"
+        print(f"🌧️ Contact distance raincloud plot {cutoff_msg}")
         apply_publication_style()
-        import pandas as pd
+        from scipy import stats
 
-        # Prepare data
-        plot_data = []
+        # Apply distance cutoff to all residue data if specified
+        filtered_distance_data = {}
         for residue, distances in distance_data.items():
-            # Sample distances to avoid overloading
-            if len(distances) > 1000:
-                sample_indices = np.random.choice(len(distances), 1000, replace=False)
-                distances = distances[sample_indices]
+            if distance_cutoff > 0:
+                filtered_distances = distances[distances <= distance_cutoff]
+            else:
+                filtered_distances = distances
 
-            for distance in distances:
-                plot_data.append({
-                    'Residue': residue,
-                    'Contact_Distance': distance
-                })
+            if len(filtered_distances) > 0:
+                filtered_distance_data[residue] = filtered_distances
 
-        if not plot_data:
+        if not filtered_distance_data:
+            print("  ⚠ No data available after applying cutoff")
             return False
 
-        df = pd.DataFrame(plot_data)
-        residues = sorted(df['Residue'].unique())
+        residues = sorted(filtered_distance_data.keys())
+        fig, ax = plt.subplots(figsize=get_standard_figsize('distribution'))
 
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+        # Color scheme matching reference
+        fill_colors = [
+            '#E8F4F8', '#F0E8F4', '#E8F8F0', '#F8F0E8', '#F4E8E8',
+            '#F5F5DC', '#E6E6FA', '#F0FFF0', '#FFF5EE', '#F0F8FF'
+        ]
+        edge_colors = [
+            '#4A90A4', '#8E44AD', '#27AE60', '#E67E22', '#E74C3C',
+            '#D2B48C', '#9370DB', '#2E8B57', '#CD853F', '#4682B4'
+        ]
 
-        # Colors
-        colors = ['#A8DADC', '#F1FAEE', '#E9C46A', '#D4A574', '#E76F51',
-                 '#2A9D8F', '#F4A261', '#E76F51', '#457B9D']
+        x_positions = np.arange(len(residues))
 
-        y_positions = np.arange(len(residues))
+        # Track max distance for y-axis scaling
+        max_distance = 0
 
         for i, residue in enumerate(residues):
-            residue_data = df[df['Residue'] == residue]['Contact_Distance']
+            residue_distances = filtered_distance_data[residue]
+            max_distance = max(max_distance, np.max(residue_distances))
 
-            # Violin plot (density)
-            violin_parts = ax.violinplot([residue_data], positions=[y_positions[i]],
-                                       vert=False, widths=0.4, showmeans=False,
-                                       showmedians=True, showextrema=False)
+            if len(residue_distances) == 0:
+                continue
 
-            for pc in violin_parts['bodies']:
-                pc.set_facecolor(colors[i % len(colors)])
-                pc.set_alpha(0.7)
+            pos = x_positions[i]
+            fill_color = fill_colors[i % len(fill_colors)]
+            edge_color = edge_colors[i % len(edge_colors)]
 
-            # Strip plot (individual points)
-            y_jitter = np.random.normal(y_positions[i], 0.05, len(residue_data))
-            ax.scatter(residue_data, y_jitter, alpha=0.6, s=8, color='black')
+            # 1. Half violin (right side)
+            _create_half_violin(ax, residue_distances, pos, fill_color,
+                              alpha=1.0, width=0.35, side='right')
 
-        # Formatting - apply_publication_style() controls font sizes and bold
-        ax.set_xlabel('Contact Distance (Å)')
-        ax.set_ylabel('Key Residues')
-        ax.set_yticks(y_positions)
-        ax.set_yticklabels(residues)
-        # Remove manual tick_params - let apply_publication_style() handle it
-        ax.grid(True, alpha=0.3)
-        ax.set_facecolor('#FAFAFA')
+            # 2. Box plot (center)
+            q1, median, q3 = np.percentile(residue_distances, [25, 50, 75])
+            iqr = q3 - q1
+            lower_whisker = max(min(residue_distances), q1 - 1.5 * iqr)
+            upper_whisker = min(max(residue_distances), q3 + 1.5 * iqr)
 
-        # Set x-axis limits
-        ax.set_xlim(0, 4.5)
+            box_width = 0.1
+            box = plt.Rectangle((pos - box_width / 2, q1), box_width, q3 - q1,
+                              facecolor='white', edgecolor=edge_color,
+                              linewidth=2, alpha=0.7, zorder=3)
+            ax.add_patch(box)
+
+            # Median line
+            ax.plot([pos - box_width / 2, pos + box_width / 2], [median, median],
+                   color=edge_color, linewidth=3, zorder=4)
+
+            # Whiskers
+            ax.plot([pos, pos], [q3, upper_whisker], color=edge_color, linewidth=2, zorder=3)
+            ax.plot([pos, pos], [q1, lower_whisker], color=edge_color, linewidth=2, zorder=3)
+            ax.plot([pos - 0.02, pos + 0.02], [upper_whisker, upper_whisker],
+                   color=edge_color, linewidth=2, zorder=3)
+            ax.plot([pos - 0.02, pos + 0.02], [lower_whisker, lower_whisker],
+                   color=edge_color, linewidth=2, zorder=3)
+
+            # 3. Density-based scatter (left side)
+            # Sample data if too many points
+            max_points = 200
+            if len(residue_distances) > max_points:
+                sample_indices = np.random.choice(len(residue_distances), max_points, replace=False)
+                sampled_distances = residue_distances[sample_indices]
+            else:
+                sampled_distances = residue_distances
+
+            # Calculate density-based x-offset
+            density = stats.gaussian_kde(sampled_distances)
+            local_density = density(sampled_distances)
+            max_offset = 0.25
+            if local_density.max() > local_density.min():
+                normalized_density = (local_density - local_density.min()) / (local_density.max() - local_density.min())
+            else:
+                normalized_density = np.zeros_like(local_density)
+
+            x_offsets = -max_offset * normalized_density - 0.05
+            x_offsets += np.random.normal(0, 0.03, len(sampled_distances))  # Add jitter
+            x_scatter = pos + x_offsets
+
+            ax.scatter(x_scatter, sampled_distances, s=15, alpha=0.6,
+                      color=edge_color, edgecolors='white',
+                      linewidth=0.5, zorder=2)
+
+        # Formatting
+        ax.set_ylabel('Contact Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+        ax.set_xlabel('Key Residues', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(residues, rotation=45, ha='center', fontsize=PUBLICATION_FONTS['tick_label'])
+        ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+        ax.set_xlim(-0.6, len(residues) - 0.4)
+
+        # Set y-axis limits dynamically based on data
+        if distance_cutoff > 0:
+            ax.set_ylim(0, min(distance_cutoff * 1.1, max_distance * 1.1))
+        else:
+            ax.set_ylim(0, max_distance * 1.1)
+
+        # Grid and spine styling
+        ax.grid(True, alpha=0.3, axis='y')
+        ax.set_axisbelow(True)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches='tight',
@@ -982,4 +1108,93 @@ def plot_contact_distances_raincloud(distance_data: Dict,
 
     except Exception as e:
         print(f"Error in contact distances raincloud plot: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def plot_residue_distance_timeseries(distance_timeseries: Dict,
+                                    residue_name: str,
+                                    output_path: str,
+                                    contact_start: float = 3.0,
+                                    contact_end: float = 4.5,
+                                    smooth_window: int = 11) -> bool:
+    """
+    Plot distance timeseries for a single residue with contact thresholds.
+
+    Parameters
+    ----------
+    distance_timeseries : dict
+        Dictionary containing 'times' and residue distance data
+        Format: {'times': time_array, 'ASP618': distance_array, ...}
+    residue_name : str
+        Residue name to plot (e.g., 'ASP618', 'ARG555')
+    output_path : str
+        Path to save the figure
+    contact_start : float
+        Contact start threshold in Angstroms (green line)
+    contact_end : float
+        Contact end threshold in Angstroms (red line)
+    smooth_window : int
+        Window size for smoothing (default 11)
+
+    Returns
+    -------
+    bool
+        True if successful
+    """
+    try:
+        print(f"📈 Distance timeseries plot for {residue_name} showing binding/unbinding dynamics")
+        apply_publication_style()
+
+        if residue_name not in distance_timeseries:
+            print(f"  ✗ Residue {residue_name} not found in timeseries data")
+            return False
+
+        times = distance_timeseries['times']
+        distances = distance_timeseries[residue_name]
+
+        # Smooth the data
+        if len(distances) > smooth_window:
+            smoothed_distances = np.convolve(
+                distances,
+                np.ones(smooth_window) / smooth_window,
+                mode='valid'
+            )
+            smoothed_times = times[smooth_window-1:]
+        else:
+            smoothed_distances = distances
+            smoothed_times = times
+
+        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+
+        # Plot distance timeseries
+        ax.plot(smoothed_times, smoothed_distances, 'b-', linewidth=2,
+               label=f'Distance (window={smooth_window})')
+
+        # Add contact threshold lines
+        ax.axhline(y=contact_start, color='g', linestyle='--', linewidth=2,
+                  label='Contact start')
+        ax.axhline(y=contact_end, color='r', linestyle='--', linewidth=2,
+                  label='Contact end')
+
+        # Formatting
+        ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+        ax.set_ylabel('Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+        ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+        ax.legend(loc='best', fontsize=PUBLICATION_FONTS['legend'], framealpha=0.9)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        plt.close()
+
+        print(f"  ✅ Distance timeseries plot saved: {output_path}")
+        return True
+
+    except Exception as e:
+        print(f"Error in distance timeseries plot: {e}")
+        import traceback
+        traceback.print_exc()
         return False

@@ -18,7 +18,8 @@
       "Read(//data/gxf1212/work/PRISM/test/analysis/rdrp/docs/example_figures/**)",
       "Read(//home/gxf1212/.claude/**)",
       "Bash(python3:*)",
-      "Read(///**)"
+      "Read(///**)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

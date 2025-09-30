@@ -108,14 +108,10 @@ def plot_violin_comparison(data_dict: Dict[str, List[float]],
 
     ax.grid(True, alpha=0.3)
 
-    # Add statistics text
-    stats_text = "Mean ± SD:\n"
+    # Print statistics (removed from plot to avoid hiding content)
+    print("  📊 Property statistics (Mean ± SD):")
     for label, values in data_dict.items():
-        stats_text += f"{label}: {np.mean(values):.2f} ± {np.std(values):.2f}\n"
-
-    ax.text(0.02, 0.98, stats_text.strip(), transform=ax.transAxes,
-            verticalalignment='top', fontsize=10,
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        print(f"    {label}: {np.mean(values):.2f} ± {np.std(values):.2f}")
 
     plt.tight_layout()
 
@@ -406,15 +402,10 @@ def plot_property_distribution(values: np.ndarray,
 
     # Add stats text
     if show_stats:
-        stats_text = (f"Mean: {mean_val:.2f}\n"
-                      f"Std: {std_val:.2f}\n"
-                      f"Median: {median_val:.2f}\n"
-                      f"Min: {np.min(values):.2f}\n"
-                      f"Max: {np.max(values):.2f}")
-
-        ax.text(0.75, 0.95, stats_text, transform=ax.transAxes,
-                verticalalignment='top', fontsize=10,
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        # Print statistics (removed from plot to avoid hiding content)
+        print(f"  📊 Distribution statistics:")
+        print(f"    Mean: {mean_val:.2f}, Std: {std_val:.2f}")
+        print(f"    Median: {median_val:.2f}, Min: {np.min(values):.2f}, Max: {np.max(values):.2f}")
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -555,14 +546,10 @@ def plot_rmsf_per_residue(rmsf_values: np.ndarray,
 
     ax.grid(True, alpha=0.3)
 
-    # Add statistics
+    # Print statistics (removed from plot to avoid hiding content)
     mean_rmsf = np.mean(rmsf_values)
     std_rmsf = np.std(rmsf_values)
-    stats_text = f"Mean RMSF: {mean_rmsf:.3f} ± {std_rmsf:.3f} nm"
-
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-            verticalalignment='top', fontsize=10,
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    print(f"  📊 RMSF statistics: Mean = {mean_rmsf:.3f} ± {std_rmsf:.3f} nm")
 
     if highlight_threshold is not None and np.any(flexible_mask):
         ax.legend()
@@ -722,14 +709,10 @@ def plot_multi_chain_rmsf(chain_rmsf_data: Dict[str, Tuple[np.ndarray, np.ndarra
 
         ax.grid(True, alpha=0.3)
 
-        # Add statistics
+        # Print statistics (removed from plot to avoid hiding content)
         mean_rmsf = np.mean(rmsf_values)
         std_rmsf = np.std(rmsf_values)
-        stats_text = f"Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å"
-
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                verticalalignment='top', fontsize=9,
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        print(f"  📊 {chain_name} RMSF: Mean = {mean_rmsf:.2f} ± {std_rmsf:.2f} Å")
 
     # Hide unused subplots
     for i in range(n_chains, len(axes)):
@@ -1688,16 +1671,12 @@ def plot_contact_distance_distribution(
         ax.spines['left'].set_linewidth(1.2)
         ax.spines['bottom'].set_linewidth(1.2)
 
-        # Add statistical information
+        # Print statistical information (removed from plot to avoid hiding content)
         if plot_type in ['violin', 'box'] and show_statistics:
-            stats_text = f"Median distances (Å) - sorted by {sort_by}:\n"
-            # for i, residue in enumerate(residue_names[:5]):  # Top 5 only to avoid crowding
-            #     median_dist = residue_stats[residue]['median']
-            #     stats_text += f"{residue}: {median_dist:.2f}\n"
-
-            ax.text(0.02, 0.98, stats_text.rstrip(), transform=ax.transAxes,
-                   verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                   bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.9))
+            print(f"  📊 Ligand distance statistics (sorted by {sort_by}, top 5):")
+            for i, residue in enumerate(residue_names[:5]):
+                median_dist = residue_stats[residue]['median']
+                print(f"    {residue}: Median = {median_dist:.2f} Å")
 
         plt.tight_layout()
 
@@ -1991,7 +1970,7 @@ def plot_hydrogen_bond_stability(
         ax1.set_ylabel('Occupancy (%)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
 
         ax1.set_xticks(range(len(hbond_names)))
-        ax1.set_xticklabels(hbond_names, rotation=45, ha='right',
+        ax1.set_xticklabels(hbond_names, rotation=45, ha='center',
                            fontsize=PUBLICATION_FONTS['tick_label'])
         ax1.set_ylim(0, 110)
         ax1.grid(True, alpha=0.6, axis='y')
@@ -2097,11 +2076,8 @@ def plot_distance_time_series(
             ax.axhline(mean_dist, color='black', linestyle='--',
                       linewidth=1.5, alpha=0.7)
 
-            # Add statistics text
-            stats_text = f'Mean: {mean_dist:.2f}±{np.std(distances):.2f} Å'
-            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                   verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+            # Print statistics (removed from plot to avoid hiding content)
+            print(f"  📊 {interaction} distance: Mean = {mean_dist:.2f} ± {np.std(distances):.2f} Å")
 
             # Styling
             ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'])
@@ -2280,21 +2256,14 @@ def plot_multi_chain_rmsf_example_style(chain_data: Dict[str, Dict[str, np.ndarr
                 residue_ids = data.get('residue_ids', np.arange(len(rmsf_values)))
                 n_residues = len(rmsf_values)
 
-                # Calculate statistics
+                # Calculate and print statistics (removed from plot to avoid hiding content)
                 mean_rmsf = np.mean(rmsf_values)
                 std_rmsf = np.std(rmsf_values)
+                print(f"  📊 {chain_name} RMSF: Mean = {mean_rmsf:.2f} ± {std_rmsf:.2f} Å")
 
                 # Create filled area plot (exact match to example)
                 ax.fill_between(residue_ids, 0, rmsf_values, alpha=0.6, color='lightblue')
                 ax.plot(residue_ids, rmsf_values, color='steelblue', linewidth=1)
-
-                # Statistics box (matching example exactly)
-                stats_text = f'Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å'
-                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                       verticalalignment='top', horizontalalignment='left',
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow',
-                               alpha=0.8, edgecolor='black'),
-                       fontsize=PUBLICATION_FONTS['annotation'], fontweight='normal')
 
                 # Panel title (shorter)
 
@@ -2329,16 +2298,10 @@ def plot_multi_chain_rmsf_example_style(chain_data: Dict[str, Dict[str, np.ndarr
                     n_residues = len(rmsf_values)
                     mean_rmsf = np.mean(rmsf_values)
                     std_rmsf = np.std(rmsf_values)
+                    print(f"  📊 {chain_name} (separate) RMSF: Mean = {mean_rmsf:.2f} ± {std_rmsf:.2f} Å")
 
                     ax_single.fill_between(residue_ids, 0, rmsf_values, alpha=0.6, color='lightblue')
                     ax_single.plot(residue_ids, rmsf_values, color='steelblue', linewidth=1)
-
-                    stats_text = f'Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å'
-                    ax_single.text(0.02, 0.98, stats_text, transform=ax_single.transAxes,
-                                  verticalalignment='top', horizontalalignment='left',
-                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow',
-                                          alpha=0.8, edgecolor='black'),
-                                  fontsize=PUBLICATION_FONTS['annotation'])
 
                     ax_single.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
                     ax_single.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')

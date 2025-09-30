@@ -40,7 +40,10 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
         # Create single panel figure (matching example)
         fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
 
-        # Plot all trajectories with simple blue lines
+        # Use different colors for each trajectory
+        colors = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#C55A11']
+
+        # Plot all trajectories with different colors
         for i, (traj_name, rmsd_data) in enumerate(rmsd_results.items()):
             if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
                 protein_rmsd = rmsd_data['protein']
@@ -49,7 +52,8 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
 
             if len(protein_rmsd) > 0:
                 time = np.arange(len(protein_rmsd)) * 0.5  # 0.5 ns intervals
-                ax.plot(time, protein_rmsd, color='steelblue', linewidth=1.0, alpha=0.8)
+                color = colors[i % len(colors)]
+                ax.plot(time, protein_rmsd, color=color, linewidth=1.5, alpha=0.85, label=traj_name)
 
         # Format exactly like the example
         ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
@@ -69,6 +73,10 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
 
         if all_rmsd:
             ax.set_ylim(0, max(all_rmsd) * 1.05)
+
+        # Add legend if multiple trajectories
+        if len(rmsd_results) > 1:
+            ax.legend(loc='best', fontsize=PUBLICATION_FONTS['legend'], framealpha=0.9)
 
         # Only add title if provided
 
@@ -408,19 +416,14 @@ def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.n
             ax.plot(residue_ids, rmsf_values, color=color, linewidth=2, alpha=0.9)
             ax.fill_between(residue_ids, rmsf_values, alpha=0.3, color=color)
 
-            # Calculate statistics
+            # Calculate and print statistics (removed from plot to avoid hiding content)
             mean_rmsf = np.mean(rmsf_values)
             std_rmsf = np.std(rmsf_values)
-            stats_text = f"Mean: {mean_rmsf:.1f} ± {std_rmsf:.2f} Å"
+            print(f"  📊 {display_name} RMSF: Mean = {mean_rmsf:.1f} ± {std_rmsf:.2f} Å")
 
             # Add panel title (matching the original figure style)
             panel_title = display_name.replace("Protein ", "").replace("Nucleic ", "Nucleic ")
             ax.set_title(panel_title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold', pad=10)
-
-            # Add statistics box (matching original style)
-            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                    verticalalignment='top', fontsize=10,
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
 
             # Formatting with appropriate x-axis label
             ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
@@ -525,12 +528,8 @@ def _plot_rmsf_separate_files(sorted_chains: List[Tuple[str, Tuple[np.ndarray, n
                 # Calculate statistics
                 mean_rmsf = np.mean(rmsf_values)
                 std_rmsf = np.std(rmsf_values)
-                stats_text = f"Mean: {mean_rmsf:.2f} ± {std_rmsf:.2f} Å"
-
-                # Add statistics box
-                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                        verticalalignment='top', fontsize=PUBLICATION_FONTS['annotation'],
-                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                # Print statistics (removed from plot to avoid hiding content)
+                print(f"  📊 {chain_name} RMSF: Mean = {mean_rmsf:.2f} ± {std_rmsf:.2f} Å")
 
                 # Formatting
                 ax.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
@@ -681,18 +680,13 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
             overall_std = stats["overall_std"]
             n_trajectories = stats["n_trajectories"]
 
-            stats_text = f"Mean: {overall_mean:.1f} ± {overall_std:.2f} Å\n"
-            stats_text += f"Trajectories: {n_trajectories}"
+            # Print statistics (removed from plot to avoid hiding content)
+            print(f"  📊 {chain_name} RMSF: Mean = {overall_mean:.1f} ± {overall_std:.2f} Å ({n_trajectories} trajectories)")
 
             # Panel title
             clean_chain_name = chain_name.replace("Protein ", "").replace("Nucleic ", "Nucleic ")
             ax.set_title(clean_chain_name, fontsize=PUBLICATION_FONTS['title'],
                         fontweight='bold', pad=10)
-
-            # Add statistics box
-            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-                   verticalalignment='top', fontsize=10,
-                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray'))
 
             # Formatting
             ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')

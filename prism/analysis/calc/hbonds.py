@@ -159,17 +159,166 @@ class HBondAnalyzer:
         if not hasattr(self, 'traj') or self.traj is None:
             logger.warning("No MDTraj trajectory available for hydrogen bond analysis")
             return []
-        
+
         hbond_pairs, hbond_triplets = self._prepare_hbond_pairs()
-        
+
         if not hbond_pairs:
             logger.warning("No hydrogen bond pairs found")
             return []
-        
+
         total_frames = self.traj.n_frames
         hbond_stats = self._analyze_hbonds_fully_vectorized(hbond_pairs, hbond_triplets)
-        
+
         return self._calculate_hbond_frequencies(hbond_stats, total_frames)
+
+    def extract_residue_hbond_timeseries(self, target_residues: List[str] = None) -> Dict[str, np.ndarray]:
+        """
+        Extract per-frame hydrogen bond time series for specific residues.
+
+        Parameters
+        ----------
+        target_residues : list of str, optional
+            List of residue names to extract (e.g., ['ASP623', 'ASN691']).
+            If None, extracts all residues with H-bonds.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping residue names to boolean arrays indicating H-bond presence per frame.
+            Format: {residue_name: np.ndarray of shape (n_frames,)}
+        """
+        if not hasattr(self, 'traj') or self.traj is None:
+            logger.warning("No trajectory data available")
+            return {}
+
+        # Get H-bond pairs
+        hbond_pairs, hbond_triplets = self._prepare_hbond_pairs()
+        if not hbond_pairs:
+            logger.warning("No hydrogen bond pairs found")
+            return {}
+
+        # Create keys for all H-bond pairs
+        hbond_keys = [self._create_hbond_key_cached(pair) for pair in hbond_pairs]
+
+        # Calculate H-bonds for all frames
+        pairs_array = np.array(hbond_pairs)
+        triplets_array = np.array(hbond_triplets)
+
+        n_frames = self.traj.n_frames
+        n_pairs = len(pairs_array)
+
+        # Compute H-bond mask for all frames
+        logger.info(f"Computing H-bond time series for {n_frames} frames...")
+
+        try:
+            # Load coordinates
+            coords = self.traj.xyz
+
+            # Calculate distances
+            donor_coords = coords[:, pairs_array[:, 0], :]
+            acceptor_coords = coords[:, pairs_array[:, 1], :]
+            all_distances = np.linalg.norm(donor_coords - acceptor_coords, axis=2)
+
+            # Calculate angles
+            h_coords = coords[:, triplets_array[:, 0], :]
+            donor_coords_triplet = coords[:, triplets_array[:, 1], :]
+            acceptor_coords_triplet = coords[:, triplets_array[:, 2], :]
+
+            vec_hd = donor_coords_triplet - h_coords
+            vec_da = acceptor_coords_triplet - donor_coords_triplet
+
+            dot_products = np.sum(vec_hd * vec_da, axis=2)
+            norm_hd = np.linalg.norm(vec_hd, axis=2)
+            norm_da = np.linalg.norm(vec_da, axis=2)
+
+            denominator = norm_hd * norm_da
+            valid_mask = denominator > 1e-10
+            cos_angles = np.zeros((n_frames, n_pairs))
+            cos_angles[valid_mask] = dot_products[valid_mask] / denominator[valid_mask]
+            cos_angles = np.clip(cos_angles, -1.0, 1.0)
+            all_angles_deg = np.degrees(np.arccos(cos_angles))
+
+            # Apply H-bond criteria
+            distance_mask = all_distances < self.config.hbond_distance_cutoff_nm
+            angle_mask = all_angles_deg > self.config.hbond_angle_cutoff_deg
+            hbond_mask = distance_mask & angle_mask  # Shape: (n_frames, n_pairs)
+
+            # Group by residue
+            residue_timeseries = {}
+
+            for pair_idx, key in enumerate(hbond_keys):
+                # Extract residue name from key
+                # Key format: "ASP 623 (OD1) -> Ligand" or "Ligand -> ASP 623 (OD1)"
+                residue_name = self._extract_residue_name_from_key(key)
+
+                if residue_name is None:
+                    continue
+
+                # Filter by target residues if specified
+                if target_residues is not None:
+                    if not any(res in residue_name for res in target_residues):
+                        continue
+
+                # Store time series (OR operation if multiple bonds to same residue)
+                if residue_name not in residue_timeseries:
+                    residue_timeseries[residue_name] = hbond_mask[:, pair_idx].copy()
+                else:
+                    # Combine with existing (H-bond present if ANY bond to this residue exists)
+                    residue_timeseries[residue_name] = np.logical_or(
+                        residue_timeseries[residue_name],
+                        hbond_mask[:, pair_idx]
+                    )
+
+            logger.info(f"Extracted H-bond time series for {len(residue_timeseries)} residues")
+            return residue_timeseries
+
+        except Exception as e:
+            logger.error(f"Error extracting H-bond time series: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    def _extract_residue_name_from_key(self, key: str) -> str:
+        """
+        Extract residue name from H-bond key.
+
+        Parameters
+        ----------
+        key : str
+            H-bond key like "ASP 623 (OD1) -> Ligand" or "Ligand -> ASN 691 (ND2)"
+
+        Returns
+        -------
+        str or None
+            Residue name like "ASP623" or None if not found
+        """
+        try:
+            # Split by "->"
+            parts = key.split(" -> ")
+
+            # Find protein side (not "Ligand")
+            protein_part = None
+            for part in parts:
+                if "Ligand" not in part:
+                    protein_part = part.strip()
+                    break
+
+            if protein_part is None:
+                return None
+
+            # Extract residue name and number
+            # Format: "ASP 623 (OD1)"
+            tokens = protein_part.split()
+            if len(tokens) >= 2:
+                res_name = tokens[0]  # "ASP"
+                res_num = tokens[1]   # "623"
+                return f"{res_name}{res_num}"
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to extract residue name from key '{key}': {e}")
+            return None
     
     def _prepare_hbond_pairs(self) -> Tuple[List, List]:
         """Prepare hydrogen bond pairs with caching"""
