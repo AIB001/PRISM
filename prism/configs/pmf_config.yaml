@@ -1,0 +1,222 @@
+# PRISM PMF Configuration File
+# Complete configuration for PMF calculations with system rebuilding
+# This file controls the entire PMF workflow: Builder → Equilibration → SMD → Umbrella → Analysis
+
+# =============================================================================
+# SYSTEM BUILDER CONFIGURATION
+# =============================================================================
+builder:
+  # System reconstruction settings
+  rebuild_system: true              # Whether to rebuild system with PMF optimization
+  frame_number: -1                  # Frame to extract from MD trajectory (-1 = last frame)
+  
+  # Force field settings (Maintain consistency with the original MD)
+  protein_forcefield: "amber99sb"   # Protein force field (auto-detect if not specified)
+  ligand_forcefield: "gaff"         # Ligand force field: gaff, openff
+  water_model: "tip3p"              # Water model: tip3p, tip4p, spc, spce
+  
+  # Geometry optimization settings
+  reference_group: "Protein"        # Reference group for PMF calculation
+  moving_group: "LIG"               # Moving group (ligand)
+  align_axis: "z"                   # Axis for protein-ligand alignment
+  center_system: true               # Center system at origin
+  
+  # Box settings for PMF
+  box_distance: 1.0                 # Distance from molecules to box edge (nm)
+  z_extension: 2.5                  # Additional Z-axis length for pulling (nm) - 经验值
+  box_type: "cubic"                 # Box shape
+
+# =============================================================================
+# EQUILIBRATION CONFIGURATION
+# =============================================================================
+equilibration:
+  # Energy Minimization (EM)
+  em:
+    integrator: "steep"             # Minimization algorithm
+    emtol: 10.0                     # Energy tolerance (kJ/mol/nm)
+    emstep: 0.01                    # Step size (nm)
+    nsteps: 50000                   # Maximum steps
+    
+    # Position restraints for EM
+    posres_protein: 1000.0          # Protein backbone restraint (kJ/mol/nm²)
+    posres_ligand: 500.0            # Ligand restraint (kJ/mol/nm²)
+  
+  # NVT Equilibration (Temperature equilibration)
+  nvt:
+    nsteps: 50000                   # Steps (100 ps with dt=0.002)
+    dt: 0.002                       # Time step (ps)
+    temperature: 310.0              # Target temperature (K)
+    tau_t: 0.1                      # Temperature coupling time constant (ps)
+    
+    # Position restraints for NVT
+    posres_protein: 1000.0          # Protein backbone restraint (kJ/mol/nm²)
+    posres_ligand: 500.0            # Ligand restraint (kJ/mol/nm²)
+    
+    # Temperature coupling groups
+    tc_grps: ["Protein", "Non-Protein"]
+  
+  # NPT Equilibration (Pressure equilibration)
+  npt:
+    nsteps: 100000                  # Steps (200 ps with dt=0.002)
+    dt: 0.002                       # Time step (ps)
+    temperature: 310.0              # Target temperature (K)
+    pressure: 1.0                   # Target pressure (bar)
+    tau_t: 0.1                      # Temperature coupling time constant (ps)
+    tau_p: 2.0                      # Pressure coupling time constant (ps)
+    
+    # Position restraints for NPT (reduced from NVT)
+    posres_protein: 400.0           # Protein backbone restraint (kJ/mol/nm²)
+    posres_ligand: 200.0            # Ligand restraint (kJ/mol/nm²)
+    
+    # Coupling settings
+    pcoupl: "Parrinello-Rahman"     # Pressure coupling algorithm
+    pcoupltype: "isotropic"         # Pressure coupling type
+
+# =============================================================================
+# SMD CONFIGURATION
+# =============================================================================
+smd:
+  # SMD simulation parameters
+  nsteps: 2500000                   # SMD simulation steps (5 ns with dt=0.002)
+  dt: 0.002                         # Time step (ps)
+  temperature: 310.0                # Temperature (K)
+  
+  # Pull parameters
+  pull_rate: 0.005                  # Pulling rate (nm/ps) - 经验值
+  pull_k: 1000.0                    # Force constant (kJ/mol/nm²)
+  pull_start: true                  # Start pulling from initial distance
+  pull_geometry: "distance"        # Pull geometry type
+  
+  # Pull groups
+  pull_group1: "Protein"            # Reference group
+  pull_group2: "LIG"                # Pulled group
+  
+  # Output control
+  nstxout: 0                        # Don't save coordinates every step
+  nstvout: 0                        # Don't save velocities every step
+  nstenergy: 500                    # Energy output frequency
+  nstlog: 500                       # Log output frequency
+  nstxtcout: 2500                   # Compressed trajectory output frequency
+  
+  # Pull output
+  nstpull: 50                       # Pull force/distance output frequency
+
+# =============================================================================
+# UMBRELLA SAMPLING CONFIGURATION
+# =============================================================================
+umbrella:
+  # Window selection
+  sample_interval_near: 0.1         # Sampling interval for close distances (nm)
+  sample_interval_far: 0.2          # Sampling interval for far distances (nm) 
+  cutoff_distance: 1.5              # Distance cutoff for adaptive sampling (nm)
+  force_constant: 1000.0            # Umbrella force constant (kJ/mol/nm²)
+  
+  # Simulation parameters for each window
+  nsteps: 11000000                  # Steps per window (22 ns with dt=0.002)
+  dt: 0.002                         # Time step (ps)
+  temperature: 310.0                # Temperature (K)
+  
+  # Equilibration and production
+  equilibration_time_ps: 2000       # Equilibration time per window (2 ns)
+  production_time_ps: 20000         # Production time per window (20 ns)
+  sampling_interval_ps: 10          # Output interval for umbrella sampling (ps)
+  
+  # Output control
+  nstxout: 0                        # Don't save coordinates
+  nstvout: 0                        # Don't save velocities  
+  nstenergy: 500                    # Energy output frequency
+  nstlog: 500                       # Log output frequency
+  nstxtcout: 5000                   # Compressed trajectory output
+  nstpull: 500                      # Pull output frequency
+
+# =============================================================================
+# WHAM ANALYSIS CONFIGURATION
+# =============================================================================
+analysis:
+  # Analysis parameters
+  begin_time_ps: 2000               # Skip first 2 ns of each window
+  bootstrap_iterations: 50         # Bootstrap error analysis iterations
+  energy_unit: "kCal"               # Output energy unit: kCal, kJ
+  temperature: 310.0                # Analysis temperature (K)
+  
+  # WHAM parameters
+  tolerance: 1e-6                   # WHAM convergence tolerance
+  max_iterations: 1000              # Maximum WHAM iterations
+  
+  # Output and visualization
+  generate_plots: true              # Generate PMF plots
+  plot_format: "png"                # Plot format: png, pdf, svg
+  pmf_range_auto: true              # Auto-determine PMF range
+  pmf_min_distance: 0.3             # Minimum distance for PMF (nm)
+  pmf_max_distance: 2.5             # Maximum distance for PMF (nm)
+
+# =============================================================================
+# GENERAL SIMULATION SETTINGS
+# =============================================================================
+simulation:
+  # Basic settings
+  temperature: 310.0                # System temperature (K) - body temperature
+  pressure: 1.0                     # System pressure (bar)
+  
+  # Cutoffs and interactions
+  rcoulomb: 1.0                     # Coulomb cutoff (nm)
+  rvdw: 1.0                         # van der Waals cutoff (nm)
+  
+  # Periodic boundary conditions
+  pbc: "xyz"                        # Periodic boundary conditions
+  
+  # Neighbor searching
+  nstlist: 10                       # Update neighbor list frequency
+  rlist: 1.0                        # Short-range cutoff (nm)
+
+# =============================================================================
+# CONSTRAINTS AND BONDS
+# =============================================================================
+constraints:
+  algorithm: "lincs"                # Constraint algorithm
+  type: "h-bonds"                   # Constraint type: none, h-bonds, all-bonds
+  lincs_iter: 1                     # LINCS iterations
+  lincs_order: 4                    # LINCS order
+
+# =============================================================================
+# IONS AND SOLVATION
+# =============================================================================
+ions:
+  neutral: true                     # Neutralize system
+  concentration: 0.15               # Salt concentration (M)
+  positive_ion: "NA"                # Positive ion type
+  negative_ion: "CL"                # Negative ion type
+
+# =============================================================================
+# OUTPUT SETTINGS
+# =============================================================================
+output:
+  # Directory structure
+  base_directory: "pmf_calculation"
+  keep_intermediate: true           # Keep intermediate files
+  
+  # Logging
+  log_level: "INFO"                 # Log level: DEBUG, INFO, WARNING, ERROR
+  save_configs: true                # Save used configurations
+  
+  # Validation
+  validate_inputs: true             # Validate input files and parameters
+  check_disk_space: true            # Check available disk space
+  
+# =============================================================================
+# ADVANCED SETTINGS
+# =============================================================================
+advanced:
+  # Parallel execution
+  use_gpu: true                     # Use GPU if available
+  gpu_ids: []                       # GPU IDs (empty = auto-detect)
+  
+  # Performance
+  ntomp: 0                          # OpenMP threads (0 = auto-detect)
+  
+  # Error handling
+  continue_on_error: false          # Continue workflow on non-critical errors
+  max_retries: 3                    # Maximum retries for failed steps
+  
+  # Memory management
+  max_memory_gb: 32                 # Maximum memory usage (GB)

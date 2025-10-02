@@ -2,24 +2,64 @@
 # -*- coding: utf-8 -*-
 
 """
-PRISM Configuration - Configuration loading and management
+PRISM Configuration - Enhanced configuration loading, validation, and management
+
+Provides comprehensive configuration management with validation, templates,
+and migration capabilities for PRISM molecular dynamics simulations.
 """
 
 import os
 import yaml
+import logging
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Union
+from .config_validator import ConfigurationValidator, ValidationLevel, validate_config_file
+from .config_templates import ConfigTemplateGenerator, ConfigTemplate
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigurationManager:
-    """Handle configuration loading and management"""
+    """Enhanced configuration loading, validation, and management"""
 
     def __init__(self, config_path=None, gromacs_env=None,
-                 forcefield_name="amber99sb", water_model_name="tip3p"):
+                 forcefield_name="amber99sb", water_model_name="tip3p",
+                 validate=True, validation_level=ValidationLevel.STANDARD):
+        """
+        Initialize configuration manager with validation
+        
+        Parameters:
+        -----------
+        config_path : str, optional
+            Path to configuration file
+        gromacs_env : GromacsEnvironment, optional
+            GROMACS environment for force field detection
+        forcefield_name : str
+            Default force field name
+        water_model_name : str
+            Default water model name
+        validate : bool
+            Whether to validate configuration
+        validation_level : ValidationLevel
+            Level of validation to perform
+        """
         self.config_path = config_path
         self.gromacs_env = gromacs_env
         self.forcefield_name = forcefield_name
         self.water_model_name = water_model_name
+        self.validate_config = validate
+        self.validation_level = validation_level
+        self.validator = ConfigurationValidator() if validate else None
+        self.template_generator = ConfigTemplateGenerator()
+        
+        # Load and validate configuration
         self.config = self._load_config()
         self._process_forcefield_names()
+        
+        # Validate if requested
+        if self.validate_config:
+            self._validate_configuration()
 
     def _load_config(self):
         """Load configuration from YAML file or use defaults"""
@@ -234,3 +274,290 @@ class ConfigurationManager:
             print(f"Updated water model to '{water_name}' (index {wm_index})")
         else:
             raise ValueError(f"Water model '{water_name}' not found for current force field")
+    
+    def _validate_configuration(self):
+        """Validate current configuration"""
+        if not self.validator:
+            return
+        
+        logger.debug(f"Validating configuration with {self.validation_level.value} level")
+        is_valid, report = self.validator.validate_config(self.config, self.validation_level)
+        
+        if not is_valid:
+            error_summary = f"Configuration validation failed with {len(report['errors'])} errors"
+            logger.error(error_summary)
+            
+            # Log first few errors
+            for i, error in enumerate(report['errors'][:3], 1):
+                logger.error(f"  {i}. {error.get('message', 'Unknown error')}")
+            
+            if len(report['errors']) > 3:
+                logger.error(f"  ... and {len(report['errors']) - 3} more errors")
+            
+            # Optionally raise exception for invalid config
+            if self.validation_level == ValidationLevel.STRICT:
+                raise ValueError(f"Configuration validation failed: {error_summary}")
+        
+        # Log warnings
+        if report['warnings']:
+            logger.warning(f"Configuration validation completed with {len(report['warnings'])} warnings")
+            for warning in report['warnings'][:2]:  # Show first 2 warnings
+                logger.warning(f"  - {warning.get('message', 'Unknown warning')}")
+        
+        logger.info("Configuration validation completed successfully")
+    
+    def get_validation_report(self) -> str:
+        """Get detailed validation report"""
+        if not self.validator:
+            return "Validation is disabled for this configuration manager"
+        
+        return self.validator.generate_validation_report(self.config, self.validation_level)
+    
+    def validate_and_fix(self) -> Dict[str, Any]:
+        """Validate configuration and suggest fixes"""
+        if not self.validator:
+            return {"status": "validation_disabled"}
+        
+        is_valid, report = self.validator.validate_config(self.config, self.validation_level)
+        
+        fixes_applied = []
+        warnings_noted = []
+        
+        # Apply automatic fixes for common issues
+        for error in report.get('errors', []):
+            error_code = error.get('error_code')
+            field_path = error.get('field_path', '')
+            
+            if error_code == 'TEMPERATURE_INCONSISTENCY':
+                # Fix temperature inconsistencies
+                target_temp = 310.0  # Default body temperature
+                self._fix_temperature_consistency(target_temp)
+                fixes_applied.append(f"Set all temperatures to {target_temp} K")
+            
+            elif error_code == 'TIMESTEP_INCONSISTENCY':
+                # Fix timestep inconsistencies
+                target_dt = 0.002
+                self._fix_timestep_consistency(target_dt)
+                fixes_applied.append(f"Set all timesteps to {target_dt} ps")
+        
+        # Note warnings for user attention
+        for warning in report.get('warnings', []):
+            warnings_noted.append(warning.get('message', 'Unknown warning'))
+        
+        return {
+            "status": "completed",
+            "original_valid": is_valid,
+            "fixes_applied": fixes_applied,
+            "warnings": warnings_noted,
+            "validation_report": self.get_validation_report()
+        }
+    
+    def _fix_temperature_consistency(self, target_temp: float):
+        """Fix temperature consistency across sections"""
+        sections_to_fix = ['simulation', 'smd', 'umbrella', 'analysis']
+        
+        for section in sections_to_fix:
+            if section in self.config and isinstance(self.config[section], dict):
+                if 'temperature' in self.config[section]:
+                    self.config[section]['temperature'] = target_temp
+        
+        # Fix equilibration subsections
+        if 'equilibration' in self.config:
+            for subsection in ['nvt', 'npt']:
+                if (subsection in self.config['equilibration'] and 
+                    isinstance(self.config['equilibration'][subsection], dict)):
+                    self.config['equilibration'][subsection]['temperature'] = target_temp
+    
+    def _fix_timestep_consistency(self, target_dt: float):
+        """Fix timestep consistency across sections"""
+        sections_to_fix = ['smd', 'umbrella']
+        
+        for section in sections_to_fix:
+            if section in self.config and isinstance(self.config[section], dict):
+                if 'dt' in self.config[section]:
+                    self.config[section]['dt'] = target_dt
+        
+        # Fix equilibration subsections
+        if 'equilibration' in self.config:
+            for subsection in ['nvt', 'npt']:
+                if (subsection in self.config['equilibration'] and 
+                    isinstance(self.config['equilibration'][subsection], dict)):
+                    self.config['equilibration'][subsection]['dt'] = target_dt
+    
+    def create_template(self, template_type: str, custom_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Create configuration from template
+        
+        Parameters:
+        -----------
+        template_type : str
+            Template type ('fast', 'standard', 'accurate', 'production')
+        custom_params : dict, optional
+            Custom parameters to override
+            
+        Returns:
+        --------
+        Dict : Generated configuration
+        """
+        template_map = {
+            'fast': ConfigTemplate.PMF_FAST,
+            'standard': ConfigTemplate.PMF_STANDARD,
+            'accurate': ConfigTemplate.PMF_ACCURATE,
+            'production': ConfigTemplate.PMF_PRODUCTION,
+            'drug_discovery': ConfigTemplate.DRUG_DISCOVERY,
+            'membrane': ConfigTemplate.MEMBRANE_PROTEIN
+        }
+        
+        if template_type not in template_map:
+            raise ValueError(f"Unknown template: {template_type}. Available: {list(template_map.keys())}")
+        
+        template_enum = template_map[template_type]
+        return self.template_generator.generate_template(template_enum, custom_params)
+    
+    def save_template(self, template_type: str, output_path: str, 
+                     custom_params: Optional[Dict[str, Any]] = None):
+        """Save configuration template to file"""
+        template_map = {
+            'fast': ConfigTemplate.PMF_FAST,
+            'standard': ConfigTemplate.PMF_STANDARD,
+            'accurate': ConfigTemplate.PMF_ACCURATE,
+            'production': ConfigTemplate.PMF_PRODUCTION,
+            'drug_discovery': ConfigTemplate.DRUG_DISCOVERY,
+            'membrane': ConfigTemplate.MEMBRANE_PROTEIN
+        }
+        
+        if template_type not in template_map:
+            raise ValueError(f"Unknown template: {template_type}")
+        
+        template_enum = template_map[template_type]
+        self.template_generator.save_template(template_enum, output_path, custom_params)
+        logger.info(f"Template '{template_type}' saved to {output_path}")
+    
+    def migrate_config(self, target_version: str = "latest") -> Dict[str, Any]:
+        """
+        Migrate configuration to newer version format
+        
+        Parameters:
+        -----------
+        target_version : str
+            Target configuration version
+            
+        Returns:
+        --------
+        Dict : Migration report
+        """
+        logger.info(f"Migrating configuration to version {target_version}")
+        
+        migration_report = {
+            "original_config": self.config.copy(),
+            "migrations_applied": [],
+            "warnings": [],
+            "success": True
+        }
+        
+        # Example migrations - add more as needed
+        if target_version == "latest" or target_version >= "2.0":
+            # Migrate old parameter names
+            migrations = [
+                ("smd.pullf_rate", "smd.pull_rate"),
+                ("umbrella.force_const", "umbrella.force_constant"),
+                ("analysis.energy_units", "analysis.energy_unit")
+            ]
+            
+            for old_path, new_path in migrations:
+                if self._migrate_parameter(old_path, new_path):
+                    migration_report["migrations_applied"].append(f"{old_path} -> {new_path}")
+            
+            # Add missing required sections
+            if "output" not in self.config:
+                self.config["output"] = {
+                    "log_level": "INFO",
+                    "save_configs": True,
+                    "validate_inputs": True
+                }
+                migration_report["migrations_applied"].append("Added 'output' section")
+        
+        # Validate migrated configuration
+        if self.validator:
+            is_valid, _ = self.validator.validate_config(self.config, ValidationLevel.BASIC)
+            if not is_valid:
+                migration_report["success"] = False
+                migration_report["warnings"].append("Migrated configuration failed validation")
+        
+        logger.info(f"Migration completed. Applied {len(migration_report['migrations_applied'])} changes")
+        return migration_report
+    
+    def _migrate_parameter(self, old_path: str, new_path: str) -> bool:
+        """Migrate a single parameter from old path to new path"""
+        old_parts = old_path.split('.')
+        new_parts = new_path.split('.')
+        
+        # Check if old parameter exists
+        current = self.config
+        for part in old_parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                return False
+            current = current[part]
+        
+        if old_parts[-1] not in current:
+            return False
+        
+        old_value = current[old_parts[-1]]
+        
+        # Create new parameter location
+        current = self.config
+        for part in new_parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        
+        # Move value and remove old
+        current[new_parts[-1]] = old_value
+        del self.config[old_parts[-2]][old_parts[-1]]
+        
+        return True
+    
+    def get_summary(self) -> str:
+        """Get configuration summary"""
+        lines = []
+        lines.append("PRISM Configuration Summary")
+        lines.append("=" * 40)
+        
+        if self.config_path:
+            lines.append(f"Source: {self.config_path}")
+        else:
+            lines.append("Source: Default configuration")
+        
+        # Basic settings
+        if 'forcefield' in self.config:
+            ff_name = self.config['forcefield'].get('name', 'Unknown')
+            lines.append(f"Force Field: {ff_name}")
+        
+        if 'water_model' in self.config:
+            wm_name = self.config['water_model'].get('name', 'Unknown')
+            lines.append(f"Water Model: {wm_name}")
+        
+        if 'simulation' in self.config:
+            sim = self.config['simulation']
+            temp = sim.get('temperature', 'Unknown')
+            lines.append(f"Temperature: {temp} K")
+        
+        # PMF specific
+        if 'smd' in self.config:
+            smd = self.config['smd']
+            pull_rate = smd.get('pull_rate', 'Unknown')
+            lines.append(f"SMD Pull Rate: {pull_rate} nm/ps")
+        
+        if 'umbrella' in self.config:
+            umb = self.config['umbrella']
+            prod_time = umb.get('production_time_ps', 'Unknown')
+            lines.append(f"Umbrella Production Time: {prod_time} ps")
+        
+        # Validation status
+        if self.validate_config and self.validator:
+            is_valid, report = self.validator.validate_config(self.config, ValidationLevel.BASIC)
+            status = "✅ Valid" if is_valid else "❌ Invalid"
+            lines.append(f"Validation Status: {status}")
+        
+        lines.append("=" * 40)
+        return "\n".join(lines)
