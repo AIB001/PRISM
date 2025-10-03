@@ -9,18 +9,18 @@ import os
 import subprocess
 from pathlib import Path
 import numpy as np
-import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Tuple
 import logging
 
 from ..utils.exceptions import (
-    PMFAnalysisError, WHAMExecutionError, WHAMConvergenceError, 
+    PMFAnalysisError, WHAMExecutionError, WHAMConvergenceError,
     RequiredFileNotFoundError, UmbrellaIncompleteError, PMFErrorCode
 )
 from ..utils.error_handling import (
-    with_retry, error_context, validate_prerequisites, 
+    with_retry, error_context, validate_prerequisites,
     ErrorCollector, handle_external_tool_error
 )
+from ..utils.plotting import PMFPlotter
 
 logger = logging.getLogger(__name__)
 
@@ -94,24 +94,16 @@ class PMFAnalyzer:
             return self._run_wham_command(wham_files, begin_time, bootstrap, energy_unit)
     
     def visualize(self, pmf_file=None, error_file=None, **kwargs):
-        """Generate PMF visualization plots"""
+        """Generate PMF visualization plots using unified plotting utilities"""
         if pmf_file is None:
             pmf_file = self.analysis_dir / "pmf.xvg"
         if error_file is None:
             error_file = self.analysis_dir / "pmferror.xvg"
-        
-        # Generate plots
-        plots = {}
-        
-        # Main PMF plot
-        plots['pmf_curve'] = self._plot_pmf_curve(pmf_file, error_file)
-        
-        # Force profile
-        plots['force_profile'] = self._plot_force_profile(pmf_file)
-        
-        # Energy landscape
-        plots['energy_landscape'] = self._plot_energy_landscape(pmf_file)
-        
+
+        # Use unified PMFPlotter
+        plotter = PMFPlotter(self.analysis_dir)
+        plots = plotter.plot_all_pmf(pmf_file, error_file)
+
         return plots
     
     def _prepare_wham_files(self):
@@ -476,150 +468,6 @@ class PMFAnalyzer:
             raise  # Re-raise PMF errors as-is
         except Exception as exc:
             logger.warning(f"Could not calculate binding energy: {exc}")
-            return None
-    
-    def _plot_pmf_curve(self, pmf_file, error_file):
-        """Create main PMF curve plot"""
-        try:
-            # Read PMF data
-            pmf_data = np.loadtxt(pmf_file, comments=['#', '@'])
-            distances = pmf_data[:, 0]
-            pmf_values = pmf_data[:, 1]
-            
-            # Read error data if available
-            errors = None
-            if Path(error_file).exists():
-                try:
-                    error_data = np.loadtxt(error_file, comments=['#', '@'])
-                    if error_data.shape[1] >= 2:
-                        errors = error_data[:, 1]
-                except:
-                    pass
-            
-            # Create plot
-            plt.figure(figsize=(12, 8))
-            
-            if errors is not None:
-                plt.errorbar(distances, pmf_values, yerr=errors,
-                           fmt='o-', capsize=3, linewidth=2, markersize=4,
-                           color='blue', ecolor='lightblue', label='PMF ± Error')
-            else:
-                plt.plot(distances, pmf_values, 'o-', linewidth=2, markersize=4,
-                        color='blue', label='PMF')
-            
-            plt.xlabel('Distance (nm)', fontsize=14)
-            plt.ylabel('PMF (kcal/mol)', fontsize=14)
-            plt.title('Potential of Mean Force', fontsize=16)
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            
-            # Add binding energy annotation
-            min_idx = np.argmin(pmf_values)
-            max_idx = np.argmax(pmf_values)
-            binding_energy = pmf_values[max_idx] - pmf_values[min_idx]
-            
-            stats_text = f'Binding Energy: {binding_energy:.2f} kcal/mol\n'
-            stats_text += f'Minimum: {distances[min_idx]:.3f} nm\n'
-            stats_text += f'Range: {distances[0]:.2f} - {distances[-1]:.2f} nm'
-            
-            plt.text(0.05, 0.95, stats_text, transform=plt.gca().transAxes,
-                    fontsize=12, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-            
-            plt.tight_layout()
-            
-            # Save plot
-            plot_file = self.analysis_dir / "pmf_curve.png"
-            plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            logger.info(f"PMF curve plot saved: {plot_file}")
-            return str(plot_file)
-            
-        except Exception as e:
-            logger.warning(f"Could not create PMF curve plot: {e}")
-            return None
-    
-    def _plot_force_profile(self, pmf_file):
-        """Create force profile plot from PMF gradient"""
-        try:
-            # Read PMF data
-            pmf_data = np.loadtxt(pmf_file, comments=['#', '@'])
-            distances = pmf_data[:, 0]
-            pmf_values = pmf_data[:, 1]
-            
-            # Calculate force as negative gradient
-            force_profile = -np.gradient(pmf_values, distances)
-            
-            # Create plot
-            plt.figure(figsize=(12, 8))
-            plt.plot(distances, force_profile, 'r-', linewidth=2, label='Force Profile')
-            plt.axhline(y=0, color='k', linestyle='--', alpha=0.5, label='Zero Force')
-            
-            plt.xlabel('Distance (nm)', fontsize=14)
-            plt.ylabel('Force (kcal/mol/nm)', fontsize=14)
-            plt.title('Force Profile (PMF Gradient)', fontsize=16)
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.tight_layout()
-            
-            # Save plot
-            plot_file = self.analysis_dir / "force_profile.png"
-            plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            logger.info(f"Force profile plot saved: {plot_file}")
-            return str(plot_file)
-            
-        except Exception as e:
-            logger.warning(f"Could not create force profile plot: {e}")
-            return None
-    
-    def _plot_energy_landscape(self, pmf_file):
-        """Create energy landscape visualization"""
-        try:
-            # Read PMF data
-            pmf_data = np.loadtxt(pmf_file, comments=['#', '@'])
-            distances = pmf_data[:, 0]
-            pmf_values = pmf_data[:, 1]
-            
-            # Create plot
-            plt.figure(figsize=(12, 8))
-            
-            # Fill area under curve
-            plt.fill_between(distances, pmf_values, alpha=0.3, color='lightblue', 
-                           label='Energy Surface')
-            plt.plot(distances, pmf_values, 'b-', linewidth=3, label='PMF')
-            
-            # Mark binding region (within 2 kcal/mol of minimum)
-            min_idx = np.argmin(pmf_values)
-            min_pmf = pmf_values[min_idx]
-            threshold = min_pmf + 2.0
-            
-            bound_mask = pmf_values <= threshold
-            if np.any(bound_mask):
-                bound_distances = distances[bound_mask]
-                plt.axvspan(bound_distances[0], bound_distances[-1], 
-                          alpha=0.2, color='green', 
-                          label='Favorable Binding (< 2 kcal/mol)')
-            
-            plt.xlabel('Distance (nm)', fontsize=14)
-            plt.ylabel('PMF (kcal/mol)', fontsize=14)
-            plt.title('Energy Landscape for Protein-Ligand Binding', fontsize=16)
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.tight_layout()
-            
-            # Save plot
-            plot_file = self.analysis_dir / "energy_landscape.png"
-            plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            logger.info(f"Energy landscape plot saved: {plot_file}")
-            return str(plot_file)
-            
-        except Exception as e:
-            logger.warning(f"Could not create energy landscape plot: {e}")
             return None
 
 

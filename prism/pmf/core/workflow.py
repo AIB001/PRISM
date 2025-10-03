@@ -27,6 +27,7 @@ from ..utils.exceptions import (
 from ..utils.error_handling import (
     with_retry, error_context, validate_prerequisites, ErrorCollector
 )
+from ..utils.plotting import PMFPlotter
 
 logger = logging.getLogger(__name__)
 
@@ -610,8 +611,8 @@ class PMFWorkflow:
             'structure_exists': (self.rebuilt_system_dir / "solv_ions.gro").exists() if self.rebuilt_system_dir.exists() else False,
             'topology_exists': (self.rebuilt_system_dir / "topol.top").exists() if self.rebuilt_system_dir.exists() else False,
             'equilibrated': self.state.get('pmf_system_equilibrated', False),
-            'equilibration_structure': (self.output_dir / "equilibration" / "npt" / "npt_final.gro").exists(),
-            'equilibration_checkpoint': (self.output_dir / "equilibration" / "npt" / "npt_final.cpt").exists()
+            'equilibration_structure': (self.output_dir / "equilibration" / "npt" / "npt.gro").exists(),
+            'equilibration_checkpoint': (self.output_dir / "equilibration" / "npt" / "npt.cpt").exists()
         }
         
         return {
@@ -804,14 +805,45 @@ class PMFWorkflow:
         logger.info(f"Summary report saved: {report_file}")
     
     def _generate_smd_plots(self, pullf_file: Path, pullx_file: Path) -> Dict:
-        """Generate SMD analysis plots"""
-        # Implementation would go here
-        return {}
+        """Generate SMD analysis plots using unified plotting utilities"""
+        analysis_dir = pullf_file.parent / 'analysis'
+        analysis_dir.mkdir(exist_ok=True)
+
+        plotter = PMFPlotter(analysis_dir)
+        plots = plotter.plot_all_smd(pullf_file, pullx_file)
+
+        return plots
     
     def _calculate_smd_stats(self, pullf_file: Path, pullx_file: Path) -> Dict:
         """Calculate SMD statistics"""
-        # Implementation would go here
-        return {}
+        import numpy as np
+
+        stats = {}
+
+        try:
+            # Read force data
+            pullf_data = np.loadtxt(pullf_file, comments=['#', '@'])
+            force = pullf_data[:, 1]
+
+            # Read distance data
+            pullx_data = np.loadtxt(pullx_file, comments=['#', '@'])
+            distance = pullx_data[:, 1]
+
+            # Calculate statistics
+            stats['max_force'] = float(np.max(force))
+            stats['avg_force'] = float(np.mean(force))
+            stats['min_force'] = float(np.min(force))
+            stats['std_force'] = float(np.std(force))
+            stats['total_distance'] = float(distance[-1] - distance[0])
+            stats['final_distance'] = float(distance[-1])
+            stats['initial_distance'] = float(distance[0])
+
+            logger.info(f"SMD statistics calculated: max_force={stats['max_force']:.2f} kJ/mol/nm")
+
+        except Exception as e:
+            logger.warning(f"Could not calculate SMD stats: {e}")
+
+        return stats
     
     def _generate_detailed_pmf_plots(self, pmf_file: Path) -> Dict:
         """Generate detailed PMF plots"""

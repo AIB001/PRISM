@@ -10,6 +10,7 @@ from .error_handling import (
     with_retry, error_context, validate_prerequisites, ErrorCollector
 )
 from .helpers import create_mdp_file, extract_pull_groups, read_xvg
+from .plotting import PMFPlotter, plot_smd_results, plot_pmf_results
 
 __all__ = [
     # Error handling
@@ -21,4 +22,8 @@ __all__ = [
     "create_mdp_file",
     "extract_pull_groups",
     "read_xvg",
+    # Plotting utilities
+    "PMFPlotter",
+    "plot_smd_results",
+    "plot_pmf_results",
 ]

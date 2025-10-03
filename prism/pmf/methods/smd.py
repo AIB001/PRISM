@@ -19,9 +19,8 @@ import numpy as np
 import logging
 
 # Import from optimization systems
-from ..interfaces.base import PMFModuleInterface, ModuleResult, ModulePhase, ModuleStatus
 from ..utils.exceptions import (
-    SMDPreparationError, SMDExecutionError, RequiredFileNotFoundError, 
+    SMDPreparationError, SMDExecutionError, RequiredFileNotFoundError,
     SystemNotFoundException, PrerequisiteNotMetError, PMFErrorCode
 )
 from ..utils.error_handling import (
@@ -305,7 +304,34 @@ pull_coord1_rate    = {pull_rate}
 pull_coord1_k       = {pull_k}
 pull-pbc-ref-prev-step-com = yes
 """
-    
+
+    def _locate_equilibrated_system(self, pmf_system_dir: Path):
+        """Locate equilibrated system files with intelligent fallback
+
+        Search priority:
+        1. Standard structure: equilibration/npt/npt.gro (current standard)
+        2. Legacy structure: npt/npt.gro (backward compatibility)
+
+        Returns:
+            tuple: (structure_path, checkpoint_path) or (None, None)
+        """
+        # Priority 1: Standard structure (equilibration/npt/)
+        equilibrated_structure = pmf_system_dir / "equilibration" / "npt" / "npt.gro"
+        equilibrated_checkpoint = pmf_system_dir / "equilibration" / "npt" / "npt.cpt"
+
+        if equilibrated_structure.exists():
+            return equilibrated_structure, equilibrated_checkpoint
+
+        # Priority 2: Legacy structure (backward compatibility)
+        legacy_structure = pmf_system_dir / "npt" / "npt.gro"
+        legacy_checkpoint = pmf_system_dir / "npt" / "npt.cpt"
+
+        if legacy_structure.exists():
+            return legacy_structure, legacy_checkpoint
+
+        # No equilibrated system found
+        return None, None
+
     def prepare_files(self, smd_dir: Path, use_pmf_system: bool = True) -> List[str]:
         """Prepare SMD files - unified preparation logic"""
         prepared_files = []
@@ -333,28 +359,28 @@ pull-pbc-ref-prev-step-com = yes
         """Prepare files from PMF-rebuilt system"""
         logger.info("Using PMF-rebuilt system (Z-axis optimized)")
         prepared_files = []
-        
-        pmf_system_dir = Path(getattr(self.pmf_system, 'rebuilt_system_dir', None) or 
+
+        pmf_system_dir = Path(getattr(self.pmf_system, 'rebuilt_system_dir', None) or
                              getattr(self.pmf_system, 'md_results_dir', None))
-        
-        # Check for equilibrated system first
-        equilibrated_structure = pmf_system_dir / "npt" / "npt.gro"
-        equilibrated_checkpoint = pmf_system_dir / "npt" / "npt.cpt"
-        
+
+        # Locate equilibrated system with smart fallback
+        equilibrated_structure, equilibrated_checkpoint = self._locate_equilibrated_system(pmf_system_dir)
+
         target_structure = smd_dir / "md.gro"
         target_checkpoint = smd_dir / "equilibrated.cpt"
         target_topology = smd_dir / "topol.top"
-        
-        if equilibrated_structure.exists():
-            logger.info("Using equilibrated PMF system")
+
+        if equilibrated_structure and equilibrated_structure.exists():
+            logger.info(f"Using equilibrated system: {equilibrated_structure.relative_to(pmf_system_dir)}")
             shutil.copy2(equilibrated_structure, target_structure)
             prepared_files.append(str(target_structure))
-            
-            if equilibrated_checkpoint.exists():
+
+            if equilibrated_checkpoint and equilibrated_checkpoint.exists():
                 shutil.copy2(equilibrated_checkpoint, target_checkpoint)
                 prepared_files.append(str(target_checkpoint))
         else:
-            logger.info("Using unequilibrated PMF-rebuilt system")
+            logger.warning("No equilibrated system found, using unequilibrated solv_ions.gro")
+            logger.warning("For better results, run equilibration first")
             base_structure = pmf_system_dir / "solv_ions.gro"
             shutil.copy2(base_structure, target_structure)
             prepared_files.append(str(target_structure))
@@ -614,459 +640,6 @@ echo "  - analysis/smd_pullx.xvg (distance vs time)"
         logger.info(f"SMD analysis script created: {analysis_script}")
         
         return analysis_script
-
-
-class SMDModule(SMDCore, PMFModuleInterface):
-    """Modern modular SMD implementation - Fully user-customizable"""
-
-    def __init__(self, config: Optional[Dict[str, Any]] = None,
-                 logger: Optional[PrismLogger] = None,
-                 communicator: Optional[ModuleCommunicator] = None,
-                 **user_params):
-        # Initialize PMFModuleInterface
-        PMFModuleInterface.__init__(self, "smd", config, logger)
-        # Initialize SMDCore
-        SMDCore.__init__(self, config=config)
-
-        self.communicator = communicator
-        self.system_path = None
-        self.output_files = []
-
-        # SMD-specific configuration - FULLY USER CUSTOMIZABLE
-        self.smd_config = self.config.get('smd', {})
-
-        # Apply user parameters with highest priority
-        self.smd_config.update(user_params)
-
-        # User-defined parameters (no defaults, user must specify)
-        self.pull_rate = self.smd_config.get('pull_rate')
-        self.nsteps = self.smd_config.get('nsteps')
-        self.dt = self.smd_config.get('dt')
-        self.pull_k = self.smd_config.get('pull_k')
-
-        # Optional parameters with sensible defaults only
-        self.temperature = self.smd_config.get('temperature', 310.0)
-        self.pressure = self.smd_config.get('pressure', 1.0)
-
-        self.logger.info(f"SMD Module initialized - User-defined parameters:")
-        self.logger.info(f"  pull_rate: {self.pull_rate}")
-        self.logger.info(f"  nsteps: {self.nsteps}")
-        self.logger.info(f"  dt: {self.dt}")
-        self.logger.info(f"  pull_k: {self.pull_k}")
-    
-    def validate_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate SMD input parameters - User-defined validation"""
-        validation_results = {
-            'valid': True,
-            'errors': [],
-            'warnings': []
-        }
-
-        try:
-            # Check required inputs
-            required_keys = ['system_path', 'output_dir']
-            for key in required_keys:
-                if key not in inputs:
-                    validation_results['errors'].append(f"Missing required input: {key}")
-                    validation_results['valid'] = False
-
-            if not validation_results['valid']:
-                return validation_results
-
-            # Validate system path
-            system_path = Path(inputs['system_path'])
-            if not self.validate_md_system(system_path):
-                validation_results['errors'].append(f"Invalid MD system at {system_path}")
-                validation_results['valid'] = False
-
-            # Check that user has provided required SMD parameters
-            required_smd_params = ['pull_rate', 'nsteps', 'dt', 'pull_k']
-            missing_params = []
-            for param in required_smd_params:
-                if getattr(self, param) is None:
-                    missing_params.append(param)
-
-            if missing_params:
-                validation_results['errors'].append(
-                    f"Missing required SMD parameters: {', '.join(missing_params)}"
-                )
-                validation_results['valid'] = False
-
-            # Basic sanity checks (no recommendations, just prevent obvious errors)
-            if self.pull_rate is not None and self.pull_rate <= 0:
-                validation_results['errors'].append("pull_rate must be positive")
-                validation_results['valid'] = False
-
-            if self.nsteps is not None and self.nsteps <= 0:
-                validation_results['errors'].append("nsteps must be positive")
-                validation_results['valid'] = False
-
-            if self.dt is not None and self.dt <= 0:
-                validation_results['errors'].append("dt must be positive")
-                validation_results['valid'] = False
-
-            if self.pull_k is not None and self.pull_k <= 0:
-                validation_results['errors'].append("pull_k must be positive")
-                validation_results['valid'] = False
-
-            self.logger.info(f"SMD input validation completed: {len(validation_results['errors'])} errors")
-
-        except Exception as e:
-            validation_results['valid'] = False
-            validation_results['errors'].append(f"Validation error: {str(e)}")
-            self.logger.error(f"SMD validation failed: {e}")
-
-        return validation_results
-    
-    def prepare(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare SMD simulation (modular interface)"""
-        try:
-            self.system_path = Path(inputs['system_path'])
-            output_dir = Path(inputs['output_dir'])
-            
-            # Setup SMD directory
-            smd_dir = output_dir / "smd"
-            self.smd_dir = smd_dir
-            
-            self.logger.info(f"Preparing SMD simulation in {smd_dir}")
-            
-            # Use unified preparation logic
-            prepared_files = self.prepare_files(smd_dir, use_pmf_system=inputs.get('use_pmf_system', True))
-            
-            self.logger.info(f"SMD preparation completed: {len(prepared_files)} files prepared")
-            
-            # Communicate preparation status to other modules
-            if self.communicator:
-                self.communicator.broadcast_status({
-                    'module': 'smd',
-                    'phase': 'preparation',
-                    'status': 'completed',
-                    'output_dir': str(smd_dir),
-                    'files_prepared': len(prepared_files)
-                })
-            
-            return {
-                'smd_dir': str(smd_dir),
-                'files_prepared': prepared_files,
-                'pull_rate': self.pull_rate,
-                'estimated_time': self._estimate_smd_time()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"SMD preparation failed: {e}")
-            raise SMDPreparationError(f"Failed to prepare SMD: {e}")
-    
-    def execute(self, inputs: Dict[str, Any]) -> ModuleResult:
-        """Execute SMD simulation (modular interface)"""
-        start_time = time.time()
-        
-        try:
-            # Get SMD directory from preparation
-            smd_dir = Path(inputs.get('smd_dir', inputs['output_dir']) + '/smd')
-            self.smd_dir = smd_dir
-            
-            self.logger.info(f"Starting SMD execution in {smd_dir}")
-            
-            # Run SMD simulation using unified logic
-            results = self.run_smd_simulation(smd_dir)
-            
-            # Calculate metrics
-            metrics = self._calculate_smd_metrics(smd_dir)
-            
-            execution_time = time.time() - start_time
-            
-            result = ModuleResult(
-                module_name=self.name,
-                phase=ModulePhase.EXECUTION,
-                status=ModuleStatus.COMPLETED,
-                output_data=results,
-                output_files=list(Path(f) for f in results.values() if isinstance(f, str) and Path(f).exists()),
-                metrics=metrics,
-                errors=[],
-                warnings=[],
-                execution_time=execution_time
-            )
-            
-            self.logger.info(f"SMD execution completed successfully in {execution_time:.2f}s")
-            
-            # Communicate completion to other modules
-            if self.communicator:
-                self.communicator.notify_completion({
-                    'module': 'smd',
-                    'trajectory_file': results.get('trajectory_file'),
-                    'pullx_file': results.get('pullx_file'),
-                    'pullf_file': results.get('pullf_file'),
-                    'suggested_windows': metrics.get('suggested_windows', 40)
-                })
-            
-            return result
-            
-        except Exception as e:
-            execution_time = time.time() - start_time
-            error_msg = f"SMD execution failed: {str(e)}"
-            self.logger.error(error_msg)
-            
-            return ModuleResult(
-                module_name=self.name,
-                phase=ModulePhase.EXECUTION,
-                status=ModuleStatus.FAILED,
-                output_data={},
-                output_files=[],
-                metrics={},
-                errors=[error_msg],
-                warnings=[],
-                execution_time=execution_time
-            )
-    
-    def analyze_results(self, execution_result: ModuleResult) -> ModuleResult:
-        """Analyze SMD results (modular interface)"""
-        start_time = time.time()
-        
-        try:
-            if execution_result.status != ModuleStatus.COMPLETED:
-                return execution_result
-            
-            smd_dir = Path(execution_result.output_data['smd_dir'])
-            
-            self.logger.info("Analyzing SMD results")
-            
-            # Analyze pull data
-            analysis_results = self._analyze_pull_data(smd_dir)
-            
-            # Generate plots if matplotlib available
-            plot_files = self._generate_analysis_plots(smd_dir, analysis_results)
-            
-            # Calculate suggested umbrella windows
-            windows = self._calculate_umbrella_windows(analysis_results)
-            
-            execution_time = time.time() - start_time
-            
-            return ModuleResult(
-                module_name=f"{self.name}_analysis",
-                phase=ModulePhase.ANALYSIS,
-                status=ModuleStatus.COMPLETED,
-                output_data={
-                    'analysis_results': analysis_results,
-                    'suggested_windows': windows,
-                    'max_force': analysis_results.get('max_force', 0),
-                    'avg_force': analysis_results.get('avg_force', 0)
-                },
-                output_files=plot_files + execution_result.output_files,
-                metrics={
-                    'max_pull_force': analysis_results.get('max_force', 0),
-                    'average_force': analysis_results.get('avg_force', 0),
-                    'suggested_windows': len(windows),
-                    'analysis_time': execution_time
-                },
-                errors=[],
-                warnings=[],
-                execution_time=execution_time
-            )
-            
-        except Exception as e:
-            execution_time = time.time() - start_time
-            error_msg = f"SMD analysis failed: {str(e)}"
-            self.logger.error(error_msg)
-            
-            return ModuleResult(
-                module_name=f"{self.name}_analysis",
-                phase=ModulePhase.ANALYSIS,
-                status=ModuleStatus.FAILED,
-                output_data={},
-                output_files=[],
-                metrics={},
-                errors=[error_msg],
-                warnings=[],
-                execution_time=execution_time
-            )
-    
-    def cleanup(self) -> None:
-        """Cleanup temporary files"""
-        try:
-            if self.config.get('cleanup_temp_files', False):
-                # Implementation for cleanup
-                self.logger.info("SMD module cleanup completed")
-        except Exception as e:
-            self.logger.warning(f"SMD cleanup warning: {e}")
-    
-    def _estimate_smd_time(self) -> float:
-        """Calculate actual SMD execution time based on user parameters"""
-        if self.nsteps and self.dt:
-            simulation_time_ps = self.nsteps * self.dt
-            # Simple estimation: ~1 second real time per 1 ps simulation time (rough estimate)
-            estimated_seconds = simulation_time_ps
-            return estimated_seconds
-        return 0.0  # Cannot estimate without user parameters
-    
-    def _calculate_smd_metrics(self, smd_dir: Path) -> Dict[str, float]:
-        """Calculate SMD simulation metrics"""
-        metrics = {}
-        
-        try:
-            metrics['pull_rate'] = self.pull_rate
-            metrics['total_steps'] = self.nsteps
-            metrics['simulation_time_ns'] = self.nsteps * self.dt / 1000
-            
-            # Analyze pull files if available
-            results_dir = smd_dir / "results"
-            pullx_file = results_dir / 'smd_pullx.xvg'
-            if pullx_file.exists():
-                distances = self.parse_xvg_file(pullx_file)
-                if distances:
-                    metrics['max_distance'] = max(distances)
-                    metrics['min_distance'] = min(distances)
-                    metrics['distance_range'] = metrics['max_distance'] - metrics['min_distance']
-                    metrics['suggested_windows'] = max(20, int(metrics['distance_range'] / 0.1))
-            
-            pullf_file = results_dir / 'smd_pullf.xvg'
-            if pullf_file.exists():
-                forces = self.parse_xvg_file(pullf_file)
-                if forces:
-                    metrics['max_force'] = max(forces)
-                    metrics['avg_force'] = sum(forces) / len(forces)
-        
-        except Exception as e:
-            self.logger.warning(f"Error calculating SMD metrics: {e}")
-        
-        return metrics
-    
-    def _analyze_pull_data(self, smd_dir: Path) -> Dict[str, Any]:
-        """Analyze pull force and distance data"""
-        analysis = {}
-        results_dir = smd_dir / "results"
-        
-        # Parse distance data
-        pullx_file = results_dir / 'smd_pullx.xvg'
-        if pullx_file.exists():
-            distances = self.parse_xvg_file(pullx_file)
-            if distances:
-                analysis['distances'] = distances
-                analysis['total_distance'] = max(distances) - min(distances)
-        
-        # Parse force data
-        pullf_file = results_dir / 'smd_pullf.xvg'
-        if pullf_file.exists():
-            forces = self.parse_xvg_file(pullf_file)
-            if forces:
-                analysis['forces'] = forces
-                analysis['max_force'] = max(forces)
-                analysis['avg_force'] = sum(forces) / len(forces)
-        
-        return analysis
-    
-    def _generate_analysis_plots(self, smd_dir: Path, analysis_results: Dict[str, Any]) -> List[Path]:
-        """Generate analysis plots"""
-        plot_files = []
-        
-        try:
-            import matplotlib.pyplot as plt
-            
-            # Force vs time plot
-            if 'forces' in analysis_results:
-                plt.figure(figsize=(10, 6))
-                plt.plot(analysis_results['forces'])
-                plt.xlabel('Time Step')
-                plt.ylabel('Pull Force (kJ/mol/nm)')
-                plt.title('SMD Pull Force vs Time')
-                plt.grid(True)
-                
-                force_plot = smd_dir / 'smd_force_analysis.png'
-                plt.savefig(force_plot, dpi=300, bbox_inches='tight')
-                plt.close()
-                plot_files.append(force_plot)
-            
-            # Distance vs time plot
-            if 'distances' in analysis_results:
-                plt.figure(figsize=(10, 6))
-                plt.plot(analysis_results['distances'])
-                plt.xlabel('Time Step')
-                plt.ylabel('Distance (nm)')
-                plt.title('SMD Pull Distance vs Time')
-                plt.grid(True)
-                
-                distance_plot = smd_dir / 'smd_distance_analysis.png'
-                plt.savefig(distance_plot, dpi=300, bbox_inches='tight')
-                plt.close()
-                plot_files.append(distance_plot)
-                
-        except ImportError:
-            self.logger.warning("Matplotlib not available for plotting")
-        except Exception as e:
-            self.logger.warning(f"Error generating plots: {e}")
-        
-        return plot_files
-    
-    def _calculate_umbrella_windows(self, analysis_results: Dict[str, Any]) -> List[float]:
-        """Calculate suggested umbrella sampling windows"""
-        windows = []
-        
-        if 'distances' in analysis_results:
-            distances = analysis_results['distances']
-            min_dist = min(distances)
-            max_dist = max(distances)
-            
-            # Generate windows with 0.1 nm spacing
-            window_spacing = 0.1
-            num_windows = int((max_dist - min_dist) / window_spacing) + 1
-            
-            for i in range(num_windows):
-                window_center = min_dist + i * window_spacing
-                windows.append(round(window_center, 2))
-        
-        return windows[:50]  # Limit to 50 windows maximum
-
-
-# Convenience functions for easy access
-def create_smd_manager(pmf_system) -> SMDManager:
-    """Create legacy SMD manager"""
-    return SMDManager(pmf_system)
-
-
-def create_smd_module(config: Optional[Dict[str, Any]] = None,
-                     logger: Optional[PrismLogger] = None,
-                     communicator: Optional[ModuleCommunicator] = None,
-                     **user_params) -> SMDModule:
-    """
-    Create modern SMD module with full user customization
-
-    Parameters:
-    -----------
-    config : dict, optional
-        Configuration dictionary
-    logger : PrismLogger, optional
-        Logger instance
-    communicator : ModuleCommunicator, optional
-        Communication module
-    **user_params :
-        User-defined SMD parameters:
-        - pull_rate : float (required) - Pulling rate in nm/ps
-        - nsteps : int (required) - Number of simulation steps
-        - dt : float (required) - Time step in ps
-        - pull_k : float (required) - Force constant in kJ/mol/nm²
-        - temperature : float (optional) - Temperature in K (default: 310.0)
-        - pressure : float (optional) - Pressure in bar (default: 1.0)
-
-    Examples:
-    ---------
-    >>> # Basic usage - user must provide all required parameters
-    >>> smd = create_smd_module(
-    ...     pull_rate=0.005,
-    ...     nsteps=5000000,
-    ...     dt=0.002,
-    ...     pull_k=1000.0
-    ... )
-    >>>
-    >>> # With custom temperature and pressure
-    >>> smd = create_smd_module(
-    ...     pull_rate=0.01,
-    ...     nsteps=2000000,
-    ...     dt=0.001,
-    ...     pull_k=500.0,
-    ...     temperature=300.0,
-    ...     pressure=1.5
-    ... )
-    """
-    return SMDModule(config, logger, communicator, **user_params)
 
 
 # Legacy compatibility alias - SMDBuilder is now just an alias to SMDManager

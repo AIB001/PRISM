@@ -184,8 +184,8 @@ class PMFEquilibrationManager:
             
             # Final equilibrated system
             results['final_system'] = {
-                'structure': str(self.npt_dir / "npt_final.gro"),
-                'checkpoint': str(self.npt_dir / "npt_final.cpt"),
+                'structure': str(self.npt_dir / "npt.gro"),
+                'checkpoint': str(self.npt_dir / "npt.cpt"),
                 'ready_for_pmf': True
             }
             
@@ -373,12 +373,12 @@ class PMFEquilibrationManager:
         )
         
         # Run NPT
-        npt_output = self.npt_dir / "npt_final.gro"
-        npt_checkpoint = self.npt_dir / "npt_final.cpt"
+        npt_output = self.npt_dir / "npt.gro"
+        npt_checkpoint = self.npt_dir / "npt.cpt"
         npt_energy = self.npt_dir / "npt_energy.xvg"
         npt_pressure = self.npt_dir / "npt_pressure.xvg"
         npt_density = self.npt_dir / "npt_density.xvg"
-        
+
         self._run_mdrun(
             tpr_file=npt_tpr,
             output_structure=npt_output,
@@ -836,10 +836,10 @@ comm-grps               = Protein Non-Protein
         """Get paths to final equilibrated system files"""
         if not all(self.state.values()):
             raise RuntimeError("System not fully equilibrated")
-        
+
         return {
-            'structure': str(self.npt_dir / "npt_final.gro"),
-            'checkpoint': str(self.npt_dir / "npt_final.cpt"),
+            'structure': str(self.npt_dir / "npt.gro"),
+            'checkpoint': str(self.npt_dir / "npt.cpt"),
             'topology': str(self.input_topology),
             'ready_for_pmf': True,
             'equilibration_summary': self.equil_dir / "equilibration_state.yaml"
@@ -1143,11 +1143,6 @@ echo "Extracting pressure and density data..."
 echo "Pressure" | $GMX_COMMAND energy -f npt.edr -o pressure.xvg -quiet || true
 echo "Density" | $GMX_COMMAND energy -f npt.edr -o density.xvg -quiet || true
 
-# Create final equilibrated system links
-echo "Creating final equilibrated system..."
-cp npt.gro npt_final.gro
-cp npt.cpt npt_final.cpt
-
 cd ..
 echo ""
 
@@ -1157,8 +1152,8 @@ echo "NVT equilibration:   $(ls nvt/nvt.gro 2>/dev/null && echo 'SUCCESS' || ech
 echo "NPT equilibration:   $(ls npt/npt.gro 2>/dev/null && echo 'SUCCESS' || echo 'FAILED')"
 echo ""
 echo "Final equilibrated system:"
-echo "  Structure: npt/npt_final.gro"
-echo "  Checkpoint: npt/npt_final.cpt"
+echo "  Structure: npt/npt.gro"
+echo "  Checkpoint: npt/npt.cpt"
 echo "  Topology: ../GMX_PMF_SYSTEM/topol.top"
 echo ""
 echo "System is ready for PMF calculations!"
