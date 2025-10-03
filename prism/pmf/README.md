@@ -247,7 +247,7 @@ squeue -u $USER
 tail -f pmf_equilibration_*.out
 
 # Step 4: Verify equilibration completion
-ls equilibration/npt_final.gro  # Should exist when complete
+ls equilibration/npt/npt.gro  # Should exist when complete
 ```
 
 ### Configuration Options

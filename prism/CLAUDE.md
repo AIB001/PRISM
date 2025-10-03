@@ -24,6 +24,92 @@
 2.明显的I/O的显示
 3.说明清楚我们的路径上的处理
 
+## PMF Module API Design
+
+### Two-API Architecture
+PMF模块采用双API设计，只保留两个核心启动入口，避免API混乱:
+
+#### 1. Remodeling API - 系统重建
+**用途**: 将MD结果转换为PMF优化系统
+**入口**: `PMFBuilder`
+
+```python
+from prism.pmf import PMFBuilder
+
+# 初始化
+builder = PMFBuilder(
+    md_results_dir="./gromacssim",
+    output_dir="./pmf_system",
+    config=config_dict  # optional
+)
+
+# 执行重建
+# equilibrate=True: 自动运行平衡 (本地测试)
+# equilibrate=False: 仅生成脚本 (服务器部署)
+results = builder.build(equilibrate=True)
+```
+
+#### 2. Runner API - PMF工作流
+**用途**: 执行完整PMF计算流程
+**入口**: `PMFRunner` 或 `run_pmf_workflow()`
+
+```python
+from prism.pmf import PMFRunner
+
+# 方法1: 使用Runner类
+runner = PMFRunner(config="pmf_config.yaml")
+results = runner.run_complete_workflow(
+    md_system_dir="./pmf_system",
+    output_dir="./pmf_results"
+)
+
+# 方法2: 使用便捷函数
+from prism.pmf import run_pmf_workflow
+results = run_pmf_workflow(
+    md_system_dir="./pmf_system",
+    output_dir="./pmf_results",
+    config="pmf_config.yaml"
+)
+```
+
+### API使用规则
+
+1. **禁止直接调用内部组件**
+   - 不要直接使用 `PMFSystem`, `PMFWorkflow`, `SMDManager`, `UmbrellaManager` 等
+   - 这些是内部实现，只通过两个主API调用
+
+2. **只修改两个入口脚本**
+   - 所有用户接口改动只在 `PMFBuilder` 和 `PMFRunner` 中进行
+   - 保持入口简单清晰
+
+3. **示例脚本规范**
+   - examples/ 中的脚本只能使用这两个API
+   - 不展示内部组件的直接使用
+
+4. **配置文件优先**
+   - 复杂参数通过YAML配置传递
+   - API保持简洁
+
+### 典型工作流
+
+```python
+# Step 1: Remodel MD system
+from prism.pmf import PMFBuilder
+
+builder = PMFBuilder("./md_results", "./pmf_system")
+remodel_results = builder.build(equilibrate=True)
+
+# Step 2: Run PMF calculations
+from prism.pmf import run_pmf_workflow
+
+pmf_results = run_pmf_workflow(
+    md_system_dir="./pmf_system/GMX_PMF_SYSTEM",
+    output_dir="./pmf_results"
+)
+
+print(f"Binding energy: {pmf_results['binding_energy']['value']:.2f} kcal/mol")
+```
+
 ## PMF_code
 ### rebuild
 主要建模部分已经实现高度的自动化
