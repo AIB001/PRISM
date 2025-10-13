@@ -16,8 +16,15 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from .core import PMFSystem, pmf_system
-from .pmf_builder import PMFBuilder
+from .builders.pmf_builder import PMFBuilder
 from ..utils.config import ConfigurationManager
+from .utils.exceptions import (
+    PMFError, PMFSystemError, PMFConfigurationError, PMFWorkflowError,
+    SystemNotFoundException, RequiredFileNotFoundError, PMFErrorCode
+)
+from .utils.error_handling import (
+    with_retry, error_context, validate_prerequisites, ErrorCollector
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +73,50 @@ class PMFRunner:
         
         return config_dict
     
+    def _validate_workflow_inputs(self, md_system_dir: str, output_dir: str, steps: List[str]):
+        """Validate workflow inputs and prerequisites"""
+        # Check MD system directory exists
+        md_path = Path(md_system_dir)
+        if not md_path.exists():
+            raise SystemNotFoundException(
+                system_path=md_system_dir,
+                searched_paths=[md_system_dir]
+            )
+        
+        # Validate step names
+        valid_steps = ['builder', 'smd', 'umbrella', 'analysis']
+        invalid_steps = [step for step in steps if step not in valid_steps]
+        if invalid_steps:
+            raise PMFConfigurationError(
+                message=f"Invalid workflow steps: {invalid_steps}",
+                error_code=PMFErrorCode.CONFIG_INVALID,
+                recoverable=True,
+                recovery_suggestions=[
+                    f"Valid steps are: {valid_steps}",
+                    "Check step names for typos"
+                ],
+                context={"invalid_steps": invalid_steps, "valid_steps": valid_steps}
+            )
+        
+        # Check output directory is writable
+        output_path = Path(output_dir)
+        if output_path.exists() and not os.access(output_path, os.W_OK):
+            raise PMFWorkflowError(
+                message=f"Output directory is not writable: {output_dir}",
+                error_code=PMFErrorCode.DIRECTORY_NOT_WRITABLE,
+                recoverable=True,
+                recovery_suggestions=[
+                    "Check directory permissions",
+                    "Change output directory"
+                ]
+            )
+        
+        logger.debug("Workflow inputs validated successfully")
+    
     def run_complete_workflow(self, md_system_dir: str, output_dir: str,
                             steps: Optional[List[str]] = None) -> Dict:
         """
-        Run complete PMF workflow
+        Run complete PMF workflow with comprehensive error handling
         
         Parameters:
         -----------
@@ -84,16 +131,44 @@ class PMFRunner:
         Returns:
         --------
         Dict : Complete workflow results
+        
+        Raises:
+        -------
+        SystemNotFoundException
+            If MD system directory is not found
+        PMFWorkflowError
+            If workflow execution fails
         """
-        if steps is None:
-            steps = ['builder', 'smd', 'umbrella', 'analysis']
-        
-        logger.info("=== Starting Complete PMF Workflow ===")
-        self.start_time = datetime.now()
-        
-        # Create output directory
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
+        with error_context("PMF complete workflow", {
+            "md_system_dir": md_system_dir,
+            "output_dir": output_dir,
+            "steps": steps
+        }):
+            if steps is None:
+                steps = ['builder', 'smd', 'umbrella', 'analysis']
+            
+            # Validate inputs
+            self._validate_workflow_inputs(md_system_dir, output_dir, steps)
+            
+            logger.info("=== Starting Complete PMF Workflow ===")
+            self.start_time = datetime.now()
+            
+            # Create output directory safely
+            output_path = Path(output_dir)
+            try:
+                output_path.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                raise PMFWorkflowError(
+                    message=f"Failed to create output directory: {exc}",
+                    error_code=PMFErrorCode.DIRECTORY_NOT_WRITABLE,
+                    recoverable=True,
+                    recovery_suggestions=[
+                        "Check directory permissions",
+                        "Ensure parent directories exist",
+                        "Check available disk space"
+                    ],
+                    context={"output_dir": output_dir}
+                ) from exc
         
         # Save configuration
         self._save_used_config(output_path)
@@ -264,7 +339,7 @@ def run_pmf_workflow(md_system_dir: str, output_dir: str,
                     config: Optional[Union[str, Dict]] = None,
                     steps: Optional[List[str]] = None) -> Dict:
     """
-    Run complete PMF workflow (convenience function)
+    Run complete PMF workflow with comprehensive error handling (convenience function)
     
     Parameters:
     -----------
@@ -281,20 +356,43 @@ def run_pmf_workflow(md_system_dir: str, output_dir: str,
     --------
     Dict : Workflow results
     
+    Raises:
+    -------
+    SystemNotFoundException
+        If MD system directory is not found
+    PMFConfigurationError
+        If configuration is invalid
+    PMFWorkflowError
+        If workflow execution fails
+    
     Example:
     --------
     >>> import prism.pmf as pmf
     >>> results = pmf.run_pmf_workflow("./md_system", "./pmf_results")
     >>> print(f"Binding energy: {results['binding_energy']['value']:.2f}")
     """
-    runner = PMFRunner(config)
-    return runner.run_complete_workflow(md_system_dir, output_dir, steps)
+    try:
+        runner = PMFRunner(config)
+        return runner.run_complete_workflow(md_system_dir, output_dir, steps)
+    except PMFError:
+        raise  # Re-raise PMF errors as-is
+    except Exception as exc:
+        raise PMFWorkflowError(
+            message=f"Unexpected error in PMF workflow: {exc}",
+            error_code=PMFErrorCode.WORKFLOW_STATE_INCONSISTENT,
+            recoverable=False,
+            context={
+                "md_system_dir": md_system_dir,
+                "output_dir": output_dir,
+                "steps": steps
+            }
+        ) from exc
 
 
 def run_pmf_step(md_system_dir: str, output_dir: str, step: str,
                 config: Optional[Union[str, Dict]] = None) -> Dict:
     """
-    Run individual PMF step
+    Run individual PMF step with error handling
     
     Parameters:
     -----------
@@ -311,11 +409,34 @@ def run_pmf_step(md_system_dir: str, output_dir: str, step: str,
     --------
     Dict : Step results
     
+    Raises:
+    -------
+    PMFConfigurationError
+        If step name is invalid
+    SystemNotFoundException
+        If MD system directory is not found
+    PMFWorkflowError
+        If step execution fails
+    
     Example:
     --------
     >>> import prism.pmf as pmf
     >>> results = pmf.run_pmf_step("./system", "./output", "smd")
     """
+    # Validate step name
+    valid_steps = ['builder', 'smd', 'umbrella', 'analysis']
+    if step not in valid_steps:
+        raise PMFConfigurationError(
+            message=f"Invalid step '{step}'. Valid steps: {valid_steps}",
+            error_code=PMFErrorCode.CONFIG_INVALID,
+            recoverable=True,
+            recovery_suggestions=[
+                f"Use one of: {valid_steps}",
+                "Check step name for typos"
+            ],
+            context={"invalid_step": step, "valid_steps": valid_steps}
+        )
+    
     return run_pmf_workflow(md_system_dir, output_dir, config, [step])
 
 

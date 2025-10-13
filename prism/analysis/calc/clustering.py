@@ -425,18 +425,26 @@ class ClusteringAnalyzer:
             # Extract coordinates for clustering
             coordinates = self._extract_coordinates(traj, cluster_selection)
 
-            # Standardize coordinates
-            scaler = StandardScaler()
-            coordinates_scaled = scaler.fit_transform(coordinates)
+            # For DBSCAN, standardize only if using PCA
+            # This allows eps to be interpreted in Angstrom units when use_pca=False
+            if use_pca:
+                scaler = StandardScaler()
+                coordinates_scaled = scaler.fit_transform(coordinates)
 
-            # Apply PCA if requested
-            if use_pca and coordinates_scaled.shape[1] > n_components:
-                pca = PCA(n_components=n_components)
-                coordinates_reduced = pca.fit_transform(coordinates_scaled)
-                logger.info(f"PCA explained variance ratio: {pca.explained_variance_ratio_.sum():.3f}")
+                if coordinates_scaled.shape[1] > n_components:
+                    pca = PCA(n_components=n_components)
+                    coordinates_reduced = pca.fit_transform(coordinates_scaled)
+                    logger.info(f"PCA explained variance ratio: {pca.explained_variance_ratio_.sum():.3f}")
+                else:
+                    coordinates_reduced = coordinates_scaled
+                    pca = None
             else:
-                coordinates_reduced = coordinates_scaled
+                # No standardization - keep coordinates in Angstrom units
+                # This allows eps parameter to be directly interpreted as distance cutoff
+                coordinates_reduced = coordinates
+                scaler = None
                 pca = None
+                logger.info("DBSCAN using raw coordinates (no PCA/scaling) - eps in Angstrom units")
 
             # Perform DBSCAN clustering
             dbscan = DBSCAN(eps=eps, min_samples=min_samples)
@@ -605,6 +613,143 @@ class ClusteringAnalyzer:
 
         except Exception as e:
             logger.error(f"Error in cluster optimization: {e}")
+            raise
+
+    def get_centroid_frames(self,
+                          clustering_results: Dict,
+                          universe: str,
+                          trajectory: Union[str, List[str]],
+                          align_selection: str = "protein and name CA",
+                          cluster_selection: str = "protein") -> Dict[int, int]:
+        """
+        Find the centroid frame (closest to cluster center) for each cluster.
+
+        Parameters
+        ----------
+        clustering_results : dict
+            Results from clustering analysis
+        universe : str
+            Path to topology file
+        trajectory : str or list of str
+            Path(s) to trajectory file(s)
+        align_selection : str
+            Selection for alignment
+        cluster_selection : str
+            Selection for clustering atoms
+
+        Returns
+        -------
+        dict
+            Mapping of cluster_id -> frame_index for centroid frames
+        """
+        try:
+            # Load trajectory
+            traj, _ = self._load_and_align_trajectory(
+                universe, trajectory, align_selection,
+                0, None, 1  # Use all frames for accurate centroid calculation
+            )
+
+            labels = clustering_results['labels']
+            coordinates = clustering_results['coordinates_reduced']
+            centers = clustering_results.get('cluster_centers', None)
+
+            if centers is None:
+                raise ValueError("Cluster centers not found in clustering results")
+
+            centroid_frames = {}
+
+            # For each cluster, find the frame closest to the center
+            unique_labels = set(labels)
+            if -1 in unique_labels:
+                unique_labels.remove(-1)  # Exclude noise points
+
+            for cluster_id in unique_labels:
+                cluster_mask = labels == cluster_id
+                if not np.any(cluster_mask):
+                    continue
+
+                cluster_coords = coordinates[cluster_mask]
+                cluster_indices = np.where(cluster_mask)[0]
+                center = centers[cluster_id]
+
+                # Calculate distances to center
+                distances = np.linalg.norm(cluster_coords - center, axis=1)
+                min_idx = np.argmin(distances)
+                centroid_frame_idx = cluster_indices[min_idx]
+
+                centroid_frames[cluster_id] = centroid_frame_idx
+
+            return centroid_frames
+
+        except Exception as e:
+            logger.error(f"Error finding centroid frames: {e}")
+            raise
+
+    def save_centroid_structures(self,
+                               clustering_results: Dict,
+                               universe: str,
+                               trajectory: Union[str, List[str]],
+                               output_dir: str,
+                               align_selection: str = "protein and name CA",
+                               cluster_selection: str = "protein") -> Dict[int, str]:
+        """
+        Save PDB files for centroid structures of each cluster.
+
+        Parameters
+        ----------
+        clustering_results : dict
+            Results from clustering analysis
+        universe : str
+            Path to topology file
+        trajectory : str or list of str
+            Path(s) to trajectory file(s)
+        output_dir : str
+            Directory to save centroid structures
+        align_selection : str
+            Selection for alignment
+        cluster_selection : str
+            Selection for clustering atoms
+
+        Returns
+        -------
+        dict
+            Mapping of cluster_id -> saved_file_path for centroid structures
+        """
+        try:
+            # Load trajectory
+            traj, _ = self._load_and_align_trajectory(
+                universe, trajectory, align_selection,
+                0, None, 1  # Use all frames for accurate centroid calculation
+            )
+
+            # Get centroid frames
+            centroid_frames = self.get_centroid_frames(
+                clustering_results, universe, trajectory, align_selection, cluster_selection
+            )
+
+            # Create output directory
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            saved_files = {}
+
+            # Save each centroid structure
+            for cluster_id, frame_idx in centroid_frames.items():
+                if frame_idx < len(traj):
+                    # Extract the frame
+                    frame_traj = traj[frame_idx:frame_idx+1]
+
+                    # Save as PDB
+                    filename = f"centroid_cluster_{cluster_id}_frame_{frame_idx}.pdb"
+                    filepath = output_path / filename
+                    frame_traj.save(str(filepath))
+                    saved_files[cluster_id] = str(filepath)
+                    logger.info(f"Saved centroid structure for cluster {cluster_id}: {filepath}")
+
+            return saved_files
+
+        except Exception as e:
+            logger.error(f"Error saving centroid structures: {e}")
             raise
 
     def calculate_rmsd_matrix(self,

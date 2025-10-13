@@ -4,61 +4,60 @@
 """
 PRISM PMF Module
 
-This module provides comprehensive PMF calculation capabilities following
-PRISM architectural patterns, with support for both automated and manual
-execution modes.
+Two-API Design for PMF Calculations:
+1. Remodeling API - System preparation and rebuilding
+2. Runner API - Complete PMF workflow execution
 
-Features:
-- Integrated PMF workflow management
-- SMD and umbrella sampling preparation
-- WHAM analysis with error estimation
-- Advanced visualization and reporting
-- Flexible configuration system
+Usage:
+    # Step 1: Remodel MD system for PMF
+    from prism.pmf import PMFBuilder
+    builder = PMFBuilder(md_results_dir, output_dir)
+    builder.build(equilibrate=True)
+
+    # Step 2: Run PMF workflow
+    from prism.pmf import PMFRunner
+    runner = PMFRunner(config)
+    results = runner.run_complete_workflow(system_dir, output_dir)
 """
 
-# Core classes following PRISM patterns
-from .core import PMFSystem, pmf_system
-from .workflow import PMFWorkflow  
-from .pmf_builder import PMFBuilder, pmf_builder
-from .smd import SMDManager, SMDBuilder
-from .umbrella import UmbrellaManager, WindowSelector
-from .analyzer import PMFAnalyzer, WhamRunner
-from .equilibration import PMFEquilibrationManager
-from .runner import PMFRunner, run_pmf_workflow, run_pmf_step, create_pmf_config
-from .md_validator import MDResultsValidator, validate_md_results, ValidationLevel
+# ============================================================================
+# PRIMARY APIs - Only use these two entry points
+# ============================================================================
+
+# 1. Remodeling API - System preparation
+from .builders import PMFBuilder
+
+# 2. Runner API - PMF workflow execution
+from .runner import PMFRunner, run_pmf_workflow, create_pmf_config
+
+# ============================================================================
+# Internal components - Do not use directly (for advanced users only)
+# ============================================================================
+from .core import PMFSystem, PMFWorkflow
+from .builders import PMFEquilibrationManager
+from .methods import SMDManager, UmbrellaManager
+from .analysis import PMFAnalyzer, MDResultsValidator, validate_md_results, ValidationLevel
 
 __all__ = [
-    # High-level interface (main entry points)
-    "PMFSystem",
-    "pmf_system",
-    
-    # Unified workflow runner (recommended API)
+    # ===== PRIMARY APIs (RECOMMENDED) =====
+    # Remodeling API
+    "PMFBuilder",
+
+    # Runner API
     "PMFRunner",
     "run_pmf_workflow",
-    "run_pmf_step",
     "create_pmf_config",
-    
-    # Workflow management
+
+    # ===== INTERNAL COMPONENTS (Advanced use only) =====
+    "PMFSystem",
     "PMFWorkflow",
-    
-    # System building
-    "PMFBuilder",
-    "pmf_builder",
-    
-    # Component managers
-    "SMDManager", 
-    "SMDBuilder",
-    "UmbrellaManager",
-    "WindowSelector", 
-    "PMFAnalyzer",
-    "WhamRunner",
     "PMFEquilibrationManager",
-    
-    # Validation and utilities
+    "SMDManager",
+    "UmbrellaManager",
+    "PMFAnalyzer",
     "MDResultsValidator",
-    "validate_md_results", 
+    "validate_md_results",
     "ValidationLevel",
-    "get_pmf_info",
 ]
 
 

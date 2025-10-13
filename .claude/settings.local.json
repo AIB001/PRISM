@@ -19,7 +19,9 @@
       "Read(//home/gxf1212/.claude/**)",
       "Bash(python3:*)",
       "Read(///**)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git fetch:*)",
+      "Bash(git show-ref:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,78 @@
+# PMF Remodeling Default Configuration (Cluster Mode)
+# For HPC cluster deployment
+# Generate scripts for server execution
+
+# Execution Mode
+execution:
+  mode: script-only         # auto-equilibrate | script-only
+
+# PMF System Parameters
+pmf_system:
+  reference_group: Protein  # Reference group for pulling
+  moving_group: LIG         # Moving group (ligand)
+  align_axis: z             # Alignment axis for pulling
+  center_system: true       # Center system in box
+
+# Box Configuration
+box:
+  box_type: cubic           # Box type
+  box_distance: 1.2         # Distance from solute to box edge (nm)
+  pulling_distance: 2.0     # Additional distance for PMF pulling (nm)
+
+# Extraction Settings
+extraction:
+  frame_number: -1          # Frame to extract (-1 for last frame)
+  output_structure: true    # Output extracted structure
+
+# Force Field Settings (auto-detected from MD system if not specified)
+general:
+  gmx_command: gmx          # GROMACS command
+  # forcefield: amber99sb   # Uncomment to override auto-detection
+  # water_model: tip3p      # Uncomment to override auto-detection
+
+# Equilibration Parameters (optimized for cluster)
+equilibration:
+  # Energy Minimization
+  em:
+    integrator: steep
+    emtol: 10.0
+    emstep: 0.01
+    nsteps: 50000
+
+  # NVT Equilibration (100 ps)
+  nvt:
+    nsteps: 50000           # 50000 steps * 0.002 ps = 100 ps
+    dt: 0.002               # Time step (ps)
+    temperature: 310.0      # Temperature (K)
+    tau_t: 0.1              # Temperature coupling time constant
+
+  # NPT Equilibration (500 ps - longer for cluster)
+  npt:
+    nsteps: 250000          # 250000 steps * 0.002 ps = 500 ps
+    dt: 0.002               # Time step (ps)
+    temperature: 310.0      # Temperature (K)
+    pressure: 1.0           # Pressure (bar)
+    tau_t: 0.1              # Temperature coupling time constant
+    tau_p: 2.0              # Pressure coupling time constant
+
+# SLURM Configuration
+slurm:
+  partition: gpu            # SLURM partition
+  nodes: 1                  # Number of nodes
+  ntasks: 1                 # Number of tasks
+  cpus_per_task: 20         # CPUs per task
+  time: "12:00:00"          # Wall time limit
+  memory: "32G"             # Memory requirement
+  gres: "gpu:1"             # GPU resources
+  environment_setup: |
+    module load gromacs/2023.1
+    export OMP_NUM_THREADS=20
+  ntmpi: 1                  # Number of MPI threads
+  ntomp: 20                 # Number of OpenMP threads
+
+# Local Execution Settings (fallback)
+local:
+  cpus: 20                  # Number of CPU cores
+  gpu_id: 0                 # GPU device ID
+  ntmpi: 1                  # Number of MPI threads
+  ntomp: 20                 # Number of OpenMP threads
