@@ -12,6 +12,8 @@ from pathlib import Path
 
 # Import publication style
 from .publication_utils import apply_publication_style, PUBLICATION_COLORS, PUBLICATION_FONTS, get_standard_figsize
+# Import residue formatting utility
+from ...utils.residue import format_residue_list
 
 def plot_contact_analysis(contact_results: Dict,
                          output_path: str,
@@ -127,7 +129,8 @@ def plot_contact_analysis(contact_results: Dict,
 def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
                              output_path: str,
                              title: str = "",
-                             separate_panels: bool = False) -> bool:
+                             separate_panels: bool = False,
+                             residue_format: str = "1letter") -> bool:
     """
     Plot grouped bar charts for contact analysis across trajectories.
 
@@ -142,6 +145,8 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
         Main plot title
     separate_panels : bool
         If True, also save individual panel figures
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -172,6 +177,9 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
         means_sorted = [means[i] for i in sorted_indices]
         stderrs_sorted = [stderrs[i] for i in sorted_indices]
 
+        # Format residue names for display
+        residues_sorted_display = format_residue_list(residues_sorted, residue_format)
+
         fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
 
         # Create grouped bars
@@ -188,7 +196,7 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
         ax.set_xlabel('Amino Acid Residues')
         ax.set_ylabel('Contact Probability (%)')
         ax.set_xticks(x)
-        ax.set_xticklabels(residues_sorted, rotation=45, ha='center')
+        ax.set_xticklabels(residues_sorted_display, rotation=45, ha='center')
         ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
         ax.set_ylim(0, 115)
         ax.set_facecolor('#FAFAFA')
@@ -217,7 +225,8 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
                                   output_path: str,
                                   title: str = "",
-                                  separate_panels: bool = False) -> bool:
+                                  separate_panels: bool = False,
+                                  residue_format: str = "1letter") -> bool:
     """
     Plot annotated heatmap for contact analysis.
 
@@ -231,6 +240,8 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
         Main plot title
     separate_panels : bool
         If True, also save individual panel figure
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -273,11 +284,14 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
                       fontsize=PUBLICATION_FONTS['colorbar'])
         cbar.ax.tick_params(labelsize=PUBLICATION_FONTS['tick_label'])
 
+        # Format residue names for display
+        residues_display = format_residue_list(residues, residue_format)
+
         # Set ticks and labels
         ax.set_yticks([0, 1, 2])
         ax.set_yticklabels(trajectories)
         ax.set_xticks(range(len(residues)))
-        ax.set_xticklabels(residues, rotation=45, ha='center')
+        ax.set_xticklabels(residues_display, rotation=45, ha='center')
 
         # Add text annotations with proper font size
         for i in range(3):
@@ -378,7 +392,8 @@ def plot_key_residue_contacts(key_residue_results: Dict,
 
 def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
                                   output_path: str,
-                                  title: str = "Key Residue Contact Analysis") -> bool:
+                                  title: str = "Key Residue Contact Analysis",
+                             residue_format: str = "1letter") -> bool:
     """
     Plot violin plots for key residue contacts with RemTP ligand using seaborn.
 
@@ -477,7 +492,10 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
         # Fix tick alignment - center labels with ticks
         ax.set_xticks(range(len(available_residues)))
-        ax.set_xticklabels(available_residues, rotation=45, ha='center')
+        # Format residue names for display
+        available_residues_display = format_residue_list(available_residues, residue_format)
+
+        ax.set_xticklabels(available_residues_display, rotation=45, ha='center')
 
         # Formatting - apply_publication_style() controls font sizes and bold automatically
         ax.set_ylabel('Contact Probability (%)')
@@ -502,7 +520,8 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
 def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, float]],
                                         output_path: str,
-                                        title: str = "Key Residue Contact Distribution") -> bool:
+                                        title: str = "Key Residue Contact Distribution",
+                             residue_format: str = "1letter") -> bool:
     """
     Plot grouped bar charts for key residue contacts with RemTP ligand.
 
@@ -581,7 +600,10 @@ def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, floa
 
         # Fix tick alignment - center labels with tick positions
         ax.set_xticks(range(len(residues_sorted)))
-        ax.set_xticklabels(residues_sorted, rotation=45, ha='center')
+        # Format residue names for display
+        residues_sorted_display = format_residue_list(residues_sorted, residue_format)
+
+        ax.set_xticklabels(residues_sorted_display, rotation=45, ha='center')
         # Remove manual tick_params - let apply_publication_style() handle it
 
         ax.set_ylim(0, max(means_sorted) * 1.3 if means_sorted else 1)
@@ -701,7 +723,8 @@ def plot_contact_numbers_timeseries(contact_timeseries_data: Dict,
 
 def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
                                        output_path: str,
-                                       title: str = "Residue Contact Numbers") -> bool:
+                                       title: str = "Residue Contact Numbers",
+                                       residue_format: str = "1letter") -> bool:
     """
     Plot violin plots for residue contact numbers (normalized by atom count).
 
@@ -714,6 +737,8 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
         Path to save the figure
     title : str
         Main plot title
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -783,7 +808,10 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
         ax.set_ylabel('Normalized Contact Number')
         ax.set_xlabel('Key Residues')
         ax.set_xticks(range(len(all_residues)))
-        ax.set_xticklabels(all_residues, rotation=45, ha='center')
+        # Format residue names for display
+        all_residues_display = format_residue_list(all_residues, residue_format)
+
+        ax.set_xticklabels(all_residues_display, rotation=45, ha='center')
         # Remove manual tick_params - let apply_publication_style() handle it
         ax.grid(True, alpha=0.3)
         ax.set_facecolor('#FAFAFA')
@@ -803,7 +831,8 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
 def plot_contact_distances_violin(distance_data: Dict,
                                  output_path: str,
                                  title: str = "Contact Distance Distributions",
-                                 distance_cutoff: float = -1.0) -> bool:
+                                 distance_cutoff: float = -1.0,
+                                 residue_format: str = "1letter") -> bool:
     """
     Plot violin plots for contact distance distributions.
 
@@ -820,6 +849,8 @@ def plot_contact_distances_violin(distance_data: Dict,
         Maximum distance to include in plot (in Angstroms).
         Default: -1.0 (no cutoff, include all distances)
         Typical values: 6.0 Å for contact analysis
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -892,7 +923,10 @@ def plot_contact_distances_violin(distance_data: Dict,
         ax.set_ylabel('Contact Distance (Å)')
         ax.set_xlabel('Key Residues')
         ax.set_xticks(range(len(all_residues)))
-        ax.set_xticklabels(all_residues, rotation=45, ha='center')
+        # Format residue names for display
+        all_residues_display = format_residue_list(all_residues, residue_format)
+
+        ax.set_xticklabels(all_residues_display, rotation=45, ha='center')
         # Remove manual tick_params - let apply_publication_style() handle it
         ax.grid(True, alpha=0.3)
         ax.set_facecolor('#FAFAFA')
@@ -951,7 +985,8 @@ def _create_half_violin(ax, data, position, color, alpha=1.0, width=0.35, side='
 def plot_contact_distances_raincloud(distance_data: Dict,
                                     output_path: str,
                                     title: str = "",
-                                    distance_cutoff: float = -1.0) -> bool:
+                                    distance_cutoff: float = -1.0,
+                             residue_format: str = "1letter") -> bool:
     """
     Plot raincloud plots for contact distance distributions.
     Follows reference implementation with half violin, box plot, and density-based scatter.
@@ -997,6 +1032,9 @@ def plot_contact_distances_raincloud(distance_data: Dict,
             return False
 
         residues = sorted(filtered_distance_data.keys())
+        # Format residue names for display
+        residues_display = format_residue_list(residues, residue_format)
+
         fig, ax = plt.subplots(figsize=get_standard_figsize('distribution'))
 
         # Color scheme matching reference
@@ -1083,7 +1121,7 @@ def plot_contact_distances_raincloud(distance_data: Dict,
         ax.set_ylabel('Contact Distance (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
         ax.set_xlabel('Key Residues', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(residues, rotation=45, ha='center', fontsize=PUBLICATION_FONTS['tick_label'])
+        ax.set_xticklabels(residues_display, rotation=45, ha='center', fontsize=PUBLICATION_FONTS['tick_label'])
         ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
         ax.set_xlim(-0.6, len(residues) - 0.4)
 

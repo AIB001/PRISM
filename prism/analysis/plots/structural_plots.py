@@ -20,6 +20,8 @@ from .publication_utils import (
     save_publication_figure, validate_figure_size, PUBLICATION_FONTS, PUBLICATION_COLORS,
     apply_publication_style, setup_publication_figure, get_standard_figsize
 )
+# Import residue formatting utility
+from ...utils.residue import format_residue_list
 from pathlib import Path
 
 # Apply global publication style on import
@@ -1776,6 +1778,7 @@ def plot_key_residue_distances(
     figsize: Optional[Tuple[float, float]] = None,
     save_path: Optional[str] = None,
     colors: Optional[List[str]] = None,
+    residue_format: str = "1letter",
     **kwargs
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
@@ -1804,6 +1807,8 @@ def plot_key_residue_distances(
         Path to save figure
     colors : list, optional
         Colors for violins
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -1860,8 +1865,11 @@ def plot_key_residue_distances(
                            edgecolor='gray'))
 
         # Enhanced styling
+        # Format residue names for display
+        residue_names_display = format_residue_list(residue_names, residue_format)
+
         ax.set_xticks(positions)
-        ax.set_xticklabels(residue_names,
+        ax.set_xticklabels(residue_names_display,
                           fontsize=PUBLICATION_FONTS['tick_label'],
                           weight='bold')
         ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')

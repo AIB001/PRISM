@@ -12,6 +12,8 @@ from pathlib import Path
 
 # Import publication style
 from .publication_utils import apply_publication_style, get_standard_figsize
+# Import residue formatting utility
+from ...utils.residue import format_residue_list
 
 
 def plot_hbond_analysis(hbond_results: Dict,
@@ -125,7 +127,8 @@ def plot_hbond_analysis(hbond_results: Dict,
 def plot_key_residue_hbonds(hbond_results: Dict,
                            key_residues: List[str],
                            output_path: str,
-                           title: str = "Key Residue Hydrogen Bonds") -> bool:
+                           title: str = "Key Residue Hydrogen Bonds",
+                           residue_format: str = "1letter") -> bool:
     """
     Plot hydrogen bond analysis for specific key residues.
 
@@ -139,6 +142,8 @@ def plot_key_residue_hbonds(hbond_results: Dict,
         Path to save the plot
     title : str
         Plot title
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -169,7 +174,10 @@ def plot_key_residue_hbonds(hbond_results: Dict,
         std_counts = [np.std(counts) if counts and len(counts) > 1 else 0 for counts in residue_counts.values()]
 
         if residue_names:
-            bars = ax1.bar(residue_names, avg_counts, yerr=std_counts,
+            # Format residue names for display
+            residue_names_display = format_residue_list(residue_names, residue_format)
+
+            bars = ax1.bar(residue_names_display, avg_counts, yerr=std_counts,
                           color='skyblue', alpha=0.7, capsize=5)
             ax1.set_ylabel('Avg H-bonds', fontfamily='Times New Roman')
             ax1.set_xlabel('Key Residues', fontfamily='Times New Roman')
@@ -204,7 +212,8 @@ def plot_key_residue_hbonds(hbond_results: Dict,
 
 def plot_hbond_raincloud(hbond_data: Dict[str, Dict[str, float]],
                         output_path: str,
-                        title: str = "Key Residue Hydrogen Bond Analysis") -> bool:
+                        title: str = "Key Residue Hydrogen Bond Analysis",
+                        residue_format: str = "1letter") -> bool:
     """
     Create raincloud-style plots for key residue hydrogen bonds.
 
@@ -220,6 +229,8 @@ def plot_hbond_raincloud(hbond_data: Dict[str, Dict[str, float]],
         Path to save the figure
     title : str
         Main plot title
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
     Returns
     -------
@@ -360,8 +371,11 @@ def plot_hbond_raincloud(hbond_data: Dict[str, Dict[str, float]],
                           linewidth=0.5, zorder=2)
 
         # 4. Formatting with proper tick alignment
+        # Format residue names for display
+        residue_labels_display = format_residue_list(residue_labels, residue_format)
+
         ax.set_xticks(positions)
-        ax.set_xticklabels(residue_labels, rotation=45, ha='center', fontsize=18)
+        ax.set_xticklabels(residue_labels_display, rotation=45, ha='center', fontsize=18)
         ax.set_ylabel('Frequency (%)', fontsize=21, fontweight='bold')
         ax.set_xlabel('Key Residues', fontsize=21, fontweight='bold')
         ax.grid(True, alpha=0.3)

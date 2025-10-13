@@ -42,6 +42,7 @@ class AnalysisConfig:
     distance_cutoff_nm: float = 0.5
     cache_dir: str = "./cache"  # Cache directory for analysis results
     timestep_ns: float = 0.5  # Time between saved trajectory frames in nanoseconds (0.5 ns = 500 ps)
+    residue_format: str = "1letter"  # Amino acid display format: "1letter" (default, e.g., D618) or "3letter" (e.g., ASP618)
 
     def __post_init__(self):
         if self.parallel_workers is None:
