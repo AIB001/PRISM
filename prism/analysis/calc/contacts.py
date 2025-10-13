@@ -5,6 +5,7 @@ from pathlib import Path
 from ..core.config import AnalysisConfig, convert_numpy_types
 import mdtraj as md
 from ..core.parallel import default_processor
+from ...utils.residue import normalize_residue_to_3letter
 
 logger = logging.getLogger(__name__)
 
@@ -315,8 +316,9 @@ class ContactAnalyzer:
 
             # If specific residues provided, use them; otherwise analyze all protein residues
             if key_residues is not None:
-                logger.info(f"Analyzing {len(key_residues)} specified residues vs {len(ligand_atoms)} ligand atoms")
-                residues_to_analyze = key_residues
+                # Normalize residue names to 3-letter format for MDTraj compatibility
+                residues_to_analyze = [normalize_residue_to_3letter(res) for res in key_residues]
+                logger.info(f"Analyzing {len(residues_to_analyze)} specified residues vs {len(ligand_atoms)} ligand atoms")
             else:
                 # Get all protein residues
                 logger.info("Analyzing all protein residues vs ligand")
@@ -549,6 +551,9 @@ class ContactAnalyzer:
             if key_residues is None:
                 key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
                                'THR680', 'LYS551', 'ARG553', 'ARG555']
+            else:
+                # Normalize residue names to 3-letter format for MDTraj compatibility
+                key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
 
             # Get ligand atoms
             ligand_atoms = traj.topology.select("resname LIG")
@@ -659,6 +664,9 @@ class ContactAnalyzer:
             if key_residues is None:
                 key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
                                'THR680', 'LYS551', 'ARG553', 'ARG555']
+            else:
+                # Normalize residue names to 3-letter format for MDTraj compatibility
+                key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
 
             # Get ligand atoms
             ligand_atoms = traj.topology.select("resname LIG")
@@ -780,6 +788,9 @@ class ContactAnalyzer:
             if key_residues is None:
                 key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
                                'THR680', 'LYS551', 'ARG553', 'ARG555']
+            else:
+                # Normalize residue names to 3-letter format for MDTraj compatibility
+                key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
 
             # Get ligand atoms
             ligand_atoms = traj.topology.select("resname LIG")
