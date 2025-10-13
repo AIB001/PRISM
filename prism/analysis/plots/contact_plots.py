@@ -159,17 +159,35 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
         # Extract data for plotting
         residues = list(contact_data.keys())
-        trajectories = ['Repeat 1', 'Repeat 2', 'Repeat 3']
-        colors = PUBLICATION_COLORS['example'][:3]  # Use example colors
+
+        # Auto-detect number of trajectories from data
+        all_traj_keys = set()
+        for residue_data in contact_data.values():
+            all_traj_keys.update(residue_data.keys())
+
+        # Detect trajectory format (Repeat1/Repeat2/Repeat3 or single trajectory)
+        repeat_keys = sorted([k for k in all_traj_keys if k.startswith('Repeat')])
+        n_trajectories = len(repeat_keys) if repeat_keys else 1
+
+        if n_trajectories == 1 and not repeat_keys:
+            # Single trajectory with custom name (shouldn't happen after test fix)
+            trajectories = [list(all_traj_keys)[0]]
+            trajectory_nums = [1]
+        else:
+            # Multiple trajectories or properly formatted single trajectory
+            trajectory_nums = [int(k.replace('Repeat', '')) for k in repeat_keys]
+            trajectories = [f'Repeat {i}' for i in trajectory_nums]
+
+        colors = PUBLICATION_COLORS['example'][:n_trajectories]
 
         # Calculate means and standard errors
         means = []
         stderrs = []
 
         for residue in residues:
-            values = [contact_data[residue].get(f'Repeat{i}', 0.0) for i in [1, 2, 3]]
+            values = [contact_data[residue].get(f'Repeat{i}', 0.0) for i in trajectory_nums]
             means.append(np.mean(values))
-            stderrs.append(np.std(values) / np.sqrt(3))  # Standard error
+            stderrs.append(np.std(values) / np.sqrt(n_trajectories) if n_trajectories > 1 else 0.0)
 
         # Sort by mean contact probability
         sorted_indices = np.argsort(means)[::-1]
@@ -182,13 +200,21 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
         fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
 
-        # Create grouped bars
+        # Create grouped bars (adapt width based on number of trajectories)
         x = np.arange(len(residues_sorted))
-        width = 0.25
+        width = 0.25 if n_trajectories > 1 else 0.6  # Wider bars for single trajectory
 
-        for i, traj in enumerate(['Repeat1', 'Repeat2', 'Repeat3']):
-            values = [contact_data[residues_sorted[j]].get(traj, 0.0) for j in range(len(residues_sorted))]
-            bars = ax.bar(x + (i-1)*width, values, width,
+        for i, traj_num in enumerate(trajectory_nums):
+            traj_key = f'Repeat{traj_num}'
+            values = [contact_data[residues_sorted[j]].get(traj_key, 0.0) for j in range(len(residues_sorted))]
+
+            # Center bars for single trajectory, offset for multiple
+            if n_trajectories == 1:
+                x_offset = 0
+            else:
+                x_offset = (i - (n_trajectories-1)/2) * width
+
+            bars = ax.bar(x + x_offset, values, width,
                          label=trajectories[i], color=colors[i],
                          alpha=0.9, edgecolor='#457B9D', linewidth=0.5)
 
@@ -197,7 +223,11 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
         ax.set_ylabel('Contact Probability (%)')
         ax.set_xticks(x)
         ax.set_xticklabels(residues_sorted_display, rotation=45, ha='center')
-        ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
+
+        # Only show legend for multiple trajectories
+        if n_trajectories > 1:
+            ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
+
         ax.set_ylim(0, 115)
         ax.set_facecolor('#FAFAFA')
 
