@@ -580,14 +580,27 @@ def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, floa
             print("No key residue data available for distribution plot")
             return False
 
+        # Auto-detect number of trajectories from data
+        all_traj_keys = set()
+        for residue_data in contact_data.values():
+            all_traj_keys.update(residue_data.keys())
+
+        repeat_keys = sorted([k for k in all_traj_keys if k.startswith('Repeat')])
+        n_trajectories = len(repeat_keys) if repeat_keys else 1
+        trajectory_nums = [int(k.replace('Repeat', '')) for k in repeat_keys] if repeat_keys else [1]
+
         # Calculate means and standard errors for key residues
         means = []
         stderrs = []
 
         for residue in available_residues:
-            values = [contact_data[residue].get(f'Repeat{i}', 0.0) for i in [1, 2, 3]]
+            values = [contact_data[residue].get(f'Repeat{i}', 0.0) for i in trajectory_nums]
             means.append(np.mean(values))
-            stderrs.append(np.std(values) / np.sqrt(3))  # Standard error
+            # Only calculate error bars for multiple trajectories
+            if n_trajectories > 1:
+                stderrs.append(np.std(values) / np.sqrt(n_trajectories))
+            else:
+                stderrs.append(0.0)
 
         # Sort by mean contact probability
         sorted_indices = np.argsort(means)[::-1]
@@ -606,9 +619,10 @@ def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, floa
                      color=colors,
                      alpha=0.9, edgecolor='#457B9D', linewidth=0.8)
 
-        # Add error bars
-        ax.errorbar(residues_sorted, means_sorted, yerr=stderrs_sorted,
-                   fmt='none', capsize=6, capthick=1.5, color='#457B9D', alpha=0.8)
+        # Add error bars only for multiple trajectories
+        if n_trajectories > 1:
+            ax.errorbar(residues_sorted, means_sorted, yerr=stderrs_sorted,
+                       fmt='none', capsize=6, capthick=1.5, color='#457B9D', alpha=0.8)
 
         # Add value labels on bars - simple percentage format only
         for i, (bar, mean, se) in enumerate(zip(bars, means_sorted, stderrs_sorted)):
@@ -619,8 +633,13 @@ def plot_key_residue_contact_distribution(contact_data: Dict[str, Dict[str, floa
                 else:  # Show one decimal place for clarity
                     label_text = f'{mean:.1f}%'
 
-                # Increase y-offset to avoid overlap with error bar caps
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + se + 5,
+                # Adjust y-offset based on whether error bars are present
+                if n_trajectories > 1:
+                    y_offset = bar.get_height() + se + 5  # Account for error bar
+                else:
+                    y_offset = bar.get_height() + 3  # Smaller offset without error bar
+
+                ax.text(bar.get_x() + bar.get_width()/2, y_offset,
                        label_text, ha='center', va='bottom',
                        fontsize=PUBLICATION_FONTS['bar_annotation'], color='#457B9D')
 
