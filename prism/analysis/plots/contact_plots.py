@@ -15,6 +15,166 @@ from .publication_utils import apply_publication_style, PUBLICATION_COLORS, PUBL
 # Import residue formatting utility
 from ...utils.residue import format_residue_list
 
+def plot_comparison_contact_distances_violin(
+    group1_distances: Dict[str, np.ndarray],
+    group2_distances: Dict[str, np.ndarray],
+    output_path: str,
+    group1_name: str = "Group 1",
+    group2_name: str = "Group 2",
+    key_residues: List[str] = None,
+    residue_format: str = "1letter"
+) -> bool:
+    """
+    Plot comparison violin plots for contact distances between two groups.
+
+    Creates split violin plots with Group 1 on the left and Group 2 on the right
+    for each residue, enabling direct visual comparison of distance distributions.
+
+    Parameters
+    ----------
+    group1_distances : dict
+        Distance data for group 1 (e.g., RemTP)
+        Format: {'ASP618': distances_array, 'ASN691': distances_array, ...}
+        Arrays can be from single or multiple trajectories combined
+    group2_distances : dict
+        Distance data for group 2 (e.g., 1'-CF3)
+        Format: {'ASP618': distances_array, 'ASN691': distances_array, ...}
+    output_path : str
+        Path to save the figure
+    group1_name : str
+        Display name for group 1 (e.g., "RemTP")
+    group2_name : str
+        Display name for group 2 (e.g., "1'-CF3")
+    key_residues : list, optional
+        List of specific residues to plot. If None, uses all common residues
+    residue_format : str
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
+
+    Returns
+    -------
+    bool
+        True if successful
+
+    Examples
+    --------
+    >>> # Compare RemTP (3 trajs) vs 1'-CF3 (1 traj)
+    >>> remtp_combined = {
+    ...     'ASP618': np.concatenate([remtp_traj1['ASP618'], remtp_traj2['ASP618'], remtp_traj3['ASP618']]),
+    ...     'ASN691': np.concatenate([remtp_traj1['ASN691'], remtp_traj2['ASN691'], remtp_traj3['ASN691']])
+    ... }
+    >>> cf3_distances = {'ASP618': cf3_array, 'ASN691': cf3_array}
+    >>> plot_comparison_contact_distances_violin(
+    ...     remtp_combined, cf3_distances,
+    ...     'remtp_vs_1pcf3_comparison.png',
+    ...     'RemTP', "1'-CF3",
+    ...     key_residues=['ASP618', 'ASN691', 'SER759']
+    ... )
+    """
+    try:
+        print(f"🎻 Comparison violin plot: {group1_name} vs {group2_name}")
+        apply_publication_style()
+        import pandas as pd
+
+        # Determine residues to plot
+        if key_residues is None:
+            # Use all common residues
+            common_residues = sorted(set(group1_distances.keys()) & set(group2_distances.keys()))
+        else:
+            # Use specified residues (filter to those present in both groups)
+            common_residues = [r for r in key_residues
+                             if r in group1_distances and r in group2_distances]
+
+        if not common_residues:
+            print(f"  ⚠ No common residues found between {group1_name} and {group2_name}")
+            return False
+
+        print(f"  📊 Plotting {len(common_residues)} residues")
+
+        # Prepare data for split violin plot
+        plot_data = []
+
+        for residue in common_residues:
+            # Group 1 data
+            distances_g1 = group1_distances[residue]
+            # Sample if too many points
+            if len(distances_g1) > 1000:
+                sample_idx = np.random.choice(len(distances_g1), 1000, replace=False)
+                distances_g1 = distances_g1[sample_idx]
+
+            for dist in distances_g1:
+                plot_data.append({
+                    'Residue': residue,
+                    'Group': group1_name,
+                    'Distance': dist
+                })
+
+            # Group 2 data
+            distances_g2 = group2_distances[residue]
+            if len(distances_g2) > 1000:
+                sample_idx = np.random.choice(len(distances_g2), 1000, replace=False)
+                distances_g2 = distances_g2[sample_idx]
+
+            for dist in distances_g2:
+                plot_data.append({
+                    'Residue': residue,
+                    'Group': group2_name,
+                    'Distance': dist
+                })
+
+        df = pd.DataFrame(plot_data)
+
+        # Figure size based on number of residues
+        if len(common_residues) > 8:
+            figsize = get_standard_figsize('wide')
+        else:
+            figsize = get_standard_figsize('distribution')
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Color scheme for two groups
+        colors = [PUBLICATION_COLORS['example'][0], PUBLICATION_COLORS['example'][1]]
+
+        # Create split violin plot
+        sns.violinplot(
+            data=df,
+            x='Residue',
+            y='Distance',
+            hue='Group',
+            split=True,  # Split violins
+            palette=colors,
+            inner=None,  # No inner markers
+            ax=ax
+        )
+
+        # Format residue names for display
+        residues_display = format_residue_list(common_residues, residue_format)
+
+        # Formatting
+        ax.set_ylabel('Contact Distance (Å)')
+        ax.set_xlabel('Amino Acid Residues')
+        ax.set_xticks(range(len(common_residues)))
+        ax.set_xticklabels(residues_display, rotation=45, ha='center')
+        ax.grid(True, alpha=0.3, axis='y')
+        ax.set_facecolor('#FAFAFA')
+
+        # Legend
+        ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        plt.close()
+
+        print(f"  ✅ Comparison plot saved: {output_path}")
+        return True
+
+    except Exception as e:
+        print(f"Error in comparison violin plot: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def plot_contact_analysis(contact_results: Dict,
                          output_path: str,
                          title: str = "",
