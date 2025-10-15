@@ -31,6 +31,7 @@ from .calc.clustering import ClusteringAnalyzer
 from .calc.structural import StructuralAnalyzer
 from .calc.sasa import SASAAnalyzer
 from .calc.dihedral import DihedralAnalyzer
+from .calc.namd_fep import NAMDFEPAnalyzer
 
 # Re-export core components at top level for backward compatibility
 
@@ -38,7 +39,8 @@ from .calc.dihedral import DihedralAnalyzer
 from . import calc
 from .calc import (
     ContactAnalyzer, HBondAnalyzer, DistanceAnalyzer,
-    RMSDAnalyzer, ClusteringAnalyzer, StructuralAnalyzer, SASAAnalyzer, DihedralAnalyzer
+    RMSDAnalyzer, ClusteringAnalyzer, StructuralAnalyzer, SASAAnalyzer, DihedralAnalyzer,
+    NAMDFEPAnalyzer
 )
 
 # Import plotting submodule
@@ -50,6 +52,14 @@ from .plots import (
     plot_rmsd_time_series, plot_rmsf_per_residue, plot_rmsd_rmsf_combined,
     plot_multi_system_comparison, plot_correlation_matrix,
     plot_statistical_comparison, plot_difference_analysis
+)
+
+# Import NAMD FEP plotting functions
+from .plots.namd_fep_plots import (
+    plot_namd_fep_convergence,
+    plot_namd_fep_decomposition_bar,
+    plot_namd_fep_dg_lambda,
+    plot_namd_fep_multi_comparison
 )
 
 # Import contact visualization module (renamed from visualization)
@@ -77,6 +87,7 @@ __all__ = [
     'StructuralAnalyzer',
     'SASAAnalyzer',
     'DihedralAnalyzer',
+    'NAMDFEPAnalyzer',
 
     # Utilities
     'TrajectoryManager',
@@ -104,6 +115,12 @@ __all__ = [
     'plot_correlation_matrix',
     'plot_statistical_comparison',
     'plot_difference_analysis',
+
+    # NAMD FEP plotting functions
+    'plot_namd_fep_convergence',
+    'plot_namd_fep_decomposition_bar',
+    'plot_namd_fep_dg_lambda',
+    'plot_namd_fep_multi_comparison',
 
     # Contact visualization module (renamed from visualization)
     'contact',

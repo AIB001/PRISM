@@ -85,3 +85,4 @@ PRISM (Protein Receptor Interaction Simulation Modeler) 是一个用于构建蛋
 - 验证轨迹处理的完整性和准确性
 - 确保分析结果的科学合理性
 - 检查输出格式的一致性和可读性
+- do not leave intermediate files in project root!

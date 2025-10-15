@@ -90,8 +90,6 @@ def get_publication_style(style_type: str = 'default') -> Dict[str, Any]:
         'savefig.edgecolor': 'none',
 
         # Enhanced grid and axes for scientific data - NO GRID GLOBALLY
-        'grid.alpha': 0.0,         # No grid opacity by default
-        'grid.linewidth': 0.0,     # No grid lines by default
         'axes.linewidth': 2.0,     # Thicker axes for subfigures
         'axes.edgecolor': 'black',
         'axes.grid': False,        # GLOBAL: No grid by default

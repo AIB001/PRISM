@@ -17,7 +17,8 @@ class GromacsEnvironment:
     def __init__(self):
         self.gmx_command = None
         self.gmx_bin_path = None
-        self.gmx_lib = None
+        self.gmx_lib = None  # Custom force field directory (e.g., mutff)
+        self.gmx_lib_default = None  # GROMACS default force field directory
         self.force_fields = {}
         self.force_field_names = {}  # Map names to indices
         self.water_models = {}
@@ -76,10 +77,29 @@ class GromacsEnvironment:
             except:
                 pass
 
-        if not self.gmx_lib:
-            print("Warning: Could not detect GMXLIB. Using default force field list.")
+        # Detect GROMACS default force field directory
+        bin_dir = os.path.dirname(self.gmx_bin_path)
+        gromacs_root = os.path.dirname(bin_dir)
+        potential_default_paths = [
+            os.path.join(gromacs_root, 'share', 'gromacs', 'top'),
+            os.path.join(gromacs_root, 'share', 'top'),
+        ]
+
+        for path in potential_default_paths:
+            if os.path.exists(path) and os.path.isdir(path):
+                # Check if this is different from custom gmx_lib
+                if self.gmx_lib and os.path.samefile(path, self.gmx_lib):
+                    continue
+                self.gmx_lib_default = path
+                break
+
+        if not self.gmx_lib and not self.gmx_lib_default:
+            print("Warning: Could not detect any GROMACS force field directories. Using default force field list.")
         else:
-            print(f"GROMACS library path: {self.gmx_lib}")
+            if self.gmx_lib:
+                print(f"GROMACS library path: {self.gmx_lib}")
+            if self.gmx_lib_default:
+                print(f"GROMACS default library path: {self.gmx_lib_default}")
             self._scan_force_fields()
 
     def _which(self, command):
@@ -103,31 +123,56 @@ class GromacsEnvironment:
 
     def _scan_force_fields(self):
         """Scan available force fields from GROMACS installation"""
-        if not self.gmx_lib or not os.path.exists(self.gmx_lib):
-            return
-
         # Reset force fields
         self.force_fields = {}
         self.force_field_names = {}
         ff_index = 1
 
-        # Scan for force field directories
-        for item in sorted(os.listdir(self.gmx_lib)):
-            item_path = os.path.join(self.gmx_lib, item)
-            if os.path.isdir(item_path) and item.endswith('.ff'):
-                ff_name = item[:-3]  # Remove .ff extension
-                self.force_fields[ff_index] = {
-                    "name": ff_name,
-                    "dir": item
-                }
-                self.force_field_names[ff_name.lower()] = ff_index
+        # Scan custom force field directory first (e.g., mutff)
+        # This matches pdb2gmx's order which scans GMXLIB first
+        if self.gmx_lib and os.path.exists(self.gmx_lib):
+            for item in sorted(os.listdir(self.gmx_lib)):
+                item_path = os.path.join(self.gmx_lib, item)
+                if os.path.isdir(item_path) and item.endswith('.ff'):
+                    ff_name = item[:-3]  # Remove .ff extension
+                    self.force_fields[ff_index] = {
+                        "name": ff_name,
+                        "dir": item,
+                        "path": item_path
+                    }
+                    self.force_field_names[ff_name.lower()] = ff_index
 
-                # Check for water models in this force field
-                water_model_file = os.path.join(item_path, 'watermodels.dat')
-                if os.path.exists(water_model_file):
-                    self._parse_water_models(water_model_file, ff_index)
+                    # Check for water models in this force field
+                    water_model_file = os.path.join(item_path, 'watermodels.dat')
+                    if os.path.exists(water_model_file):
+                        self._parse_water_models(water_model_file, ff_index)
 
-                ff_index += 1
+                    ff_index += 1
+
+        # Then scan GROMACS default force field directory
+        # This matches pdb2gmx's order which scans default directory second
+        if self.gmx_lib_default and os.path.exists(self.gmx_lib_default):
+            for item in sorted(os.listdir(self.gmx_lib_default)):
+                item_path = os.path.join(self.gmx_lib_default, item)
+                if os.path.isdir(item_path) and item.endswith('.ff'):
+                    ff_name = item[:-3]  # Remove .ff extension
+                    # Skip if already added from custom directory
+                    if ff_name.lower() in self.force_field_names:
+                        continue
+
+                    self.force_fields[ff_index] = {
+                        "name": ff_name,
+                        "dir": item,
+                        "path": item_path
+                    }
+                    self.force_field_names[ff_name.lower()] = ff_index
+
+                    # Check for water models in this force field
+                    water_model_file = os.path.join(item_path, 'watermodels.dat')
+                    if os.path.exists(water_model_file):
+                        self._parse_water_models(water_model_file, ff_index)
+
+                    ff_index += 1
 
         print(f"Found {len(self.force_fields)} force fields")
 

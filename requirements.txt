@@ -8,9 +8,9 @@ acpype>=2021.0
 
 # For OpenFF support (optional)
 # Uncomment if using OpenFF force field
-openff-toolkit>=0.10.0
-openff-interchange>=0.2.0
-rdkit>=2021.0
+openff-toolkit
+openff-interchange
+rdkit
 
 # System dependencies (install separately)
 # - GROMACS

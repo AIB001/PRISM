@@ -29,6 +29,13 @@ from .publication_utils import (
     save_publication_figure, create_publication_colormap,
     PUBLICATION_FONTS, PUBLICATION_COLORS
 )
+from .namd_fep_plots import (
+    plot_namd_fep_convergence,
+    plot_namd_fep_decomposition_bar,
+    plot_namd_fep_dg_lambda,
+    plot_namd_fep_multi_comparison,
+    plot_namd_fep_full_analysis
+)
 
 __all__ = [
     # Basic plotting
@@ -76,5 +83,12 @@ __all__ = [
     'save_publication_figure',
     'create_publication_colormap',
     'PUBLICATION_FONTS',
-    'PUBLICATION_COLORS'
+    'PUBLICATION_COLORS',
+
+    # NAMD FEP plotting
+    'plot_namd_fep_convergence',
+    'plot_namd_fep_decomposition_bar',
+    'plot_namd_fep_dg_lambda',
+    'plot_namd_fep_multi_comparison',
+    'plot_namd_fep_full_analysis'
 ]

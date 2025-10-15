@@ -544,7 +544,32 @@ rm -rf cache/  # 删除所有缓存
 
 **接触分析：**
 - 阈值：4.0-4.5 Å 是常用范围
-- 关键残基：可通过 `analyze_key_residue_contacts()` 自动筛选 Top N
+- 关键残基：可通过 `analyze_key_residue_contacts()` 自动筛选 Top N，或手动指定
+
+**关键残基参数 (`key_residues`)：**
+- **格式**：使用三字母氨基酸代码 + 残基编号，如 `['ASP618', 'ASN691', 'SER759']`
+- **用途**：限制接触分析仅针对指定的重要残基（如活性位点、突变位点）
+- **优势**：
+  - 显著加快计算速度（只分析指定残基而非全部残基）
+  - 聚焦于生物学关键区域
+  - 减少噪音和无关数据
+- **示例**：
+  ```python
+  # RemTP 分析中的关键残基（基于文献和FEP研究）
+  key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
+                 'THR680', 'THR687', 'ALA688', 'LYS551', 'ARG553', 'ARG555']
+
+  contacts = analyzer.analyze_key_residue_contacts(
+      universe=topology_file,
+      trajectory=trajectory_file,
+      key_residues=key_residues,  # 只分析这些残基
+      cutoff=4.0
+  )
+  ```
+- **注意事项**：
+  - 残基名称必须与拓扑文件中的命名一致
+  - 可以传递 `None` 让 PRISM 自动筛选 Top N 高频接触残基
+  - 对于衍生物对比分析，建议使用相同的 `key_residues` 列表以保持一致性
 
 **聚类分析：**
 - K-means：先用 `find_optimal_clusters()` 确定簇数
