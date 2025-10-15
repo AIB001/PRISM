@@ -27,11 +27,11 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    sudo apt-get install cmake
    
    # Download GROMACS Package
-   wget https://ftp.gromacs.org/gromacs/gromacs-2024.3.tar.gz
-   tar xfz gromacs-2024.3.tar.gz
+   wget https://ftp.gromacs.org/gromacs/gromacs-2025.1.tar.gz
+   tar xfz gromacs-2025.1.tar.gz
    
    # Prepare to build GROMACS with cmake
-   cd gromacs-2024.3
+   cd gromacs-2025.1
    mkdir build
    cd build
    
@@ -42,7 +42,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
    -DCUDA_INCLUDE_DIRS=/usr/local/cuda/include \
    -DCUDA_CUDART_LIBRARY=/usr/local/cuda/lib64 \
-   -DCMAKE_INSTALL_PREFIX=/mnt/data/zf/gromacs-2024.3
+   -DCMAKE_INSTALL_PREFIX=~/gromacs-2025.1
    
    make -j${nproc}
    make check # Optional but recommended
@@ -283,5 +283,6 @@ If you use PRISM in your research, please cite:
 ```
 
 ## License
+
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
