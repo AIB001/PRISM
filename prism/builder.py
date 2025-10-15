@@ -201,8 +201,38 @@ class PRISMBuilder:
         print(f"Ligand force field files generated in: {self.lig_ff_dir}")
         return self.lig_ff_dir
 
-    def clean_protein(self):
-        """Clean the protein PDB file"""
+    def clean_protein(self, ion_mode=None, distance_cutoff=None, keep_crystal_water=None, remove_artifacts=None):
+        """
+        Clean the protein PDB file with intelligent metal ion handling.
+
+        Parameters
+        ----------
+        ion_mode : str, optional
+            Ion handling mode. Options:
+            - 'keep_all': Keep all metal ions (except water unless keep_crystal_water=True)
+            - 'smart' (default): Keep structural metals (Zn, Mg, Ca, Fe, etc.), remove non-structural ions (Na, Cl, etc.)
+            - 'remove_all': Remove all metal ions
+            If not specified, reads from config or defaults to 'smart'
+        distance_cutoff : float, optional
+            Maximum distance (Angstroms) from protein for keeping metals.
+            Metals farther than this will be removed even if they are structural.
+            If not specified, reads from config or defaults to 5.0 Å
+        keep_crystal_water : bool, optional
+            Whether to keep crystal water molecules. Default: False
+            If True, water molecules from the crystal structure are preserved.
+            If not specified, reads from config or defaults to False
+        remove_artifacts : bool, optional
+            Whether to remove crystallization artifacts (GOL, EDO, PEG, NAG, etc.). Default: True
+            If False, crystallization artifacts are kept in the output.
+            If not specified, reads from config or defaults to True
+
+        Returns
+        -------
+        str
+            Path to cleaned PDB file
+        """
+        from .utils.cleaner import ProteinCleaner
+
         print("\n=== Cleaning Protein ===")
 
         cleaned_pdb = os.path.join(self.output_dir, f"{self.protein_name}_clean.pdb")
@@ -211,20 +241,64 @@ class PRISMBuilder:
             print(f"Using existing cleaned protein: {cleaned_pdb}")
             return cleaned_pdb
 
-        with open(self.protein_path, 'r') as f_in, open(cleaned_pdb, 'w') as f_out:
-            for line in f_in:
-                if not line.startswith('HETATM'):
-                    # Fix terminal hydrogen names for AMBER compatibility
-                    if 'HN1' in line:
-                        line = line.replace('HN1', 'H1 ')
-                    if 'HN2' in line:
-                        line = line.replace('HN2', 'H2 ')
-                    if 'HN3' in line:
-                        line = line.replace('HN3', 'H3 ')
-                    f_out.write(line)
+        # Get parameters from config if not explicitly provided
+        if ion_mode is None:
+            ion_mode = self.config.get('protein_preparation', {}).get('ion_handling_mode', 'smart')
+        if distance_cutoff is None:
+            distance_cutoff = self.config.get('protein_preparation', {}).get('metal_distance_cutoff', 5.0)
+        if keep_crystal_water is None:
+            keep_crystal_water = self.config.get('protein_preparation', {}).get('keep_crystal_water', False)
+        if remove_artifacts is None:
+            remove_artifacts = self.config.get('protein_preparation', {}).get('remove_crystallization_artifacts', True)
+
+        # Get custom metals from config
+        keep_custom = self.config.get('protein_preparation', {}).get('keep_custom_metals', [])
+        remove_custom = self.config.get('protein_preparation', {}).get('remove_custom_metals', [])
+
+        # Initialize cleaner
+        cleaner = ProteinCleaner(
+            ion_mode=ion_mode,
+            distance_cutoff=distance_cutoff,
+            keep_crystal_water=keep_crystal_water,
+            remove_artifacts=remove_artifacts,
+            keep_custom_metals=keep_custom if keep_custom else None,
+            remove_custom_metals=remove_custom if remove_custom else None,
+            verbose=True
+        )
+
+        # Clean the protein
+        cleaner.clean_pdb(self.protein_path, cleaned_pdb)
+
+        # Post-process: Fix terminal hydrogen names for AMBER compatibility
+        self._fix_hydrogen_names(cleaned_pdb)
 
         print(f"Protein cleaned and saved to: {cleaned_pdb}")
         return cleaned_pdb
+
+    def _fix_hydrogen_names(self, pdb_file):
+        """
+        Fix terminal hydrogen names for AMBER compatibility.
+
+        AMBER force fields expect specific naming for N-terminal hydrogens:
+        H1, H2, H3 instead of HN1, HN2, HN3
+        """
+        with open(pdb_file, 'r') as f:
+            lines = f.readlines()
+
+        fixed_lines = []
+        for line in lines:
+            if line.startswith('ATOM'):
+                # Fix terminal hydrogen names
+                if 'HN1' in line:
+                    line = line.replace('HN1', 'H1 ')
+                elif 'HN2' in line:
+                    line = line.replace('HN2', 'H2 ')
+                elif 'HN3' in line:
+                    line = line.replace('HN3', 'H3 ')
+            fixed_lines.append(line)
+
+        with open(pdb_file, 'w') as f:
+            f.writelines(fixed_lines)
 
     def build_model(self, cleaned_protein):
         """Build the GROMACS model"""
@@ -232,7 +306,9 @@ class PRISMBuilder:
             cleaned_protein,
             self.lig_ff_dir,
             self.forcefield_idx,
-            self.water_model_idx
+            self.water_model_idx,
+            self.forcefield,  # Pass full force field info (name, dir, path)
+            self.water_model  # Pass full water model info
         )
 
     def generate_mdp_files(self):

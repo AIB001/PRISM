@@ -64,20 +64,32 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         print(f"\n{'='*60}")
         print("Starting GAFF Force Field Generation")
         print(f"{'='*60}")
-        
+
         try:
+            # Check if output already exists BEFORE trying to generate parameters
+            # This allows using cached files even when antechamber/acpype are not available
+            lig_dir = os.path.join(self.output_dir, "LIG.amb2gmx")
+            if os.path.exists(lig_dir) and not self.overwrite:
+                if self.check_required_files(lig_dir):
+                    print(f"\nUsing cached GAFF force field parameters from: {lig_dir}")
+                    print("All required files found:")
+                    for f in sorted(os.listdir(lig_dir)):
+                        print(f"  - {f}")
+                    print("\n(Use --overwrite to regenerate)")
+                    return lig_dir
+
             # Generate AMBER parameters
             ff_dir = self.generate_amber_parameters()
-            
+
             # Find acpype output
             ff_files = self.find_acpype_output(ff_dir)
-            
+
             # Standardize to LIG naming
             lig_dir = self.standardize_to_LIG(ff_files)
-            
+
             # Cleanup
             self.cleanup_temp_files()
-            
+
             print(f"\n{'='*60}")
             print("Force field generation completed successfully!")
             print(f"{'='*60}")
@@ -85,9 +97,9 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             print("\nGenerated files:")
             for f in os.listdir(lig_dir):
                 print(f"  - {f}")
-            
+
             return lig_dir
-            
+
         except Exception as e:
             print(f"\nError during force field generation: {e}")
             raise
@@ -343,7 +355,10 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     def _process_mol2_format(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
         """Process MOL2 format files"""
         print("Processing MOL2 format...")
-        
+
+        # Get the ff_dir from amber_mol2 path
+        ff_dir = os.path.dirname(amber_mol2)
+
         print("Generating AM1-BCC charges...")
         cmd = [
             "antechamber",
@@ -356,8 +371,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
-        self.run_command(cmd)
-        
+        self.run_command(cmd, cwd=ff_dir)
+
         print("Generating prep file...")
         cmd = [
             "antechamber",
@@ -370,16 +385,16 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
-        self.run_command(cmd)
-        
+        self.run_command(cmd, cwd=ff_dir)
+
         print("Generating force field parameters...")
         self.run_command([
             "parmchk2",
             "-i", prep_file,
             "-f", "prepi",
             "-o", frcmod_file
-        ])
-        
+        ], cwd=ff_dir)
+
         print("Creating AMBER topology...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)
     
@@ -387,20 +402,20 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         """Create AMBER topology using tleap"""
         ff_dir = os.path.dirname(amber_mol2)
         tleap_input = os.path.join(ff_dir, f"tleap_{self.ligand_name}.in")
-        
+
         with open(tleap_input, 'w') as f:
             f.write(f"""source leaprc.protein.ff14SB
 source leaprc.gaff
 
-LIG = loadmol2 {amber_mol2}
-loadamberparams {frcmod_file}
+LIG = loadmol2 {os.path.basename(amber_mol2)}
+loadamberparams {os.path.basename(frcmod_file)}
 
-saveamberparm LIG {prmtop_file} {rst7_file}
+saveamberparm LIG {os.path.basename(prmtop_file)} {os.path.basename(rst7_file)}
 
 quit
 """)
-        
-        self.run_command(["tleap", "-f", tleap_input])
+
+        self.run_command(["tleap", "-f", os.path.basename(tleap_input)], cwd=ff_dir)
     
     def find_acpype_output(self, ff_dir):
         """Find the acpype output directory and files"""
@@ -532,18 +547,30 @@ quit
     def cleanup_temp_files(self):
         """Clean up temporary files"""
         print("\n=== Cleaning up ===")
-        
+
         ff_dir = os.path.join(self.output_dir, "forcefield")
         if os.path.exists(ff_dir):
-            patterns = ["*.frcmod", "*.prep", "*.prmtop", "*.rst7", "*.log", "*.in", 
+            patterns = ["*.frcmod", "*.prep", "*.prmtop", "*.rst7", "*.log", "*.in",
                        "ANTECHAMBER*", "ATOMTYPE*", "PREP*", "NEWPDB*", "sqm*"]
-            
+
             for pattern in patterns:
                 for file_path in Path(ff_dir).glob(pattern):
                     try:
                         os.remove(file_path)
                     except OSError:
                         pass
+
+        # Also clean up any antechamber temp files in current working directory
+        # (These should not be created if cwd is set correctly, but clean them just in case)
+        cwd = os.getcwd()
+        temp_patterns = ["ANTECHAMBER*", "ATOMTYPE.INF", "PREP.INF", "NEWPDB.PDB", "sqm.*"]
+        for pattern in temp_patterns:
+            for file_path in Path(cwd).glob(pattern):
+                try:
+                    print(f"  Removing temp file: {file_path.name}")
+                    os.remove(file_path)
+                except OSError:
+                    pass
     
     # Add remaining methods from original file as needed
     def _process_sdf_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
