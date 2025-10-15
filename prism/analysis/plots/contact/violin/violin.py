@@ -13,9 +13,9 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 # Import publication style
-from ..publication_utils import apply_publication_style, PUBLICATION_COLORS, PUBLICATION_FONTS, get_standard_figsize
+from ...core.publication_utils import apply_publication_style, PUBLICATION_COLORS, PUBLICATION_FONTS, get_standard_figsize
 # Import residue formatting utility
-from ....utils.residue import format_residue_list
+from .....utils.residue import format_residue_list
 
 
 

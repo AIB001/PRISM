@@ -3,35 +3,35 @@
 """
 Contact analysis plotting subpackage.
 
-Provides modular plotting functions for contact analysis,
-organized by visualization type.
+Hierarchical organization by visualization type.
 """
 
-# Import all functions from submodules
-from .contact_violin_plots import (
+# Import from core
+from .core.analysis import (
+    plot_contact_analysis,
+    plot_grouped_contact_bars,
+    plot_key_residue_contacts,
+    plot_key_residue_contact_distribution,
+    plot_contact_distances_raincloud
+)
+
+# Import from violin
+from .violin.violin import (
     plot_comparison_contact_distances_violin,
     plot_key_residue_contact_violin,
     plot_residue_contact_numbers_violin,
     plot_contact_distances_violin
 )
 
-from .contact_heatmap_plots import (
+# Import from heatmap
+from .heatmap.probability import (
     plot_contact_heatmap_annotated
 )
 
-from .contact_analysis_plots import (
-    plot_contact_analysis
-)
-from .contact_timeseries_plots import (
+# Import from timeseries
+from .timeseries.contacts import (
     plot_contact_numbers_timeseries,
     plot_residue_distance_timeseries
-)
-
-from .contact_analysis_plots import (
-    plot_grouped_contact_bars,
-    plot_key_residue_contacts,
-    plot_key_residue_contact_distribution,
-    plot_contact_distances_raincloud
 )
 
 __all__ = [
