@@ -169,51 +169,31 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             jobid = match.group(1)
             print(f"Job submitted successfully. Job ID: {jobid}")
 
-            # Wait for job to process (SwissParam can take time, especially with tautomers)
-            print("Waiting for SwissParam to process molecule...")
-            time.sleep(10)
+            # Wait for job to process
+            print("Waiting for SwissParam to generate parameters...")
+            time.sleep(20)  # Give SwissParam time to generate GROMACS files
 
             # Download results
             result_url = f"http://www.swissparam.ch/results/{jobid}/results.tar.gz"
             print(f"Downloading results from {result_url}")
 
-            max_retries = 40  # Increased retries for tautomer processing
+            max_retries = 10
             tar_data = None
             for attempt in range(max_retries):
                 try:
                     response = br.open(result_url)
                     tar_data = response.read()
 
-                    if len(tar_data) > 1000:  # Reasonable size for GROMACS files
-                        # Quick check if this looks like complete results
-                        test_tar = os.path.join(temp_dir, f"test_{jobid}.tar.gz")
-                        with open(test_tar, 'wb') as f:
-                            f.write(tar_data)
-                        try:
-                            with tarfile.open(test_tar, 'r:gz') as tar:
-                                members = tar.getnames()
-                                # Check if GROMACS files are present
-                                has_gro = any('gro' in m for m in members)
-                                has_itp = any('itp' in m for m in members)
-                                if has_gro and has_itp:
-                                    print(f"Complete results received (attempt {attempt + 1})")
-                                    os.remove(test_tar)
-                                    break
-                                else:
-                                    print(f"Partial results only (attempt {attempt + 1}/{max_retries}), waiting for GROMACS files...")
-                                    os.remove(test_tar)
-                                    time.sleep(10)  # Wait longer for tautomer processing
-                        except:
-                            print(f"Could not parse tarball (attempt {attempt + 1}/{max_retries}), waiting...")
-                            os.remove(test_tar)
-                            time.sleep(10)
+                    if len(tar_data) > 100:  # Any reasonable tarball
+                        print(f"Results downloaded (attempt {attempt + 1})")
+                        break
                     else:
                         print(f"Result not ready yet (attempt {attempt + 1}/{max_retries}), waiting...")
-                        time.sleep(10)
+                        time.sleep(3)
                 except Exception as e:
                     if attempt < max_retries - 1:
                         print(f"Download failed (attempt {attempt + 1}/{max_retries}): {e}")
-                        time.sleep(10)
+                        time.sleep(3)
                     else:
                         raise
 
@@ -295,17 +275,10 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"SwissParam returned {len(tautomer_files)} explicit tautomer options")
             print(f"Auto-selecting first tautomer: {os.path.basename(tautomer_files[0])}")
             return self._resubmit_with_tautomer(tautomer_files[0])
-        elif has_tautomers_file and modified_mol2:
-            # SwissParam detected tautomers but hasn't generated GROMACS files yet
-            # We need to trigger the continuation by accessing the results page
-            print("DEBUG: SwissParam detected tautomers, need to trigger continuation...")
-            # Extract job ID from sp_dir path
-            import re
-            jobid_match = re.search(r'swissparam_(\d+)', sp_dir)
-            if jobid_match:
-                jobid = jobid_match.group(1)
-                print(f"DEBUG: Triggering continuation for job {jobid}...")
-                return self._trigger_tautomer_continuation(jobid, sp_dir)
+        elif has_tautomers_file:
+            # SwissParam detected tautomers - this is just informational
+            # The GROMACS files should still be in the tarball, continue looking
+            print("SwissParam detected tautomers (informational only), looking for GROMACS files...")
 
         # SwissParam output structure - look for GROMACS files
         for root, dirs, filenames in os.walk(sp_dir):

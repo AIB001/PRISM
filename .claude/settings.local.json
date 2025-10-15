@@ -21,7 +21,12 @@
       "Read(///**)",
       "Bash(python:*)",
       "Bash(git fetch:*)",
-      "Bash(git show-ref:*)"
+      "Bash(git show-ref:*)",
+      "Bash(xargs ls:*)",
+      "Bash(ssh:*)",
+      "Read(//home/gxf1212/data/work/SciDraft-Studio/projects/RdRp/data/tables/**)",
+      "Read(//data/gxf1212/work/PRISM/test/analysis/rdrp/fepout/1p-cn-cf3/**)",
+      "Read(//tmp/**)"
     ],
     "deny": [],
     "ask": []
