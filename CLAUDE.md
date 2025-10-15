@@ -1,203 +1,87 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 在处理此代码仓库时提供指导。
 
-## Project Overview
+## 项目概述
 
-PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Python tool for building protein-ligand systems for molecular dynamics simulations in GROMACS. It supports multiple force fields including GAFF (via AmberTools) and OpenFF (Open Force Field).
+PRISM (Protein Receptor Interaction Simulation Modeler) 是一个用于构建蛋白质-配体系统进行 GROMACS 分子动力学模拟的综合性 Python 工具。支持多种力场，包括 GAFF（通过 AmberTools）和 OpenFF（Open Force Field）。
 
-## Development Commands
+## 通用开发要求
 
-### Installation and Setup
-```bash
-# Install in development mode
-pip install -e .
+### 代码质量与规范
 
-# Install with specific force field support
-pip install -e .[gaff]          # GAFF support only
-pip install -e .[openff]        # OpenFF support only  
-pip install -e .[all]           # All force fields
+- **模块化设计**：每个文件不超过800行代码，保持模块清晰分离
+- **使用真实数据**：不使用合成/模拟数据，所有测试应使用真实轨迹数据
+- **统一字体格式**：所有输出使用 Times New Roman 字体，确保 PRISM 所有组件格式一致
+- **调用 PRISM 接口**：test_*.py 文件应调用 PRISM 公共接口，避免编写复杂逻辑
+- **纯 MDTraj 实现**：轨迹分析优先使用 MDTraj，避免混合使用不同库
 
-# Basic installation
-pip install -r requirements.txt
-```
+### 测试与分析要求
 
-### Running PRISM
-```bash
-# Basic usage with GAFF (default) - positional arguments
-python prism/builder.py protein.pdb ligand.mol2 -o output_dir
+- **最小化测试文件**：test_*.py 文件应保持简洁，专注核心功能测试
+- **有意义的文件名**：生成的图表文件应使用描述性名称（如 "protein_rmsd_timeseries.png"）
+- **避免冗余计算**：移除不必要的分析项目（如配体 RMSF 等）
+- **使用公共工具**：配体检测等功能应使用 PRISM 公共工具，避免重复实现
 
-# Using OpenFF force field
-python prism/builder.py protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff
+### 性能优化
 
-# Alternative syntax using flags (more flexible argument order)
-python prism/builder.py --protein-file protein.pdb --ligand-file ligand.mol2 -o output_dir
+- **自动并行化**：默认启用多核并行计算，自动检测可用 CPU 核心数
+- **OpenMP 优化**：轨迹分析自动启用 OpenMP 并行化，无需额外配置
+- **内存效率**：处理大型轨迹时使用生成器和流式处理
 
-# Mixed order with flags (helpful for complex commands)
-python prism/builder.py -o output_dir --ligand-forcefield openff --protein-file protein.pdb --ligand-file ligand.mol2
+### 架构设计
 
-# With custom configuration
-python prism/builder.py protein.pdb ligand.mol2 -o output_dir --config config.yaml
+- **高内聚低耦合**：模块间依赖关系清晰，避免循环导入
+- **接口稳定**：公共 API 保持向后兼容，内部实现可灵活调整
+- **错误处理**：提供详细的错误信息和故障排除指导
+- **配置管理**：支持 YAML 配置文件和命令行参数的灵活组合
 
-# List available force fields
-python prism/builder.py --list-forcefields
+### 依赖管理
 
-# Export default configuration template
-python prism/builder.py --export-config my_config.yaml
-```
+- **推荐使用 mamba**：优先使用 mamba 进行依赖安装，解决依赖冲突
+- **隔离环境**：每个项目使用独立的虚拟环境
+- **版本锁定**：明确声明依赖版本，确保环境可复现
 
-### Testing
-```bash
-# Test with example data (4xb4 complex)
-cd test/4xb4
-python ../../prism/builder.py 4xb4_protein.pdb 4xb4_ligand.mol2 -o test_output
+### 文档与注释
 
-# Run the generated simulation
-cd test_output/GMX_PROLIG_MD
-bash ../../../prism/sim/scripts/localrun.sh
-```
+- 代码注释使用English，便于团队理解
+- **API 文档**：所有公共接口必须有完整的文档字符串
+- **配置说明**：提供详细的配置选项说明和示例
 
-### High-Level Python API
-```python
-import prism as pm
+## 开发规范
 
-# Simple system building
-system = pm.system("protein.pdb", "ligand.mol2")
-output_dir = system.build()
+### 轨迹处理
 
-# Step-by-step building with control
-system = pm.system("protein.pdb", "ligand.sdf", ligand_forcefield="openff")
-results = system.build_step_by_step()
+- **PBC 处理**：使用 MDTraj 进行周期性边界条件校正
+- **链选择**：支持复杂的链选择语法（如 "chain P"）
+- **配体检测**：使用统一的配体识别工具
+- **帧完整性**：确保处理过程中不丢失轨迹帧
 
-# Running simulations
-sim = pm.model("output/GMX_PROLIG_MD")
-sim.run(engine="gmx")
-```
+### 力场支持
 
-## Architecture Overview
+- **多力场兼容**：同时支持 GAFF 和 OpenFF 力场
+- **自动检测**：自动检测可用的力场工具
+- **错误恢复**：提供备选方案和详细的安装指导
 
-### Core Modules
+### 图形输出
 
-1. **`prism.builder`** - Main entry point and workflow orchestration
-   - `PRISMBuilder` class handles the complete workflow
-   - Command-line interface with extensive options
-   - Supports both GAFF and OpenFF force fields
+- **格式统一**：所有图表使用一致的风格和字体
+- **文件命名**：使用描述性的文件名，避免通用名称
+- **分辨率优化**：确保图表适合出版和展示需求
 
-2. **`prism.core`** - High-level Python API
-   - `PRISMSystem` class provides simplified interface
-   - Wraps `PRISMBuilder` functionality with user-friendly methods
-   - Supports step-by-step building and configuration management
+### 兼容性
 
-3. **`prism.forcefield/`** - Force field generation
-   - `ForceFieldGeneratorBase` - Abstract base class
-   - `GAFFForceFieldGenerator` - GAFF support via AmberTools/ACPYPE
-   - `OpenFFForceFieldGenerator` - OpenFF support via openff-toolkit
-   - Generates GROMACS-compatible .itp, .gro, and topology files
+- **平台支持**：支持 Linux、macOS（包括 Apple Silicon）
+- **Python 版本**：支持 Python 3.9+
+- **依赖最小化**：避免不必要的重型依赖
 
-4. **`prism.utils/`** - Core utilities
-   - `GromacsEnvironment` - GROMACS detection and management
-   - `ConfigurationManager` - YAML configuration handling
-   - `MDPGenerator` - MD parameter file generation
-   - `SystemBuilder` - GROMACS system assembly
+## 安装与配置
 
-5. **`prism.sim/`** - Simulation execution
-   - `SimulationModel` - High-level simulation interface
-   - `GMXSimulator` - GROMACS-based simulations
-   - `OpenMMSimulator` - OpenMM-based simulations
-   - `localrun.sh` - Example GPU-accelerated simulation script
+详细的安装说明、故障排除指南和配置选项请参考各子模块的具体文档。推荐使用 mamba 进行依赖管理，创建独立的虚拟环境以避免冲突。
 
-6. **`prism.pmf/`** - Advanced analysis
-   - PMF calculation through steered MD and umbrella sampling
-   - `SMDManager`, `UmbrellaManager` for specialized workflows
-   - `PMFAnalyzer` for free energy calculations
+## 测试与验证
 
-### Configuration System
-
-- **Default config**: `prism/configs/default_config.yaml`
-- **Runtime config**: Generated in output directory as `prism_config.yaml`
-- **Override hierarchy**: CLI args > config file > defaults
-- **Key sections**: general, box, simulation, ions, constraints, energy_minimization, output, electrostatics, vdw, temperature_coupling, pressure_coupling
-
-### Output Structure
-
-Generated files follow this structure:
-```
-output_dir/
-├── GMX_PROLIG_MD/           # Main GROMACS files
-│   ├── solv_ions.gro        # Complete solvated system
-│   ├── topol.top            # System topology
-│   └── posre.itp            # Position restraints
-├── LIG.amb2gmx/             # GAFF ligand files
-│   ├── LIG.gro              # Ligand coordinates
-│   ├── LIG.itp              # Ligand topology
-│   ├── LIG.top              # Ligand topology file
-│   ├── atomtypes_LIG.itp    # Atom type definitions
-│   └── posre_LIG.itp        # Ligand position restraints
-├── LIG.openff2gmx/          # OpenFF ligand files (alternative)
-├── mdps/                    # MD parameter files
-│   ├── em.mdp               # Energy minimization
-│   ├── nvt.mdp              # NVT equilibration
-│   ├── npt.mdp              # NPT equilibration
-│   └── md.mdp               # Production MD
-└── prism_config.yaml        # Used configuration
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Argument parsing errors**: Use correct order (protein ligand options) or alternative flags:
-   ```bash
-   # Correct: positional arguments first
-   python prism/builder.py protein.pdb ligand.mol2 -o output_dir
-   
-   # Alternative: use flags for flexible order
-   python prism/builder.py -o output_dir --protein-file protein.pdb --ligand-file ligand.mol2
-   ```
-
-2. **Ion addition failures**: The system now auto-detects water groups dynamically instead of using hardcoded values. If issues persist:
-   - Check that the system contains water molecules
-   - Verify GROMACS can find solvent groups in the topology
-   - Check log output for specific error messages
-
-3. **Force field errors**: Ensure dependencies are installed:
-   - **GAFF**: Requires AmberTools and ACPYPE
-   - **OpenFF**: Requires openff-toolkit and openff-interchange
-
-4. **Memory errors**: Large systems may require more RAM during parameterization
-
-### Debug Commands
-```bash
-# Check dependencies
-python -c "import prism as pm; print(pm.check_dependencies())"
-
-# List available force fields
-python prism/builder.py --list-forcefields
-
-# Test with minimal example
-python prism/builder.py test/4xb4/4xb4_protein.pdb test/4xb4/4xb4_ligand.mol2 -o test_output
-```
-
-## Development Notes
-
-- **Force field detection**: Uses GROMACS environment auto-detection
-- **Dynamic ion addition**: Automatically detects water groups instead of hardcoded values
-- **Error handling**: Comprehensive error messages with troubleshooting guidance
-- **Flexibility**: Supports both file-based and programmatic configuration, multiple argument formats
-- **Modularity**: Clean separation between force field generators, system building, and simulation
-- **GPU support**: Optimized GROMACS commands for GPU acceleration in simulation scripts
-- **Resume capability**: Simulation scripts check for existing files and can resume from checkpoints
-
-## Entry Points
-
-1. **Command line**: `python prism/builder.py` or `prism` (if installed)
-2. **Python API**: `import prism as pm; pm.system()` or `pm.build_system()`
-3. **Direct builder**: `from prism.builder import PRISMBuilder`
-4. **Simulation**: `from prism.sim import model`
-
-## Testing and Examples
-
-- **Test data**: `test/4xb4/` contains complete protein-ligand example
-- **Configuration examples**: `test/4xb4/prism_config.yaml` shows runtime configuration
-- **MDP templates**: Generated dynamically based on configuration
-- **Simulation scripts**: GPU-optimized examples in `prism/sim/scripts/`
+- 使用真实的蛋白质-配体复合物数据进行测试
+- 验证轨迹处理的完整性和准确性
+- 确保分析结果的科学合理性
+- 检查输出格式的一致性和可读性

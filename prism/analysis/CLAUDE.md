@@ -1,0 +1,174 @@
+# PRISM Analysis Module 开发指南
+
+## 模块概述
+
+PRISM Analysis 是一个高性能的分子动力学轨迹分析引擎，专注于提供科研级别的计算和可视化功能。
+
+### 模块结构
+```
+prism/analysis/
+├── calc/                    # 核心计算模块
+│   ├── rmsd.py             # RMSD/RMSF 分析
+│   ├── contacts.py         # 接触分析
+│   ├── clustering.py       # 聚类分析
+│   ├── structural.py       # 结构分析
+│   ├── dihedral.py         # 二面角分析
+│   ├── sasa.py            # 溶剂可及表面积
+│   └── hbonds.py          # 氢键分析
+├── plots/                   # 可视化模块
+│   ├── basic.py            # 基础图表
+│   ├── structural_plots.py  # 结构分析图表
+│   ├── comparison_plots.py  # 对比图表
+│   └── publication_utils.py # 出版级样式
+├── trajectory_processor.py  # 轨迹预处理
+├── analyzer.py             # 高级分析器
+└── visualize.py            # 可视化接口
+```
+
+## 开发原则
+
+### 1. 核心定位与职责
+
+**专注于计算**：PRISM Analysis 的核心使命是成为高性能、可扩展的分子模拟计算引擎。所有核心计算逻辑（RMSD、RMSF、接触分析、聚类等）都必须在 PRISM 内部实现，确保计算的一致性和可靠性。
+
+**依赖最小化**：保持 PRISM 的独立性，使其能够通过 `pip install -e .` 轻松集成到其他项目（如 SciDraft-Studio）中。避免引入不必要的重型依赖，优先使用科学计算生态系统中的标准库。
+
+**接口标准化**：提供统一、稳定的 API 接口，便于外部项目调用和集成。
+
+### 2. 技术架构要求
+
+**MDTraj 优先**：轨迹分析统一使用 MDTraj 库，避免引入 MDAnalysis，保持依赖的一致性和代码的简洁性。
+
+**自动并行化**：所有核心计算函数默认支持并行化，自动检测并利用所有可用的 CPU 核心。通过 OpenMP 优化实现高性能计算。
+
+**内存优化**：处理大型轨迹时使用生成器和流式处理，避免内存溢出问题。
+
+**错误处理**：提供详细的错误信息和异常处理，包含故障排除指导。
+
+### 3. 通用工具集
+
+**PBC 处理**：提供稳健的周期性边界条件处理工具，确保分子/复合物在模拟盒子中始终保持完整。支持复杂的链选择语法（如 "chain P"）。
+
+**拓扑解析**：自动识别和分割蛋白链、核酸链、配体等功能。使用统一的配体检测工具 (`prism.utils.ligand`)。
+
+**轨迹验证**：确保处理过程中不丢失轨迹帧，验证数据完整性。
+
+## 测试规范
+
+### 架构核心原则
+
+**所有核心逻辑必须在PRISM内部**：
+- 所有分析计算逻辑（RMSD、接触、氢键、聚类等）必须实现在 `prism/analysis/calc/` 模块中
+- 所有绘图逻辑必须实现在 `prism/analysis/plots/` 模块中
+- 测试脚本 (`test_*.py`) 严禁包含任何复杂的计算或绘图逻辑
+- 测试脚本只能调用PRISM公共API，不能直接使用MDTraj、matplotlib等底层库
+
+### 数据要求
+
+**严禁合成数据**：所有测试脚本 (`test_*.py`) 严禁使用 `np.random.random` 等方式创建的合成数据或示例数据。
+
+**真实数据驱动**：测试必须基于真实轨迹数据进行。使用 `repeat1_processed.xtc` 等真实轨迹文件进行验证。
+
+**结果验证**：测试脚本的核心任务是调用 PRISM API 进行计算，验证返回结果的正确性和科学合理性。
+
+### 测试文件架构要求
+
+**极简化实现**：`test_*.py` 文件必须保持极简，仅包含：
+- 参数设置和文件路径配置
+- PRISM API 调用
+- 基本的结果验证和状态输出
+- 严禁包含任何MDTraj、matplotlib、numpy等直接计算逻辑
+
+**纯PRISM API调用**：测试脚本只能调用PRISM公共接口：
+```python
+# 正确示例
+analyzer = RMSDAnalyzer(config)
+results = analyzer.calculate_rmsd(...)
+
+# 错误示例 - 严禁在测试脚本中出现
+import mdtraj as md
+traj = md.load(...)  # 禁止
+plt.plot(...)        # 禁止
+```
+
+**缓存利用**：在 debug 模式下，利用已有的计算结果缓存，避免重复计算。
+
+no titles in any plots...just print or add minimal legends to explain what the plot is. apply to all plots.
+axis labels: also, not too long. you can print, like the publication figure captions. print inside PRISM, not test scripts.
+
+## 可视化规范
+
+### 出版级标准
+
+**图表质量**：所有 PRISM 生成的图表必须达到科研出版级别，适合直接用于学术论文。
+
+**样式统一**：强制使用全局统一的绘图样式 (`get_publication_style` 函数)，确保所有 PRISM 组件的视觉一致性。
+apply_publication_style，注意要控制所有单个panel的图的大小差不多，这样才能让所有图字体一致且相对于图的大小一致
+
+**字体规范**：
+- 统一使用 **Times New Roman** 字体
+- 字体大小足够大，确保作为子图或面板时依然清晰可读
+- 支持中文标签时使用合适的中文字体
+
+### 文件命名
+
+**描述性命名**：使用有意义的文件名，如：
+- `protein_rmsd_timeseries.png`
+- `ligand_contacts_heatmap.png`
+- `trajectory_clustering_rmsd.png`
+
+**避免通用名称**：禁止使用 `plot.png`、`result.png` 等无意义的文件名。
+
+## 性能优化
+
+### 并行计算
+
+**自动检测**：自动检测可用 CPU 核心数，默认启用多核并行计算。
+
+**OpenMP 集成**：通过环境变量 `OMP_NUM_THREADS` 自动配置 OpenMP 并行化。
+
+**框架并行化**：利用 MDTraj 内置的并行计算功能，如 `n_jobs=-1` 参数。
+
+### 内存管理
+
+**流式处理**：对于大型轨迹，使用生成器和分批处理避免内存问题。
+
+**缓存策略**：合理使用计算结果缓存，避免重复计算。
+
+**资源释放**：及时释放不再需要的内存资源。
+
+## 代码质量
+
+### 模块化设计
+
+**文件大小控制**：每个文件不超过 800 行代码，保持模块清晰分离。
+
+**功能分离**：计算逻辑与可视化分离，核心算法与辅助功能分离。
+
+**接口简洁**：提供简洁明了的公共接口，隐藏内部实现细节。
+
+### 文档要求
+
+**中文注释**：代码注释使用中文，便于团队理解和维护。
+
+**完整文档字符串**：所有公共函数必须有详细的参数说明、返回值说明和使用示例。
+
+**配置说明**：提供详细的配置选项说明和最佳实践指导。
+
+## 集成要求
+
+### 外部调用
+
+**标准化接口**：提供统一的分析入口点，便于 SciDraft-Studio 等外部项目集成。
+
+**配置兼容**：支持灵活的配置方式，兼容不同的使用场景。
+
+**错误处理**：提供友好的错误信息，帮助用户快速定位和解决问题。
+
+### 扩展性
+
+**插件架构**：支持新分析方法的便捷添加。
+
+**格式兼容**：支持多种轨迹格式和拓扑文件格式。
+
+**版本兼容**：保持向后兼容性，确保 API 的稳定性。

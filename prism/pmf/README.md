@@ -24,20 +24,46 @@ The PMF module calculates binding free energies using a optimized workflow:
 
 ## Quick Start
 
-### Basic Usage
+### System Remodeling (Prerequisite)
+
+Before PMF calculations, MD systems need to be remodeled for PMF optimization using PRISM's built-in PMFBuilder. This creates a PMF-ready system with extended box and proper structure:
+
+```bash
+# Method 1: Use PRISM PMF Builder (recommended)
+python prism/pmf/examples/pmf_remodel.py \
+    --input ./gromacssim \
+    --output ./pmf_output \
+    --config prism/pmf/configs/equilibration_simple.yaml \
+    --pulling-distance 2.0
+
+# Method 2: Test PMF Builder workflow
+python test_pmf_builder.py \
+    --input ./gromacssim \
+    --output ./pmf_test \
+    --pulling-distance 2.0 \
+    --equilibrate
+```
+
+**Equilibration After Remodeling**: The PMF Builder automatically handles equilibration when `--equilibrate` is enabled (default). For custom equilibration:
+
+```bash
+# Using configuration with custom equilibration settings
+python pmf_remodel.py --input ./gromacssim --output ./pmf_test \
+    --config prism/pmf/configs/cluster_128.yaml \
+    --no-equilibrate  # Generate scripts only
+
+# Submit equilibration job (if scripts only)
+cd ./pmf_test/GMX_PMF_SYSTEM
+sbatch run_equilibration_slurm.sh  # or bash run_equilibration_local.sh
+```
+
+### Basic PMF Usage
 
 ```python
 import prism.pmf as pmf
 
-# Recommended: PMF calculation with system rebuilding for optimal results
-# Uses default settings with 2.0 nm pulling distance
-system = pmf.pmf_system("./gaff_model", "./pmf_results")
-
-# Customize pulling distance for your specific system
-system = pmf.pmf_system(
-    "./gaff_model", "./pmf_results",
-    pulling_distance=3.5  # Custom 3.5 nm pulling distance
-)
+# Use remodeled and equilibrated system
+system = pmf.pmf_system("./gromacssim/GMX_PMF_SYSTEM", "./pmf_results")
 
 # Run complete automated workflow
 results = system.run(mode='auto')
@@ -182,6 +208,120 @@ pmf_results/                     # Your specified output directory
 - SMD and umbrella sampling simulations run alongside your MD directory
 - Final analysis results are saved to your specified output directory
 - This approach ensures efficient use of disk space and reliable access to all necessary files
+
+## PMF System Remodeling
+
+### Overview
+
+PMF system remodeling is a critical preprocessing step that transforms standard MD simulation results into PMF-optimized systems. This process:
+
+1. **Extracts Essential Files**: Copies structure, topology, and restraint files
+2. **Extends Simulation Box**: Adds space for ligand pulling simulations
+3. **Prepares Equilibration**: Generates scripts for system relaxation
+4. **Validates Structure**: Ensures system integrity for PMF calculations
+
+### Remodeling Workflow
+
+```bash
+# Step 1: Remodel the system using PRISM PMF Builder
+python prism/pmf/examples/pmf_remodel.py \
+    --input ./gromacssim \
+    --output ./pmf_output \
+    --config prism/pmf/configs/equilibration_simple.yaml \
+    --pulling-distance 2.0 \
+    --equilibrate
+
+# Alternative: Generate equilibration scripts only
+python prism/pmf/examples/pmf_remodel.py \
+    --input ./gromacssim \
+    --output ./pmf_output \
+    --config prism/pmf/configs/cluster_128.yaml \
+    --no-equilibrate
+
+# Step 2: Submit equilibration (if scripts only)
+cd ./pmf_output/GMX_PMF_SYSTEM
+sbatch run_equilibration_slurm.sh
+
+# Step 3: Monitor equilibration
+squeue -u $USER
+tail -f pmf_equilibration_*.out
+
+# Step 4: Verify equilibration completion
+ls equilibration/npt/npt.gro  # Should exist when complete
+```
+
+### Configuration Options
+
+Basic equilibration configuration in `prism/pmf/configs/equilibration_simple.yaml`:
+
+- **Local execution**: CPU/GPU settings for single machine
+- **Slurm execution**: Cluster job submission parameters
+- **Simulation parameters**: NVT/NPT equilibration times and temperatures
+
+### Generated Files Structure
+
+After remodeling, the following structure is created:
+
+```
+GMX_PMF_SYSTEM/
+├── solv_ions.gro                   # Remodeled structure
+├── topol.top                       # System topology
+├── posre*.itp                      # Position restraints
+├── PMF_SYSTEM_INFO.txt             # Remodeling metadata
+├── equilibration/                  # Equilibration directory
+│   ├── em.mdp, nvt.mdp, npt.mdp   # Simulation parameters
+│   └── (results after equilibration)
+├── run_equilibration_slurm.sh     # Cluster submission script
+├── run_equilibration_local.sh     # Local execution script
+├── equilibration_commands.sh      # GROMACS commands
+└── EQUILIBRATION_INSTRUCTIONS.txt # Usage instructions
+```
+
+### Testing and Validation
+
+Use the remodeling test script to validate the process:
+
+```bash
+# Comprehensive remodeling test
+python prism/pmf/examples/test_pmf_remodeling.py \
+    --input ./gromacssim \
+    --output ./remodeling_test \
+    --pulling-distance 2.5
+
+# Check test results
+cat ./remodeling_test/pmf_remodeling_test_report.json
+```
+
+The test script validates:
+- Input system structure and files
+- Remodeling script execution
+- Output system completeness
+- PMF workflow compatibility
+
+### Troubleshooting Remodeling
+
+**Common Issues:**
+
+1. **Missing Input Files**:
+   ```
+   Error: Required file not found: GMX_PROLIG_MD/solv_ions.gro
+   ```
+   - Ensure input system contains MD results with proper structure
+
+2. **Remodeling Script Fails**:
+   ```
+   Error: Remodeling script failed with return code 1
+   ```
+   - Check that all required files are present and readable
+   - Verify pulling distance is reasonable (1.5-4.0 nm typically)
+
+3. **Equilibration Fails**:
+   ```
+   Error: Energy minimization failed
+   ```
+   - Check GROMACS installation and GPU drivers
+   - Verify cluster partition and resource settings
+   - Review equilibration log files for specific errors
 
 ## Advanced Usage
 

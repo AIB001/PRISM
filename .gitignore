@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Archive directory (deprecated files)
+Archive/
+
 # C extensions
 *.so
 
@@ -76,5 +79,6 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-test/
+test/*
 <import>/
+*.egg-info
