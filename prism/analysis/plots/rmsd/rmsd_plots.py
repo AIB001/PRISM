@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 # Import publication style
-from .publication_utils import apply_publication_style, PUBLICATION_FONTS, get_standard_figsize
+from ..core.publication_utils import apply_publication_style, PUBLICATION_FONTS, get_standard_figsize
 
 
 def plot_rmsd_simple_timeseries(rmsd_results: Dict,

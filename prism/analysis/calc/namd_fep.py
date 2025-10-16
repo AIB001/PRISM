@@ -160,8 +160,6 @@ class NAMDFEPAnalyzer:
             if not Path(f).exists():
                 raise FileNotFoundError(f"FEP output file not found: {f}")
 
-        logger.info(f"Processing {len(fepout_files)} .fepout file(s)")
-
         # Create cache key
         if cache_name is None:
             file_names = [Path(f).name for f in fepout_files]
@@ -174,13 +172,8 @@ class NAMDFEPAnalyzer:
 
         # Check cache
         if not force_recompute and cache_file.exists():
-            logger.info(f"✓ Loading cached decomposition from {cache_file.name}")
-            print(f"  ✓ Using cached decomposition data: {cache_file.name}")
             with open(cache_file, 'rb') as f:
                 return pickle.load(f)
-        else:
-            logger.info(f"✗ Cache miss, computing decomposition")
-            print(f"  ⚙ Computing FEP decomposition (will cache to: {cache_file.name})")
 
         # Determine output directory
         if output_dir is None:
@@ -199,9 +192,6 @@ class NAMDFEPAnalyzer:
             fepout_pattern = ' '.join([Path(f).name for f in fepout_files])
             cmd = f"bash {self._script_path} {fepout_pattern} {start_frame} {end_frame} {stride} {num_points}"
 
-            logger.info(f"Running decomposition script: {cmd}")
-            print(f"  ⚙ Running NAMD FEP decomposition (this may take a few minutes for large files)...")
-
             # Run bash script
             result = subprocess.run(
                 cmd,
@@ -214,11 +204,6 @@ class NAMDFEPAnalyzer:
             if result.returncode != 0:
                 logger.error(f"Decomposition script failed: {result.stderr}")
                 raise RuntimeError(f"NAMD FEP decomposition failed:\n{result.stderr}")
-
-            # Log script output
-            if result.stdout:
-                logger.info(f"Script output:\n{result.stdout}")
-                print("  ✓ Decomposition completed successfully")
 
             # Parse results from decompose_summary.dat
             # Note: we're already in work_dir, so use relative path
@@ -337,27 +322,29 @@ class NAMDFEPAnalyzer:
                 # Find .fepout files in this repeat
                 fepout_files = list(repeat_dir.glob("*.fepout"))
                 if not fepout_files:
-                    logger.warning(f"No .fepout files found in {repeat_dir}")
+                    # Silently skip - it's normal to have incomplete repeats
                     continue
-
-                logger.info(f"  Processing {repeat_dir.name}: {len(fepout_files)} file(s)")
 
                 try:
                     # Run decomposition for this repeat
+                    # Create unique cache name for this repeat
+                    repeat_cache = f"{cache_name}_{sys_type}_{repeat_dir.name}" if cache_name else f"{sys_type}_{repeat_dir.name}"
                     decomp_data = self.run_decomposition(
                         fepout_files=[str(f) for f in fepout_files],
-                        cache_name=f"{sys_type}_{repeat_dir.name}_{cache_name}" if cache_name else None,
+                        cache_name=repeat_cache,
                         **decomp_kwargs
                     )
+
+                    # Save intermediate decomposition data for this repeat
+                    intermediate_file = repeat_dir / f"{sys_type}_{repeat_dir.name}_decomposition.csv"
+                    decomp_data.to_csv(intermediate_file, index=False)
 
                     # Extract final values (last row, skip fraction column)
                     final_values = decomp_data.iloc[-1][1:].values
                     decomp_results.append(final_values)
 
-                    logger.info(f"    ✓ {repeat_dir.name}: ΔG = {final_values[0]:.2f} kcal/mol")
-
                 except Exception as e:
-                    logger.error(f"Error processing {repeat_dir}: {e}")
+                    print(f"  ✗ {repeat_dir.name}: Error - {str(e)}")
                     continue
 
             if decomp_results:
@@ -384,17 +371,6 @@ class NAMDFEPAnalyzer:
 
             results['ddG'] = ddG
             results['ddG_std'] = ddG_std
-
-            logger.info(
-                f"✓ Binding ΔΔG = {ddG[0]:.2f} ± {ddG_std[0]:.2f} kcal/mol "
-                f"(Complex - Ligand)"
-            )
-
-            print(f"\n=== NAMD FEP Results ===")
-            print(f"Complex ΔG:  {results['complex'][0]:7.2f} ± {results['complex_std'][0]:.2f} kcal/mol")
-            print(f"Ligand ΔG:   {results['ligand'][0]:7.2f} ± {results['ligand_std'][0]:.2f} kcal/mol")
-            print(f"Binding ΔΔG: {ddG[0]:7.2f} ± {ddG_std[0]:.2f} kcal/mol")
-            print(f"========================\n")
 
         return results
 
@@ -636,14 +612,9 @@ class NAMDFEPAnalyzer:
             output_dir = Path(output_dir).resolve()
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"\n{'='*70}")
-        logger.info(f"  NAMD FEP Batch Processing: {system_dir.name}")
-        logger.info(f"{'='*70}\n")
-
         results = {}
 
         # 1. Run decomposition analysis
-        print("\n=== Running Decomposition Analysis ===")
         decomp_results = self.calculate_system_decomposition(
             str(system_dir),
             cache_name=system_dir.name,
@@ -652,7 +623,6 @@ class NAMDFEPAnalyzer:
         results['decomposition'] = decomp_results
 
         # 2. Parse raw FEP data from all repeats
-        print("\n=== Parsing Raw FEP Data ===")
         raw_data_combined = []
 
         for phase in ['complex', 'ligand']:
@@ -666,7 +636,6 @@ class NAMDFEPAnalyzer:
                 logger.warning(f"No {phase} directories found")
                 continue
 
-            print(f"\n{phase.capitalize()} phase:")
             phase_data_all = []
 
             for repeat_dir in repeat_dirs:
@@ -676,7 +645,7 @@ class NAMDFEPAnalyzer:
                     fepout_files = list(repeat_dir.glob("*.fepout"))
 
                 if not fepout_files:
-                    logger.warning(f"  No .fepout files in {repeat_dir.name}")
+                    # Silently skip - normal to have incomplete repeats
                     continue
 
                 fepout_file = fepout_files[0]  # Use first (should be only one)
@@ -694,8 +663,6 @@ class NAMDFEPAnalyzer:
 
                     phase_data_all.append(raw_data)
                     raw_data_combined.append(raw_data)
-
-                    print(f"  ✓ {repeat_dir.name}: {len(raw_data)} windows, final ΔG = {raw_data['dG_accum'].iloc[-1]:.2f} kcal/mol")
 
                 except Exception as e:
                     logger.error(f"  ✗ Error parsing {repeat_dir.name}: {e}")
@@ -717,8 +684,6 @@ class NAMDFEPAnalyzer:
                 results[f'{phase}_raw_mean'] = dG_accum_mean
                 results[f'{phase}_raw_std'] = dG_accum_std  # Changed from _sem to _std
                 results[f'{phase}_lambda'] = ref_data[['start', 'stop']].values
-
-                print(f"  Final {phase} ΔG: {dG_accum_mean[-1]:.2f} ± {dG_accum_std[-1]:.2f} kcal/mol (n={n_repeats})")
 
         # Combine all raw data
         if raw_data_combined:
@@ -748,7 +713,6 @@ class NAMDFEPAnalyzer:
 
         # 4. Save output files
         if save_data:
-            print("\n=== Saving Output Files ===")
             results['file_paths'] = {}
 
             # Save decomposition summary (JSON)
@@ -781,14 +745,53 @@ class NAMDFEPAnalyzer:
 
                 json.dump(json_data, f, indent=2)
             results['file_paths']['summary_json'] = str(json_file)
-            print(f"  ✓ {json_file.name}")
+
+            # Save detailed summary text file
+            text_file = output_dir / 'namd_fep_detailed_summary.txt'
+            with open(text_file, 'w') as f:
+                f.write("="*60 + "\n")
+                f.write(f"NAMD FEP Analysis - {system_dir.name}\n")
+                f.write("="*60 + "\n\n")
+
+                if 'complex' in decomp_results:
+                    f.write("Complex Phase:\n")
+                    f.write(f"  Final ΔG: {decomp_results['complex'][0]:.2f} ± {decomp_results['complex_std'][0]:.2f} kcal/mol\n")
+                    f.write(f"  Number of repeats: {decomp_results['complex_n']}\n")
+                    if 'complex_lambda' in results:
+                        f.write(f"  Lambda windows: {len(results['complex_lambda'])}\n")
+                    f.write(f"  Energy decomposition:\n")
+                    f.write(f"    ΔElec:   {decomp_results['complex'][1]:7.2f} ± {decomp_results['complex_std'][1]:.2f} kcal/mol\n")
+                    f.write(f"    ΔVdW:    {decomp_results['complex'][2]:7.2f} ± {decomp_results['complex_std'][2]:.2f} kcal/mol\n")
+                    f.write(f"    ΔCouple: {decomp_results['complex'][3]:7.2f} ± {decomp_results['complex_std'][3]:.2f} kcal/mol\n")
+                    f.write("\n")
+
+                if 'ligand' in decomp_results:
+                    f.write("Ligand Phase:\n")
+                    f.write(f"  Final ΔG: {decomp_results['ligand'][0]:.2f} ± {decomp_results['ligand_std'][0]:.2f} kcal/mol\n")
+                    f.write(f"  Number of repeats: {decomp_results['ligand_n']}\n")
+                    if 'ligand_lambda' in results:
+                        f.write(f"  Lambda windows: {len(results['ligand_lambda'])}\n")
+                    f.write(f"  Energy decomposition:\n")
+                    f.write(f"    ΔElec:   {decomp_results['ligand'][1]:7.2f} ± {decomp_results['ligand_std'][1]:.2f} kcal/mol\n")
+                    f.write(f"    ΔVdW:    {decomp_results['ligand'][2]:7.2f} ± {decomp_results['ligand_std'][2]:.2f} kcal/mol\n")
+                    f.write(f"    ΔCouple: {decomp_results['ligand'][3]:7.2f} ± {decomp_results['ligand_std'][3]:.2f} kcal/mol\n")
+                    f.write("\n")
+
+                if 'ddG' in decomp_results:
+                    f.write("Binding Free Energy:\n")
+                    f.write(f"  ΔΔG: {decomp_results['ddG'][0]:.2f} ± {decomp_results['ddG_std'][0]:.2f} kcal/mol\n")
+                    f.write(f"  Energy decomposition:\n")
+                    f.write(f"    ΔΔElec:   {decomp_results['ddG'][1]:7.2f} ± {decomp_results['ddG_std'][1]:.2f} kcal/mol\n")
+                    f.write(f"    ΔΔVdW:    {decomp_results['ddG'][2]:7.2f} ± {decomp_results['ddG_std'][2]:.2f} kcal/mol\n")
+                    f.write(f"    ΔΔCouple: {decomp_results['ddG'][3]:7.2f} ± {decomp_results['ddG_std'][3]:.2f} kcal/mol\n")
+
+            results['file_paths']['detailed_summary_txt'] = str(text_file)
 
             # Save raw dG/lambda data (combined CSV)
             if not results['raw_data'].empty:
                 csv_file = output_dir / 'namd_fep_raw_data.csv'
                 results['raw_data'].to_csv(csv_file, index=False)
                 results['file_paths']['raw_data_csv'] = str(csv_file)
-                print(f"  ✓ {csv_file.name}")
 
             # Save decomposition data
             if 'decomposition' in results and results['decomposition']:
@@ -833,10 +836,5 @@ class NAMDFEPAnalyzer:
 
                 decomp_df.to_csv(decomp_file, index=False)
                 results['file_paths']['decomposition_csv'] = str(decomp_file)
-                print(f"  ✓ {decomp_file.name}")
-
-        print("\n" + "="*70)
-        print("  ✓ NAMD FEP Batch Processing Complete")
-        print("="*70 + "\n")
 
         return results

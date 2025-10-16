@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import logging
 
 # Import and apply global publication style
-from .publication_utils import apply_publication_style
+from ..core.publication_utils import apply_publication_style
 apply_publication_style()
 
 logger = logging.getLogger(__name__)

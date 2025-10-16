@@ -693,7 +693,7 @@ def plot_namd_fep_full_analysis(results: Dict,
                                  dG_dlambda_mean - dG_dlambda_std,
                                  dG_dlambda_mean + dG_dlambda_std,
                                  color=color, alpha=0.2)
-            ax_deriv.axhline(y=0, color='gray', linestyle=(0, (5, 5)), linewidth=1.5, alpha=0.5)
+            ax_deriv.axhline(y=0, color='gray', linestyle='--', linewidth=1.5, alpha=0.5)
 
             # Plot accumulated ΔG with STD error bands
             ax_accum.plot(lambda_mid, dG_accum_mean,
@@ -744,7 +744,7 @@ def plot_namd_fep_full_analysis(results: Dict,
             # Style derivative plot
             ax_deriv.set_ylabel('\u0394G/\u0394\u03bb (kcal/mol)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
             ax_deriv.set_xlim(0, 1)
-            ax_deriv.grid(True, linestyle=':', alpha=0.4)
+            ax_deriv.grid(True, alpha=0.3)
             # Keep all four spines visible
             ax_deriv.spines['left'].set_linewidth(2)
             ax_deriv.spines['bottom'].set_linewidth(2)
@@ -758,7 +758,7 @@ def plot_namd_fep_full_analysis(results: Dict,
             # Style accumulated plot
             ax_accum.set_ylabel('\u0394G (kcal/mol)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
             ax_accum.set_xlim(0, 1)
-            ax_accum.grid(True, linestyle=':', alpha=0.4)
+            ax_accum.grid(True, alpha=0.3)
             # Keep all four spines visible
             ax_accum.spines['left'].set_linewidth(2)
             ax_accum.spines['bottom'].set_linewidth(2)
@@ -773,12 +773,7 @@ def plot_namd_fep_full_analysis(results: Dict,
             ax_deriv.legend(loc='upper left', frameon=True, fontsize=PUBLICATION_FONTS['legend'])
             ax_accum.legend(loc='upper left', frameon=True, fontsize=PUBLICATION_FONTS['legend'])
 
-            # Print results
-            print(f"\n{phase.capitalize()} Phase:")
-            print(f"  Final ΔG: {final_dG:.2f} ± {final_dG_std:.2f} kcal/mol")
-            print(f"  Lambda windows: {n_windows}")
-
-            # Add to summary
+            # Add to summary (no printing)
             n_repeats = results['statistics'].get(f'n_{phase}_repeats', 0)
             summary_lines.append(
                 f"{phase.capitalize()}: ΔG = {final_dG:.2f} ± {final_dG_std:.2f} kcal/mol (n={n_repeats})"
@@ -791,7 +786,6 @@ def plot_namd_fep_full_analysis(results: Dict,
                 ddG = stats['binding_ddG']
                 ddG_std = stats['binding_ddG_std']
                 summary_lines.append(f"\nBinding ΔΔG = {ddG:.2f} ± {ddG_std:.2f} kcal/mol")
-                print(f"\nBinding ΔΔG: {ddG:.2f} ± {ddG_std:.2f} kcal/mol")
 
         # Create summary text
         summary_text = "NAMD FEP Analysis Results\n" + "="*30 + "\n"
@@ -811,7 +805,6 @@ def plot_namd_fep_full_analysis(results: Dict,
             # Save the figure
             save_publication_figure(fig, output_path, **kwargs)
             logger.info(f"Full FEP analysis figure saved: {output_path}")
-            print(f"\n✓ Full analysis figure saved: {output_path}")
 
             # Save summary to separate text file
             from pathlib import Path
@@ -820,8 +813,5 @@ def plot_namd_fep_full_analysis(results: Dict,
             with open(summary_file, 'w') as f:
                 f.write(summary_text)
             logger.info(f"Analysis summary saved: {summary_file}")
-            print(f"✓ Analysis summary saved: {summary_file}")
-
-        print("\n✓ NAMD FEP full analysis plot generated")
 
         return fig, (ax_c_deriv, ax_c_accum, ax_l_deriv, ax_l_accum)

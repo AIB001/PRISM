@@ -51,7 +51,8 @@ from .plots import (
     plot_sasa_comparison, plot_property_distribution,
     plot_rmsd_time_series, plot_rmsf_per_residue, plot_rmsd_rmsf_combined,
     plot_multi_system_comparison, plot_correlation_matrix,
-    plot_statistical_comparison, plot_difference_analysis
+    plot_statistical_comparison, plot_difference_analysis,
+    plot_namd_fep_full_analysis
 )
 
 # Import NAMD FEP plotting functions
@@ -115,6 +116,7 @@ __all__ = [
     'plot_correlation_matrix',
     'plot_statistical_comparison',
     'plot_difference_analysis',
+    'plot_namd_fep_full_analysis',
 
     # NAMD FEP plotting functions
     'plot_namd_fep_convergence',

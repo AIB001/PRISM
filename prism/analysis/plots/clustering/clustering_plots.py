@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import logging
 
 # Import publication utilities
-from .publication_utils import (
+from ..core.publication_utils import (
     get_publication_style, get_color_palette, fix_rotated_labels,
     add_statistical_annotations, style_axes_for_publication,
     save_publication_figure, validate_figure_size, PUBLICATION_FONTS, PUBLICATION_COLORS,

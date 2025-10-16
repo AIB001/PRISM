@@ -12,6 +12,14 @@ openff-toolkit
 openff-interchange
 rdkit
 
+# For OPLS-AA support (via LigParGen server)
+# Required for OPLSAAForceFieldGenerator
+requests>=2.25.0
+
+# For SwissParam-based force fields (MMFF, MATCH, Hybrid)
+# Required for MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
+mechanize>=0.4.0
+
 # System dependencies (install separately)
 # - GROMACS
 # - AmberTools (for GAFF)

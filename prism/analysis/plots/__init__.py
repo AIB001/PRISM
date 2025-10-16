@@ -15,15 +15,16 @@ from .structural_plots import (
     plot_contact_probability_barplot, plot_contact_probability_heatmap,
     plot_contact_distance_distribution, plot_hydrogen_bond_analysis
 )
-from .rmsd_plots import (
+from .rmsd import (
     plot_rmsd_simple_timeseries, plot_rmsd_analysis, plot_rmsf_analysis,
     plot_rmsf_with_auto_chains
 )
-from .comparison_plots import (
+from .comparison import (
     plot_multi_system_comparison, plot_correlation_matrix,
     plot_statistical_comparison, plot_difference_analysis
 )
-from .publication_utils import (
+from .namd_fep_plots import plot_namd_fep_full_analysis
+from .core.publication_utils import (
     get_publication_style, get_color_palette, setup_publication_figure,
     fix_rotated_labels, add_statistical_annotations, style_axes_for_publication,
     save_publication_figure, create_publication_colormap,
@@ -72,6 +73,9 @@ __all__ = [
     'plot_correlation_matrix',
     'plot_statistical_comparison',
     'plot_difference_analysis',
+
+    # NAMD FEP plotting
+    'plot_namd_fep_full_analysis',
 
     # Publication utilities
     'get_publication_style',

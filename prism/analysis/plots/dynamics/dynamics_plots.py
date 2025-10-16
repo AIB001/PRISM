@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 # Import publication style
-from .publication_utils import apply_publication_style, get_standard_figsize
+from ..core.publication_utils import apply_publication_style, get_standard_figsize
 
 
 def plot_ligand_dynamics_panel(dynamics_data_list: List[Dict],

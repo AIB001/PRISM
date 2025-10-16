@@ -11,9 +11,9 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 # Import publication style
-from .publication_utils import apply_publication_style, get_standard_figsize
+from ..core.publication_utils import apply_publication_style, get_standard_figsize
 # Import residue formatting utility
-from ...utils.residue import format_residue_list
+from ....utils.residue import format_residue_list
 
 
 def plot_hbond_analysis(hbond_results: Dict,

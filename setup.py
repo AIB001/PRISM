@@ -33,6 +33,13 @@ extras_require = {
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
     ],
+    "opls": [
+        "requests>=2.25.0",
+        "rdkit>=2021.0",  # Optional for coordinate alignment
+    ],
+    "swissparam": [
+        "mechanize>=0.4.0",
+    ],
     "analysis": [
         "mdtraj>=1.9.0",      # Optional for enhanced trajectory analysis
         "scipy>=1.6.0",       # For statistical analysis
@@ -42,6 +49,8 @@ extras_require = {
         "openff-toolkit>=0.10.0",
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
+        "requests>=2.25.0",
+        "mechanize>=0.4.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
     ],
@@ -98,6 +107,8 @@ print("\n  # 2. Then install PRISM:")
 print("  pip install -e .                # Basic installation (includes core analysis)")
 print("  pip install -e .[gaff]          # With GAFF support")
 print("  pip install -e .[openff]        # With OpenFF support")
+print("  pip install -e .[opls]          # With OPLS-AA support (LigParGen)")
+print("  pip install -e .[swissparam]    # With SwissParam support (MMFF/MATCH/Hybrid)")
 print("  pip install -e .[analysis]      # With enhanced analysis (MDTraj, SciPy)")
 print("  pip install -e .[all]           # With all force fields and features")
 

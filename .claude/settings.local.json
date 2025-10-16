@@ -22,16 +22,11 @@
       "Bash(python:*)",
       "Bash(git fetch:*)",
       "Bash(git show-ref:*)",
-      "Read(//data/gxf1212/work/SciDraft-Studio/projects/RdRp/FEP/**)",
-      "Read(//data/gxf1212/work/SciDraft-Studio/projects/RdRp/data/fepout/1p-cn-cf3/**)",
-      "Read(//home/gxf1212/data/work/SciDraft-Studio/projects/RdRp/FEP/**)",
+      "Bash(xargs ls:*)",
       "Bash(ssh:*)",
-      "Bash(/home/gxf1212/.conda/envs/prism/bin/python -m prism.builder:*)",
-      "Bash(cat:*)",
-      "Bash(pdbfixer:*)",
-      "Read(//tmp/**)",
-      "Bash(echo $CONDA_DEFAULT_ENV)",
-      "Bash(/home/gxf1212/.conda/envs/prism/bin/pdbfixer --help)"
+      "Read(//home/gxf1212/data/work/SciDraft-Studio/projects/RdRp/data/tables/**)",
+      "Read(//data/gxf1212/work/PRISM/test/analysis/rdrp/fepout/1p-cn-cf3/**)",
+      "Read(//tmp/**)"
     ],
     "deny": [],
     "ask": []

@@ -66,7 +66,7 @@ class GMXSimulator:
     def run(self, stages=None, gpu_id=0, ntomp=10, ntmpi=1, continue_from=None, **kwargs):
         """
         Run GROMACS MD simulation.
-        
+
         Parameters:
         -----------
         stages : list, optional
@@ -82,7 +82,7 @@ class GMXSimulator:
             Continue from a specific stage ('em', 'nvt', 'npt')
         **kwargs : dict
             Additional parameters (ignored for compatibility)
-            
+
         Returns:
         --------
         dict
@@ -91,7 +91,7 @@ class GMXSimulator:
         # Default stages
         if stages is None:
             stages = ['em', 'nvt', 'npt', 'prod']
-        
+
         # Copy localrun.sh to GMX directory
         target_script = os.path.join(self.gmx_dir, "localrun.sh")
         if not os.path.exists(self.localrun_script):
@@ -99,36 +99,42 @@ class GMXSimulator:
             self._create_localrun_script(target_script)
         else:
             shutil.copy2(self.localrun_script, target_script)
-        
+
         # Make script executable
         os.chmod(target_script, 0o755)
-        
+
         # Modify script parameters if needed
         self._modify_script_parameters(target_script, gpu_id, ntomp, ntmpi)
-        
+
         # Change to GMX directory
         original_dir = os.getcwd()
         os.chdir(self.gmx_dir)
-        
+
         try:
             # Run the simulation
             print(f"Running GROMACS simulation in: {self.gmx_dir}")
             print(f"Stages: {', '.join(stages)}")
             print(f"GPU ID: {gpu_id}, Threads: {ntomp}")
-            
-            # Execute localrun.sh
+
+            # Set OMP_NUM_THREADS to match ntomp to avoid conflicts
+            # GROMACS requires OMP_NUM_THREADS and -ntomp to be consistent
+            env = os.environ.copy()
+            env['OMP_NUM_THREADS'] = str(ntomp)
+
+            # Execute localrun.sh with modified environment
             result = subprocess.run(
                 ["bash", "localrun.sh"],
                 check=True,
                 text=True,
-                capture_output=False  # Let output stream to console
+                capture_output=False,  # Let output stream to console
+                env=env
             )
-            
+
             # Collect output files
             outputs = self._collect_outputs()
-            
+
             return outputs
-            
+
         except subprocess.CalledProcessError as e:
             print(f"Error running GROMACS simulation: {e}")
             raise
