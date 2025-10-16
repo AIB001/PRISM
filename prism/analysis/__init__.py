@@ -38,7 +38,8 @@ from .calc.dihedral import DihedralAnalyzer
 from . import calc
 from .calc import (
     ContactAnalyzer, HBondAnalyzer, DistanceAnalyzer,
-    RMSDAnalyzer, ClusteringAnalyzer, StructuralAnalyzer, SASAAnalyzer, DihedralAnalyzer
+    RMSDAnalyzer, ClusteringAnalyzer, StructuralAnalyzer, SASAAnalyzer, DihedralAnalyzer,
+    NAMDFEPAnalyzer
 )
 
 # Import plotting submodule
@@ -49,7 +50,8 @@ from .plots import (
     plot_sasa_comparison, plot_property_distribution,
     plot_rmsd_time_series, plot_rmsf_per_residue, plot_rmsd_rmsf_combined,
     plot_multi_system_comparison, plot_correlation_matrix,
-    plot_statistical_comparison, plot_difference_analysis
+    plot_statistical_comparison, plot_difference_analysis,
+    plot_namd_fep_full_analysis
 )
 
 # Import contact visualization module (renamed from visualization)
@@ -77,6 +79,7 @@ __all__ = [
     'StructuralAnalyzer',
     'SASAAnalyzer',
     'DihedralAnalyzer',
+    'NAMDFEPAnalyzer',
 
     # Utilities
     'TrajectoryManager',
@@ -104,6 +107,7 @@ __all__ = [
     'plot_correlation_matrix',
     'plot_statistical_comparison',
     'plot_difference_analysis',
+    'plot_namd_fep_full_analysis',
 
     # Contact visualization module (renamed from visualization)
     'contact',

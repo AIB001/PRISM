@@ -14,6 +14,7 @@ from .clustering import ClusteringAnalyzer
 from .structural import StructuralAnalyzer
 from .sasa import SASAAnalyzer
 from .dihedral import DihedralAnalyzer
+from .namd_fep import NAMDFEPAnalyzer
 
 __all__ = [
     'ContactAnalyzer',
@@ -23,5 +24,6 @@ __all__ = [
     'ClusteringAnalyzer',
     'StructuralAnalyzer',
     'SASAAnalyzer',
-    'DihedralAnalyzer'
+    'DihedralAnalyzer',
+    'NAMDFEPAnalyzer'
 ]
