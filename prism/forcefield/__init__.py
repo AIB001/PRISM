@@ -6,7 +6,9 @@ Force field generators for PRISM
 
 Available force field generators:
 - GAFFForceFieldGenerator: GAFF force field using AmberTools
+- GAFF2ForceFieldGenerator: GAFF2 force field using AmberTools (improved version)
 - OpenFFForceFieldGenerator: OpenFF force field
+- CGenFFForceFieldGenerator: CGenFF (CHARMM General Force Field) from web server
 - OPLSAAForceFieldGenerator: OPLS-AA force field using LigParGen
 - MMFFForceFieldGenerator: MMFF-based force field using SwissParam
 - MATCHForceFieldGenerator: MATCH force field using SwissParam
@@ -30,10 +32,24 @@ try:
 except ImportError:
     pass
 
+# GAFF2 force field
+try:
+    from .gaff2 import GAFF2ForceFieldGenerator
+    __all__.append("GAFF2ForceFieldGenerator")
+except ImportError:
+    pass
+
 # OpenFF force field
 try:
     from .openff import OpenFFForceFieldGenerator
     __all__.append("OpenFFForceFieldGenerator")
+except ImportError:
+    pass
+
+# CGenFF force field
+try:
+    from .cgenff import CGenFFForceFieldGenerator
+    __all__.append("CGenFFForceFieldGenerator")
 except ImportError:
     pass
 
@@ -91,12 +107,28 @@ def get_generator_info():
             "dependencies": ["AmberTools (antechamber, parmchk2, tleap)"]
         }
 
+    if "GAFF2ForceFieldGenerator" in __all__:
+        info["GAFF2"] = {
+            "class": "GAFF2ForceFieldGenerator",
+            "description": "GAFF2 force field using AmberTools (improved version with better torsion parameters)",
+            "output_dir": "LIG.amb2gmx",
+            "dependencies": ["AmberTools (antechamber, parmchk2, tleap)"]
+        }
+
     if "OpenFFForceFieldGenerator" in __all__:
         info["OpenFF"] = {
             "class": "OpenFFForceFieldGenerator",
             "description": "OpenFF force field",
             "output_dir": "LIG.openff2gmx",
             "dependencies": ["openff-toolkit", "openff-interchange"]
+        }
+
+    if "CGenFFForceFieldGenerator" in __all__:
+        info["CGenFF"] = {
+            "class": "CGenFFForceFieldGenerator",
+            "description": "CGenFF (CHARMM General Force Field) - requires web-downloaded files",
+            "output_dir": "LIG.cgenff2gmx",
+            "dependencies": ["Web download from https://cgenff.umaryland.edu/"]
         }
 
     if "OPLSAAForceFieldGenerator" in __all__:

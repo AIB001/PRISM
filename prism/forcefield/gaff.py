@@ -242,7 +242,7 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     def run_command(self, cmd, cwd=None, check=True):
         """Run a shell command and return its output"""
         print(f"Running: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -251,15 +251,35 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
                 text=True,
                 capture_output=True
             )
-            
+
+            # Print full stdout if available
             if result.stdout.strip():
-                print(f"Output: {result.stdout.strip()[:100]}...")
-            
+                print(f"STDOUT:\n{result.stdout}")
+
+            # Print stderr even on success (antechamber often writes important info to stderr)
+            if result.stderr.strip():
+                print(f"STDERR:\n{result.stderr}")
+
             return result.stdout
-            
+
         except subprocess.CalledProcessError as e:
-            print(f"Error executing command: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-            print(f"Error output: {e.stderr}")
+            print(f"\n{'='*60}")
+            print(f"ERROR executing command:")
+            print(f"  Command: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
+            print(f"  Return code: {e.returncode}")
+            print(f"  Working directory: {cwd if cwd else 'current directory'}")
+            print(f"{'='*60}")
+
+            if e.stdout and e.stdout.strip():
+                print(f"\nSTDOUT:\n{e.stdout}")
+
+            if e.stderr and e.stderr.strip():
+                print(f"\nSTDERR:\n{e.stderr}")
+            else:
+                print("\nNo error output captured from stderr")
+
+            print(f"{'='*60}\n")
+
             if check:
                 raise
             return e.stdout
@@ -275,14 +295,33 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     def generate_amber_parameters(self):
         """Generate AMBER force field parameters using AmberTools"""
         print("\n=== Generating AMBER Parameters ===")
-        
+
+        # Check for required tools
+        missing_tools = []
+        for tool in ['antechamber', 'parmchk2', 'tleap', 'acpype']:
+            if not self.check_command_exists(tool):
+                missing_tools.append(tool)
+
+        if missing_tools:
+            raise RuntimeError(
+                f"Missing required AmberTools components: {', '.join(missing_tools)}\n"
+                f"Please install AmberTools via: conda install -c conda-forge ambertools\n"
+                f"Or visit: http://ambermd.org/GetAmber.php"
+            )
+
+        # Check if sqm is available (required for BCC charges)
+        sqm_available = self.check_command_exists('sqm')
+        if not sqm_available:
+            print("Warning: 'sqm' not found. AM1-BCC charge calculation may fail.")
+            print("Will automatically fall back to gas phase charges if needed.")
+
         ff_dir = os.path.join(self.output_dir, "forcefield")
         os.makedirs(ff_dir, exist_ok=True)
-        
-        acpype_dirs = [d for d in os.listdir(ff_dir) 
-                      if (d.endswith('.acpype') or d.endswith('.amb2gmx')) 
+
+        acpype_dirs = [d for d in os.listdir(ff_dir)
+                      if (d.endswith('.acpype') or d.endswith('.amb2gmx'))
                       and os.path.isdir(os.path.join(ff_dir, d))]
-        
+
         if acpype_dirs and not self.overwrite:
             print(f"Found existing acpype output, skipping generation")
             return ff_dir
@@ -359,44 +398,96 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         # Get the ff_dir from amber_mol2 path
         ff_dir = os.path.dirname(amber_mol2)
 
+        # Clean up any existing antechamber temp files before starting
+        self._clean_antechamber_temp_files(ff_dir)
+
+        # Copy input file to working directory to avoid path issues
+        input_mol2 = os.path.join(ff_dir, f"input_{self.ligand_name}.mol2")
+        shutil.copy2(self.ligand_path, input_mol2)
+
         print("Generating AM1-BCC charges...")
         cmd = [
             "antechamber",
-            "-i", self.ligand_path,
+            "-i", os.path.basename(input_mol2),
             "-fi", "mol2",
-            "-o", amber_mol2,
+            "-o", os.path.basename(amber_mol2),
             "-fo", "mol2",
             "-c", "bcc",
-            "-s", "2"
+            "-s", "2",
+            "-at", "gaff"  # Explicitly specify GAFF atom types
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
-        self.run_command(cmd, cwd=ff_dir)
+
+        try:
+            self.run_command(cmd, cwd=ff_dir)
+        except subprocess.CalledProcessError as e:
+            print("\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
+            # Try with simpler gas phase charges as fallback
+            cmd_fallback = [
+                "antechamber",
+                "-i", os.path.basename(input_mol2),
+                "-fi", "mol2",
+                "-o", os.path.basename(amber_mol2),
+                "-fo", "mol2",
+                "-c", "gas",
+                "-s", "2",
+                "-at", "gaff"
+            ]
+            if self.net_charge != 0:
+                cmd_fallback.extend(["-nc", str(self.net_charge)])
+            self.run_command(cmd_fallback, cwd=ff_dir)
 
         print("Generating prep file...")
+        # Generate prep file from the charged mol2 file
+        # Important: We don't need to recalculate charges, just convert format
         cmd = [
             "antechamber",
-            "-i", amber_mol2,
+            "-i", os.path.basename(amber_mol2),
             "-fi", "mol2",
-            "-o", prep_file,
+            "-o", os.path.basename(prep_file),
             "-fo", "prepi",
-            "-c", "bcc",
-            "-s", "2"
+            "-at", "gaff"
         ]
+        # Add net charge if specified (required for proper file generation)
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
-        self.run_command(cmd, cwd=ff_dir)
+
+        try:
+            self.run_command(cmd, cwd=ff_dir)
+        except subprocess.CalledProcessError as e:
+            print("\nPrep file generation failed. Trying with explicit charge retention...")
+            # Alternative: explicitly tell antechamber to read charges from mol2
+            cmd_alt = [
+                "antechamber",
+                "-i", os.path.basename(amber_mol2),
+                "-fi", "mol2",
+                "-o", os.path.basename(prep_file),
+                "-fo", "prepi",
+                "-c", "rc",  # Read charges from input file
+                "-at", "gaff"
+            ]
+            if self.net_charge != 0:
+                cmd_alt.extend(["-nc", str(self.net_charge)])
+            self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating force field parameters...")
         self.run_command([
             "parmchk2",
-            "-i", prep_file,
+            "-i", os.path.basename(prep_file),
             "-f", "prepi",
-            "-o", frcmod_file
+            "-o", os.path.basename(frcmod_file),
+            "-a", "Y"  # Print all force field parameters
         ], cwd=ff_dir)
 
         print("Creating AMBER topology...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)
+
+        # Clean up intermediate input file
+        try:
+            os.remove(input_mol2)
+        except:
+            pass
     
     def _create_topology_with_tleap(self, amber_mol2, frcmod_file, prmtop_file, rst7_file):
         """Create AMBER topology using tleap"""
@@ -544,6 +635,16 @@ quit
         else:
             print("Warning: Could not extract atomtypes from TOP file")
     
+    def _clean_antechamber_temp_files(self, directory):
+        """Clean up antechamber temporary files from a specific directory"""
+        temp_patterns = ["ANTECHAMBER*", "ATOMTYPE.INF", "PREP.INF", "NEWPDB.PDB", "sqm.*"]
+        for pattern in temp_patterns:
+            for file_path in Path(directory).glob(pattern):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+
     def cleanup_temp_files(self):
         """Clean up temporary files"""
         print("\n=== Cleaning up ===")
@@ -551,7 +652,7 @@ quit
         ff_dir = os.path.join(self.output_dir, "forcefield")
         if os.path.exists(ff_dir):
             patterns = ["*.frcmod", "*.prep", "*.prmtop", "*.rst7", "*.log", "*.in",
-                       "ANTECHAMBER*", "ATOMTYPE*", "PREP*", "NEWPDB*", "sqm*"]
+                       "ANTECHAMBER*", "ATOMTYPE*", "PREP*", "NEWPDB*", "sqm*", "input_*"]
 
             for pattern in patterns:
                 for file_path in Path(ff_dir).glob(pattern):
@@ -563,14 +664,7 @@ quit
         # Also clean up any antechamber temp files in current working directory
         # (These should not be created if cwd is set correctly, but clean them just in case)
         cwd = os.getcwd()
-        temp_patterns = ["ANTECHAMBER*", "ATOMTYPE.INF", "PREP.INF", "NEWPDB.PDB", "sqm.*"]
-        for pattern in temp_patterns:
-            for file_path in Path(cwd).glob(pattern):
-                try:
-                    print(f"  Removing temp file: {file_path.name}")
-                    os.remove(file_path)
-                except OSError:
-                    pass
+        self._clean_antechamber_temp_files(cwd)
     
     # Add remaining methods from original file as needed
     def _process_sdf_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
