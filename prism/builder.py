@@ -20,7 +20,9 @@ if __name__ == "__main__" and __package__ is None:
     from prism.utils.mdp import MDPGenerator
     from prism.utils.system import SystemBuilder
     from prism.forcefield.gaff import GAFFForceFieldGenerator
+    from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
     from prism.forcefield.openff import OpenFFForceFieldGenerator
+    from prism.forcefield.cgenff import CGenFFForceFieldGenerator
 else:
     # Normal package imports
     from .utils.environment import GromacsEnvironment
@@ -29,13 +31,17 @@ else:
     from .utils.system import SystemBuilder
     try:
         from .forcefield.gaff import GAFFForceFieldGenerator
+        from .forcefield.gaff2 import GAFF2ForceFieldGenerator
         from .forcefield.openff import OpenFFForceFieldGenerator
+        from .forcefield.cgenff import CGenFFForceFieldGenerator
     except ImportError:
         # For standalone usage
         sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         try:
             from prism.forcefield.gaff import GAFFForceFieldGenerator
+            from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
             from prism.forcefield.openff import OpenFFForceFieldGenerator
+            from prism.forcefield.cgenff import CGenFFForceFieldGenerator
         except ImportError:
             print("Error: Cannot import force field generators")
             print("Please check your PRISM installation")
@@ -46,7 +52,7 @@ class PRISMBuilder:
     """Complete system builder for protein-ligand MD simulations with multiple force field support"""
 
     def __init__(self, protein_path, ligand_path, output_dir, ligand_forcefield='gaff',
-                 config_path=None, forcefield=None, water_model=None, overwrite=None):
+                 config_path=None, forcefield=None, water_model=None, overwrite=None, forcefield_path=None):
         """
         Initialize PRISM Builder with configuration support
 
@@ -55,11 +61,11 @@ class PRISMBuilder:
         protein_path : str
             Path to the protein PDB file
         ligand_path : str
-            Path to the ligand file (MOL2/SDF)
+            Path to the ligand file (MOL2/SDF) - not used for cgenff
         output_dir : str
             Directory where output files will be stored
         ligand_forcefield : str
-            Force field for ligand ('gaff' or 'openff')
+            Force field for ligand ('gaff', 'gaff2', 'openff', or 'cgenff')
         config_path : str, optional
             Path to configuration YAML file
         forcefield : str, optional
@@ -68,15 +74,22 @@ class PRISMBuilder:
             Water model name (e.g., 'tip3p', overrides config)
         overwrite : bool, optional
             Whether to overwrite existing files (overrides config)
+        forcefield_path : str, optional
+            Path to CGenFF directory (required when ligand_forcefield='cgenff')
         """
         self.protein_path = os.path.abspath(protein_path)
         self.ligand_path = os.path.abspath(ligand_path)
         self.output_dir = os.path.abspath(output_dir)
         self.ligand_forcefield = ligand_forcefield.lower()
+        self.forcefield_path = forcefield_path
 
         # Validate ligand force field
-        if self.ligand_forcefield not in ['gaff', 'openff']:
-            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff' or 'openff'")
+        if self.ligand_forcefield not in ['gaff', 'gaff2', 'openff', 'cgenff']:
+            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', or 'cgenff'")
+
+        # Validate cgenff requires forcefield_path
+        if self.ligand_forcefield == 'cgenff' and not forcefield_path:
+            raise ValueError("CGenFF force field requires --forcefield-path to specify the directory containing downloaded CGenFF files")
 
         # Initialize GROMACS environment
         self.gromacs_env = GromacsEnvironment()
@@ -181,12 +194,31 @@ class PRISMBuilder:
             )
             self.lig_ff_dir = generator.run()
 
+        elif self.ligand_forcefield == 'gaff2':
+            # Use GAFF2 force field generator
+            generator = GAFF2ForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
         elif self.ligand_forcefield == 'openff':
             # Use OpenFF force field generator
             generator = OpenFFForceFieldGenerator(
                 self.ligand_path,
                 self.output_dir,
                 charge=self.config['ligand_forcefield']['charge'],
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'cgenff':
+            # Use CGenFF force field generator
+            generator = CGenFFForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                cgenff_dir=self.forcefield_path,
                 overwrite=self.overwrite
             )
             self.lig_ff_dir = generator.run()
@@ -319,13 +351,13 @@ class PRISMBuilder:
         """Clean up temporary files"""
         print("\n=== Cleaning up temporary files ===")
 
-        # Cleanup directories for both GAFF and OpenFF
+        # Cleanup directories for GAFF, GAFF2, and OpenFF
         cleanup_dirs = ["forcefield", "temp_openff"]
 
         for dir_name in cleanup_dirs:
             cleanup_dir = os.path.join(self.output_dir, dir_name)
             if os.path.exists(cleanup_dir):
-                if self.ligand_forcefield == 'gaff':
+                if self.ligand_forcefield in ['gaff', 'gaff2']:
                     temp_patterns = ["*.frcmod", "*.prep", "*.prmtop", "*.rst7", "*.log", "*.in",
                                      "ANTECHAMBER*", "ATOMTYPE*", "PREP*", "NEWPDB*", "sqm*", "leap*"]
 
@@ -408,19 +440,25 @@ def main():
 Example usage:
   # Using GAFF force field with defaults (amber99sb, tip3p)
   prism protein.pdb ligand.mol2 -o output_dir
-  
+
+  # Using GAFF2 force field (improved version of GAFF)
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield gaff2
+
   # Using OpenFF force field with specific protein force field
   prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff --forcefield amber14sb
-  
+
+  # Using CGenFF force field (requires web-downloaded files)
+  prism protein.pdb dummy.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+
   # With custom configuration file
   prism protein.pdb ligand.mol2 -o output_dir --config config.yaml
-  
+
   # Override specific parameters
   prism protein.pdb ligand.mol2 -o output_dir --forcefield amber99sb-ildn --water tip4p --temperature 300
-  
+
   # Export default configuration template
   prism --export-config my_config.yaml
-  
+
   # List available force fields
   prism --list-forcefields
         """
@@ -449,10 +487,12 @@ Example usage:
                           help="Protein force field name (default: amber99sb)")
     ff_group.add_argument("--water", "-w", type=str, default="tip3p",
                           help="Water model name (default: tip3p)")
-    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'openff'], default='gaff',
-                          help="Force field for ligand (default: gaff)")
+    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'gaff2', 'openff', 'cgenff'], default='gaff',
+                          help="Force field for ligand: gaff (default), gaff2 (improved), openff, or cgenff")
     ff_group.add_argument("--ligand-charge", type=int, default=0,
                           help="Net charge of ligand (default: 0)")
+    ff_group.add_argument("--forcefield-path", "-ffp", type=str, default=None,
+                          help="Path to force field directory (required for cgenff: directory containing web-downloaded CGenFF files)")
 
     # Box options
     box_group = parser.add_argument_group('Box options')
@@ -739,6 +779,7 @@ pressure_coupling:
         forcefield=args.forcefield,
         water_model=args.water,
         overwrite=args.overwrite,
+        forcefield_path=args.forcefield_path,
         **kwargs
     )
 
