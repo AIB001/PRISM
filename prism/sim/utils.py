@@ -49,24 +49,24 @@ def validate_gmx_directory(gmx_dir):
 
 def find_forcefield_dir(output_dir):
     """
-    Find the force field directory (LIG.amb2gmx or LIG.openff2gmx).
-    
+    Find the force field directory (LIG.amb2gmx, LIG.openff2gmx, LIG.gaff2gmx, or LIG.cgenff2gmx).
+
     Parameters:
     -----------
     output_dir : str
         Output directory containing GMX_PROLIG_MD, mdps, and force field directory
-        
+
     Returns:
     --------
     str
         Path to force field directory
-        
+
     Raises:
     -------
     FileNotFoundError
         If no force field directory is found
     """
-    possible_names = ['LIG.amb2gmx', 'LIG.openff2gmx', 'LIG.gaff2gmx']
+    possible_names = ['LIG.amb2gmx', 'LIG.openff2gmx', 'LIG.gaff2gmx', 'LIG.cgenff2gmx']
     
     # Check in the output directory (same level as GMX_PROLIG_MD)
     for name in possible_names:

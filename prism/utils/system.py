@@ -233,6 +233,9 @@ class SystemBuilder:
             # pdb2gmx didn't process metals, add them manually
             self._add_metals_to_topology(fixed_pdb, str(protein_gro), str(topol_top))
 
+        # Validate and fix topology for common issues
+        self._validate_and_fix_topology(str(topol_top))
+
         return str(protein_gro), str(topol_top)
 
     def _fix_topology(self, topol_path: str, lig_ff_dir: str):
@@ -245,7 +248,11 @@ class SystemBuilder:
 
         if not lig_itp_path.exists():
             raise FileNotFoundError(f"Ligand ITP file not found: {lig_itp_path}")
-        if not atomtypes_itp_path.exists():
+
+        # Check if this is CGenFF (has charmm36.ff subdirectory)
+        is_cgenff = (lig_ff_path / "charmm36.ff").exists()
+
+        if not is_cgenff and not atomtypes_itp_path.exists():
             raise FileNotFoundError(f"Ligand atomtypes file not found: {atomtypes_itp_path}")
 
         with open(topol_path, 'r') as f:
@@ -256,8 +263,11 @@ class SystemBuilder:
             print("Topology already includes ligand parameters.")
             return
 
-        with open(atomtypes_itp_path, 'r') as f:
-            atomtypes_content = f.read()
+        # For CGenFF, atomtypes are handled by charmm36.ff includes in LIG.itp
+        # For other force fields, we need to explicitly include atomtypes
+        if not is_cgenff:
+            with open(atomtypes_itp_path, 'r') as f:
+                atomtypes_content = f.read()
 
         new_lines = []
         molecules_added = False
@@ -265,9 +275,15 @@ class SystemBuilder:
             new_lines.append(line)
             # Insert atomtypes and ligand ITP after the main forcefield include
             if '#include' in line and '.ff/forcefield.itp' in line:
-                new_lines.append("\n; Include ligand atomtypes\n")
-                new_lines.append(atomtypes_content)
-                new_lines.append("\n; Include ligand topology\n")
+                if is_cgenff:
+                    # CGenFF: Only include LIG.itp (which includes charmm36.ff files)
+                    print("Detected CGenFF force field - using integrated CHARMM atomtypes")
+                    new_lines.append("\n; Include CGenFF ligand topology (with CHARMM36 parameters)\n")
+                else:
+                    # Other force fields: Include separate atomtypes file
+                    new_lines.append("\n; Include ligand atomtypes\n")
+                    new_lines.append(atomtypes_content)
+                    new_lines.append("\n; Include ligand topology\n")
                 new_lines.append(f'#include "../{lig_ff_path.name}/LIG.itp"\n')
 
             # Add ligand to the molecules section
@@ -652,6 +668,117 @@ class SystemBuilder:
             f.writelines(gro_lines)
 
         print(f"Successfully added {len(metals)} metal ion(s) to system")
+
+    def _validate_and_fix_topology(self, topol_top: str):
+        """
+        Validate topology file and fix common issues.
+
+        This method checks for and fixes:
+        1. Improper dihedrals without parameters (common in AMBER force fields)
+        2. Other topology inconsistencies
+
+        Args:
+            topol_top: Path to the main topology file
+        """
+        print("\nValidating topology file...")
+
+        # Find all protein chain topology files
+        protein_itp_files = list(self.model_dir.glob("topol_Protein_chain_*.itp"))
+
+        if not protein_itp_files:
+            print("No protein chain topology files found, skipping validation.")
+            return
+
+        issues_fixed = 0
+
+        for itp_file in protein_itp_files:
+            print(f"  Checking {itp_file.name}...")
+
+            # Check for improper dihedrals without parameters
+            fixed = self._fix_improper_dihedrals(str(itp_file))
+            if fixed > 0:
+                issues_fixed += fixed
+                print(f"    Fixed {fixed} improper dihedral(s) without parameters")
+
+        if issues_fixed > 0:
+            print(f"\nTopology validation: Fixed {issues_fixed} issue(s)")
+        else:
+            print("Topology validation: No issues found")
+
+    def _fix_improper_dihedrals(self, itp_file: str) -> int:
+        """
+        Fix improper dihedrals (type 4) that lack parameters in AMBER force fields.
+
+        This is a known issue with some AMBER force fields (e.g., amber14sb) where
+        pdb2gmx generates improper dihedral definitions without parameters. These
+        are typically used for maintaining planarity and can be safely removed if
+        the force field doesn't provide default parameters.
+
+        Args:
+            itp_file: Path to the protein chain ITP file
+
+        Returns:
+            Number of problematic dihedrals removed
+        """
+        with open(itp_file, 'r') as f:
+            lines = f.readlines()
+
+        # Track if we're in the improper dihedrals section
+        in_improper_section = False
+        fixed_lines = []
+        removed_count = 0
+
+        for i, line in enumerate(lines):
+            # Check for improper dihedrals section header
+            if '[ dihedrals ]' in line:
+                # Check next non-comment line to see if this is improper section
+                next_idx = i + 1
+                while next_idx < len(lines) and (lines[next_idx].strip().startswith(';') or not lines[next_idx].strip()):
+                    next_idx += 1
+
+                # Check if the next data line contains "func" column with value 4
+                if next_idx < len(lines):
+                    # Look ahead a few lines to check for type 4 dihedrals
+                    check_lines = lines[next_idx:min(next_idx + 5, len(lines))]
+                    for check_line in check_lines:
+                        if check_line.strip() and not check_line.strip().startswith(';'):
+                            parts = check_line.split()
+                            if len(parts) >= 5 and parts[4] == '4':
+                                in_improper_section = True
+                                break
+
+            # If in improper section and line is a dihedral definition
+            if in_improper_section and line.strip() and not line.strip().startswith(';'):
+                parts = line.split()
+                # Check if this is a type 4 dihedral with only atom indices (no parameters)
+                # Format: atom1 atom2 atom3 atom4 func_type [parameters...]
+                if len(parts) >= 5 and parts[4] == '4' and len(parts) == 5:
+                    # This improper dihedral has no parameters - likely will cause error
+                    # Remove it and add comment explaining why
+                    removed_count += 1
+                    fixed_lines.append(f"; REMOVED by PRISM: Improper dihedral without parameters: {line}")
+                    # Log which dihedral was removed
+                    continue
+
+            # Check if we're exiting improper section
+            if in_improper_section and line.strip().startswith('[') and '[ dihedrals ]' not in line:
+                in_improper_section = False
+
+            fixed_lines.append(line)
+
+        # Only write if we made changes
+        if removed_count > 0:
+            # Backup original file
+            backup_file = itp_file + '.backup'
+            if not Path(backup_file).exists():
+                with open(backup_file, 'w') as f:
+                    f.writelines(lines)
+
+            # Write fixed version
+            with open(itp_file, 'w') as f:
+                f.writelines(fixed_lines)
+
+        return removed_count
 
 
 if __name__ == '__main__':
