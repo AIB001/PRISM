@@ -1,0 +1,86 @@
+# PRISM Default Configuration File
+# This file serves as a template for creating custom configurations
+# Copy this file and modify as needed for your simulations
+
+# General settings
+general:
+  overwrite: false  # Whether to overwrite existing files
+  # gmx_command is auto-detected but can be specified here
+
+# Box settings
+box:
+  distance: 1.5  # Distance from protein to box edge (nm)
+  shape: cubic  # Box shape: cubic, dodecahedron, octahedron
+  center: true  # Center the protein in the box
+
+# Simulation parameters
+simulation:
+  temperature: 310  # Temperature (K) - body temperature
+  pressure: 1.0  # Pressure (bar)
+  pH: 7.0  # pH for protonation states
+  ligand_charge: 0  # Net charge of the ligand
+  production_time_ns: 500  # Production MD time (ns)
+  dt: 0.002  # Time step (ps)
+  equilibration_nvt_time_ps: 500  # NVT equilibration time (ps)
+  equilibration_npt_time_ps: 500  # NPT equilibration time (ps)
+
+# Ion settings
+ions:
+  neutral: true  # Neutralize the system
+  concentration: 0.15  # Salt concentration (M)
+  positive_ion: NA  # Positive ion type
+  negative_ion: CL  # Negative ion type
+
+# Constraint settings
+constraints:
+  algorithm: lincs  # Constraint algorithm
+  type: h-bonds  # Constrain: none, h-bonds, all-bonds
+  lincs_iter: 1  # LINCS iterations
+  lincs_order: 4  # LINCS order
+
+# Energy minimization
+energy_minimization:
+  integrator: steep  # Minimization algorithm
+  emtol: 200.0  # Convergence criterion (kJ/mol/nm)
+  emstep: 0.01  # Initial step size
+  nsteps: 10000  # Maximum steps
+
+# Output settings
+output:
+  trajectory_interval_ps: 500  # Save trajectory every X ps
+  energy_interval_ps: 10  # Save energy every X ps
+  log_interval_ps: 10  # Log output every X ps
+  compressed_trajectory: true  # Use compressed XTC format
+
+# Electrostatics
+electrostatics:
+  coulombtype: PME  # Electrostatics method
+  rcoulomb: 1.0  # Coulomb cutoff (nm)
+  pme_order: 4  # PME interpolation order
+  fourierspacing: 0.16  # Grid spacing for FFT (nm)
+
+# Van der Waals
+vdw:
+  rvdw: 1.0  # VdW cutoff (nm)
+  dispcorr: EnerPres  # Dispersion correction
+
+# Temperature coupling
+temperature_coupling:
+  tcoupl: V-rescale  # Temperature coupling algorithm
+  tc_grps:  # Coupling groups
+    - Protein
+    - Non-Protein
+  tau_t:  # Coupling time constants (ps)
+    - 0.1
+    - 0.1
+
+# Pressure coupling
+pressure_coupling:
+  pcoupl: C-rescale  # Pressure coupling algorithm (GROMACS 2021+)
+  pcoupltype: isotropic  # Pressure coupling type
+  tau_p: 1.0  # Coupling time constant (ps)
+  compressibility: 4.5e-05  # Compressibility (bar^-1)
+
+# Note: Force field and water model are specified via command line:
+# --forcefield amber99sb --water tip3p
+# Available options depend on your GROMACS installation
