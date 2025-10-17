@@ -58,13 +58,13 @@ extras_require = {
 
 setup(
     name="prism-md",
-    version="1.1.0",
+    version="1.0.0",
     author="PRISM Development Team",
     author_email="",
     description="Protein Receptor Interaction Simulation Modeler - A tool for building protein-ligand MD systems",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/aib001/PRISM",
+    url="https://github.com/yourusername/PRISM",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
