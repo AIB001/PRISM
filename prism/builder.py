@@ -23,6 +23,8 @@ if __name__ == "__main__" and __package__ is None:
     from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
     from prism.forcefield.openff import OpenFFForceFieldGenerator
     from prism.forcefield.cgenff import CGenFFForceFieldGenerator
+    from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
+    from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
 else:
     # Normal package imports
     from .utils.environment import GromacsEnvironment
@@ -34,6 +36,8 @@ else:
         from .forcefield.gaff2 import GAFF2ForceFieldGenerator
         from .forcefield.openff import OpenFFForceFieldGenerator
         from .forcefield.cgenff import CGenFFForceFieldGenerator
+        from .forcefield.opls_aa import OPLSAAForceFieldGenerator
+        from .forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
     except ImportError:
         # For standalone usage
         sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,6 +46,8 @@ else:
             from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
             from prism.forcefield.openff import OpenFFForceFieldGenerator
             from prism.forcefield.cgenff import CGenFFForceFieldGenerator
+            from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
+            from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
         except ImportError:
             print("Error: Cannot import force field generators")
             print("Please check your PRISM installation")
@@ -65,7 +71,7 @@ class PRISMBuilder:
         output_dir : str
             Directory where output files will be stored
         ligand_forcefield : str
-            Force field for ligand ('gaff', 'gaff2', 'openff', or 'cgenff')
+            Force field for ligand ('gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid')
         config_path : str, optional
             Path to configuration YAML file
         forcefield : str, optional
@@ -84,8 +90,8 @@ class PRISMBuilder:
         self.forcefield_path = forcefield_path
 
         # Validate ligand force field
-        if self.ligand_forcefield not in ['gaff', 'gaff2', 'openff', 'cgenff']:
-            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', or 'cgenff'")
+        if self.ligand_forcefield not in ['gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid']:
+            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid'")
 
         # Validate cgenff requires forcefield_path
         if self.ligand_forcefield == 'cgenff' and not forcefield_path:
@@ -219,6 +225,45 @@ class PRISMBuilder:
                 self.ligand_path,
                 self.output_dir,
                 cgenff_dir=self.forcefield_path,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'opls':
+            # Use OPLS-AA force field generator (via LigParGen)
+            generator = OPLSAAForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                charge=self.config['ligand_forcefield']['charge'],
+                charge_model='cm1a',  # or 'cm5' for more accuracy
+                align_to_input=True,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'mmff':
+            # Use MMFF force field generator (via SwissParam)
+            generator = MMFFForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'match':
+            # Use MATCH force field generator (via SwissParam)
+            generator = MATCHForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'hybrid':
+            # Use hybrid MMFF-based-MATCH force field generator (via SwissParam)
+            generator = HybridMMFFMATCHForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
                 overwrite=self.overwrite
             )
             self.lig_ff_dir = generator.run()
@@ -447,8 +492,16 @@ Example usage:
   # Using OpenFF force field with specific protein force field
   prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff --forcefield amber14sb
 
+  # Using OPLS-AA force field (via LigParGen server, requires internet)
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield opls
+
   # Using CGenFF force field (requires web-downloaded files)
   prism protein.pdb dummy.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+
+  # Using SwissParam force fields (via SwissParam server, requires internet)
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield mmff    # MMFF-based
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield match   # MATCH
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield hybrid  # Hybrid MMFF-based-MATCH
 
   # With custom configuration file
   prism protein.pdb ligand.mol2 -o output_dir --config config.yaml
@@ -487,8 +540,8 @@ Example usage:
                           help="Protein force field name (default: amber99sb)")
     ff_group.add_argument("--water", "-w", type=str, default="tip3p",
                           help="Water model name (default: tip3p)")
-    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'gaff2', 'openff', 'cgenff'], default='gaff',
-                          help="Force field for ligand: gaff (default), gaff2 (improved), openff, or cgenff")
+    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid'], default='gaff',
+                          help="Force field for ligand: gaff (default), gaff2 (improved), openff, cgenff, opls (OPLS-AA via LigParGen), mmff/match/hybrid (SwissParam)")
     ff_group.add_argument("--ligand-charge", type=int, default=0,
                           help="Net charge of ligand (default: 0)")
     ff_group.add_argument("--forcefield-path", "-ffp", type=str, default=None,

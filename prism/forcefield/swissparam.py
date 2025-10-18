@@ -450,8 +450,42 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
             # Parse job ID
             xml = response.read().strip()
-            match = re.search(r'job=([^"&]+)', xml.decode())
+            print(f"DEBUG: Tautomer submission response length: {len(xml)}")
+            print(f"DEBUG: First 500 chars of response: {xml[:500].decode() if len(xml) > 0 else 'EMPTY'}")
+
+            # Check if response contains an error message
+            response_text = xml.decode()
+            if 'ERROR:' in response_text or 'error' in response_text.lower():
+                # Extract error message
+                error_match = re.search(r'(MATCH ERROR:[^<]+)', response_text)
+                if error_match:
+                    error_msg = error_match.group(1).strip()
+                    print(f"\n{'='*60}")
+                    print(f"SwissParam Error: {error_msg}")
+                    print(f"{'='*60}")
+                    print("\nThis tautomer cannot be processed with MATCH force field.")
+                    print("Possible solutions:")
+                    print("  1. Try a different force field: --ligand-forcefield mmff")
+                    print("  2. Try the hybrid approach: --ligand-forcefield hybrid")
+                    print("  3. Use GAFF/GAFF2: --ligand-forcefield gaff2")
+                    print("  4. Manually prepare the ligand structure to avoid tautomers")
+                    raise ValueError(f"SwissParam MATCH force field failed: {error_msg}")
+                else:
+                    print(f"ERROR: SwissParam returned an error response")
+                    print(f"Response preview:\n{response_text[:1000]}")
+                    raise ValueError("SwissParam tautomer submission failed")
+
+            # Try multiple patterns to extract job ID
+            match = re.search(r'job=([^"&]+)', response_text)
             if not match:
+                # Try alternative patterns
+                match = re.search(r'/results/(\d+)', response_text)
+            if not match:
+                match = re.search(r'jobid["\s:=]+(\d+)', response_text, re.IGNORECASE)
+
+            if not match:
+                print(f"ERROR: Could not extract job ID from response")
+                print(f"Full response:\n{response_text}")
                 raise ValueError("Could not extract job ID from tautomer submission")
 
             jobid = match.group(1)
@@ -586,7 +620,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         with open(source_itp, 'r') as f:
             content = f.read()
 
-        # Replace common SwissParam molecule names with LIG
+        # Replace common SwissParam molecule names with LIG (global)
         content = re.sub(r'\bUNL\b', 'LIG', content)  # SwissParam default
         content = re.sub(r'\bunl\b', 'LIG', content)
         content = re.sub(r'\bligand\b', 'LIG', content, flags=re.IGNORECASE)
@@ -594,6 +628,34 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         # Also replace the ligand name from file
         ligand_basename = Path(self.ligand_path).stem
         content = re.sub(rf'\b{re.escape(ligand_basename)}\b', 'LIG', content, flags=re.IGNORECASE)
+
+        # Also replace in [ moleculetype ] section specifically
+        content = re.sub(r'(\[\s*moleculetype\s*\]\s*;\s*\w+\s+\w+\s+)\S+', r'\1LIG', content)
+
+        # Replace residue names in [ atoms ] section (4th column)
+        lines = content.split('\n')
+        new_lines = []
+        in_atoms = False
+
+        for line in lines:
+            if line.strip().startswith('[ atoms ]'):
+                in_atoms = True
+                new_lines.append(line)
+            elif in_atoms and line.strip().startswith('['):
+                in_atoms = False
+                new_lines.append(line)
+            elif in_atoms and not line.strip().startswith(';') and line.strip():
+                # Use regex to replace residue name (4th field) while preserving spacing
+                modified_line = re.sub(
+                    r'^(\s*\d+\s+\S+\s+\d+\s+)\S+(\s+)',
+                    r'\1LIG\2',
+                    line
+                )
+                new_lines.append(modified_line)
+            else:
+                new_lines.append(line)
+
+        content = '\n'.join(new_lines)
 
         # Add position restraints include if not present
         if "#ifdef POSRES" not in content:
