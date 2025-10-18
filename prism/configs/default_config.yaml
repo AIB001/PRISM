@@ -17,7 +17,7 @@ box:
 simulation:
   temperature: 310  # Temperature (K) - body temperature
   pressure: 1.0  # Pressure (bar)
-  pH: 7.0  # pH for protonation states
+  pH: 7.4  # pH for protonation states
   ligand_charge: 0  # Net charge of the ligand
   production_time_ns: 500  # Production MD time (ns)
   dt: 0.002  # Time step (ps)
