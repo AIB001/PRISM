@@ -23,6 +23,8 @@ generate_html("trajectory.xtc", "topology.pdb", "ligand.mol2", "output.html")
 - 🎨 **2D/3D interactive visualization** - Switch between wheel layout and molecular structure
 - 📊 **Color-coded contact frequencies** - Instantly identify key interactions (0-100% scale)
 - 🖱️ **Draggable interface** - Rearrange residues and adjust layout in real-time
+- 🔄 **Flexible display modes** - Choose between unique or duplicate residue modes
+- 🎛️ **Customizable view** - Toggle grid lines, rotate 180°, hide/show elements
 - 📸 **High-resolution export** - Export publication-quality PNG images (up to 8K)
 - 📈 **Detailed statistics** - Contact frequencies, atom-level details, distance measurements
 - 🔍 **Interactive tooltips** - Hover over atoms/residues for detailed information
@@ -63,8 +65,10 @@ generate_html("trajectory.xtc", "topology.pdb", "ligand.mol2", "output.html")
 - **Automatic ligand detection** - No manual specification needed
 - **Fast vectorized analysis** - Handles trajectories with >1000 frames efficiently
 - **Smart frame sampling** - Automatically samples large trajectories for performance
+- **Two contact display modes** - Unique residue or allow duplicates for detailed analysis
 - **Multiple visualization modes** - 2D wheel layout and 3D molecular structure
-- **Real-time interactivity** - Drag, zoom, pan, and rearrange elements
+- **Real-time interactivity** - Drag, zoom, pan, rotate, and rearrange elements
+- **Customizable display** - Toggle grid lines, hide/show connections and hydrogens
 
 ##### Visual Elements
 - **Color-coded atoms** - Carbon (green), Oxygen (red), Nitrogen (blue), Sulfur (yellow)
@@ -78,22 +82,65 @@ generate_html("trajectory.xtc", "topology.pdb", "ligand.mol2", "output.html")
 - **Distance measurements** - Average contact distances for each interaction
 - **Automatic filtering** - Only shows significant contacts (>10% frequency)
 
+#### Contact Display Modes
+
+PRISM supports two contact visualization modes to handle different analysis scenarios:
+
+##### Mode 1: Unique Residue Mode (Default)
+**Best for:** Quick overview of main contacting residues
+
+- Each residue appears **only once** in the visualization
+- Shows the **best contact** (highest frequency) per residue
+- Default: Top 20 contacts displayed
+- Based on `residue_proportions` metric
+
+**Example:** If ARG123 contacts both ligand atom C1 (80%) and C5 (75%), only the C1 contact is shown.
+
+##### Mode 2: Allow Duplicate Residues Mode
+**Best for:** Detailed analysis of multi-point interactions
+
+- Same residue can appear **multiple times** with different ligand atoms
+- Shows all **high-frequency atom-pair contacts**
+- Default: Top 25 contacts displayed
+- Based on `contact_frequencies` metric (atom-pair level)
+
+**Example:** ARG123 appears twice - once for ARG123-C1 (80%) and once for ARG123-C5 (75%).
+
+##### Comparison Table
+
+| Feature | Unique Mode | Duplicate Mode |
+|---------|-------------|----------------|
+| **Parameter** | `allow_duplicate_residues=False` | `allow_duplicate_residues=True` |
+| **Residue repetition** | One per residue | Multiple allowed |
+| **Contact count** | Top 20 (default) | Top 25 (default) |
+| **Data source** | Residue-level aggregation | Atom-pair level |
+| **Use case** | Overview of key residues | Detailed multi-point contacts |
+
 #### Command-Line Interface
 
 ```bash
-# Basic usage
+# Mode 1: Unique residue mode (default)
 python -m prism.analysis.contact.htmlgen \
     trajectory.xtc \
     topology.pdb \
     ligand.mol2 \
     -o contact_analysis.html
 
-# Custom output location
+# Mode 2: Allow duplicate residues
 python -m prism.analysis.contact.htmlgen \
-    /path/to/prod.xtc \
-    /path/to/system.pdb \
-    /path/to/ligand.mol2 \
-    -o /output/my_contacts.html
+    trajectory.xtc \
+    topology.pdb \
+    ligand.mol2 \
+    -o contact_analysis.html \
+    --allow-duplicates
+
+# Custom maximum contacts
+python -m prism.analysis.contact.htmlgen \
+    trajectory.xtc \
+    topology.pdb \
+    ligand.mol2 \
+    --allow-duplicates \
+    --max-contacts 30
 ```
 
 #### Python API
@@ -102,12 +149,22 @@ python -m prism.analysis.contact.htmlgen \
 ```python
 from prism.analysis.contact import generate_html
 
-# One-line generation
+# Mode 1: Unique residue mode (default)
 generate_html(
     trajectory="trajectory.xtc",
     topology="topology.pdb",
     ligand="ligand.mol2",
     output="contact_analysis.html"
+)
+
+# Mode 2: Allow duplicate residues
+generate_html(
+    trajectory="trajectory.xtc",
+    topology="topology.pdb",
+    ligand="ligand.mol2",
+    output="contact_analysis.html",
+    allow_duplicate_residues=True,
+    max_contacts=25
 )
 ```
 
@@ -115,11 +172,22 @@ generate_html(
 ```python
 from prism.analysis.contact import HTMLGenerator
 
-# Create generator instance
+# Mode 1: Create generator with unique residue mode
 generator = HTMLGenerator(
     trajectory_file="trajectory.xtc",
     topology_file="topology.pdb",
-    ligand_file="ligand.mol2"
+    ligand_file="ligand.mol2",
+    allow_duplicate_residues=False,  # Default
+    max_contacts=20                   # Default for unique mode
+)
+
+# Mode 2: Allow duplicate residues for detailed analysis
+generator = HTMLGenerator(
+    trajectory_file="trajectory.xtc",
+    topology_file="topology.pdb",
+    ligand_file="ligand.mol2",
+    allow_duplicate_residues=True,
+    max_contacts=25                   # Default for duplicate mode
 )
 
 # Run analysis
@@ -937,7 +1005,7 @@ rm -rf cache/  # Delete all cached data
 
 ### Contact Analysis
 
-#### `generate_html(trajectory, topology, ligand, output)`
+#### `generate_html(trajectory, topology, ligand, output, allow_duplicate_residues, max_contacts)`
 Quick HTML generation function.
 
 **Parameters:**
@@ -945,6 +1013,8 @@ Quick HTML generation function.
 - `topology` (str): Topology file path (.pdb, .gro, etc.)
 - `ligand` (str): Ligand structure file path (.mol2, .sdf, .mol)
 - `output` (str): Output HTML file path (default: "contact_analysis.html")
+- `allow_duplicate_residues` (bool): Allow same residue to appear multiple times (default: False)
+- `max_contacts` (int): Maximum contacts to display (default: 20 for unique mode, 25 for duplicate mode)
 
 **Returns:**
 - `str`: Path to generated HTML file
@@ -953,8 +1023,15 @@ Quick HTML generation function.
 
 **Methods:**
 
-##### `__init__(trajectory_file, topology_file, ligand_file)`
+##### `__init__(trajectory_file, topology_file, ligand_file, allow_duplicate_residues, max_contacts)`
 Initialize generator with input files.
+
+**Parameters:**
+- `trajectory_file` (str): Trajectory file path
+- `topology_file` (str): Topology file path
+- `ligand_file` (str): Ligand structure file path
+- `allow_duplicate_residues` (bool): Allow duplicate residues (default: False)
+- `max_contacts` (int): Maximum contacts to display (default: auto-determined)
 
 ##### `analyze()`
 Run complete contact analysis.

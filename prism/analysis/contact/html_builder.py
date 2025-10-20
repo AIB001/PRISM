@@ -335,14 +335,16 @@ class HTMLBuilder:
             <button class="zoom-btn" onclick="zoomOut()">−</button>
             <button class="zoom-btn" onclick="centerView()" style="width: auto; padding: 0 15px;">Center</button>
         </div>
-        
+
         <div class="controls">
             <button class="control-btn" onclick="resetPositions()">Reset Layout</button>
             <button class="control-btn" onclick="rotateWheel()">Rotate Wheel</button>
             <button class="control-btn" onclick="toggleDistanceLock()" id="distanceLockBtn">🔒 Distance Locked</button>
             <button class="control-btn" onclick="toggle3DMode()" id="mode3DBtn">2D Mode</button>
             <button class="control-btn secondary" onclick="toggleConnections()" id="connectBtn">Hide Connections</button>
-            <button class="control-btn secondary" onclick="toggleHydrogens()" id="hydrogenBtn">Hide H atoms</button> 
+            <button class="control-btn secondary" onclick="toggleHydrogens()" id="hydrogenBtn">Hide H atoms</button>
+            <button class="control-btn secondary" onclick="toggleGrid()" id="gridBtn">Hide Grid</button>
+            <button class="control-btn" onclick="rotateCanvas180()">Rotate 180°</button>
             <div class="export-controls" style="display: inline-flex; gap: 10px; align-items: center;">
                 <select id="exportQuality" class="control-btn secondary" style="padding: 10px;">
                     <option value="1">Standard (1x)</option>

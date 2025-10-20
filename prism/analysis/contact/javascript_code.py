@@ -30,7 +30,8 @@ def get_contact_map_class_part1():
                     this.ctx = this.canvas.getContext('2d');
                     this.tooltip = document.getElementById('tooltip');
                     this.showConnections = true;
-                    this.showHydrogens = true;  
+                    this.showHydrogens = true;
+                    this.showGrid = true;
                     this.distanceLocked = true;
                     this.is3DMode = false;
                     this.isDragging = false;
@@ -957,20 +958,20 @@ def get_drawing_methods():
             draw() {
                 this.ctx.save();
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                
+
                 this.ctx.translate(this.viewOffset.x, this.viewOffset.y);
                 this.ctx.scale(this.zoom, this.zoom);
-                
+
                 if (this.is3DMode) {
-                    this.drawGrid();
+                    if (this.showGrid) this.drawGrid();
                     this.draw3DScene();
                 } else {
-                    this.drawGrid();
+                    if (this.showGrid) this.drawGrid();
                     if (this.showConnections) this.drawConnections();
                     this.drawLigand();
                     this.drawContacts();
                 }
-                
+
                 this.ctx.restore();
             }
             
@@ -1068,7 +1069,53 @@ def get_utility_functions():
             const btn = document.getElementById('hydrogenBtn');
             btn.textContent = contactMap.showHydrogens ? 'Hide H atoms' : 'Show H atoms';
         }
-        
+
+        function toggleGrid() {
+            contactMap.showGrid = !contactMap.showGrid;
+            const btn = document.getElementById('gridBtn');
+            btn.textContent = contactMap.showGrid ? 'Hide Grid' : 'Show Grid';
+        }
+
+        function rotateCanvas180() {
+            // Animate 180-degree rotation
+            const steps = 30;
+            let currentStep = 0;
+            const rotationPerStep = Math.PI / steps;
+
+            const animate = () => {
+                if (currentStep < steps) {
+                    // Rotate all contacts around the center
+                    contactMap.contacts.forEach(contact => {
+                        const dx = contact.x - contactMap.centerX;
+                        const dy = contact.y - contactMap.centerY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const currentAngle = Math.atan2(dy, dx);
+                        const newAngle = currentAngle + rotationPerStep;
+
+                        contact.x = contactMap.centerX + dist * Math.cos(newAngle);
+                        contact.y = contactMap.centerY + dist * Math.sin(newAngle);
+                        contact.angle = newAngle;
+                    });
+
+                    // Rotate ligand atoms around the center
+                    contactMap.ligandAtoms.forEach(atom => {
+                        const dx = atom.x - contactMap.centerX;
+                        const dy = atom.y - contactMap.centerY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const currentAngle = Math.atan2(dy, dx);
+                        const newAngle = currentAngle + rotationPerStep;
+
+                        atom.x = contactMap.centerX + dist * Math.cos(newAngle);
+                        atom.y = contactMap.centerY + dist * Math.sin(newAngle);
+                    });
+
+                    currentStep++;
+                    setTimeout(animate, 16); // ~60fps
+                }
+            };
+            animate();
+        }
+
         function centerView() { 
             // Calculate the bounding box of all visible elements
             let minX = Infinity, maxX = -Infinity;
