@@ -5,7 +5,7 @@
 CGenFF force field generator wrapper for PRISM
 
 CGenFF (CHARMM General Force Field) requires downloading ligand files
-from the CGenFF web server: https://cgenff.umaryland.edu/
+from the CGenFF web server: https://cgenff.com/
 
 This module processes the downloaded CGenFF files and converts them
 to PRISM-standardized GROMACS format.

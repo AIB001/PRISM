@@ -182,7 +182,7 @@ python /path/to/PRISM/prism/builder.py
 4. **Using CGenFF**:
 
    ```bash
-   # First download CGenFF files from [https://cgenff.com/](https://cgenff.com/)
+   # First download CGenFF files from https://cgenff.com/
    prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
    ```
 

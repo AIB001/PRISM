@@ -128,7 +128,7 @@ def get_generator_info():
             "class": "CGenFFForceFieldGenerator",
             "description": "CGenFF (CHARMM General Force Field) - requires web-downloaded files",
             "output_dir": "LIG.cgenff2gmx",
-            "dependencies": ["Web download from https://cgenff.umaryland.edu/"]
+            "dependencies": ["Web download from https://cgenff.com/"]
         }
 
     if "OPLSAAForceFieldGenerator" in __all__:
