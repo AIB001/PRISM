@@ -103,7 +103,7 @@ conda install conda-forge::openbabel
 
 CGenFF requires downloading force field files from the web server:
 
-1. Visit https://cgenff.umaryland.edu/
+1. Visit [https://cgenff.com/](https://cgenff.com/)
 2. Upload your ligand structure (MOL2/SDF)
 3. Download the generated files (PDB and TOP files)
 4. Place them in a directory
@@ -182,7 +182,7 @@ python /path/to/PRISM/prism/builder.py
 4. **Using CGenFF**:
 
    ```bash
-   # First download CGenFF files from https://cgenff.umaryland.edu/
+   # First download CGenFF files from [https://cgenff.com/](https://cgenff.com/)
    prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
    ```
 
@@ -535,3 +535,4 @@ If you use PRISM in your research, please cite:
 
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
+
