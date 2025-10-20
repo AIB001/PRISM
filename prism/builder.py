@@ -549,9 +549,9 @@ Example usage:
 
     # Box options
     box_group = parser.add_argument_group('Box options')
-    box_group.add_argument("--box-distance", type=float, default=1.5,
+    box_group.add_argument("--box-distance", "-d", type=float, default=1.5,
                            help="Distance from protein to box edge in nm (default: 1.5)")
-    box_group.add_argument("--box-shape", choices=['cubic', 'dodecahedron', 'octahedron'], default='cubic',
+    box_group.add_argument("--box-shape", "-bs", choices=['cubic', 'dodecahedron', 'octahedron'], default='cubic',
                            help="Box shape (default: cubic)")
     box_group.add_argument("--no-center", action="store_true",
                            help="Don't center protein in box")
@@ -577,11 +577,11 @@ Example usage:
     ion_group = parser.add_argument_group('Ion options')
     ion_group.add_argument("--no-neutralize", action="store_true",
                            help="Don't neutralize the system")
-    ion_group.add_argument("--salt-concentration", type=float, default=0.15,
+    ion_group.add_argument("--salt-concentration", "-sc", type=float, default=0.15,
                            help="Salt concentration in M (default: 0.15)")
-    ion_group.add_argument("--positive-ion", default="NA",
+    ion_group.add_argument("--positive-ion", "-pion", default="NA",
                            help="Positive ion type (default: NA)")
-    ion_group.add_argument("--negative-ion", default="CL",
+    ion_group.add_argument("--negative-ion", "-nion", default="CL",
                            help="Negative ion type (default: CL)")
 
     # Energy minimization
@@ -611,13 +611,13 @@ Example usage:
 
     # MM/PBSA options
     mmpbsa_group = parser.add_argument_group('MM/PBSA options')
-    mmpbsa_group.add_argument("--mmpbsa", action="store_true",
+    mmpbsa_group.add_argument("--mmpbsa", "-pbsa", action="store_true",
                               help="Run MM/PBSA calculation instead of full MD workflow")
-    mmpbsa_group.add_argument("--mode", choices=['single-frame', 'trajectory'], default='single-frame',
+    mmpbsa_group.add_argument("--mode", "-m", choices=['single-frame', 'trajectory'], default='single-frame',
                               help="MM/PBSA mode: single-frame (docking pose) or trajectory (MD)")
-    mmpbsa_group.add_argument("--structure", help="Path to structure file (GRO) for single-frame MM/PBSA")
-    mmpbsa_group.add_argument("--system-dir", help="Path to PRISM-generated GMX_PROLIG_MD directory")
-    mmpbsa_group.add_argument("--mmpbsa-output", help="Output directory for MM/PBSA results (default: same as structure file directory)")
+    mmpbsa_group.add_argument("--structure", "-s", help="Path to structure file (GRO) for single-frame MM/PBSA")
+    mmpbsa_group.add_argument("--system-dir", "-sd", help="Path to PRISM-generated GMX_PROLIG_MD directory")
+    mmpbsa_group.add_argument("--mmpbsa-output", "-po", help="Output directory for MM/PBSA results (default: same as structure file directory)")
 
     args = parser.parse_args()
 

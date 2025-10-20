@@ -289,6 +289,85 @@ fi
 
 run `bash localrun.sh`
 
+## Command-Line Parameters
+
+PRISM provides convenient shortcuts for frequently used parameters, allowing you to write more concise commands while maintaining full compatibility with the complete parameter names.
+
+### Common Parameters and Shortcuts
+
+**Basic Setup**
+- `-pf, --protein-file`: Protein PDB file path
+- `-lf, --ligand-file`: Ligand structure file (MOL2/SDF)
+- `-o, --output`: Output directory for generated files
+- `-c, --config`: Custom configuration YAML file
+- `-f, --overwrite`: Force overwrite existing files
+
+**Force Field Options**
+- `-ff, --forcefield`: Protein force field (e.g., amber99sb, amber14sb, charmm36)
+- `-lff, --ligand-forcefield`: Ligand force field (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+- `-w, --water`: Water model (tip3p, tip4p, spce)
+- `-ffp, --forcefield-path`: Path to CGenFF downloaded files (required for cgenff)
+
+**System Configuration**
+- `-d, --box-distance`: Distance from protein to box edge in nm (default: 1.5)
+- `-bs, --box-shape`: Simulation box shape (cubic, dodecahedron, octahedron)
+- `-t, --temperature`: Simulation temperature in Kelvin (default: 310)
+- `-p, --pressure`: Simulation pressure in bar (default: 1.0)
+
+**Ion Parameters**
+- `-sc, --salt-concentration`: Salt concentration in M (default: 0.15)
+- `-pion, --positive-ion`: Positive ion type (default: NA)
+- `-nion, --negative-ion`: Negative ion type (default: CL)
+
+**MM/PBSA Analysis**
+- `-pbsa, --mmpbsa`: Run MM/PBSA binding energy calculation
+- `-m, --mode`: MM/PBSA mode (single-frame or trajectory)
+- `-s, --structure`: Structure file for single-frame calculation
+- `-sd, --system-dir`: PRISM-generated system directory
+- `-po, --mmpbsa-output`: Output directory for MM/PBSA results
+
+### Usage Examples with Shortcuts
+
+**Quick start with minimal typing:**
+```bash
+prism protein.pdb ligand.mol2 -o output -f
+```
+
+**Specify force fields using shortcuts:**
+```bash
+prism protein.pdb ligand.mol2 -o output -ff amber14sb -lff gaff2 -w tip4p
+```
+
+**Customize system parameters:**
+```bash
+prism protein.pdb ligand.mol2 -o output -d 2.0 -t 300 -sc 0.1 -f
+```
+
+**Run MM/PBSA calculation:**
+```bash
+prism -pbsa -m single-frame -s em.gro -sd system_dir -f
+```
+
+**Mix shortcuts and full names (fully compatible):**
+```bash
+prism protein.pdb ligand.mol2 -o output --forcefield amber99sb -lff openff --box-distance 1.8
+```
+
+**Advanced example combining multiple options:**
+```bash
+prism protein.pdb ligand.sdf \
+    -o my_simulation \
+    -ff amber14sb \
+    -lff openff \
+    -w tip4p \
+    -d 2.0 \
+    -t 310 \
+    -sc 0.15 \
+    -f
+```
+
+All shortcuts are designed to be intuitive while maintaining backward compatibility with existing scripts that use full parameter names.
+
 ## Force Field Selection Guide
 
 ### When to Use Each Force Field
