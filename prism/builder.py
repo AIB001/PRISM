@@ -435,6 +435,19 @@ class PRISMBuilder:
             print("Warning: GMX_PROLIG_MD directory not found, skipping localrun.sh generation")
             return None
 
+        # Clean up Emacs backup files (#topol.top.1#, #topol.top.2#, etc.)
+        import glob
+        backup_pattern = os.path.join(gmx_md_dir, '#*#')
+        backup_files = glob.glob(backup_pattern)
+        if backup_files:
+            print(f"Cleaning up {len(backup_files)} Emacs backup file(s)...")
+            for backup_file in backup_files:
+                try:
+                    os.remove(backup_file)
+                    print(f"  Removed: {os.path.basename(backup_file)}")
+                except Exception as e:
+                    print(f"  Warning: Could not remove {backup_file}: {e}")
+
         script_path = os.path.join(gmx_md_dir, 'localrun.sh')
 
         script_content = '''#!/bin/bash
