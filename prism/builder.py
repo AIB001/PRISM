@@ -609,7 +609,57 @@ Example usage:
     util_group.add_argument("--gmx-command", default=None,
                             help="GROMACS command to use (auto-detected if not specified)")
 
+    # MM/PBSA options
+    mmpbsa_group = parser.add_argument_group('MM/PBSA options')
+    mmpbsa_group.add_argument("--mmpbsa", action="store_true",
+                              help="Run MM/PBSA calculation instead of full MD workflow")
+    mmpbsa_group.add_argument("--mode", choices=['single-frame', 'trajectory'], default='single-frame',
+                              help="MM/PBSA mode: single-frame (docking pose) or trajectory (MD)")
+    mmpbsa_group.add_argument("--structure", help="Path to structure file (GRO) for single-frame MM/PBSA")
+    mmpbsa_group.add_argument("--system-dir", help="Path to PRISM-generated GMX_PROLIG_MD directory")
+    mmpbsa_group.add_argument("--mmpbsa-output", help="Output directory for MM/PBSA results (default: same as structure file directory)")
+
     args = parser.parse_args()
+
+    # Handle MM/PBSA workflow (takes priority over normal workflow)
+    if args.mmpbsa:
+        if args.mode == 'single-frame':
+            # Import MM/PBSA module
+            try:
+                if __name__ == "__main__" and __package__ is None:
+                    from prism.mmpbsa import SingleFrameMMPBSA
+                else:
+                    from .mmpbsa import SingleFrameMMPBSA
+            except ImportError as e:
+                print(f"Error importing MM/PBSA module: {e}")
+                print("Please ensure gmx_MMPBSA is installed: pip install gmx_MMPBSA")
+                sys.exit(1)
+
+            # Validate required arguments
+            if not args.structure:
+                parser.error("--structure is required for single-frame MM/PBSA")
+            if not args.system_dir:
+                parser.error("--system-dir is required for single-frame MM/PBSA")
+
+            # Run single-frame MM/PBSA
+            try:
+                calculator = SingleFrameMMPBSA(
+                    structure_file=args.structure,
+                    system_dir=args.system_dir,
+                    output_dir=args.mmpbsa_output,  # None defaults to structure file directory
+                    overwrite=args.overwrite
+                )
+                calculator.run()
+                sys.exit(0)
+            except Exception as e:
+                print(f"\nMM/PBSA calculation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(1)
+        else:
+            # Trajectory mode - to be implemented later
+            print("Trajectory MM/PBSA mode will be implemented in the future")
+            sys.exit(1)
 
     # Handle --export-config option
     if args.export_config:
