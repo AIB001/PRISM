@@ -296,17 +296,21 @@ PRISM provides convenient shortcuts for frequently used parameters, allowing you
 ### Common Parameters and Shortcuts
 
 **Basic Setup**
-- `-pf, --protein-file`: Protein PDB file path
-- `-lf, --ligand-file`: Ligand structure file (MOL2/SDF)
+- `-pf, --protein-file`: Protein PDB file path (alternative to positional argument)
+- `-lf, --ligand-file`: Ligand structure file (MOL2/SDF) (alternative to positional argument)
 - `-o, --output`: Output directory for generated files
 - `-c, --config`: Custom configuration YAML file
 - `-f, --overwrite`: Force overwrite existing files
 
 **Force Field Options**
-- `-ff, --forcefield`: Protein force field (e.g., amber99sb, amber14sb, charmm36)
-- `-lff, --ligand-forcefield`: Ligand force field (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+- `-ff, --forcefield`: **Protein** force field (e.g., amber99sb, amber14sb, charmm36)
+- `-lff, --ligand-forcefield`: **Ligand** force field (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
 - `-w, --water`: Water model (tip3p, tip4p, spce)
 - `-ffp, --forcefield-path`: Path to CGenFF downloaded files (required for cgenff)
+
+**⚠️ Important Distinction:**
+- `-pf`/`-lf` are for **file paths** (where to find protein/ligand files)
+- `-ff`/`-lff` are for **force fields** (which force field to use for protein/ligand)
 
 **System Configuration**
 - `-d, --box-distance`: Distance from protein to box edge in nm (default: 1.5)
