@@ -397,10 +397,126 @@ class ProteinCleaner:
         distances = np.sqrt(np.sum((coords - point) ** 2, axis=1))
         return float(np.min(distances))
 
+    def _convert_metals_to_atom(self, hetatm_lines: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Convert metal ion HETATM records to ATOM records for pdb2gmx compatibility.
+
+        This allows pdb2gmx to directly recognize and include metal ions in the topology,
+        avoiding the need for manual addition later.
+
+        Parameters
+        ----------
+        hetatm_lines : list of str
+            HETATM records from cleaned PDB
+
+        Returns
+        -------
+        tuple
+            (metal_atom_lines, other_hetatm_lines)
+            - metal_atom_lines: Metal ions converted to ATOM format
+            - other_hetatm_lines: Other HETATM records (cofactors, etc.)
+        """
+        metal_atom_lines = []
+        other_hetatm_lines = []
+
+        for line in hetatm_lines:
+            residue_name = line[17:20].strip().upper()
+            atom_name = line[12:16].strip().upper()
+
+            # Check if this is a metal ion that should be converted
+            is_metal = (residue_name in self.structural_metals or
+                       atom_name in self.structural_metals or
+                       residue_name in self.non_structural_ions or
+                       atom_name in self.non_structural_ions)
+
+            if is_metal:
+                # Convert HETATM to ATOM
+                # PDB format: columns 1-6 are record type
+                atom_line = 'ATOM  ' + line[6:]
+                metal_atom_lines.append(atom_line)
+
+                if self.verbose:
+                    chain = line[21] if len(line) > 21 else ' '
+                    resnum = line[22:26].strip() if len(line) > 26 else ''
+                    print(f"  Converting {residue_name} (chain {chain}, res {resnum}) from HETATM to ATOM")
+            else:
+                # Keep as HETATM (cofactors, modified residues, etc.)
+                other_hetatm_lines.append(line)
+
+        return metal_atom_lines, other_hetatm_lines
+
+    def _group_by_chain(self, protein_lines: List[str], metal_lines: List[str]) -> dict:
+        """
+        Group protein and metal atoms by chain ID for proper PDB output.
+
+        IMPORTANT: pdb2gmx requires each chain to have a consistent residue type.
+        Since metals are type 'Ion' and proteins are type 'Protein', they cannot
+        be in the same chain. We assign each metal to a NEW unique chain ID.
+
+        Parameters
+        ----------
+        protein_lines : list of str
+            Protein ATOM records
+        metal_lines : list of str
+            Metal ATOM records (converted from HETATM)
+
+        Returns
+        -------
+        dict
+            {chain_id: ([protein_atoms], [metal_atoms])}
+        """
+        import string
+
+        chains = {}
+
+        # Group protein atoms by chain
+        for line in protein_lines:
+            if len(line) > 21:
+                chain_id = line[21]
+                if chain_id not in chains:
+                    chains[chain_id] = ([], [])
+                chains[chain_id][0].append(line)
+
+        # Assign metals to NEW unique chain IDs (not mixed with protein)
+        # This is required because pdb2gmx doesn't allow mixed Protein/Ion types
+        used_chains = set(chains.keys())
+        available_chains = [c for c in string.ascii_uppercase + string.digits
+                           if c not in used_chains]
+
+        metal_chain_idx = 0
+        for line in metal_lines:
+            if len(line) > 21:
+                original_chain = line[21]
+
+                # Assign a new unique chain ID for this metal
+                if metal_chain_idx < len(available_chains):
+                    new_chain_id = available_chains[metal_chain_idx]
+                else:
+                    # Fallback: use numbers or special characters
+                    new_chain_id = str(metal_chain_idx % 10)
+
+                metal_chain_idx += 1
+
+                # Modify the line to use the new chain ID
+                # PDB format: chain ID is at position 21
+                modified_line = line[:21] + new_chain_id + line[22:]
+
+                # Create new chain entry for this metal
+                if new_chain_id not in chains:
+                    chains[new_chain_id] = ([], [])
+                chains[new_chain_id][1].append(modified_line)
+
+                if self.verbose:
+                    res_name = line[17:20].strip()
+                    resnum = line[22:26].strip()
+                    print(f"  Reassigning {res_name} {resnum} from chain {original_chain} to chain {new_chain_id} (for pdb2gmx compatibility)")
+
+        return chains
+
     def _write_pdb(self, output_pdb: str, protein_lines: List[str],
                    hetatm_lines: List[str], input_pdb: str):
         """
-        Write cleaned PDB file.
+        Write cleaned PDB file with proper chain organization for pdb2gmx.
 
         Parameters
         ----------
@@ -413,6 +529,12 @@ class ProteinCleaner:
         input_pdb : str
             Original input file (for header information)
         """
+        # Convert metal HETATM to ATOM for pdb2gmx compatibility
+        metal_atom_lines, other_hetatm_lines = self._convert_metals_to_atom(hetatm_lines)
+
+        # Group protein and metal atoms by chain for proper output
+        chain_atoms = self._group_by_chain(protein_lines, metal_atom_lines)
+
         with open(output_pdb, 'w') as out:
             # Write header
             out.write(f"REMARK   Cleaned by PRISM ProteinCleaner\n")
@@ -421,19 +543,31 @@ class ProteinCleaner:
             out.write(f"REMARK   Distance cutoff: {self.distance_cutoff} A\n")
             out.write(f"REMARK   Keep crystal water: {self.keep_crystal_water}\n")
             out.write(f"REMARK   Remove crystallization artifacts: {self.remove_artifacts}\n")
+            if metal_atom_lines:
+                out.write(f"REMARK   Converted {len(metal_atom_lines)} metal HETATM to ATOM for pdb2gmx\n")
+                out.write(f"REMARK   Metals integrated into their respective protein chains\n")
 
-            # Write protein atoms
-            for line in protein_lines:
+            # Write chains with protein atoms followed by their metals
+            for chain_id in sorted(chain_atoms.keys()):
+                protein_atoms, metal_atoms = chain_atoms[chain_id]
+
+                # Write protein atoms
+                for line in protein_atoms:
+                    out.write(line)
+
+                # Write metal atoms immediately after protein atoms in the same chain
+                # This keeps them together for pdb2gmx
+                for line in metal_atoms:
+                    out.write(line)
+
+                # TER record after each chain
+                out.write("TER\n")
+
+            # Write other HETATM records (cofactors, modified residues, etc.)
+            for line in other_hetatm_lines:
                 out.write(line)
 
-            # Write all HETATM records (metals and other heteroatoms)
-            # Keep metals in their original chains for GROMACS compatibility
-            # GROMACS needs metals to be in the same chain as the protein they bind to
-            for line in hetatm_lines:
-                out.write(line)
-
-            # Write TER and END
-            out.write("TER\n")
+            # Final END record
             out.write("END\n")
 
     def _print_statistics(self):

@@ -19,11 +19,11 @@ from .visualization_generator import VisualizationGenerator
 
 class HTMLGenerator:
     """Generate interactive HTML visualization from trajectory analysis"""
-    
-    def __init__(self, trajectory_file, topology_file, ligand_file):
+
+    def __init__(self, trajectory_file, topology_file, ligand_file, allow_duplicate_residues=False, max_contacts=None):
         """
         Initialize HTML generator
-        
+
         Parameters
         ----------
         trajectory_file : str
@@ -32,10 +32,16 @@ class HTMLGenerator:
             Path to topology file (.pdb, .gro, etc.)
         ligand_file : str
             Path to ligand file (.sdf, .mol, .mol2)
+        allow_duplicate_residues : bool
+            If True, allows same residue to appear multiple times with different ligand atoms (default: False)
+        max_contacts : int
+            Maximum number of contacts to display (default: 20 for unique mode, 25 for duplicate mode)
         """
         self.trajectory_file = trajectory_file
         self.topology_file = topology_file
         self.ligand_file = ligand_file
+        self.allow_duplicate_residues = allow_duplicate_residues
+        self.max_contacts = max_contacts if max_contacts is not None else (25 if allow_duplicate_residues else 20)
         self.traj = None
         self.contact_results = None
         self.ligand_data = None
@@ -70,7 +76,12 @@ class HTMLGenerator:
         # Generate visualization data
         vis_generator = VisualizationGenerator()
         self.ligand_data = vis_generator.generate_ligand_data(self.contact_results, ligand_mol)
-        self.contacts = vis_generator.generate_contact_data(self.contact_results, self.ligand_data)
+        self.contacts = vis_generator.generate_contact_data(
+            self.contact_results,
+            self.ligand_data,
+            max_contacts=self.max_contacts,
+            allow_duplicate_residues=self.allow_duplicate_residues
+        )
         
         # Calculate statistics
         self.stats = data_processor.calculate_statistics(self.contacts)
@@ -124,10 +135,10 @@ class HTMLGenerator:
         
         return output_file
 
-def generate_html(trajectory, topology, ligand, output="contact_analysis.html"):
+def generate_html(trajectory, topology, ligand, output="contact_analysis.html", allow_duplicate_residues=False, max_contacts=None):
     """
     Convenience function to generate HTML visualization
-    
+
     Parameters
     ----------
     trajectory : str
@@ -138,13 +149,17 @@ def generate_html(trajectory, topology, ligand, output="contact_analysis.html"):
         Path to ligand file
     output : str
         Output HTML file path
-        
+    allow_duplicate_residues : bool
+        If True, allows same residue to appear multiple times with different ligand atoms (default: False)
+    max_contacts : int
+        Maximum number of contacts to display (default: 20 for unique mode, 25 for duplicate mode)
+
     Returns
     -------
     str
         Path to generated HTML file
     """
-    generator = HTMLGenerator(trajectory, topology, ligand)
+    generator = HTMLGenerator(trajectory, topology, ligand, allow_duplicate_residues, max_contacts)
     return generator.generate(output)
 
 def main():
@@ -154,11 +169,17 @@ def main():
     parser.add_argument("topology", help="Topology file (.pdb, .gro, etc.)")
     parser.add_argument("ligand", help="Ligand file (.sdf, .mol, .mol2)")
     parser.add_argument("-o", "--output", default="contact_analysis.html", help="Output HTML file")
-    
+    parser.add_argument("--allow-duplicates", action="store_true",
+                        help="Allow same residue to appear multiple times with different ligand atoms")
+    parser.add_argument("--max-contacts", type=int, default=None,
+                        help="Maximum number of contacts to display (default: 20 for unique mode, 25 for duplicate mode)")
+
     args = parser.parse_args()
-    
+
     try:
-        generate_html(args.trajectory, args.topology, args.ligand, args.output)
+        generate_html(args.trajectory, args.topology, args.ligand, args.output,
+                     allow_duplicate_residues=args.allow_duplicates,
+                     max_contacts=args.max_contacts)
         print(f"\n=== Complete! ===")
     except Exception as e:
         print(f"Error: {e}")

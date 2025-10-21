@@ -1,17 +1,22 @@
 # PRISM - Protein Receptor Interaction Simulation Modeler
 
-PRISM is a comprehensive tool for building protein-ligand systems for molecular dynamics simulations in GROMACS. It supports multiple force fields for ligands including GAFF (General AMBER Force Field) and OpenFF (Open Force Field).
+PRISM is a comprehensive tool for building protein-ligand systems for molecular dynamics simulations in GROMACS. It supports multiple force fields for ligands including GAFF, GAFF2, OpenFF, CGenFF, OPLS-AA, and SwissParam (MMFF/MATCH/Hybrid).
 
 ## Features
 
-- Multiple Force Field Support
-  - GAFF via AmberTools
-  - OpenFF via openff-toolkit
+- **Multiple Force Field Support**
+  - **GAFF/GAFF2** via AmberTools
+  - **OpenFF** via openff-toolkit
+  - **CGenFF** (CHARMM General Force Field) via web download
+  - **OPLS-AA** via LigParGen server
+  - **SwissParam** (MMFF/MATCH/Hybrid) via SwissParam server
 - **Automatic System Building**: Complete workflow from PDB/MOL2/SDF to simulation-ready files
 - **Flexible Configuration**: YAML-based configuration for easy customization
 - **Smart File Processing**: Handles various input formats with automatic conversion
 - **Position Restraints**: Automatic generation for equilibration protocols
 - **Complete MDP Files**: Pre-configured protocols for minimization, equilibration, and production
+- **Metal Ion Support**: Automatic recognition and handling of metal ions (Zn, Ca, Mg, Fe, etc.)
+- **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
 
 ## Installation
 
@@ -70,7 +75,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 
 ### Force Field Specific Dependencies
 
-#### For GAFF Support:
+#### For GAFF/GAFF2 Support:
 
 ```bash
 # AmberTools (required)
@@ -90,9 +95,50 @@ conda install -c conda-forge openff-toolkit openff-interchange
 # RDKit (required for SDF handling)
 conda install -c conda-forge rdkit
 
-# OpenBabel (Optional bur Recommended)
+# OpenBabel (Optional but Recommended)
 conda install conda-forge::openbabel
 ```
+
+#### For CGenFF Support:
+
+CGenFF requires downloading force field files from the web server:
+
+1. Visit [https://cgenff.com/](https://cgenff.com/)
+2. Upload your ligand structure (MOL2/SDF)
+3. Download the generated files (PDB and TOP files)
+4. Place them in a directory
+5. Use `--ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files`
+
+**Note**: For halogens (F, Cl, Br, I), PRISM automatically removes lone pair (LP) atoms and transfers their charges to halogen atoms.
+
+#### For OPLS-AA Support:
+
+OPLS-AA uses the LigParGen web server (requires internet connection):
+
+```bash
+# Required Python packages
+pip install requests
+```
+
+Usage: `--ligand-forcefield opls`
+
+**Note**: Internet connection required during force field generation.
+
+#### For SwissParam Support (MMFF/MATCH/Hybrid):
+
+SwissParam uses the SwissParam web server (requires internet connection):
+
+```bash
+# Required Python packages
+pip install mechanize
+```
+
+Usage:
+- `--ligand-forcefield mmff` (MMFF-based)
+- `--ligand-forcefield match` (MATCH)
+- `--ligand-forcefield hybrid` (Hybrid MMFF-based-MATCH)
+
+**Note**: Internet connection required during force field generation.
 
 ### Installing PRISM
 
@@ -121,16 +167,54 @@ python /path/to/PRISM/prism/builder.py
    prism protein.pdb ligand.mol2 -o output_dir
    ```
 
-2. **Using OpenFF**:
+2. **Using GAFF2 (improved GAFF)**:
+
+   ```bash
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield gaff2
+   ```
+
+3. **Using OpenFF**:
 
    ```bash
    prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff
    ```
 
-3. **With custom configuration**:
+4. **Using CGenFF**:
+
+   ```bash
+   # First download CGenFF files from https://cgenff.com/
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+   ```
+
+5. **Using OPLS-AA**:
+
+   ```bash
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield opls
+   ```
+
+6. **Using SwissParam force fields**:
+
+   ```bash
+   # MMFF-based
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield mmff
+
+   # MATCH
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield match
+
+   # Hybrid MMFF-based-MATCH
+   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield hybrid
+   ```
+
+7. **With custom configuration**:
 
    ```bash
    prism protein.pdb ligand.mol2 -o output_dir --config my_config.yaml
+   ```
+
+8. **With specific protein force field**:
+
+   ```bash
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield amber14sb --water tip4p
    ```
 
 ### Running MD Simulations
@@ -205,6 +289,110 @@ fi
 
 run `bash localrun.sh`
 
+## Command-Line Parameters
+
+PRISM provides convenient shortcuts for frequently used parameters, allowing you to write more concise commands while maintaining full compatibility with the complete parameter names.
+
+### Common Parameters and Shortcuts
+
+**Basic Setup**
+- `-pf, --protein-file`: Protein PDB file path (alternative to positional argument)
+- `-lf, --ligand-file`: Ligand structure file (MOL2/SDF) (alternative to positional argument)
+- `-o, --output`: Output directory for generated files
+- `-c, --config`: Custom configuration YAML file
+- `-f, --overwrite`: Force overwrite existing files
+
+**Force Field Options**
+- `-ff, --forcefield`: **Protein** force field (e.g., amber99sb, amber14sb, charmm36)
+- `-lff, --ligand-forcefield`: **Ligand** force field (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+- `-w, --water`: Water model (tip3p, tip4p, spce)
+- `-ffp, --forcefield-path`: Path to CGenFF downloaded files (required for cgenff)
+
+**⚠️ Important Distinction:**
+- `-pf`/`-lf` are for **file paths** (where to find protein/ligand files)
+- `-ff`/`-lff` are for **force fields** (which force field to use for protein/ligand)
+
+**System Configuration**
+- `-d, --box-distance`: Distance from protein to box edge in nm (default: 1.5)
+- `-bs, --box-shape`: Simulation box shape (cubic, dodecahedron, octahedron)
+- `-t, --temperature`: Simulation temperature in Kelvin (default: 310)
+- `-p, --pressure`: Simulation pressure in bar (default: 1.0)
+
+**Ion Parameters**
+- `-sc, --salt-concentration`: Salt concentration in M (default: 0.15)
+- `-pion, --positive-ion`: Positive ion type (default: NA)
+- `-nion, --negative-ion`: Negative ion type (default: CL)
+
+**MM/PBSA Analysis**
+- `-pbsa, --mmpbsa`: Run MM/PBSA binding energy calculation
+- `-m, --mode`: MM/PBSA mode (single-frame or trajectory)
+- `-s, --structure`: Structure file for single-frame calculation
+- `-sd, --system-dir`: PRISM-generated system directory
+- `-po, --mmpbsa-output`: Output directory for MM/PBSA results
+
+### Usage Examples with Shortcuts
+
+**Quick start with minimal typing:**
+```bash
+prism protein.pdb ligand.mol2 -o output -f
+```
+
+**Specify force fields using shortcuts:**
+```bash
+prism protein.pdb ligand.mol2 -o output -ff amber14sb -lff gaff2 -w tip4p
+```
+
+**Customize system parameters:**
+```bash
+prism protein.pdb ligand.mol2 -o output -d 2.0 -t 300 -sc 0.1 -f
+```
+
+**Run MM/PBSA calculation:**
+```bash
+prism -pbsa -m single-frame -s em.gro -sd system_dir -f
+```
+
+**Mix shortcuts and full names (fully compatible):**
+```bash
+prism protein.pdb ligand.mol2 -o output --forcefield amber99sb -lff openff --box-distance 1.8
+```
+
+**Advanced example combining multiple options:**
+```bash
+prism protein.pdb ligand.sdf \
+    -o my_simulation \
+    -ff amber14sb \
+    -lff openff \
+    -w tip4p \
+    -d 2.0 \
+    -t 310 \
+    -sc 0.15 \
+    -f
+```
+
+All shortcuts are designed to be intuitive while maintaining backward compatibility with existing scripts that use full parameter names.
+
+## Force Field Selection Guide
+
+### When to Use Each Force Field
+
+| Force Field | Best For | Pros | Cons | Internet Required |
+|------------|----------|------|------|-------------------|
+| **GAFF** | General small molecules | Widely used, well-tested | Older parameters | No |
+| **GAFF2** | General small molecules | Improved over GAFF, better for pharmaceuticals | Newer, less tested | No |
+| **OpenFF** | Drug-like molecules | Modern, data-driven parameters | Requires more dependencies | No |
+| **CGenFF** | CHARMM compatibility | Consistent with CHARMM protein FF | Manual web download required | For download |
+| **OPLS-AA** | All-atom simulations | Good for organic molecules | Internet required | Yes |
+| **MMFF** | Quick parameterization | Fast, general purpose | Less accurate for MD | Yes |
+| **MATCH** | CHARMM-style parameters | Good transferability | May fail for complex molecules | Yes |
+| **Hybrid** | Balanced approach | Combines MMFF and MATCH | Internet required | Yes |
+
+### Special Features
+
+- **Metal Ions**: Automatically recognized and handled (Zn²⁺, Ca²⁺, Mg²⁺, Fe²⁺/³⁺, Cu²⁺, Mn²⁺, etc.)
+- **Protonation States**: Support for CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH
+- **Halogen Handling**: CGenFF lone pairs (LP) automatically removed and charges transferred
+
 ## Configuration
 
 PRISM uses YAML configuration files for customization. Key parameters include:
@@ -227,9 +415,17 @@ PRISM/
 │   ├── forcefield/          # Force field generators
 │   │   ├── __init__.py
 │   │   ├── base.py         # Base class
-│   │   ├── gaff.py         # GAFF wrapper
-│   │   └── openff.py       # OpenFF wrapper
+│   │   ├── gaff.py         # GAFF force field
+│   │   ├── gaff2.py        # GAFF2 force field
+│   │   ├── openff.py       # OpenFF force field
+│   │   ├── cgenff.py       # CGenFF force field
+│   │   ├── opls_aa.py      # OPLS-AA force field
+│   │   └── swissparam.py   # SwissParam force fields
 │   └── utils/              # Utilities
+│       ├── cleaner.py      # Protein cleaning & metal handling
+│       ├── system.py       # System building
+│       ├── config.py       # Configuration management
+│       └── mdp.py          # MDP file generation
 ├── configs/                 # Example configurations
 ├── examples/               # Example input files
 ├── docs/                   # Documentation
@@ -240,33 +436,86 @@ PRISM/
 
 PRISM generates a complete set of files ready for MD simulation:
 
-- **Force field files** (`LIG.amb2gmx/` or `LIG.openff2gmx/`):
+- **Force field files** (directory name depends on force field):
+  - `LIG.amb2gmx/` (GAFF/GAFF2)
+  - `LIG.openff2gmx/` (OpenFF)
+  - `LIG.cgenff2gmx/` (CGenFF)
+  - `LIG.opls2gmx/` (OPLS-AA)
+  - `LIG.mmff2gmx/`, `LIG.match2gmx/`, `LIG.hybrid2gmx/` (SwissParam)
+
+  Each contains:
   - `LIG.gro`: Ligand coordinates
   - `LIG.itp`: Ligand topology
   - `atomtypes_LIG.itp`: Atom type definitions
   - `posre_LIG.itp`: Position restraints
+
 - **System files** (`GMX_PROLIG_MD/`):
   - `solv_ions.gro`: Complete solvated system
   - `topol.top`: System topology
+  - `protein_clean.pdb`: Cleaned protein structure
+  - `topol_Protein.itp`: Protein topology
+  - `topol_Ion*.itp`: Metal ion topologies (if present)
+
 - **Protocol files** (`mdps/`):
   - `em.mdp`: Energy minimization
   - `nvt.mdp`: NVT equilibration
   - `npt.mdp`: NPT equilibration
   - `md.mdp`: Production run
 
+- **Configuration backup**:
+  - `prism_config.yaml`: Complete configuration used for this build
+
 ## Troubleshooting
 
 ### Common Issues
 
 1. **"Command not found" errors**: Ensure all dependencies are installed and in PATH
-2. **Force field errors**: Check that AmberTools (for GAFF) or openff-toolkit (for OpenFF) is installed
-3. **Memory errors**: Large systems may require more RAM, especially during parameterization
+   ```bash
+   # Check GROMACS
+   gmx --version
+
+   # Check AmberTools (for GAFF/GAFF2)
+   antechamber -h
+
+   # Check Python packages
+   python -c "import openff.toolkit"  # For OpenFF
+   python -c "import requests"         # For OPLS-AA
+   python -c "import mechanize"        # For SwissParam
+   ```
+
+2. **Force field errors**:
+   - **GAFF/GAFF2**: Ensure AmberTools and ACPYPE are installed
+   - **OpenFF**: Check openff-toolkit and openff-interchange
+   - **CGenFF**: Verify you downloaded the correct files from the web server
+   - **OPLS-AA**: Check internet connection and requests package
+   - **SwissParam**: Check internet connection and mechanize package
+
+3. **SwissParam errors**:
+   - `MATCH ERROR: Could not Finish Charging`: Try `--ligand-forcefield mmff` or `--ligand-forcefield hybrid`
+   - Tautomer issues: Use a different force field (GAFF2 recommended)
+
+4. **CGenFF halogen issues**:
+   - LP (lone pair) atoms are automatically removed
+   - If you see LP-related errors, please report as a bug
+
+5. **Metal ion issues**:
+   - PRISM automatically detects common metal ions
+   - Supported: Zn, Ca, Mg, Fe, Cu, Mn, Co, Ni, K, Na, Cl
+   - If a metal is not recognized, it may be treated as a regular atom
+
+6. **Protonation state issues**:
+   - Ensure residues use standard names (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
+   - GROMACS pdb2gmx should handle these automatically
+
+7. **Memory errors**: Large systems may require more RAM, especially during parameterization
 
 ### Getting Help
 
 - Check the log files in the output directory
-- Ensure input files are properly formatted
+- Ensure input files are properly formatted (PDB/MOL2/SDF)
 - Verify all dependencies are correctly installed
+- Check PRISM configuration in `prism_config.yaml`
+- For internet-based force fields, verify network connectivity
 
 ## Citation
 
@@ -286,3 +535,4 @@ If you use PRISM in your research, please cite:
 
 
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
+

@@ -223,14 +223,24 @@ class SystemBuilder:
 
         self._run_command(command, str(self.model_dir), input_str=input_text)
 
-        # Check if pdb2gmx already handled metals (any ion chain topology exists)
-        # PDBFixer may keep metals in original chains (D, F) or move to chain M
-        # If pdb2gmx created ion chain topologies, metals are already included
-        ion_chain_files = list(self.model_dir.glob("topol_Ion_chain_*.itp"))
-        if ion_chain_files:
-            print(f"\nMetals already processed by pdb2gmx ({len(ion_chain_files)} ion chain(s) found)")
+        # Check if pdb2gmx already handled metals (any ion topology exists)
+        # With improved PRISM cleaner, metals are converted from HETATM to ATOM
+        # This allows pdb2gmx to directly recognize and include them
+        #
+        # pdb2gmx can generate ion topologies with different naming patterns:
+        # - topol_Ion.itp (single ion chain)
+        # - topol_Ion_chain_*.itp (multiple ion chains)
+        ion_files = list(self.model_dir.glob("topol_Ion*.itp"))
+
+        if ion_files:
+            print(f"\n✓ Metals successfully processed by pdb2gmx ({len(ion_files)} ion topology file(s) found)")
+            for itp_file in ion_files:
+                print(f"  - {itp_file.name}")
         else:
-            # pdb2gmx didn't process metals, add them manually
+            # Fallback: pdb2gmx didn't process metals, add them manually
+            # This shouldn't happen with the new HETATM->ATOM conversion in cleaner.py
+            print("\n⚠ Warning: No ion topologies detected by pdb2gmx")
+            print("  Attempting manual metal addition as fallback...")
             self._add_metals_to_topology(fixed_pdb, str(protein_gro), str(topol_top))
 
         # Validate and fix topology for common issues
@@ -557,20 +567,47 @@ class SystemBuilder:
         """
         Extract metal ion information from PDB file.
 
+        IMPORTANT: With the new cleaner.py implementation, metals are converted
+        from HETATM to ATOM records, so we need to check BOTH record types.
+
+        However, we must EXCLUDE protein residues like CYM, HID, HIE which are
+        also ATOM records but are amino acids, not metals.
+
         Returns:
             List of dicts with keys: residue_name, atom_name, chain, resnum, coords
         """
         metals = []
+        # True metal ions (must match cleaner.py definitions)
         metal_names = {'ZN', 'MG', 'CA', 'FE', 'CU', 'MN', 'CO', 'NI', 'CD', 'HG',
                       'ZN2', 'MG2', 'CA2', 'FE2', 'FE3', 'CU2', 'MN2'}
 
+        # Amino acid residues that should NEVER be treated as metals
+        # These include all standard + special protonation states
+        protein_residues = {
+            # Standard amino acids
+            'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
+            'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
+            # Special protonation states
+            'HID', 'HIE', 'HIP',  # Histidine variants
+            'CYM', 'CYX',  # Cysteine variants (deprotonated, disulfide)
+            'LYN',  # Lysine neutral
+            'ASH', 'GLH',  # Protonated acidic residues
+            # Terminal variants
+            'ACE', 'NME', 'NH2'
+        }
+
         with open(pdb_file, 'r') as f:
             for line in f:
-                if line.startswith('HETATM'):
+                # Check both ATOM and HETATM (metals may be converted to ATOM by cleaner)
+                if line.startswith('ATOM') or line.startswith('HETATM'):
                     residue_name = line[17:20].strip().upper()
                     atom_name = line[12:16].strip().upper()
 
-                    # Check if this is a metal
+                    # CRITICAL: Skip if this is a protein residue
+                    if residue_name in protein_residues:
+                        continue
+
+                    # Check if this is a metal (by residue name or atom name)
                     if residue_name in metal_names or atom_name in metal_names:
                         chain = line[21].strip()
                         resnum = line[22:26].strip()

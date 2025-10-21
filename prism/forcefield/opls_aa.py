@@ -506,9 +506,44 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         with open(source_itp, 'r') as f:
             content = f.read()
 
-        # Replace molecule names with LIG
-        content = re.sub(r'\bUNK\b', 'LIG', content)
+        # Replace molecule names with LIG (case-insensitive for all variants)
+        # Common LigParGen molecule names: UNK, MOL, LIG, or ligand name
+        content = re.sub(r'\bUNK\b', 'LIG', content, flags=re.IGNORECASE)
         content = re.sub(r'\bunk\b', 'LIG', content)
+        content = re.sub(r'\bMOL\b', 'LIG', content, flags=re.IGNORECASE)
+
+        # Also replace in [ moleculetype ] section specifically
+        content = re.sub(r'(\[\s*moleculetype\s*\]\s*;\s*\w+\s+\w+\s+)\S+', r'\1LIG', content)
+
+        # Replace residue names in [ atoms ] section
+        # Pattern: atom_nr  type  resnr  residue  atom  cgnr  charge  mass
+        # We need to replace the residue name (4th column)
+        # Use regex to replace while preserving formatting
+        lines = content.split('\n')
+        new_lines = []
+        in_atoms = False
+
+        for line in lines:
+            if line.strip().startswith('[ atoms ]'):
+                in_atoms = True
+                new_lines.append(line)
+            elif in_atoms and line.strip().startswith('['):
+                in_atoms = False
+                new_lines.append(line)
+            elif in_atoms and not line.strip().startswith(';') and line.strip():
+                # Use regex to replace residue name (4th field) while preserving spacing
+                # Typical format: "     1  opls_800      1    UNK     C1      1    -0.120  12.011"
+                # Replace any word in position 4 with LIG
+                modified_line = re.sub(
+                    r'^(\s*\d+\s+\S+\s+\d+\s+)\S+(\s+)',
+                    r'\1LIG\2',
+                    line
+                )
+                new_lines.append(modified_line)
+            else:
+                new_lines.append(line)
+
+        content = '\n'.join(new_lines)
 
         # Add position restraints include if not present
         if "#ifdef POSRES" not in content:

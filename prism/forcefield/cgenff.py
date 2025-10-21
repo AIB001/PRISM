@@ -5,7 +5,7 @@
 CGenFF force field generator wrapper for PRISM
 
 CGenFF (CHARMM General Force Field) requires downloading ligand files
-from the CGenFF web server: https://cgenff.umaryland.edu/
+from the CGenFF web server: https://cgenff.com/
 
 This module processes the downloaded CGenFF files and converts them
 to PRISM-standardized GROMACS format.
@@ -111,6 +111,10 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"  - Proper dihedrals: {len(self.dihedrals_proper)}")
             print(f"  - Improper dihedrals: {len(self.dihedrals_improper)}")
 
+            # Clean up lone pairs (LP atoms) for halogens
+            print("\n[Step 3.5] Cleaning lone pairs (LP atoms)...")
+            self._remove_lone_pairs()
+
             # Create output directory
             print(f"\n[Step 4] Creating output directory: {lig_dir}")
             os.makedirs(lig_dir, exist_ok=True)
@@ -193,7 +197,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         print(f"  Found TOP file: {self.top_file.name}")
 
     def _parse_pdb(self):
-        """Parse PDB file and convert to GRO format"""
+        """Parse PDB file and convert to GRO format (excluding LP atoms)"""
         gro_lines = []
         atom_count = 0
 
@@ -203,9 +207,14 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         with open(self.pdb_file, 'r') as f:
             for line in f:
                 if line.startswith('ATOM') or line.startswith('HETATM'):
-                    atom_count += 1
                     # Parse PDB line
                     atom_name = line[12:16].strip()
+
+                    # Skip LP (lone pair) atoms - they will be removed from topology
+                    if 'LP' in atom_name.upper():
+                        continue
+
+                    atom_count += 1
                     x = float(line[30:38].strip()) / 10.0  # Å to nm
                     y = float(line[38:46].strip()) / 10.0
                     z = float(line[46:54].strip()) / 10.0
@@ -361,6 +370,121 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         pattern = rf'\[\s*{section_name}\s*\](.*?)(?=\[|$)'
         match = re.search(pattern, content, re.DOTALL)
         return match.group(1) if match else None
+
+    def _remove_lone_pairs(self):
+        """
+        Remove lone pair (LP) atoms from topology and transfer their charges to halogen atoms
+
+        CGenFF generates LP atoms for halogens (F, Cl, Br, I) to represent lone pairs.
+        These need to be removed for GROMACS compatibility:
+        1. Identify LP atoms (names containing 'LP')
+        2. Record LP charges and find bonded halogen atoms
+        3. Remove LP atoms from all sections
+        4. Transfer LP charges to halogen atoms
+        """
+        # Step 1: Identify LP atoms and build mapping
+        lp_atoms = {}  # {lp_atom_id: {'charge': float, 'halogen_id': str}}
+        halogen_elements = {'F', 'Cl', 'Br', 'I', 'CL'}
+
+        for atom in self.atoms:
+            atom_name = atom['name'].upper()
+            # Check if atom name contains LP (e.g., LP1, LP2, LP)
+            if 'LP' in atom_name:
+                lp_atoms[atom['id']] = {
+                    'charge': float(atom['charge']),
+                    'name': atom['name'],
+                    'halogen_id': None
+                }
+
+        if not lp_atoms:
+            print("  ✓ No lone pair (LP) atoms found")
+            return
+
+        print(f"  Found {len(lp_atoms)} LP atoms to remove:")
+        for lp_id, lp_data in lp_atoms.items():
+            print(f"    - Atom {lp_id} ({lp_data['name']}): charge = {lp_data['charge']:.6f}")
+
+        # Step 2: Find halogen atoms bonded to each LP
+        # Look through bonds to find which halogen each LP is connected to
+        for bond in self.bonds:
+            atom1_id, atom2_id = bond[0], bond[1]
+
+            # Check if one atom is LP and find its halogen partner
+            if atom1_id in lp_atoms:
+                # atom2 should be the halogen
+                for atom in self.atoms:
+                    if atom['id'] == atom2_id:
+                        # Check if it's a halogen by name or type
+                        atom_name_upper = atom['name'].upper()
+                        is_halogen = any(hal in atom_name_upper for hal in halogen_elements)
+                        if is_halogen or atom_name_upper[0] in halogen_elements:
+                            lp_atoms[atom1_id]['halogen_id'] = atom2_id
+                            print(f"    - LP {atom1_id} bonded to halogen {atom2_id} ({atom['name']})")
+                        break
+            elif atom2_id in lp_atoms:
+                # atom1 should be the halogen
+                for atom in self.atoms:
+                    if atom['id'] == atom1_id:
+                        atom_name_upper = atom['name'].upper()
+                        is_halogen = any(hal in atom_name_upper for hal in halogen_elements)
+                        if is_halogen or atom_name_upper[0] in halogen_elements:
+                            lp_atoms[atom2_id]['halogen_id'] = atom1_id
+                            print(f"    - LP {atom2_id} bonded to halogen {atom1_id} ({atom['name']})")
+                        break
+
+        # Step 3: Transfer charges from LP to halogen atoms
+        charge_transfers = {}  # {halogen_id: total_lp_charge}
+        for lp_id, lp_data in lp_atoms.items():
+            if lp_data['halogen_id']:
+                halogen_id = lp_data['halogen_id']
+                if halogen_id not in charge_transfers:
+                    charge_transfers[halogen_id] = 0.0
+                charge_transfers[halogen_id] += lp_data['charge']
+
+        # Update halogen atom charges
+        for atom in self.atoms:
+            if atom['id'] in charge_transfers:
+                old_charge = float(atom['charge'])
+                new_charge = old_charge + charge_transfers[atom['id']]
+                atom['charge'] = f"{new_charge:.10f}"
+                print(f"  Updated halogen {atom['id']} ({atom['name']}) charge: {old_charge:.6f} → {new_charge:.6f}")
+
+        # Step 4: Remove LP atoms from atoms list
+        lp_atom_ids = set(lp_atoms.keys())
+        self.atoms = [atom for atom in self.atoms if atom['id'] not in lp_atom_ids]
+        print(f"  Removed {len(lp_atom_ids)} LP atoms from [atoms] section")
+
+        # Step 5: Remove all interactions involving LP atoms
+        # Helper function to check if any atom in a list is LP
+        def contains_lp(atom_ids):
+            return any(aid in lp_atom_ids for aid in atom_ids)
+
+        # Remove bonds involving LP
+        old_bonds = len(self.bonds)
+        self.bonds = [bond for bond in self.bonds if not contains_lp(bond[:2])]
+        print(f"  Removed {old_bonds - len(self.bonds)} bonds involving LP atoms")
+
+        # Remove pairs involving LP
+        old_pairs = len(self.pairs)
+        self.pairs = [pair for pair in self.pairs if not contains_lp(pair[:2])]
+        print(f"  Removed {old_pairs - len(self.pairs)} pairs involving LP atoms")
+
+        # Remove angles involving LP
+        old_angles = len(self.angles)
+        self.angles = [angle for angle in self.angles if not contains_lp(angle[:3])]
+        print(f"  Removed {old_angles - len(self.angles)} angles involving LP atoms")
+
+        # Remove proper dihedrals involving LP
+        old_proper = len(self.dihedrals_proper)
+        self.dihedrals_proper = [dih for dih in self.dihedrals_proper if not contains_lp(dih[:4])]
+        print(f"  Removed {old_proper - len(self.dihedrals_proper)} proper dihedrals involving LP atoms")
+
+        # Remove improper dihedrals involving LP
+        old_improper = len(self.dihedrals_improper)
+        self.dihedrals_improper = [dih for dih in self.dihedrals_improper if not contains_lp(dih[:4])]
+        print(f"  Removed {old_improper - len(self.dihedrals_improper)} improper dihedrals involving LP atoms")
+
+        print(f"  ✓ Successfully removed all LP atoms and transferred charges to halogens")
 
     def _generate_atomtypes_itp(self):
         """Generate atomtypes_LIG.itp"""

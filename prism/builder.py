@@ -23,6 +23,8 @@ if __name__ == "__main__" and __package__ is None:
     from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
     from prism.forcefield.openff import OpenFFForceFieldGenerator
     from prism.forcefield.cgenff import CGenFFForceFieldGenerator
+    from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
+    from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
 else:
     # Normal package imports
     from .utils.environment import GromacsEnvironment
@@ -34,6 +36,8 @@ else:
         from .forcefield.gaff2 import GAFF2ForceFieldGenerator
         from .forcefield.openff import OpenFFForceFieldGenerator
         from .forcefield.cgenff import CGenFFForceFieldGenerator
+        from .forcefield.opls_aa import OPLSAAForceFieldGenerator
+        from .forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
     except ImportError:
         # For standalone usage
         sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,6 +46,8 @@ else:
             from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
             from prism.forcefield.openff import OpenFFForceFieldGenerator
             from prism.forcefield.cgenff import CGenFFForceFieldGenerator
+            from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
+            from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
         except ImportError:
             print("Error: Cannot import force field generators")
             print("Please check your PRISM installation")
@@ -65,7 +71,7 @@ class PRISMBuilder:
         output_dir : str
             Directory where output files will be stored
         ligand_forcefield : str
-            Force field for ligand ('gaff', 'gaff2', 'openff', or 'cgenff')
+            Force field for ligand ('gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid')
         config_path : str, optional
             Path to configuration YAML file
         forcefield : str, optional
@@ -84,8 +90,8 @@ class PRISMBuilder:
         self.forcefield_path = forcefield_path
 
         # Validate ligand force field
-        if self.ligand_forcefield not in ['gaff', 'gaff2', 'openff', 'cgenff']:
-            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', or 'cgenff'")
+        if self.ligand_forcefield not in ['gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid']:
+            raise ValueError(f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid'")
 
         # Validate cgenff requires forcefield_path
         if self.ligand_forcefield == 'cgenff' and not forcefield_path:
@@ -219,6 +225,45 @@ class PRISMBuilder:
                 self.ligand_path,
                 self.output_dir,
                 cgenff_dir=self.forcefield_path,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'opls':
+            # Use OPLS-AA force field generator (via LigParGen)
+            generator = OPLSAAForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                charge=self.config['ligand_forcefield']['charge'],
+                charge_model='cm1a',  # or 'cm5' for more accuracy
+                align_to_input=True,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'mmff':
+            # Use MMFF force field generator (via SwissParam)
+            generator = MMFFForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'match':
+            # Use MATCH force field generator (via SwissParam)
+            generator = MATCHForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
+                overwrite=self.overwrite
+            )
+            self.lig_ff_dir = generator.run()
+
+        elif self.ligand_forcefield == 'hybrid':
+            # Use hybrid MMFF-based-MATCH force field generator (via SwissParam)
+            generator = HybridMMFFMATCHForceFieldGenerator(
+                self.ligand_path,
+                self.output_dir,
                 overwrite=self.overwrite
             )
             self.lig_ff_dir = generator.run()
@@ -383,6 +428,96 @@ class PRISMBuilder:
         self.config_manager.save_config(config_file)
         print(f"Configuration saved to: {config_file}")
 
+    def generate_localrun_script(self):
+        """Generate localrun.sh script for easy MD execution"""
+        gmx_md_dir = os.path.join(self.output_dir, 'GMX_PROLIG_MD')
+        if not os.path.exists(gmx_md_dir):
+            print("Warning: GMX_PROLIG_MD directory not found, skipping localrun.sh generation")
+            return None
+
+        # Clean up Emacs backup files (#topol.top.1#, #topol.top.2#, etc.)
+        import glob
+        backup_pattern = os.path.join(gmx_md_dir, '#*#')
+        backup_files = glob.glob(backup_pattern)
+        if backup_files:
+            print(f"Cleaning up {len(backup_files)} Emacs backup file(s)...")
+            for backup_file in backup_files:
+                try:
+                    os.remove(backup_file)
+                    print(f"  Removed: {os.path.basename(backup_file)}")
+                except Exception as e:
+                    print(f"  Warning: Could not remove {backup_file}: {e}")
+
+        script_path = os.path.join(gmx_md_dir, 'localrun.sh')
+
+        script_content = '''#!/bin/bash
+
+######################################################
+# SIMULATION PART
+######################################################
+
+# Energy Minimization (EM)
+mkdir -p em
+if [ -f ./em/em.gro ]; then
+    echo "EM already completed, skipping..."
+elif [ -f ./em/em.tpr ]; then
+    echo "EM tpr file found, continuing from checkpoint..."
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v -cpi ./em/em.cpt
+else
+    echo "Starting EM from scratch..."
+    gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o ./em/em.tpr -maxwarn 999
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v
+fi
+
+# NVT Equilibration
+mkdir -p nvt
+if [ -f ./nvt/nvt.gro ]; then
+    echo "NVT already completed, skipping..."
+elif [ -f ./nvt/nvt.tpr ]; then
+    echo "NVT tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
+else
+    echo "Starting NVT from scratch..."
+    gmx grompp -f ../mdps/nvt.mdp -c ./em/em.gro -r ./em/em.gro -p topol.top -o ./nvt/nvt.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
+fi
+
+# NPT Equilibration
+mkdir -p npt
+if [ -f ./npt/npt.gro ]; then
+    echo "NPT already completed, skipping..."
+elif [ -f ./npt/npt.tpr ]; then
+    echo "NPT tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
+else
+    echo "Starting NPT from scratch..."
+    gmx grompp -f ../mdps/npt.mdp -c ./nvt/nvt.gro -r ./nvt/nvt.gro -t ./nvt/nvt.cpt -p topol.top -o ./npt/npt.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v
+fi
+
+# Production MD
+mkdir -p prod
+if [ -f ./prod/md.gro ]; then
+    echo "Production MD already completed, skipping..."
+elif [ -f ./prod/md.tpr ]; then
+    echo "Production MD tpr file found, continuing from checkpoint..."
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
+else
+    echo "Starting Production MD from scratch..."
+    gmx grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 999
+    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
+fi
+'''
+
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+
+        # Make script executable
+        os.chmod(script_path, 0o755)
+
+        print(f"Local run script generated: {script_path}")
+        return script_path
+
     def run(self):
         """Run the complete workflow"""
         print(f"\n{'='*60}")
@@ -410,6 +545,9 @@ class PRISMBuilder:
             # Step 5: Cleanup
             self.cleanup()
 
+            # Step 6: Generate local run script
+            script_path = self.generate_localrun_script()
+
             print(f"\n{'='*60}")
             print("PRISM Builder workflow completed successfully!")
             print(f"{'='*60}")
@@ -420,7 +558,23 @@ class PRISMBuilder:
             print(f"\nProtein force field used: {self.forcefield['name']}")
             print(f"Ligand force field used: {self.ligand_forcefield.upper()}")
             print(f"Water model used: {self.water_model['name']}")
-            print(f"\nYou can now run MD simulations using the generated files.")
+
+            if script_path:
+                gmx_md_dir = os.path.join(self.output_dir, 'GMX_PROLIG_MD')
+                print(f"\n{'='*60}")
+                print("Ready to run MD simulations!")
+                print(f"{'='*60}")
+                print(f"\nTo run the MD workflow:")
+                print(f"  1. Navigate to the MD directory:")
+                print(f"     cd {gmx_md_dir}")
+                print(f"  2. Execute the simulation script:")
+                print(f"     bash localrun.sh")
+                print(f"\nThe script will run:")
+                print(f"  - Energy Minimization (EM)")
+                print(f"  - NVT Equilibration")
+                print(f"  - NPT Equilibration")
+                print(f"  - Production MD")
+                print(f"\nNote: Adjust GPU and thread settings in localrun.sh as needed")
 
             return self.output_dir
 
@@ -447,8 +601,16 @@ Example usage:
   # Using OpenFF force field with specific protein force field
   prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff --forcefield amber14sb
 
+  # Using OPLS-AA force field (via LigParGen server, requires internet)
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield opls
+
   # Using CGenFF force field (requires web-downloaded files)
   prism protein.pdb dummy.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+
+  # Using SwissParam force fields (via SwissParam server, requires internet)
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield mmff    # MMFF-based
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield match   # MATCH
+  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield hybrid  # Hybrid MMFF-based-MATCH
 
   # With custom configuration file
   prism protein.pdb ligand.mol2 -o output_dir --config config.yaml
@@ -487,8 +649,8 @@ Example usage:
                           help="Protein force field name (default: amber99sb)")
     ff_group.add_argument("--water", "-w", type=str, default="tip3p",
                           help="Water model name (default: tip3p)")
-    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'gaff2', 'openff', 'cgenff'], default='gaff',
-                          help="Force field for ligand: gaff (default), gaff2 (improved), openff, or cgenff")
+    ff_group.add_argument("--ligand-forcefield", "-lff", choices=['gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid'], default='gaff',
+                          help="Force field for ligand: gaff (default), gaff2 (improved), openff, cgenff, opls (OPLS-AA via LigParGen), mmff/match/hybrid (SwissParam)")
     ff_group.add_argument("--ligand-charge", type=int, default=0,
                           help="Net charge of ligand (default: 0)")
     ff_group.add_argument("--forcefield-path", "-ffp", type=str, default=None,
@@ -496,9 +658,9 @@ Example usage:
 
     # Box options
     box_group = parser.add_argument_group('Box options')
-    box_group.add_argument("--box-distance", type=float, default=1.5,
+    box_group.add_argument("--box-distance", "-d", type=float, default=1.5,
                            help="Distance from protein to box edge in nm (default: 1.5)")
-    box_group.add_argument("--box-shape", choices=['cubic', 'dodecahedron', 'octahedron'], default='cubic',
+    box_group.add_argument("--box-shape", "-bs", choices=['cubic', 'dodecahedron', 'octahedron'], default='cubic',
                            help="Box shape (default: cubic)")
     box_group.add_argument("--no-center", action="store_true",
                            help="Don't center protein in box")
@@ -524,11 +686,11 @@ Example usage:
     ion_group = parser.add_argument_group('Ion options')
     ion_group.add_argument("--no-neutralize", action="store_true",
                            help="Don't neutralize the system")
-    ion_group.add_argument("--salt-concentration", type=float, default=0.15,
+    ion_group.add_argument("--salt-concentration", "-sc", type=float, default=0.15,
                            help="Salt concentration in M (default: 0.15)")
-    ion_group.add_argument("--positive-ion", default="NA",
+    ion_group.add_argument("--positive-ion", "-pion", default="NA",
                            help="Positive ion type (default: NA)")
-    ion_group.add_argument("--negative-ion", default="CL",
+    ion_group.add_argument("--negative-ion", "-nion", default="CL",
                            help="Negative ion type (default: CL)")
 
     # Energy minimization
@@ -556,7 +718,57 @@ Example usage:
     util_group.add_argument("--gmx-command", default=None,
                             help="GROMACS command to use (auto-detected if not specified)")
 
+    # MM/PBSA options
+    mmpbsa_group = parser.add_argument_group('MM/PBSA options')
+    mmpbsa_group.add_argument("--mmpbsa", "-pbsa", action="store_true",
+                              help="Run MM/PBSA calculation instead of full MD workflow")
+    mmpbsa_group.add_argument("--mode", "-m", choices=['single-frame', 'trajectory'], default='single-frame',
+                              help="MM/PBSA mode: single-frame (docking pose) or trajectory (MD)")
+    mmpbsa_group.add_argument("--structure", "-s", help="Path to structure file (GRO) for single-frame MM/PBSA")
+    mmpbsa_group.add_argument("--system-dir", "-sd", help="Path to PRISM-generated GMX_PROLIG_MD directory")
+    mmpbsa_group.add_argument("--mmpbsa-output", "-po", help="Output directory for MM/PBSA results (default: same as structure file directory)")
+
     args = parser.parse_args()
+
+    # Handle MM/PBSA workflow (takes priority over normal workflow)
+    if args.mmpbsa:
+        if args.mode == 'single-frame':
+            # Import MM/PBSA module
+            try:
+                if __name__ == "__main__" and __package__ is None:
+                    from prism.mmpbsa import SingleFrameMMPBSA
+                else:
+                    from .mmpbsa import SingleFrameMMPBSA
+            except ImportError as e:
+                print(f"Error importing MM/PBSA module: {e}")
+                print("Please ensure gmx_MMPBSA is installed: pip install gmx_MMPBSA")
+                sys.exit(1)
+
+            # Validate required arguments
+            if not args.structure:
+                parser.error("--structure is required for single-frame MM/PBSA")
+            if not args.system_dir:
+                parser.error("--system-dir is required for single-frame MM/PBSA")
+
+            # Run single-frame MM/PBSA
+            try:
+                calculator = SingleFrameMMPBSA(
+                    structure_file=args.structure,
+                    system_dir=args.system_dir,
+                    output_dir=args.mmpbsa_output,  # None defaults to structure file directory
+                    overwrite=args.overwrite
+                )
+                calculator.run()
+                sys.exit(0)
+            except Exception as e:
+                print(f"\nMM/PBSA calculation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(1)
+        else:
+            # Trajectory mode - to be implemented later
+            print("Trajectory MM/PBSA mode will be implemented in the future")
+            sys.exit(1)
 
     # Handle --export-config option
     if args.export_config:

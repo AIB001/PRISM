@@ -133,16 +133,43 @@ class VisualizationGenerator:
         
         return ligand_data
     
-    def generate_contact_data(self, contact_results, ligand_data, max_contacts=20):
-        """Generate contact data for HTML with proper alignment and TOP3 marking"""
+    def generate_contact_data(self, contact_results, ligand_data, max_contacts=20, allow_duplicate_residues=False):
+        """
+        Generate contact data for HTML with proper alignment and TOP3 marking
+
+        Parameters
+        ----------
+        contact_results : dict
+            Results from contact analysis
+        ligand_data : dict
+            Ligand visualization data
+        max_contacts : int
+            Maximum number of contacts to display (default: 20, or 25 if allow_duplicate_residues=True)
+        allow_duplicate_residues : bool
+            If True, allows same residue to appear multiple times with different ligand atoms (default: False)
+
+        Returns
+        -------
+        list
+            Contact data for visualization
+        """
+        if allow_duplicate_residues:
+            # Mode 1: Allow duplicate residues - show atom-pair level contacts
+            return self._generate_contact_data_with_duplicates(contact_results, ligand_data, max_contacts)
+        else:
+            # Mode 2: Unique residues only - show best contact per residue
+            return self._generate_contact_data_unique_residues(contact_results, ligand_data, max_contacts)
+
+    def _generate_contact_data_unique_residues(self, contact_results, ligand_data, max_contacts):
+        """Generate contact data with unique residues (one contact per residue)"""
         residue_prop = contact_results['residue_proportions']
         residue_distances = contact_results.get('residue_avg_distances', {})
         residue_best_ligand = contact_results.get('residue_best_ligand_atoms', {})
-        
+
         # Sort residues by contact proportion
         sorted_residues = sorted(residue_prop.items(), key=lambda x: x[1], reverse=True)
         top_residues = sorted_residues[:max_contacts]
-        
+
         # Identify global TOP3 residues based on frequency
         top3_residue_ids = set()
         if len(sorted_residues) >= 1:
@@ -151,39 +178,39 @@ class VisualizationGenerator:
             top3_residue_ids.add(sorted_residues[1][0])  # 2nd
         if len(sorted_residues) >= 3:
             top3_residue_ids.add(sorted_residues[2][0])  # 3rd
-        
+
         contacts = []
-        
+
         for idx, (residue_id, proportion) in enumerate(top_residues):
             # Get the best ligand atom for this residue
             best_ligand_atom_traj = residue_best_ligand.get(residue_id, contact_results['ligand_atoms'][0])
-            
+
             # Find the corresponding ligand atom in our data
             best_ligand_atom_id = None
             for atom in ligand_data['atoms']:
                 if atom.get('trajIndex') == best_ligand_atom_traj:
                     best_ligand_atom_id = atom['id']
                     break
-            
+
             if not best_ligand_atom_id:
                 best_ligand_atom_id = 'L0'
-            
+
             # Extract residue type
             residue_type = residue_id[:3] if len(residue_id) >= 3 else residue_id
-            
+
             # Get average distance
             avg_distance_nm = residue_distances.get(residue_id, 0.35)
-            
+
             # Calculate pixel distance
             min_dist_nm = 0.2
             max_dist_nm = 0.8
             clamped_dist = min(max(avg_distance_nm, min_dist_nm), max_dist_nm)
             sqrt_dist = np.sqrt((clamped_dist - min_dist_nm) / (max_dist_nm - min_dist_nm))
             pixel_distance = 250 + sqrt_dist * 150
-            
+
             # Check if this residue is in TOP3
             is_top3 = residue_id in top3_residue_ids
-            
+
             contacts.append({
                 'id': str(residue_id.replace(' ', '_')),
                 'frequency': float(min(proportion, 1.0)),
@@ -194,5 +221,59 @@ class VisualizationGenerator:
                 'pixelDistance': float(pixel_distance),
                 'isTop3': is_top3  # Mark if this is a TOP3 contact
             })
-        
+
+        return contacts
+
+    def _generate_contact_data_with_duplicates(self, contact_results, ligand_data, max_contacts):
+        """Generate contact data allowing duplicate residues (atom-pair level)"""
+        contact_frequencies = contact_results['contact_frequencies']
+        avg_contact_distances = contact_results.get('residue_avg_distances', {})
+
+        # Sort by atom-pair contact frequency
+        sorted_contacts = sorted(contact_frequencies.items(), key=lambda x: x[1], reverse=True)
+        top_contacts = sorted_contacts[:max_contacts]
+
+        contacts = []
+
+        for idx, ((ligand_atom_traj, residue_id), frequency) in enumerate(top_contacts):
+            # Find the corresponding ligand atom in our data
+            ligand_atom_id = None
+            for atom in ligand_data['atoms']:
+                if atom.get('trajIndex') == ligand_atom_traj:
+                    ligand_atom_id = atom['id']
+                    break
+
+            if not ligand_atom_id:
+                continue
+
+            # Extract residue type
+            residue_type = residue_id[:3] if len(residue_id) >= 3 else residue_id
+
+            # Get average distance (use residue-level distance as approximation)
+            avg_distance_nm = avg_contact_distances.get(residue_id, 0.35)
+
+            # Calculate pixel distance
+            min_dist_nm = 0.2
+            max_dist_nm = 0.8
+            clamped_dist = min(max(avg_distance_nm, min_dist_nm), max_dist_nm)
+            sqrt_dist = np.sqrt((clamped_dist - min_dist_nm) / (max_dist_nm - min_dist_nm))
+            pixel_distance = 250 + sqrt_dist * 150
+
+            # Check if this is a TOP3 contact (by frequency rank)
+            is_top3 = idx < 3
+
+            # Create unique ID combining residue and ligand atom
+            contact_id = f"{residue_id}_{ligand_atom_traj}".replace(' ', '_')
+
+            contacts.append({
+                'id': contact_id,
+                'frequency': float(frequency),
+                'residueType': str(residue_type),
+                'ligandAtom': ligand_atom_id,
+                'residue': str(residue_id),
+                'avgDistance': float(avg_distance_nm),
+                'pixelDistance': float(pixel_distance),
+                'isTop3': is_top3
+            })
+
         return contacts
