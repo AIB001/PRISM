@@ -81,6 +81,13 @@ pressure_coupling:
   tau_p: 1.0  # Coupling time constant (ps)
   compressibility: 4.5e-05  # Compressibility (bar^-1)
 
+# Protonation state optimization
+protonation:
+  optimize: true  # Use Meeko for hydrogen optimization (requires: pip install meeko)
+  ph: 7.0  # Target pH for protonation (overridden by simulation.pH if not set)
+  preserve_existing_h: false  # Keep existing hydrogens in input structure
+  his_state: auto  # Histidine protonation: auto, HID, HIE, or HIP
+
 # Note: Force field and water model are specified via command line:
 # --forcefield amber99sb --water tip3p
 # Available options depend on your GROMACS installation

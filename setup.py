@@ -40,6 +40,9 @@ extras_require = {
     "swissparam": [
         "mechanize>=0.4.0",
     ],
+    "protonation": [
+        "meeko>=0.5.0",  # For hydrogen optimization and protonation
+    ],
     "analysis": [
         "mdtraj>=1.9.0",      # Optional for enhanced trajectory analysis
         "scipy>=1.6.0",       # For statistical analysis
@@ -51,6 +54,7 @@ extras_require = {
         "rdkit>=2021.0",
         "requests>=2.25.0",
         "mechanize>=0.4.0",
+        "meeko>=0.5.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
     ],

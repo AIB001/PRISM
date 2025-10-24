@@ -48,7 +48,12 @@
       "Bash(tee:*)",
       "Bash(gmx_MMPBSA:*)",
       "Bash(ls:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "WebSearch",
+      "WebFetch(domain:meeko.readthedocs.io)",
+      "Read(//data/gxf1212/local_programs/mutff/**)",
+      "mcp__filesystem__list_directory",
+      "mcp__filesystem__list_allowed_directories"
     ],
     "deny": [],
     "ask": []

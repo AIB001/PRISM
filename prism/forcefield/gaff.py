@@ -335,42 +335,10 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         if self.file_format == 'mol2':
             self._process_mol2_format(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
         else:
-            success = False
-            
-            if self.rdkit_available:
-                try:
-                    print("Attempting method 1: RDKit SDF to MOL conversion...")
-                    self._process_sdf_format_rdkit(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, ff_dir)
-                    success = True
-                except Exception as e:
-                    print(f"Method 1 failed: {e}")
-            
-            if not success:
-                try:
-                    print("\nAttempting method 2: Direct antechamber conversion...")
-                    self._process_sdf_format_direct(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
-                    success = True
-                except Exception as e:
-                    print(f"Method 2 failed: {e}")
-            
-            if not success and self.check_command_exists('obabel'):
-                try:
-                    print("\nAttempting method 3: Convert SDF to MOL2 using Open Babel...")
-                    self._process_sdf_format_obabel(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
-                    success = True
-                except Exception as e:
-                    print(f"Method 3 failed: {e}")
-            
-            if not success:
-                try:
-                    print("\nAttempting method 4: Using Gasteiger charges...")
-                    self._process_sdf_format_gasteiger(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
-                    success = True
-                except Exception as e:
-                    print(f"Method 4 failed: {e}")
-            
-            if not success:
-                raise RuntimeError("All SDF processing methods failed.")
+            # For SDF files, use direct antechamber conversion
+            # This is the only method implemented in gaff2.py
+            print("Processing SDF format...")
+            self._process_sdf_format_direct(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
         
         print("Converting to GROMACS format...")
         current_dir = os.getcwd()

@@ -229,23 +229,54 @@ quit
         # Continue with prep file generation
         self._process_mol2_intermediate(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
 
-    def _process_mol2_intermediate(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, charge_method="wc"):
-        """Process intermediate MOL2 file with GAFF2"""
+    def _process_mol2_intermediate(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, charge_method=None):
+        """Process intermediate MOL2 file with GAFF2
+
+        Note: When processing MOL2 from SDF (already has BCC charges), we don't specify
+        a charge method (-c flag) and let antechamber handle it automatically. This matches
+        the behavior of _process_mol2_format() which also omits the -c flag.
+        """
         print("Generating prep file from charged MOL2 with GAFF2...")
 
         ff_dir = os.path.dirname(amber_mol2)
 
+        # Verify input file exists
+        if not os.path.exists(amber_mol2):
+            raise FileNotFoundError(f"Input MOL2 file not found: {amber_mol2}")
+
+        # Build command WITHOUT -c flag (let antechamber handle charges)
         cmd = [
             "antechamber",
             "-i", os.path.basename(amber_mol2),
             "-fi", "mol2",
             "-o", os.path.basename(prep_file),
             "-fo", "prepi",
-            "-c", charge_method,
-            "-s", "2",
             "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
         ]
-        self.run_command(cmd, cwd=ff_dir)
+
+        # Add net charge if specified
+        if self.net_charge != 0:
+            cmd.extend(["-nc", str(self.net_charge)])
+
+        try:
+            print(f"Attempting prep file generation without explicit charge method...")
+            self.run_command(cmd, cwd=ff_dir)
+        except Exception as e:
+            print(f"\nPrep file generation failed: {e}")
+            print("Trying with explicit charge retention (-c rc)...")
+            # Fallback: explicitly tell antechamber to read charges from mol2
+            cmd_alt = [
+                "antechamber",
+                "-i", os.path.basename(amber_mol2),
+                "-fi", "mol2",
+                "-o", os.path.basename(prep_file),
+                "-fo", "prepi",
+                "-c", "rc",  # Read charges from input file
+                "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+            ]
+            if self.net_charge != 0:
+                cmd_alt.extend(["-nc", str(self.net_charge)])
+            self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating GAFF2 force field parameters...")
         self.run_command([

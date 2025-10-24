@@ -104,6 +104,8 @@ class SystemBuilder:
 
             # Store water model name for use in solvation
             self.water_model_name = water_info.get('name', 'tip3p') if water_info else 'tip3p'
+            # Store force field info for terminal atom fixing
+            self.ff_info = ff_info
 
             fixed_pdb = self._fix_protein(cleaned_protein_path)
             protein_gro, topol_top = self._generate_topology(fixed_pdb, ff_idx, water_idx, ff_info, water_info)
@@ -162,10 +164,12 @@ class SystemBuilder:
             ]
             self._run_command(command, str(self.model_dir.parent))
 
-        # Fix terminal atoms for GROMACS compatibility (OXT → O)
+        # Fix terminal atoms for GROMACS compatibility (OXT → O or OC1/OC2)
         print("Fixing terminal atoms for GROMACS compatibility...")
         from prism.utils.cleaner import fix_terminal_atoms
-        fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), verbose=True)
+        # Get force field name if available
+        ff_name = getattr(self, 'ff_info', {}).get('name') if hasattr(self, 'ff_info') and self.ff_info else None
+        fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), force_field=ff_name, verbose=True)
 
         return str(fixed_pdb)
 

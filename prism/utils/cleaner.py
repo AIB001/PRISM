@@ -637,21 +637,21 @@ def clean_protein_pdb(input_pdb: str, output_pdb: str,
     return cleaner.clean_pdb(input_pdb, output_pdb)
 
 
-def fix_terminal_atoms(pdb_file: str, output_file: str = None, verbose: bool = True) -> str:
+def fix_terminal_atoms(pdb_file: str, output_file: str = None,
+                      force_field: str = None, verbose: bool = True) -> str:
     """
     Fix terminal atom naming and ordering for GROMACS compatibility.
 
-    GROMACS pdb2gmx expects C-terminal residues to have a single 'O' atom
-    positioned right after the 'C' (carbonyl) atom. However, pdbfixer may:
-    1. Add both backbone 'O' and terminal 'OXT'
-    2. Place the terminal oxygen at the end of the residue
-    3. Add O atom directly (not as OXT) at the end
+    Different AMBER force fields use different C-terminal oxygen naming:
+    - Standard AMBER (amber99sb, amber14sb, etc.): Single 'O' atom
+    - Modified AMBER (amber99sb-star-ildn-*-mut, etc.): 'OC1' and 'OC2' atoms (carboxylate)
 
-    This function:
-    1. Identifies C-terminal residues (by finding O/OXT atoms appearing after side chains)
-    2. Removes duplicate backbone 'O' atoms
-    3. Renames 'OXT' to 'O'
-    4. Repositions the O atom to appear right after the C atom
+    This function handles both cases:
+    1. Identifies C-terminal residues
+    2. Removes duplicate backbone 'O'/'OXT' atoms
+    3. Renames/creates proper terminal atoms based on force field:
+       - Standard: Single 'O' atom after 'C'
+       - Modified (mut): Two atoms 'OC1' and 'OC2' after 'C'
 
     Parameters
     ----------
@@ -659,6 +659,10 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, verbose: bool = T
         Path to input PDB file
     output_file : str, optional
         Path to output file. If None, overwrites input file.
+    force_field : str, optional
+        Force field name to determine terminal atom naming.
+        If contains 'mut' or 'star', uses OC1/OC2 naming.
+        Otherwise uses single O atom (default).
     verbose : bool
         Print information about fixes
 
@@ -670,13 +674,25 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, verbose: bool = T
     Examples
     --------
     >>> fix_terminal_atoms('protein.pdb', 'protein_fixed.pdb')
-    >>> fix_terminal_atoms('protein.pdb')  # Overwrites input
+    >>> fix_terminal_atoms('protein.pdb', force_field='amber99sb-star-ildn-bsc1-mut')
     """
     if output_file is None:
         output_file = pdb_file
 
     if not os.path.exists(pdb_file):
         raise FileNotFoundError(f"PDB file not found: {pdb_file}")
+
+    # Determine terminal oxygen naming based on force field
+    # Modified AMBER force fields (with 'mut' or 'star') use OC1/OC2
+    # Standard AMBER uses single O atom
+    use_oc1_oc2 = False
+    if force_field:
+        ff_lower = force_field.lower()
+        if 'mut' in ff_lower or 'star' in ff_lower:
+            use_oc1_oc2 = True
+            if verbose:
+                print(f"Detected modified AMBER force field ({force_field})")
+                print("  Using OC1/OC2 terminal oxygen naming")
 
     # Backbone atom names that should appear before O in proper order
     BACKBONE_ATOMS = {'N', 'CA', 'C'}
@@ -705,7 +721,7 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, verbose: bool = T
             residues[res_id].append({'line': line, 'index': i, 'atom': atom_name, 'res_name': res_name})
 
     # Second pass: identify C-terminal residues needing fixes
-    c_terminal_residues = {}  # res_id -> {c_index, o_line, o_index}
+    c_terminal_residues = {}  # res_id -> {c_index, skip_indices, o_line}
 
     for res_id, atoms in residues.items():
         c_idx = None
@@ -720,67 +736,108 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, verbose: bool = T
 
             if atom_name == 'C':
                 c_idx = i
+                c_line = atom_info['line']  # Store C line for coordinate reference
             elif atom_name == 'O':
                 o_idx = i
                 o_line = atom_info['line']
             elif atom_name == 'OXT':
                 oxt_idx = i
-                # Rename OXT to O
-                o_line = atom_info['line'][:12] + ' O  ' + atom_info['line'][16:]
+                oxt_line = atom_info['line']
             elif atom_name in SIDECHAIN_INDICATORS:
                 has_sidechain = True
 
         # Determine if this is a C-terminal needing fix
         needs_fix = False
+        skip_atom_indices = []  # Track all atoms to skip (may be multiple O/OXT)
+        terminal_lines = []  # Lines to insert (may be 1 or 2 oxygen atoms)
 
         # Case 1: OXT exists (clear C-terminal)
         if oxt_idx is not None:
             needs_fix = True
-            o_idx = oxt_idx
+            skip_atom_indices.append(oxt_idx)
+            # CRITICAL FIX: If both O and OXT exist (PDBFixer added OXT), skip BOTH
+            if o_idx is not None and o_idx != oxt_idx:
+                skip_atom_indices.append(o_idx)
+
+            # Generate terminal oxygen atom(s) based on force field
+            source_line = atoms[oxt_idx]['line']
+            if use_oc1_oc2:
+                # Modified AMBER: Create OC1 and OC2 (two terminal oxygens)
+                oc1_line = source_line[:12] + ' OC1' + source_line[16:]
+                oc2_line = source_line[:12] + ' OC2' + source_line[16:]
+                terminal_lines = [oc1_line, oc2_line]
+            else:
+                # Standard AMBER: Single O atom
+                o_line = source_line[:12] + ' O  ' + source_line[16:]
+                terminal_lines = [o_line]
+
         # Case 2: O appears after side chain atoms (misplaced terminal O)
         elif o_idx is not None and c_idx is not None and has_sidechain:
             # Check if O appears after any side chain atom
             for i, atom_info in enumerate(atoms):
                 if atom_info['atom'] in SIDECHAIN_INDICATORS and i < o_idx:
                     needs_fix = True
+                    skip_atom_indices.append(o_idx)
+
+                    # Generate terminal oxygen atom(s) based on force field
+                    source_line = atoms[o_idx]['line']
+                    if use_oc1_oc2:
+                        # Modified AMBER: Create OC1 and OC2
+                        oc1_line = source_line[:12] + ' OC1' + source_line[16:]
+                        oc2_line = source_line[:12] + ' OC2' + source_line[16:]
+                        terminal_lines = [oc1_line, oc2_line]
+                    else:
+                        # Standard AMBER: Keep as O
+                        terminal_lines = [source_line]
                     break
 
-        if needs_fix and c_idx is not None and o_line is not None:
+        if needs_fix and c_idx is not None and terminal_lines:
             c_terminal_residues[res_id] = {
                 'c_index': atoms[c_idx]['index'],
-                'o_index': atoms[o_idx]['index'],
-                'o_line': o_line,
+                'skip_indices': [atoms[idx]['index'] for idx in skip_atom_indices],
+                'terminal_lines': terminal_lines,  # Changed from 'o_line' to support multiple lines
                 'res_name': atoms[0]['res_name'],
                 'chain': res_id.split(':')[0],
                 'res_num': res_id.split(':')[-1],
-                'is_oxt': oxt_idx is not None
+                'is_oxt': oxt_idx is not None,
+                'use_oc1_oc2': use_oc1_oc2
             }
 
     # Third pass: reconstruct file with corrected terminal residues
     skip_indices = set()
-    insert_map = {}  # index -> line_to_insert
+    insert_map = {}  # index -> lines_to_insert (may be multiple lines)
     fixed_count = 0
 
     for res_id, term_info in c_terminal_residues.items():
-        # Skip the old O/OXT position
-        skip_indices.add(term_info['o_index'])
-        # Insert O right after C
-        insert_map[term_info['c_index']] = term_info['o_line']
+        # Skip ALL old O/OXT positions (may be multiple when both O and OXT exist)
+        for skip_idx in term_info['skip_indices']:
+            skip_indices.add(skip_idx)
+        # Insert corrected terminal oxygen(s) right after C
+        insert_map[term_info['c_index']] = term_info['terminal_lines']
         fixed_count += 1
 
         if verbose:
             fix_type = "OXT → O" if term_info['is_oxt'] else "misplaced O"
+            skip_count = len(term_info['skip_indices'])
+            atoms_removed = f"{skip_count} atom(s)" if skip_count > 1 else "1 atom"
+
+            if term_info['use_oc1_oc2']:
+                atoms_added = "OC1 and OC2"
+            else:
+                atoms_added = "O"
+
             print(f"  Fixed {fix_type} in {term_info['res_name']} {term_info['chain']}{term_info['res_num']} "
-                  f"(repositioned after C atom)")
+                  f"(removed {atoms_removed}, added {atoms_added})")
 
     # Write output with insertions
     with open(output_file, 'w') as f:
         for i, line in enumerate(all_lines):
             if i not in skip_indices:
                 f.write(line)
-                # Insert O atom after C atom if needed
+                # Insert terminal oxygen atom(s) after C atom if needed
                 if i in insert_map:
-                    f.write(insert_map[i])
+                    for terminal_line in insert_map[i]:
+                        f.write(terminal_line)
 
     if verbose:
         if fixed_count > 0:

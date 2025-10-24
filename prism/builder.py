@@ -19,6 +19,7 @@ if __name__ == "__main__" and __package__ is None:
     from prism.utils.config import ConfigurationManager
     from prism.utils.mdp import MDPGenerator
     from prism.utils.system import SystemBuilder
+    from prism.utils.protonation import ProteinProtonator
     from prism.forcefield.gaff import GAFFForceFieldGenerator
     from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
     from prism.forcefield.openff import OpenFFForceFieldGenerator
@@ -31,6 +32,7 @@ else:
     from .utils.config import ConfigurationManager
     from .utils.mdp import MDPGenerator
     from .utils.system import SystemBuilder
+    from .utils.protonation import ProteinProtonator
     try:
         from .forcefield.gaff import GAFFForceFieldGenerator
         from .forcefield.gaff2 import GAFF2ForceFieldGenerator
@@ -306,17 +308,31 @@ class PRISMBuilder:
         Returns
         -------
         str
-            Path to cleaned PDB file
+            Path to cleaned (and optionally protonated) PDB file
         """
         from .utils.cleaner import ProteinCleaner
 
         print("\n=== Cleaning Protein ===")
 
         cleaned_pdb = os.path.join(self.output_dir, f"{self.protein_name}_clean.pdb")
+        final_pdb = cleaned_pdb  # By default, return the cleaned PDB
 
-        if os.path.exists(cleaned_pdb) and not self.overwrite:
-            print(f"Using existing cleaned protein: {cleaned_pdb}")
-            return cleaned_pdb
+        # Check if protonation optimization is requested
+        optimize_protonation = self.config.get('protonation', {}).get('optimize', False)
+
+        # If protonation is enabled, we'll create a separate protonated file
+        if optimize_protonation:
+            protonated_pdb = os.path.join(self.output_dir, f"{self.protein_name}_protonated.pdb")
+            # Check if both cleaned and protonated files exist
+            if os.path.exists(cleaned_pdb) and os.path.exists(protonated_pdb) and not self.overwrite:
+                print(f"Using existing cleaned and protonated protein: {protonated_pdb}")
+                return protonated_pdb
+            final_pdb = protonated_pdb
+        else:
+            # No protonation - just check cleaned file
+            if os.path.exists(cleaned_pdb) and not self.overwrite:
+                print(f"Using existing cleaned protein: {cleaned_pdb}")
+                return cleaned_pdb
 
         # Get parameters from config if not explicitly provided
         if ion_mode is None:
@@ -350,7 +366,60 @@ class PRISMBuilder:
         self._fix_hydrogen_names(cleaned_pdb)
 
         print(f"Protein cleaned and saved to: {cleaned_pdb}")
-        return cleaned_pdb
+
+        # === NEW: Protonation optimization step ===
+        if optimize_protonation:
+            print("\n=== Optimizing Protein Protonation ===")
+
+            # Get protonation config
+            prot_config = self.config.get('protonation', {})
+            ph = prot_config.get('ph', self.config.get('simulation', {}).get('pH', 7.0))
+            his_state = prot_config.get('his_state', 'auto')
+            preserve_h = prot_config.get('preserve_existing_h', False)
+
+            try:
+                # Initialize protonator
+                protonator = ProteinProtonator(
+                    ph=ph,
+                    preserve_existing_h=preserve_h,
+                    his_state=his_state,
+                    verbose=True
+                )
+
+                # Run protonation optimization
+                work_dir = os.path.join(self.output_dir, "protonation_work")
+                os.makedirs(work_dir, exist_ok=True)
+
+                results = protonator.optimize_hydrogens(
+                    input_pdb=cleaned_pdb,
+                    output_pdb=protonated_pdb,
+                    work_dir=work_dir
+                )
+
+                print(f"Protonation optimization completed")
+                print(f"Protonated protein saved to: {protonated_pdb}")
+
+                # Validate the output
+                validation = results.get('validation', {})
+                if validation:
+                    print(f"  Validation: {validation.get('residues_with_h', 0)} hydrogen atoms added")
+                    if validation.get('his_residues'):
+                        print(f"  Found {len(validation['his_residues'])} histidine residue(s)")
+
+                return protonated_pdb
+
+            except ImportError as e:
+                print(f"\nWarning: Meeko not available for protonation optimization")
+                print(f"  Error: {e}")
+                print(f"  Install with: pip install meeko")
+                print(f"  Continuing with cleaned protein without protonation optimization")
+                return cleaned_pdb
+            except Exception as e:
+                print(f"\nWarning: Protonation optimization failed: {e}")
+                print(f"  Continuing with cleaned protein without protonation optimization")
+                return cleaned_pdb
+
+        return final_pdb
 
     def _fix_hydrogen_names(self, pdb_file):
         """
