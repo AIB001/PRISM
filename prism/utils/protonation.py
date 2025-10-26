@@ -75,10 +75,19 @@ class ProteinProtonator:
                 self.has_reduce2 = False
 
         except ImportError as e:
-            raise ImportError(
-                "Meeko is not available. Install with: pip install meeko\n"
-                "Or install with PRISM: pip install -e .[protonation]"
-            ) from e
+            error_msg = str(e)
+            if "gemmi" in error_msg:
+                raise ImportError(
+                    f"Meeko is installed but missing dependency: {error_msg}\n"
+                    "Install with: pip install gemmi\n"
+                    "Or reinstall meeko with all dependencies: pip install meeko --upgrade"
+                ) from e
+            else:
+                raise ImportError(
+                    f"Meeko is not available: {error_msg}\n"
+                    "Install with: pip install meeko\n"
+                    "Or install with PRISM: pip install -e .[protonation]"
+                ) from e
 
     def optimize_hydrogens(self,
                           input_pdb: str,
