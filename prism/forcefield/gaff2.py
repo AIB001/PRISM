@@ -19,6 +19,21 @@ try:
 except ImportError:
     from gaff import GAFFForceFieldGenerator
 
+# Import color utilities
+try:
+    from ..utils.colors import print_success, print_info, print_warning, success, path, number
+except ImportError:
+    try:
+        from prism.utils.colors import print_success, print_info, print_warning, success, path, number
+    except ImportError:
+        # Fallback if colors not available
+        def print_success(x, **kwargs): print(f"✓ {x}")
+        def print_info(x, **kwargs): print(f"ℹ {x}")
+        def print_warning(x, **kwargs): print(f"⚠ {x}")
+        def success(x): return f"✓ {x}"
+        def path(x): return x
+        def number(x): return x
+
 
 class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
     """GAFF2 force field generator wrapper - extends GAFF with gaff2 atom types"""
@@ -29,11 +44,11 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
 
         # Override the print message to show GAFF2
         print(f"\n{'='*60}")
-        print("NOTE: Using GAFF2 Force Field (improved version)")
+        print_info("Using GAFF2 Force Field (improved version)")
         print("GAFF2 features:")
-        print("  - Better torsion parameters")
-        print("  - Improved charge models")
-        print("  - Enhanced coverage of chemical space")
+        print(f"  - {success('Better torsion parameters')}")
+        print(f"  - {success('Improved charge models')}")
+        print(f"  - {success('Enhanced coverage of chemical space')}")
         print(f"{'='*60}")
 
     def run(self):
@@ -47,31 +62,35 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             lig_dir = os.path.join(self.output_dir, "LIG.amb2gmx")
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
-                    print(f"\nUsing cached GAFF2 force field parameters from: {lig_dir}")
+                    print_info(f"Using cached GAFF2 parameters from: {path(lig_dir)}")
                     print("All required files found:")
                     for f in sorted(os.listdir(lig_dir)):
-                        print(f"  - {f}")
-                    print("\n(Use --overwrite to regenerate)")
+                        print_success(f, prefix="  -")
+                    print_warning("Use --overwrite to regenerate")
                     return lig_dir
 
             # Generate AMBER parameters (using GAFF2)
+            print("  Generating AMBER parameters...")
             ff_dir = self.generate_amber_parameters()
+            print_success("  AMBER parameters generated")
 
             # Find acpype output
+            print("  Converting to GROMACS format...")
             ff_files = self.find_acpype_output(ff_dir)
 
             # Standardize to LIG naming
             lig_dir = self.standardize_to_LIG(ff_files)
+            print_success("  Converted to GROMACS format")
 
             # Cleanup
             self.cleanup_temp_files()
 
             print(f"\n{'='*60}")
-            print("GAFF2 force field generation completed successfully!")
+            print_success("GAFF2 force field generation completed!")
             print(f"{'='*60}")
-            print(f"\nOutput files are in: {lig_dir}")
+            print(f"\nOutput files are in: {path(lig_dir)}")
             print("\nGenerated files:")
-            for f in os.listdir(lig_dir):
+            for f in sorted(os.listdir(lig_dir)):
                 print(f"  - {f}")
 
             return lig_dir

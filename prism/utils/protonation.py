@@ -4,8 +4,14 @@
 """
 Protein protonation state optimization using Meeko.
 
-This module provides preprocessing for protein structures to optimize
-hydrogen positions and protonation states before GROMACS pdb2gmx processing.
+This module leverages Meeko (originally designed for AutoDock preprocessing)
+to add hydrogens and detect histidine protonation states. The detected states
+are then used to rename residues (HIS→HID/HIE/HIP) before GROMACS pdb2gmx
+regenerates standardized hydrogens.
+
+Note: This is an experimental feature that "borrows" Meeko's receptor preparation
+      capabilities for quality protonation state detection, not its original
+      AutoDock docking purpose.
 """
 
 import os
@@ -23,9 +29,13 @@ class ProteinProtonator:
     """
     Optimize protein protonation states using Meeko.
 
-    This class provides a preprocessing step that uses Meeko's reduce2.py
-    and mk_prepare_receptor.py to add and optimize hydrogens before passing
-    the structure to GROMACS pdb2gmx.
+    This class uses Meeko's mk_prepare_receptor.py (AutoDock preprocessing tool)
+    to add hydrogens and process protein structures. The hydrogens are then
+    analyzed to detect histidine protonation states, which are used to rename
+    residues appropriately before GROMACS pdb2gmx processing.
+
+    Note: Meeko is primarily an AutoDock tool. We leverage its receptor
+          preparation capabilities for protonation state detection.
     """
 
     def __init__(self,
@@ -56,29 +66,31 @@ class ProteinProtonator:
         self._check_meeko_available()
 
     def _check_meeko_available(self):
-        """Check if Meeko is installed and available."""
+        """
+        Check if Meeko is installed and available.
+
+        Note: We only use mk_prepare_receptor.py from Meeko. The reduce2.py tool
+              does not exist in current Meeko versions (0.7.1+) and is not needed.
+        """
         try:
             import meeko
             logger.info(f"Meeko version: {meeko.__version__}")
-
-            # Check for reduce2.py command
-            try:
-                result = subprocess.run(
-                    ["reduce2.py", "--help"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                self.has_reduce2 = (result.returncode == 0)
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                logger.warning("reduce2.py not found in PATH. Using mk_prepare_receptor only.")
-                self.has_reduce2 = False
+            logger.info("Using Meeko's mk_prepare_receptor.py for hydrogen addition")
 
         except ImportError as e:
-            raise ImportError(
-                "Meeko is not available. Install with: pip install meeko\n"
-                "Or install with PRISM: pip install -e .[protonation]"
-            ) from e
+            error_msg = str(e)
+            if "gemmi" in error_msg:
+                raise ImportError(
+                    f"Meeko is installed but missing dependency: {error_msg}\n"
+                    "Install with: pip install gemmi\n"
+                    "Or reinstall meeko with all dependencies: pip install meeko --upgrade"
+                ) from e
+            else:
+                raise ImportError(
+                    f"Meeko is not available: {error_msg}\n"
+                    "Install with: pip install meeko\n"
+                    "Or install with PRISM: pip install -e .[protonation]"
+                ) from e
 
     def optimize_hydrogens(self,
                           input_pdb: str,
@@ -128,19 +140,10 @@ class ProteinProtonator:
         }
 
         try:
-            # Step 1: Add/optimize hydrogens with reduce2.py (if available)
-            if self.has_reduce2:
-                h_optimized_pdb = work_path / "protein_H_optimized.pdb"
-                self._run_reduce2(input_path, h_optimized_pdb)
-                results["reduce2_output"] = str(h_optimized_pdb)
-                intermediate_pdb = h_optimized_pdb
-            else:
-                # Skip reduce2, use input directly
-                intermediate_pdb = input_path
-                logger.info("Skipping reduce2.py (not available)")
-
-            # Step 2: Prepare receptor with Meeko (validates and cleans structure)
-            self._run_mk_prepare_receptor(intermediate_pdb, output_path, work_path)
+            # Use Meeko's mk_prepare_receptor to add hydrogens and prepare structure
+            # Note: reduce2.py does not exist in current Meeko versions, we only use mk_prepare_receptor
+            logger.info("Using Meeko's mk_prepare_receptor.py to add and optimize hydrogens")
+            self._run_mk_prepare_receptor(input_path, output_path, work_path)
             results["final_output"] = str(output_path)
 
             # Step 3: Validate output
@@ -159,43 +162,6 @@ class ProteinProtonator:
                 shutil.rmtree(work_path, ignore_errors=True)
 
         return results
-
-    def _run_reduce2(self, input_pdb: Path, output_pdb: Path):
-        """
-        Run reduce2.py for hydrogen optimization.
-
-        Parameters
-        ----------
-        input_pdb : Path
-            Input PDB file
-        output_pdb : Path
-            Output PDB file with optimized hydrogens
-        """
-        logger.info("Running reduce2.py for hydrogen optimization...")
-
-        cmd = ["reduce2.py", str(input_pdb)]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes timeout
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(f"reduce2.py failed: {result.stderr}")
-
-            # Write output
-            with open(output_pdb, 'w') as f:
-                f.write(result.stdout)
-
-            logger.info(f"Hydrogens optimized successfully")
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("reduce2.py timed out after 5 minutes")
-        except Exception as e:
-            raise RuntimeError(f"reduce2.py execution failed: {e}")
 
     def _run_mk_prepare_receptor(self, input_pdb: Path, output_pdb: Path, work_dir: Path):
         """
@@ -309,6 +275,130 @@ class ProteinProtonator:
             logger.warning(f"Found {len(stats['metal_atoms'])} metal atoms - verify coordination")
 
         return stats
+
+
+def detect_and_rename_protonation_states(pdb_file: str, output_file: str = None) -> Dict[str, any]:
+    """
+    Detect histidine protonation states and rename residues for GROMACS compatibility.
+
+    This function analyzes hydrogen atoms added by Meeko to determine the actual
+    protonation state of histidines (HID/HIE/HIP), then renames the residues accordingly.
+    After renaming, GROMACS pdb2gmx can use -ignh to regenerate standardized hydrogens.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Input PDB file with Meeko-optimized hydrogens
+    output_file : str, optional
+        Output PDB file with renamed residues (default: overwrites input)
+
+    Returns
+    -------
+    dict
+        Dictionary with detected states and renaming statistics
+
+    Notes
+    -----
+    Histidine protonation states:
+    - HID: Protonated on ND1 (has HD1 hydrogen)
+    - HIE: Protonated on NE2 (has HE2 hydrogen)
+    - HIP: Doubly protonated (has both HD1 and HE2)
+    - HIS: Default/unknown state
+    """
+    from pathlib import Path
+
+    if output_file is None:
+        output_file = pdb_file
+
+    pdb_path = Path(pdb_file)
+    if not pdb_path.exists():
+        raise FileNotFoundError(f"PDB file not found: {pdb_file}")
+
+    # Dictionary to store histidine residues and their hydrogen atoms
+    # Key: (chain, resid), Value: set of hydrogen atom names
+    his_residues = {}
+    all_lines = []
+
+    # First pass: read file and identify histidines
+    with open(pdb_file, 'r') as f:
+        for line in f:
+            all_lines.append(line)
+
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                continue
+
+            res_name = line[17:20].strip()
+            if res_name not in ["HIS", "HID", "HIE", "HIP"]:
+                continue
+
+            chain = line[21].strip()
+            res_id = line[22:26].strip()
+            atom_name = line[12:16].strip()
+
+            key = (chain, res_id)
+            if key not in his_residues:
+                his_residues[key] = {'atoms': set(), 'original_name': res_name}
+
+            # Track relevant hydrogen atoms
+            if atom_name in ['HD1', 'HE2', 'H', 'HN']:
+                his_residues[key]['atoms'].add(atom_name)
+
+    # Determine protonation states
+    renaming_stats = {
+        'total_his': len(his_residues),
+        'renamed': {},
+        'unchanged': []
+    }
+
+    for (chain, res_id), info in his_residues.items():
+        h_atoms = info['atoms']
+        original = info['original_name']
+
+        # Determine correct state based on hydrogens
+        if 'HD1' in h_atoms and 'HE2' in h_atoms:
+            new_name = 'HIP'  # Doubly protonated
+        elif 'HD1' in h_atoms:
+            new_name = 'HID'  # Protonated on ND1
+        elif 'HE2' in h_atoms:
+            new_name = 'HIE'  # Protonated on NE2
+        else:
+            new_name = 'HIE'  # Default to HIE if unclear
+
+        if original != new_name:
+            renaming_stats['renamed'][(chain, res_id)] = {
+                'from': original,
+                'to': new_name,
+                'h_atoms': list(h_atoms)
+            }
+        else:
+            renaming_stats['unchanged'].append((chain, res_id, original))
+
+    # Second pass: write output with renamed residues
+    with open(output_file, 'w') as f:
+        for line in all_lines:
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                f.write(line)
+                continue
+
+            res_name = line[17:20].strip()
+            if res_name not in ["HIS", "HID", "HIE", "HIP"]:
+                f.write(line)
+                continue
+
+            chain = line[21].strip()
+            res_id = line[22:26].strip()
+            key = (chain, res_id)
+
+            # Check if this residue needs renaming
+            if key in renaming_stats['renamed']:
+                new_name = renaming_stats['renamed'][key]['to']
+                # Replace residue name (columns 18-20, 1-indexed, so 17-20 in 0-indexed)
+                new_line = line[:17] + f"{new_name:3s}" + line[20:]
+                f.write(new_line)
+            else:
+                f.write(line)
+
+    return renaming_stats
 
 
 def optimize_protein_protonation(input_pdb: str,

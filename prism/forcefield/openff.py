@@ -17,6 +17,23 @@ try:
 except ImportError:
     from base import ForceFieldGeneratorBase
 
+# Import color utilities
+try:
+    from ..utils.colors import print_success, print_info, print_warning, print_error, success, error, path, number
+except ImportError:
+    try:
+        from prism.utils.colors import print_success, print_info, print_warning, print_error, success, error, path, number
+    except ImportError:
+        # Fallback if colors not available
+        def print_success(x, **kwargs): print(f"✓ {x}")
+        def print_info(x, **kwargs): print(f"ℹ {x}")
+        def print_warning(x, **kwargs): print(f"⚠ {x}")
+        def print_error(x, **kwargs): print(f"✗ {x}")
+        def success(x): return f"✓ {x}"
+        def error(x): return f"✗ {x}"
+        def path(x): return x
+        def number(x): return x
+
 # Import OpenFF specific dependencies
 try:
     from openff.toolkit import Molecule, ForceField
@@ -24,9 +41,9 @@ try:
     from openff.units import unit
     import numpy as np
 except ImportError as e:
-    print(f"Warning: Missing OpenFF dependencies: {e}")
-    print("OpenFF force field generator will not be available.")
-    print("RECOMMENDED INSTALLATION:")
+    print_warning(f"Missing OpenFF dependencies: {e}")
+    print_error("OpenFF force field generator will not be available")
+    print_info("RECOMMENDED INSTALLATION:")
     print("  mamba install -c conda-forge openff-toolkit")
     print("  # OR: conda install -c conda-forge openff-toolkit")
     print("  # OR: pip install openff-toolkit openff-interchange")
@@ -70,11 +87,13 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
         # Output directory for OpenFF files
         self.lig_ff_dir = os.path.join(self.output_dir, self.get_output_dir_name())
         
-        print(f"\nInitialized OpenFF Force Field Generator:")
-        print(f"  Ligand: {self.ligand_path}")
-        print(f"  Charge: {self.charge}")
+        print(f"\n{'='*60}")
+        print_info("Initialized OpenFF Force Field Generator")
+        print(f"{'='*60}")
+        print(f"  Ligand: {path(self.ligand_path)}")
+        print(f"  Charge: {number(self.charge)}")
         print(f"  Force field: {self.forcefield_name}")
-        print(f"  Output directory: {self.output_dir}")
+        print(f"  Output directory: {path(self.output_dir)}")
     
     def get_output_dir_name(self):
         """Get the output directory name for OpenFF"""
@@ -83,7 +102,7 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
     def run(self):
         """Run the OpenFF force field generation workflow"""
         print(f"\n{'='*60}")
-        print("Starting OpenFF Force Field Generation")
+        print_info("Starting OpenFF Force Field Generation")
         print(f"{'='*60}")
 
         try:
@@ -91,26 +110,30 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
             # This allows using cached files even when antechamber/obabel are not available
             if os.path.exists(self.lig_ff_dir) and not self.overwrite:
                 if self.check_required_files(self.lig_ff_dir):
-                    print(f"\nUsing cached OpenFF force field parameters from: {self.lig_ff_dir}")
+                    print_info(f"Using cached OpenFF parameters from: {path(self.lig_ff_dir)}")
                     print("All required files found:")
                     for f in sorted(os.listdir(self.lig_ff_dir)):
-                        print(f"  - {f}")
-                    print("\n(Use --overwrite to regenerate)")
+                        print_success(f, prefix="  -")
+                    print_warning("Use --overwrite to regenerate")
                     return self.lig_ff_dir
 
             # Create output directory
             os.makedirs(self.lig_ff_dir, exist_ok=True)
 
             # Load molecule (only if we need to generate new parameters)
+            print("  Loading molecule with OpenFF toolkit...")
             mol = self._load_molecule()
+            print_success("  Molecule loaded successfully")
 
             # Generate force field parameters
+            print(f"  Generating parameters with {self.forcefield_name}...")
             self._generate_parameters(mol)
+            print_success("  Parameters generated successfully")
 
             print(f"\n{'='*60}")
-            print("Force field generation completed successfully!")
+            print_success("OpenFF force field generation completed!")
             print(f"{'='*60}")
-            print(f"\nOutput files are in: {self.lig_ff_dir}")
+            print(f"\nOutput files are in: {path(self.lig_ff_dir)}")
             print("\nGenerated files:")
             for f in sorted(os.listdir(self.lig_ff_dir)):
                 print(f"  - {f}")

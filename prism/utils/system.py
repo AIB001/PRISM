@@ -14,6 +14,22 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+# Import color utilities
+try:
+    from .colors import print_success, print_warning, print_info, success, warning, path, number
+except ImportError:
+    try:
+        from prism.utils.colors import print_success, print_warning, print_info, success, warning, path, number
+    except ImportError:
+        # Fallback
+        def print_success(x, **kwargs): print(f"✓ {x}")
+        def print_warning(x, **kwargs): print(f"⚠ {x}")
+        def print_info(x, **kwargs): print(f"ℹ {x}")
+        def success(x): return f"✓ {x}"
+        def warning(x): return f"⚠ {x}"
+        def path(x): return x
+        def number(x): return x
+
 
 class SystemBuilder:
     """
@@ -96,7 +112,7 @@ class SystemBuilder:
             The path to the directory containing the final model files.
         """
         try:
-            print("\n=== Building GROMACS Model ===")
+            print_info("Building GROMACS Model")
 
             if (self.model_dir / "solv_ions.gro").exists() and not self.overwrite:
                 print(f"Final model file solv_ions.gro already exists in {self.model_dir}, skipping model building.")
@@ -123,7 +139,7 @@ class SystemBuilder:
             solvated_gro = self._solvate(boxed_gro, topol_top)
             self._add_ions(solvated_gro, topol_top)
 
-            print("\nSystem building completed successfully.")
+            print_success("System building completed")
             print(f"System files are in {self.model_dir}")
             return str(self.model_dir)
 
@@ -135,7 +151,7 @@ class SystemBuilder:
 
     def _fix_protein(self, cleaned_protein: str) -> str:
         """Fix missing atoms in protein using pdbfixer."""
-        print("\nStep 1: Fixing protein with pdbfixer...")
+        print("\n  Step 1: Fixing protein with pdbfixer...")
         fixed_pdb = self.model_dir / "fixed_clean_protein.pdb"
 
         if fixed_pdb.exists() and not self.overwrite:
@@ -176,7 +192,7 @@ class SystemBuilder:
     def _generate_topology(self, fixed_pdb: str, ff_idx: int, water_idx: int,
                           ff_info: dict = None, water_info: dict = None) -> Tuple[str, str]:
         """Generate topology using pdb2gmx, handling histidines."""
-        print("\nStep 2: Generating topology with pdb2gmx...")
+        print("\n  Step 2: Generating topology with pdb2gmx...")
 
         protein_gro = self.model_dir / "pro.gro"
         topol_top = self.model_dir / "topol.top"
@@ -185,14 +201,28 @@ class SystemBuilder:
             print(f"Protein topology already generated at {protein_gro}, skipping pdb2gmx.")
             return str(protein_gro), str(topol_top)
 
+        # Check protonation method
+        protonation_method = self.config.get('protonation', {}).get('method', 'gromacs')
+
         # Build pdb2gmx command
         command = [
             self.gmx_command, "pdb2gmx",
             "-f", fixed_pdb,
             "-o", str(protein_gro),
             "-p", str(topol_top),
-            "-ignh"
+            "-ignh"  # Always use -ignh to regenerate standardized hydrogens
         ]
+
+        # Print information about protonation method
+        if protonation_method == 'gromacs':
+            print_info("  Using GROMACS protonation (pdb2gmx -ignh: ignore and regenerate all hydrogens)")
+        elif protonation_method == 'meeko':
+            print_info("  Using Meeko-detected protonation states (residues renamed, pdb2gmx -ignh regenerates H)")
+            print("  → Meeko's role: Intelligent detection of histidine protonation states (HID/HIE/HIP)")
+            print("  → GROMACS pdb2gmx: Regenerates standardized hydrogen atoms with correct naming")
+        else:
+            # Default to gromacs method
+            print_warning(f"  Unknown protonation method '{protonation_method}', defaulting to GROMACS")
 
         # Use -ff and -water flags if force field info is provided
         # This is more reliable than interactive menu indexing
@@ -237,7 +267,7 @@ class SystemBuilder:
         ion_files = list(self.model_dir.glob("topol_Ion*.itp"))
 
         if ion_files:
-            print(f"\n✓ Metals successfully processed by pdb2gmx ({len(ion_files)} ion topology file(s) found)")
+            print_success(f"Metals processed by pdb2gmx ({number(len(ion_files))} ion topology file(s) found)", prefix="  ✓")
             for itp_file in ion_files:
                 print(f"  - {itp_file.name}")
         else:
@@ -254,7 +284,7 @@ class SystemBuilder:
 
     def _fix_topology(self, topol_path: str, lig_ff_dir: str):
         """Includes ligand parameters into the main topology file."""
-        print("\nStep 3: Including ligand parameters in topology...")
+        print("\n  Step 3: Including ligand parameters in topology...")
 
         lig_ff_path = Path(lig_ff_dir)
         lig_itp_path = lig_ff_path / "LIG.itp"
@@ -315,7 +345,7 @@ class SystemBuilder:
 
     def _combine_protein_ligand(self, protein_gro: str, lig_ff_dir: str) -> str:
         """Combines protein and ligand GRO files into a complex."""
-        print("\nStep 4: Combining protein and ligand coordinates...")
+        print("\n  Step 4: Combining protein and ligand coordinates...")
         complex_gro = self.model_dir / "pro_lig.gro"
         lig_gro_path = Path(lig_ff_dir) / "LIG.gro"
 
@@ -356,7 +386,7 @@ class SystemBuilder:
 
     def _create_box(self, complex_gro: str) -> str:
         """Creates the simulation box."""
-        print("\nStep 5: Creating simulation box...")
+        print("\n  Step 5: Creating simulation box...")
         boxed_gro = self.model_dir / "pro_lig_newbox.gro"
 
         if boxed_gro.exists() and not self.overwrite:
@@ -379,7 +409,7 @@ class SystemBuilder:
 
     def _solvate(self, boxed_gro: str, topol_top: str) -> str:
         """Solvates the system."""
-        print("\nStep 6: Solvating the system...")
+        print("\n  Step 6: Solvating the system...")
         solvated_gro = self.model_dir / "solv.gro"
 
         if solvated_gro.exists() and not self.overwrite:
@@ -418,7 +448,7 @@ class SystemBuilder:
         Adds ions to neutralize the system and achieve a target salt concentration.
         This method uses a single, robust call to `gmx genion`.
         """
-        print("\nStep 7: Adding ions...")
+        print("\n  Step 7: Adding ions...")
         ions_gro = self.model_dir / "solv_ions.gro"
 
         if ions_gro.exists() and not self.overwrite:
@@ -501,7 +531,7 @@ class SystemBuilder:
                 content = f.read()
             
             if any(ion in content for ion in ['NA ', 'CL ', 'K ', 'BR ', 'CA ']):
-                print("Topology successfully updated with ions.")
+                print_success("Topology updated with ions", prefix="  ✓")
                 return
             else:
                 print("Warning: Could not verify ion addition in topology. Manual check recommended.")
