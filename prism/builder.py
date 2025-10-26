@@ -782,6 +782,8 @@ Example usage:
     util_group = parser.add_argument_group('Utility options')
     util_group.add_argument("--list-forcefields", action="store_true",
                             help="List available force fields and exit")
+    util_group.add_argument("--install-forcefields", action="store_true",
+                            help="Install additional force fields from PRISM configs to GROMACS")
     util_group.add_argument("--export-config", metavar="FILE",
                             help="Export default configuration to file and exit")
     util_group.add_argument("--gmx-command", default=None,
@@ -924,6 +926,23 @@ pressure_coupling:
         with open(args.export_config, 'w') as f:
             f.write(default_config)
         print(f"Default configuration exported to: {args.export_config}")
+        sys.exit(0)
+
+    # Handle --install-forcefields option
+    if args.install_forcefields:
+        try:
+            # Import force field installer
+            if __name__ == "__main__" and __package__ is None:
+                from prism.utils.forcefield_installer import ForceFieldInstaller
+            else:
+                from .utils.forcefield_installer import ForceFieldInstaller
+
+            installer = ForceFieldInstaller()
+            installer.install_forcefields_interactive()
+        except Exception as e:
+            print(f"Error installing force fields: {e}")
+            import traceback
+            traceback.print_exc()
         sys.exit(0)
 
     # Handle --list-forcefields option
