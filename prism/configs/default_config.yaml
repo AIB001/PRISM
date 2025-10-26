@@ -83,10 +83,11 @@ pressure_coupling:
 
 # Protonation state optimization
 protonation:
-  optimize: true  # Use Meeko for hydrogen optimization (requires: pip install meeko)
+  method: gromacs  # Protonation method: 'gromacs' (pdb2gmx -ignh, default) or 'meeko' (Meeko optimization, requires: pip install meeko)
+  optimize: true  # Legacy parameter - use 'method' instead. When method='meeko', Meeko hydrogens are preserved in pdb2gmx
   ph: 7.0  # Target pH for protonation (overridden by simulation.pH if not set)
-  preserve_existing_h: false  # Keep existing hydrogens in input structure
-  his_state: auto  # Histidine protonation: auto, HID, HIE, or HIP
+  preserve_existing_h: false  # Keep existing hydrogens in input structure (only for meeko method)
+  his_state: auto  # Histidine protonation: auto, HID, HIE, or HIP (only for meeko method)
 
 # Note: Force field and water model are specified via command line:
 # --forcefield amber99sb --water tip3p

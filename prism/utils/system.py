@@ -201,14 +201,28 @@ class SystemBuilder:
             print(f"Protein topology already generated at {protein_gro}, skipping pdb2gmx.")
             return str(protein_gro), str(topol_top)
 
+        # Check protonation method
+        protonation_method = self.config.get('protonation', {}).get('method', 'gromacs')
+
         # Build pdb2gmx command
         command = [
             self.gmx_command, "pdb2gmx",
             "-f", fixed_pdb,
             "-o", str(protein_gro),
-            "-p", str(topol_top),
-            "-ignh"
+            "-p", str(topol_top)
         ]
+
+        # Add -ignh flag only for gromacs method (ignore existing hydrogens)
+        # For meeko method, preserve Meeko-optimized hydrogens
+        if protonation_method == 'gromacs':
+            command.append("-ignh")
+            print_info("  Using GROMACS protonation (pdb2gmx -ignh: ignore and regenerate all hydrogens)")
+        elif protonation_method == 'meeko':
+            print_info("  Using Meeko protonation (preserving Meeko-optimized hydrogens)")
+        else:
+            # Default to gromacs method
+            command.append("-ignh")
+            print_warning(f"  Unknown protonation method '{protonation_method}', defaulting to GROMACS")
 
         # Use -ff and -water flags if force field info is provided
         # This is more reliable than interactive menu indexing

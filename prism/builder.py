@@ -328,10 +328,15 @@ class PRISMBuilder:
         final_pdb = cleaned_pdb  # By default, return the cleaned PDB
 
         # Check if protonation optimization is requested
-        optimize_protonation = self.config.get('protonation', {}).get('optimize', False)
+        protonation_method = self.config.get('protonation', {}).get('method', 'gromacs')
+        # Legacy support: also check 'optimize' parameter for backwards compatibility
+        use_meeko = protonation_method == 'meeko' or (
+            protonation_method == 'gromacs' and
+            self.config.get('protonation', {}).get('optimize', False)
+        )
 
-        # If protonation is enabled, we'll create a separate protonated file
-        if optimize_protonation:
+        # If meeko protonation is enabled, we'll create a separate protonated file
+        if use_meeko:
             protonated_pdb = os.path.join(self.output_dir, f"{self.protein_name}_protonated.pdb")
             # Check if both cleaned and protonated files exist
             if os.path.exists(cleaned_pdb) and os.path.exists(protonated_pdb) and not self.overwrite:
@@ -378,7 +383,7 @@ class PRISMBuilder:
         print(f"Protein cleaned and saved to: {cleaned_pdb}")
 
         # === NEW: Protonation optimization step ===
-        if optimize_protonation:
+        if use_meeko:
             print("\n=== Optimizing Protein Protonation ===")
 
             # Get protonation config
@@ -758,6 +763,8 @@ Example usage:
                            help="Pressure in bar (default: 1.0)")
     sim_group.add_argument("--pH", type=float, default=7.0,
                            help="pH for protonation states (default: 7.0)")
+    sim_group.add_argument("--protonation", "-proton", choices=['gromacs', 'meeko'], default='gromacs',
+                           help="Protonation method: 'gromacs' (pdb2gmx -ignh, default) or 'meeko' (Meeko optimization, requires meeko installed)")
     sim_group.add_argument("--production-ns", type=float, default=500,
                            help="Production time in ns (default: 500)")
     sim_group.add_argument("--dt", type=float, default=0.002,
@@ -1023,6 +1030,8 @@ pressure_coupling:
         config_overrides.setdefault('simulation', {})['pressure'] = args.pressure
     if args.pH != 7.0:
         config_overrides.setdefault('simulation', {})['pH'] = args.pH
+    if args.protonation != 'gromacs':
+        config_overrides.setdefault('protonation', {})['method'] = args.protonation
     if args.production_ns != 500:
         config_overrides.setdefault('simulation', {})['production_time_ns'] = args.production_ns
     if args.dt != 0.002:
