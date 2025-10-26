@@ -7,6 +7,20 @@ PRISM MDP Generator - Generate MDP files for MD simulations
 
 import os
 
+# Import color utilities
+try:
+    from .colors import print_success, print_info, print_subheader, path, number
+except ImportError:
+    try:
+        from prism.utils.colors import print_success, print_info, print_subheader, path, number
+    except ImportError:
+        # Fallback if colors not available
+        def print_success(x, **kwargs): print(f"✓ {x}")
+        def print_info(x, **kwargs): print(f"ℹ {x}")
+        def print_subheader(x, **kwargs): print(f"\n=== {x} ===")
+        def path(x): return x
+        def number(x): return x
+
 
 class MDPGenerator:
     """Generate MDP files for MD simulations"""
@@ -18,7 +32,7 @@ class MDPGenerator:
 
     def generate_all(self):
         """Generate all MDP files"""
-        print("\n=== Generating MDP Files ===")
+        print_subheader("Generating MDP Files")
 
         self._generate_ions_mdp()
         self._generate_em_mdp()
@@ -26,7 +40,7 @@ class MDPGenerator:
         self._generate_npt_mdp()
         self._generate_production_mdp()
 
-        print(f"MDP files generated in {self.mdp_dir}")
+        print_success(f"MDP files generated in {path(self.mdp_dir)}")
         self._print_summary()
 
     def _generate_ions_mdp(self):
@@ -305,7 +319,8 @@ comm-grps               = {tc_grps}
         sim_config = self.config['simulation']
         em_config = self.config['energy_minimization']
 
-        print(f"  - Energy minimization: {em_config['nsteps']} steps")
-        print(f"  - NVT equilibration: {sim_config['equilibration_nvt_time_ps']} ps")
-        print(f"  - NPT equilibration: {sim_config['equilibration_npt_time_ps']} ps")
-        print(f"  - Production: {sim_config['production_time_ns']} ns")
+        print_info("Simulation parameters:")
+        print(f"  - Energy minimization: {number(em_config['nsteps'])} steps")
+        print(f"  - NVT equilibration: {number(sim_config['equilibration_nvt_time_ps'])} ps")
+        print(f"  - NPT equilibration: {number(sim_config['equilibration_npt_time_ps'])} ps")
+        print(f"  - Production: {number(sim_config['production_time_ns'])} ns")

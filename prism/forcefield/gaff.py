@@ -18,6 +18,21 @@ try:
 except ImportError:
     from base import ForceFieldGeneratorBase
 
+# Import color utilities
+try:
+    from ..utils.colors import print_success, print_info, print_warning, success, path, number
+except ImportError:
+    try:
+        from prism.utils.colors import print_success, print_info, print_warning, success, path, number
+    except ImportError:
+        # Fallback if colors not available
+        def print_success(x, **kwargs): print(f"✓ {x}")
+        def print_info(x, **kwargs): print(f"ℹ {x}")
+        def print_warning(x, **kwargs): print(f"⚠ {x}")
+        def success(x): return f"✓ {x}"
+        def path(x): return x
+        def number(x): return x
+
 
 class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     """GAFF force field generator wrapper"""
@@ -47,13 +62,15 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             "LIG"
         ]
         
-        print(f"\nInitialized GAFF Force Field Generator:")
-        print(f"  Ligand: {self.ligand_path}")
+        print(f"\n{'='*60}")
+        print_info("Initialized GAFF Force Field Generator")
+        print(f"{'='*60}")
+        print(f"  Ligand: {path(self.ligand_path)}")
         print(f"  File format: {self.file_format.upper()}")
         print(f"  Ligand ID: {self.ligand_id}")
-        print(f"  Net charge: {self.net_charge}")
-        print(f"  Output directory: {self.output_dir}")
-        print(f"  RDKit available: {self.rdkit_available}")
+        print(f"  Net charge: {number(self.net_charge)}")
+        print(f"  Output directory: {path(self.output_dir)}")
+        print(f"  RDKit available: {success('Yes') if self.rdkit_available else '❌ No'}")
     
     def get_output_dir_name(self):
         """Get the output directory name for GAFF"""
@@ -62,7 +79,7 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     def run(self):
         """Run the GAFF force field generation workflow"""
         print(f"\n{'='*60}")
-        print("Starting GAFF Force Field Generation")
+        print_info("Starting GAFF Force Field Generation")
         print(f"{'='*60}")
 
         try:
@@ -71,31 +88,35 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             lig_dir = os.path.join(self.output_dir, "LIG.amb2gmx")
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
-                    print(f"\nUsing cached GAFF force field parameters from: {lig_dir}")
+                    print_info(f"Using cached GAFF parameters from: {path(lig_dir)}")
                     print("All required files found:")
                     for f in sorted(os.listdir(lig_dir)):
-                        print(f"  - {f}")
-                    print("\n(Use --overwrite to regenerate)")
+                        print_success(f, prefix="  -")
+                    print_warning("Use --overwrite to regenerate")
                     return lig_dir
 
             # Generate AMBER parameters
+            print("  Generating AMBER parameters...")
             ff_dir = self.generate_amber_parameters()
+            print_success("  AMBER parameters generated")
 
             # Find acpype output
+            print("  Converting to GROMACS format...")
             ff_files = self.find_acpype_output(ff_dir)
 
             # Standardize to LIG naming
             lig_dir = self.standardize_to_LIG(ff_files)
+            print_success("  Converted to GROMACS format")
 
             # Cleanup
             self.cleanup_temp_files()
 
             print(f"\n{'='*60}")
-            print("Force field generation completed successfully!")
+            print_success("GAFF force field generation completed!")
             print(f"{'='*60}")
-            print(f"\nOutput files are in: {lig_dir}")
+            print(f"\nOutput files are in: {path(lig_dir)}")
             print("\nGenerated files:")
-            for f in os.listdir(lig_dir):
+            for f in sorted(os.listdir(lig_dir)):
                 print(f"  - {f}")
 
             return lig_dir

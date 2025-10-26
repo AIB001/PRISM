@@ -20,6 +20,11 @@ if __name__ == "__main__" and __package__ is None:
     from prism.utils.mdp import MDPGenerator
     from prism.utils.system import SystemBuilder
     from prism.utils.protonation import ProteinProtonator
+    from prism.utils.colors import (
+        print_header, print_subheader, print_step,
+        print_success, print_error, print_warning, print_info,
+        success, error, warning, path, number
+    )
     from prism.forcefield.gaff import GAFFForceFieldGenerator
     from prism.forcefield.gaff2 import GAFF2ForceFieldGenerator
     from prism.forcefield.openff import OpenFFForceFieldGenerator
@@ -33,6 +38,11 @@ else:
     from .utils.mdp import MDPGenerator
     from .utils.system import SystemBuilder
     from .utils.protonation import ProteinProtonator
+    from .utils.colors import (
+        print_header, print_subheader, print_step,
+        print_success, print_error, print_warning, print_info,
+        success, error, warning, path, number
+    )
     try:
         from .forcefield.gaff import GAFFForceFieldGenerator
         from .forcefield.gaff2 import GAFF2ForceFieldGenerator
@@ -191,7 +201,7 @@ class PRISMBuilder:
 
     def generate_ligand_forcefield(self):
         """Generate ligand force field using selected force field generator"""
-        print(f"\n=== Generating Ligand Force Field ({self.ligand_forcefield.upper()}) ===")
+        print_subheader(f"Generating Ligand Force Field ({self.ligand_forcefield.upper()})")
 
         if self.ligand_forcefield == 'gaff':
             # Use GAFF force field generator
@@ -277,7 +287,7 @@ class PRISMBuilder:
             if not os.path.exists(filepath):
                 raise FileNotFoundError(f"Required file not found: {filepath}")
 
-        print(f"Ligand force field files generated in: {self.lig_ff_dir}")
+        print(f"Ligand force field files generated in: {path(self.lig_ff_dir)}")
         return self.lig_ff_dir
 
     def clean_protein(self, ion_mode=None, distance_cutoff=None, keep_crystal_water=None, remove_artifacts=None):
@@ -312,7 +322,7 @@ class PRISMBuilder:
         """
         from .utils.cleaner import ProteinCleaner
 
-        print("\n=== Cleaning Protein ===")
+        print_subheader("Cleaning Protein")
 
         cleaned_pdb = os.path.join(self.output_dir, f"{self.protein_name}_clean.pdb")
         final_pdb = cleaned_pdb  # By default, return the cleaned PDB
@@ -463,7 +473,7 @@ class PRISMBuilder:
 
     def cleanup(self):
         """Clean up temporary files"""
-        print("\n=== Cleaning up temporary files ===")
+        print_subheader("Cleaning up temporary files")
 
         # Cleanup directories for GAFF, GAFF2, and OpenFF
         cleanup_dirs = ["forcefield", "temp_openff"]
@@ -589,55 +599,61 @@ fi
 
     def run(self):
         """Run the complete workflow"""
-        print(f"\n{'='*60}")
-        print("Starting PRISM Builder workflow")
-        print(f"{'='*60}")
+        print_header("PRISM Builder Workflow")
 
         try:
             # Save configuration for reference
             self.save_config()
 
             # Step 1: Generate ligand force field
+            print_step(1, 6, f"Generating ligand force field ({self.ligand_forcefield.upper()})")
             self.generate_ligand_forcefield()
+            print_success(f"Ligand force field generated")
 
             # Step 2: Clean protein
+            print_step(2, 6, "Cleaning protein structure")
             cleaned_protein = self.clean_protein()
+            print_success("Protein structure cleaned")
 
             # Step 3: Build model
+            print_step(3, 6, "Building GROMACS system")
             model_dir = self.build_model(cleaned_protein)
             if not model_dir:
                 raise RuntimeError("Failed to build model")
+            print_success("GROMACS system built")
 
             # Step 4: Generate MDP files
+            print_step(4, 6, "Generating MD parameter files")
             self.generate_mdp_files()
+            print_success("MDP files generated")
 
             # Step 5: Cleanup
+            print_step(5, 6, "Cleaning up temporary files")
             self.cleanup()
+            print_success("Cleanup completed")
 
             # Step 6: Generate local run script
+            print_step(6, 6, "Generating simulation run script")
             script_path = self.generate_localrun_script()
+            print_success("Run script generated")
 
-            print(f"\n{'='*60}")
-            print("PRISM Builder workflow completed successfully!")
-            print(f"{'='*60}")
-            print(f"\nOutput files are in: {self.output_dir}")
-            print(f"MD system files are in: {os.path.join(self.output_dir, 'GMX_PROLIG_MD')}")
-            print(f"MDP files are in: {self.mdp_generator.mdp_dir}")
-            print(f"Configuration saved in: {os.path.join(self.output_dir, 'prism_config.yaml')}")
-            print(f"\nProtein force field used: {self.forcefield['name']}")
-            print(f"Ligand force field used: {self.ligand_forcefield.upper()}")
-            print(f"Water model used: {self.water_model['name']}")
+            print_header("Workflow Complete!")
+            print(f"\nOutput files are in: {path(self.output_dir)}")
+            print(f"MD system files are in: {path(os.path.join(self.output_dir, 'GMX_PROLIG_MD'))}")
+            print(f"MDP files are in: {path(self.mdp_generator.mdp_dir)}")
+            print(f"Configuration saved in: {path(os.path.join(self.output_dir, 'prism_config.yaml'))}")
+            print(f"\nProtein force field used: {number(self.forcefield['name'])}")
+            print(f"Ligand force field used: {number(self.ligand_forcefield.upper())}")
+            print(f"Water model used: {number(self.water_model['name'])}")
 
             if script_path:
                 gmx_md_dir = os.path.join(self.output_dir, 'GMX_PROLIG_MD')
-                print(f"\n{'='*60}")
-                print("Ready to run MD simulations!")
-                print(f"{'='*60}")
+                print_header("Ready to Run MD Simulations!")
                 print(f"\nTo run the MD workflow:")
                 print(f"  1. Navigate to the MD directory:")
-                print(f"     cd {gmx_md_dir}")
+                print(f"     {path(f'cd {gmx_md_dir}')}")
                 print(f"  2. Execute the simulation script:")
-                print(f"     bash localrun.sh")
+                print(f"     {number('bash localrun.sh')}")
                 print(f"\nThe script will run:")
                 print(f"  - Energy Minimization (EM)")
                 print(f"  - NVT Equilibration")
@@ -648,7 +664,7 @@ fi
             return self.output_dir
 
         except Exception as e:
-            print(f"\nError during PRISM Builder workflow: {e}")
+            print_error(f"Workflow failed: {e}")
             import traceback
             traceback.print_exc()
             raise
