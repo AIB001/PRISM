@@ -209,19 +209,19 @@ class SystemBuilder:
             self.gmx_command, "pdb2gmx",
             "-f", fixed_pdb,
             "-o", str(protein_gro),
-            "-p", str(topol_top)
+            "-p", str(topol_top),
+            "-ignh"  # Always use -ignh to regenerate standardized hydrogens
         ]
 
-        # Add -ignh flag only for gromacs method (ignore existing hydrogens)
-        # For meeko method, preserve Meeko-optimized hydrogens
+        # Print information about protonation method
         if protonation_method == 'gromacs':
-            command.append("-ignh")
             print_info("  Using GROMACS protonation (pdb2gmx -ignh: ignore and regenerate all hydrogens)")
         elif protonation_method == 'meeko':
-            print_info("  Using Meeko protonation (preserving Meeko-optimized hydrogens)")
+            print_info("  Using Meeko-detected protonation states (residues renamed, pdb2gmx -ignh regenerates H)")
+            print("  → Meeko's role: Intelligent detection of histidine protonation states (HID/HIE/HIP)")
+            print("  → GROMACS pdb2gmx: Regenerates standardized hydrogen atoms with correct naming")
         else:
             # Default to gromacs method
-            command.append("-ignh")
             print_warning(f"  Unknown protonation method '{protonation_method}', defaulting to GROMACS")
 
         # Use -ff and -water flags if force field info is provided

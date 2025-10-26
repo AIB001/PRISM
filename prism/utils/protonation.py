@@ -311,6 +311,130 @@ class ProteinProtonator:
         return stats
 
 
+def detect_and_rename_protonation_states(pdb_file: str, output_file: str = None) -> Dict[str, any]:
+    """
+    Detect histidine protonation states and rename residues for GROMACS compatibility.
+
+    This function analyzes hydrogen atoms added by Meeko to determine the actual
+    protonation state of histidines (HID/HIE/HIP), then renames the residues accordingly.
+    After renaming, GROMACS pdb2gmx can use -ignh to regenerate standardized hydrogens.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Input PDB file with Meeko-optimized hydrogens
+    output_file : str, optional
+        Output PDB file with renamed residues (default: overwrites input)
+
+    Returns
+    -------
+    dict
+        Dictionary with detected states and renaming statistics
+
+    Notes
+    -----
+    Histidine protonation states:
+    - HID: Protonated on ND1 (has HD1 hydrogen)
+    - HIE: Protonated on NE2 (has HE2 hydrogen)
+    - HIP: Doubly protonated (has both HD1 and HE2)
+    - HIS: Default/unknown state
+    """
+    from pathlib import Path
+
+    if output_file is None:
+        output_file = pdb_file
+
+    pdb_path = Path(pdb_file)
+    if not pdb_path.exists():
+        raise FileNotFoundError(f"PDB file not found: {pdb_file}")
+
+    # Dictionary to store histidine residues and their hydrogen atoms
+    # Key: (chain, resid), Value: set of hydrogen atom names
+    his_residues = {}
+    all_lines = []
+
+    # First pass: read file and identify histidines
+    with open(pdb_file, 'r') as f:
+        for line in f:
+            all_lines.append(line)
+
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                continue
+
+            res_name = line[17:20].strip()
+            if res_name not in ["HIS", "HID", "HIE", "HIP"]:
+                continue
+
+            chain = line[21].strip()
+            res_id = line[22:26].strip()
+            atom_name = line[12:16].strip()
+
+            key = (chain, res_id)
+            if key not in his_residues:
+                his_residues[key] = {'atoms': set(), 'original_name': res_name}
+
+            # Track relevant hydrogen atoms
+            if atom_name in ['HD1', 'HE2', 'H', 'HN']:
+                his_residues[key]['atoms'].add(atom_name)
+
+    # Determine protonation states
+    renaming_stats = {
+        'total_his': len(his_residues),
+        'renamed': {},
+        'unchanged': []
+    }
+
+    for (chain, res_id), info in his_residues.items():
+        h_atoms = info['atoms']
+        original = info['original_name']
+
+        # Determine correct state based on hydrogens
+        if 'HD1' in h_atoms and 'HE2' in h_atoms:
+            new_name = 'HIP'  # Doubly protonated
+        elif 'HD1' in h_atoms:
+            new_name = 'HID'  # Protonated on ND1
+        elif 'HE2' in h_atoms:
+            new_name = 'HIE'  # Protonated on NE2
+        else:
+            new_name = 'HIE'  # Default to HIE if unclear
+
+        if original != new_name:
+            renaming_stats['renamed'][(chain, res_id)] = {
+                'from': original,
+                'to': new_name,
+                'h_atoms': list(h_atoms)
+            }
+        else:
+            renaming_stats['unchanged'].append((chain, res_id, original))
+
+    # Second pass: write output with renamed residues
+    with open(output_file, 'w') as f:
+        for line in all_lines:
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                f.write(line)
+                continue
+
+            res_name = line[17:20].strip()
+            if res_name not in ["HIS", "HID", "HIE", "HIP"]:
+                f.write(line)
+                continue
+
+            chain = line[21].strip()
+            res_id = line[22:26].strip()
+            key = (chain, res_id)
+
+            # Check if this residue needs renaming
+            if key in renaming_stats['renamed']:
+                new_name = renaming_stats['renamed'][key]['to']
+                # Replace residue name (columns 18-20, 1-indexed, so 17-20 in 0-indexed)
+                new_line = line[:17] + f"{new_name:3s}" + line[20:]
+                f.write(new_line)
+            else:
+                f.write(line)
+
+    return renaming_stats
+
+
 def optimize_protein_protonation(input_pdb: str,
                                  output_pdb: str,
                                  ph: float = 7.0,

@@ -421,6 +421,22 @@ class PRISMBuilder:
                     if validation.get('his_residues'):
                         print(f"  Found {len(validation['his_residues'])} histidine residue(s)")
 
+                # Detect and rename protonation states for GROMACS compatibility
+                print("\n=== Detecting Protonation States ===")
+                from prism.utils.protonation import detect_and_rename_protonation_states
+
+                rename_stats = detect_and_rename_protonation_states(protonated_pdb, protonated_pdb)
+
+                if rename_stats['renamed']:
+                    print(f"Renamed {len(rename_stats['renamed'])} histidine residue(s) based on Meeko optimization:")
+                    for (chain, resid), info in rename_stats['renamed'].items():
+                        print(f"  Chain {chain} Residue {resid}: {info['from']} → {info['to']} (H atoms: {', '.join(info['h_atoms'])})")
+                else:
+                    print("No histidine residues needed renaming")
+
+                print("\nNote: GROMACS pdb2gmx will use -ignh to regenerate standardized hydrogens")
+                print("      Meeko's contribution: intelligent detection of histidine protonation states")
+
                 return protonated_pdb
 
             except ImportError as e:
@@ -764,7 +780,7 @@ Example usage:
     sim_group.add_argument("--pH", type=float, default=7.0,
                            help="pH for protonation states (default: 7.0)")
     sim_group.add_argument("--protonation", "-proton", choices=['gromacs', 'meeko'], default='gromacs',
-                           help="Protonation method: 'gromacs' (pdb2gmx -ignh, default) or 'meeko' (Meeko optimization, requires meeko installed)")
+                           help="Protonation method: 'gromacs' (standard, default) or 'meeko' (intelligent HIS state detection via Meeko, requires: pip install meeko)")
     sim_group.add_argument("--production-ns", type=float, default=500,
                            help="Production time in ns (default: 500)")
     sim_group.add_argument("--dt", type=float, default=0.002,
