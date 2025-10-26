@@ -4,8 +4,14 @@
 """
 Protein protonation state optimization using Meeko.
 
-This module provides preprocessing for protein structures to optimize
-hydrogen positions and protonation states before GROMACS pdb2gmx processing.
+This module leverages Meeko (originally designed for AutoDock preprocessing)
+to add hydrogens and detect histidine protonation states. The detected states
+are then used to rename residues (HIS→HID/HIE/HIP) before GROMACS pdb2gmx
+regenerates standardized hydrogens.
+
+Note: This is an experimental feature that "borrows" Meeko's receptor preparation
+      capabilities for quality protonation state detection, not its original
+      AutoDock docking purpose.
 """
 
 import os
@@ -23,9 +29,13 @@ class ProteinProtonator:
     """
     Optimize protein protonation states using Meeko.
 
-    This class provides a preprocessing step that uses Meeko's reduce2.py
-    and mk_prepare_receptor.py to add and optimize hydrogens before passing
-    the structure to GROMACS pdb2gmx.
+    This class uses Meeko's mk_prepare_receptor.py (AutoDock preprocessing tool)
+    to add hydrogens and process protein structures. The hydrogens are then
+    analyzed to detect histidine protonation states, which are used to rename
+    residues appropriately before GROMACS pdb2gmx processing.
+
+    Note: Meeko is primarily an AutoDock tool. We leverage its receptor
+          preparation capabilities for protonation state detection.
     """
 
     def __init__(self,
@@ -56,23 +66,16 @@ class ProteinProtonator:
         self._check_meeko_available()
 
     def _check_meeko_available(self):
-        """Check if Meeko is installed and available."""
+        """
+        Check if Meeko is installed and available.
+
+        Note: We only use mk_prepare_receptor.py from Meeko. The reduce2.py tool
+              does not exist in current Meeko versions (0.7.1+) and is not needed.
+        """
         try:
             import meeko
             logger.info(f"Meeko version: {meeko.__version__}")
-
-            # Check for reduce2.py command
-            try:
-                result = subprocess.run(
-                    ["reduce2.py", "--help"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                self.has_reduce2 = (result.returncode == 0)
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                logger.warning("reduce2.py not found in PATH. Using mk_prepare_receptor only.")
-                self.has_reduce2 = False
+            logger.info("Using Meeko's mk_prepare_receptor.py for hydrogen addition")
 
         except ImportError as e:
             error_msg = str(e)
@@ -137,19 +140,10 @@ class ProteinProtonator:
         }
 
         try:
-            # Step 1: Add/optimize hydrogens with reduce2.py (if available)
-            if self.has_reduce2:
-                h_optimized_pdb = work_path / "protein_H_optimized.pdb"
-                self._run_reduce2(input_path, h_optimized_pdb)
-                results["reduce2_output"] = str(h_optimized_pdb)
-                intermediate_pdb = h_optimized_pdb
-            else:
-                # Skip reduce2, use input directly
-                intermediate_pdb = input_path
-                logger.info("Skipping reduce2.py (not available)")
-
-            # Step 2: Prepare receptor with Meeko (validates and cleans structure)
-            self._run_mk_prepare_receptor(intermediate_pdb, output_path, work_path)
+            # Use Meeko's mk_prepare_receptor to add hydrogens and prepare structure
+            # Note: reduce2.py does not exist in current Meeko versions, we only use mk_prepare_receptor
+            logger.info("Using Meeko's mk_prepare_receptor.py to add and optimize hydrogens")
+            self._run_mk_prepare_receptor(input_path, output_path, work_path)
             results["final_output"] = str(output_path)
 
             # Step 3: Validate output
@@ -168,43 +162,6 @@ class ProteinProtonator:
                 shutil.rmtree(work_path, ignore_errors=True)
 
         return results
-
-    def _run_reduce2(self, input_pdb: Path, output_pdb: Path):
-        """
-        Run reduce2.py for hydrogen optimization.
-
-        Parameters
-        ----------
-        input_pdb : Path
-            Input PDB file
-        output_pdb : Path
-            Output PDB file with optimized hydrogens
-        """
-        logger.info("Running reduce2.py for hydrogen optimization...")
-
-        cmd = ["reduce2.py", str(input_pdb)]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minutes timeout
-            )
-
-            if result.returncode != 0:
-                raise RuntimeError(f"reduce2.py failed: {result.stderr}")
-
-            # Write output
-            with open(output_pdb, 'w') as f:
-                f.write(result.stdout)
-
-            logger.info(f"Hydrogens optimized successfully")
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("reduce2.py timed out after 5 minutes")
-        except Exception as e:
-            raise RuntimeError(f"reduce2.py execution failed: {e}")
 
     def _run_mk_prepare_receptor(self, input_pdb: Path, output_pdb: Path, work_dir: Path):
         """

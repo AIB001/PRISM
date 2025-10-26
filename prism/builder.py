@@ -780,7 +780,7 @@ Example usage:
     sim_group.add_argument("--pH", type=float, default=7.0,
                            help="pH for protonation states (default: 7.0)")
     sim_group.add_argument("--protonation", "-proton", choices=['gromacs', 'meeko'], default='gromacs',
-                           help="Protonation method: 'gromacs' (standard, default) or 'meeko' (intelligent HIS state detection via Meeko, requires: pip install meeko)")
+                           help="Protonation method: 'gromacs' (default) or 'meeko' (experimental)")
     sim_group.add_argument("--production-ns", type=float, default=500,
                            help="Production time in ns (default: 500)")
     sim_group.add_argument("--dt", type=float, default=0.002,
