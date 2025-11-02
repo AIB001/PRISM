@@ -30,7 +30,7 @@ if __name__ == "__main__" and __package__ is None:
     from prism.forcefield.openff import OpenFFForceFieldGenerator
     from prism.forcefield.cgenff import CGenFFForceFieldGenerator
     from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
-    from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
+    from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridForceFieldGenerator
 else:
     # Normal package imports
     from .utils.environment import GromacsEnvironment
@@ -59,7 +59,7 @@ else:
             from prism.forcefield.openff import OpenFFForceFieldGenerator
             from prism.forcefield.cgenff import CGenFFForceFieldGenerator
             from prism.forcefield.opls_aa import OPLSAAForceFieldGenerator
-            from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
+            from prism.forcefield.swissparam import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridForceFieldGenerator
         except ImportError:
             print("Error: Cannot import force field generators")
             print("Please check your PRISM installation")

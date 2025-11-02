@@ -66,13 +66,15 @@ try:
         SwissParamForceFieldGenerator,
         MMFFForceFieldGenerator,
         MATCHForceFieldGenerator,
-        HybridMMFFMATCHForceFieldGenerator
+        BothForceFieldGenerator,
+        HybridForceFieldGenerator  # Alias for backward compatibility
     )
     __all__.extend([
         "SwissParamForceFieldGenerator",
         "MMFFForceFieldGenerator",
         "MATCHForceFieldGenerator",
-        "HybridMMFFMATCHForceFieldGenerator"
+        "BothForceFieldGenerator",
+        "HybridForceFieldGenerator"
     ])
 except ImportError:
     pass
@@ -142,25 +144,33 @@ def get_generator_info():
     if "MMFFForceFieldGenerator" in __all__:
         info["MMFF"] = {
             "class": "MMFFForceFieldGenerator",
-            "description": "MMFF-based force field using SwissParam server",
+            "description": "MMFF-based force field using SwissParam API",
             "output_dir": "LIG.mmff2gmx",
-            "dependencies": ["mechanize"]
+            "dependencies": ["curl (command-line tool)"]
         }
 
     if "MATCHForceFieldGenerator" in __all__:
         info["MATCH"] = {
             "class": "MATCHForceFieldGenerator",
-            "description": "MATCH force field using SwissParam server",
+            "description": "MATCH force field using SwissParam API",
             "output_dir": "LIG.match2gmx",
-            "dependencies": ["mechanize"]
+            "dependencies": ["curl (command-line tool)"]
         }
 
-    if "HybridMMFFMATCHForceFieldGenerator" in __all__:
-        info["Hybrid MMFF-MATCH"] = {
-            "class": "HybridMMFFMATCHForceFieldGenerator",
-            "description": "Hybrid MMFF-based-MATCH force field using SwissParam",
-            "output_dir": "LIG.hybrid2gmx",
-            "dependencies": ["mechanize"]
+    if "BothForceFieldGenerator" in __all__:
+        info["Both"] = {
+            "class": "BothForceFieldGenerator",
+            "description": "Both MMFF-based + MATCH force field using SwissParam API",
+            "output_dir": "LIG.both2gmx",
+            "dependencies": ["curl (command-line tool)"]
+        }
+
+    if "HybridForceFieldGenerator" in __all__:
+        info["Hybrid (deprecated)"] = {
+            "class": "HybridForceFieldGenerator",
+            "description": "Alias for BothForceFieldGenerator (backward compatibility)",
+            "output_dir": "LIG.both2gmx",
+            "dependencies": ["curl (command-line tool)"]
         }
 
     return info

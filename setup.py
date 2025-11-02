@@ -38,7 +38,7 @@ extras_require = {
         "rdkit>=2021.0",  # Optional for coordinate alignment
     ],
     "swissparam": [
-        "mechanize>=0.4.0",
+        # SwissParam now uses command-line API via curl (no Python dependencies)
     ],
     "protonation": [
         "meeko>=0.5.0",  # For hydrogen optimization and protonation
@@ -53,7 +53,7 @@ extras_require = {
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
         "requests>=2.25.0",
-        "mechanize>=0.4.0",
+        # SwissParam uses curl (no Python dependencies)
         "meeko>=0.5.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",

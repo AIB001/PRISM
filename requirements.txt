@@ -17,8 +17,8 @@ rdkit>=2021.0
 requests>=2.25.0
 
 # For SwissParam-based force fields (MMFF, MATCH, Hybrid)
-# Required for MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
-mechanize>=0.4.0
+# SwissParam now uses command-line API (no additional Python dependencies required)
+# Only requires curl (should be available on all systems)
 
 # For protonation state optimization (optional)
 # Uncomment if using Meeko for hydrogen optimization

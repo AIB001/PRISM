@@ -11,13 +11,13 @@ Unified interface for generating ligand force field parameters for GROMACS simul
 | **OPLS-AA** | `OPLSAAForceFieldGenerator` | `LIG.opls2gmx` | Server (LigParGen) |
 | **MMFF** | `MMFFForceFieldGenerator` | `LIG.mmff2gmx` | Server (SwissParam) |
 | **MATCH** | `MATCHForceFieldGenerator` | `LIG.match2gmx` | Server (SwissParam) |
-| **Hybrid** | `HybridMMFFMATCHForceFieldGenerator` | `LIG.hybrid2gmx` | Server (SwissParam) |
+| **Both** | `BothForceFieldGenerator` | `LIG.both2gmx` | Server (SwissParam) |
 
 ## Installation
 
 ```bash
 # Base dependencies
-pip install requests mechanize
+pip install requests
 
 # GAFF - AmberTools
 mamba install -c conda-forge ambertools
@@ -30,6 +30,38 @@ mamba install -c conda-forge rdkit
 ```
 
 ## Usage
+
+### High-Level API (Recommended)
+
+```python
+import prism as pm
+
+# GAFF
+system = pm.system("protein.pdb", "ligand.mol2", ligand_forcefield="gaff")
+system.build()
+
+# OpenFF
+system = pm.system("protein.pdb", "ligand.sdf", ligand_forcefield="openff")
+system.build()
+
+# OPLS-AA
+system = pm.system("protein.pdb", "ligand.mol2", ligand_forcefield="opls")
+system.build()
+
+# SwissParam - MMFF
+system = pm.system("protein.pdb", "ligand.mol2", ligand_forcefield="mmff")
+system.build()
+
+# SwissParam - MATCH
+system = pm.system("protein.pdb", "ligand.mol2", ligand_forcefield="match")
+system.build()
+
+# SwissParam - Both (MMFF + MATCH)
+system = pm.system("protein.pdb", "ligand.mol2", ligand_forcefield="both")
+system.build()
+```
+
+### Direct Generator Usage
 
 All generators follow the same pattern:
 
@@ -82,9 +114,13 @@ generator = OPLSAAForceFieldGenerator(
 result_dir = generator.run()  # output/LIG.opls2gmx/
 ```
 
-**MMFF / MATCH / Hybrid:**
+**SwissParam - MMFF / MATCH / Both:**
 ```python
-from prism.forcefield import MMFFForceFieldGenerator, MATCHForceFieldGenerator, HybridMMFFMATCHForceFieldGenerator
+from prism.forcefield.swissparam import (
+    MMFFForceFieldGenerator,
+    MATCHForceFieldGenerator,
+    BothForceFieldGenerator
+)
 
 # MMFF-based
 generator = MMFFForceFieldGenerator("ligand.mol2", "output")
@@ -94,9 +130,21 @@ result_dir = generator.run()  # output/LIG.mmff2gmx/
 generator = MATCHForceFieldGenerator("ligand.mol2", "output")
 result_dir = generator.run()  # output/LIG.match2gmx/
 
-# Hybrid
-generator = HybridMMFFMATCHForceFieldGenerator("ligand.mol2", "output")
-result_dir = generator.run()  # output/LIG.hybrid2gmx/
+# Both (MMFF + MATCH)
+generator = BothForceFieldGenerator("ligand.mol2", "output")
+result_dir = generator.run()  # output/LIG.both2gmx/
+```
+
+**SwissParam - Convenience Function:**
+```python
+from prism.forcefield.swissparam import generate_swissparam_ff
+
+result_dir = generate_swissparam_ff(
+    ligand_path="ligand.mol2",
+    output_dir="output",
+    approach="mmff-based",  # or "match", "both"
+    overwrite=True
+)
 ```
 
 ## Output Files
@@ -111,6 +159,22 @@ output/LIG.<ff>2gmx/
 ├── atomtypes_LIG.itp    # Atom types
 └── posre_LIG.itp        # Position restraints
 ```
+
+## SwissParam Special Notes
+
+⚠️ **Request Limits**: SwissParam uses a web service with rate limiting
+- Wait a few minutes between consecutive requests
+- If you get "could not be submitted to the queuing system" error, wait and retry
+
+⚠️ **Network Required**: Requires internet connection to access SwissParam server
+
+**Supported Methods:**
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| MMFF | Based on MMFF94 force field | Fast parameterization for most drug-like molecules |
+| MATCH | Based on MATCH parameters | More accurate charges and geometric parameters |
+| Both | MMFF + MATCH combined | Most comprehensive parameter set |
 
 ## Utility Functions
 
@@ -131,18 +195,20 @@ for name, details in info.items():
 | Generator | MOL2 | SDF | PDB |
 |-----------|------|-----|-----|
 | GAFF, OpenFF, OPLS-AA | ✓ | ✓ | ✗ |
-| MMFF, MATCH, Hybrid | ✓ | ✓ | ✓ |
+| MMFF, MATCH, Both | ✓ | ✓ | ✓ |
 
 ## Troubleshooting
 
 **Missing Dependencies:**
 ```bash
 # Install missing packages as needed
-pip install requests mechanize
+pip install requests
 mamba install -c conda-forge ambertools openff-toolkit rdkit
 ```
 
-**Server Timeout:** Server-based generators (OPLS-AA, MMFF, MATCH, Hybrid) require internet connection. Large molecules may take longer to process.
+**Server Timeout:** Server-based generators (OPLS-AA, MMFF, MATCH, Both) require internet connection. Large molecules may take longer to process.
+
+**SwissParam Rate Limiting:** If you encounter errors like "could not be submitted to the queuing system", you've likely hit the rate limit. Wait 5-10 minutes before retrying.
 
 **AmberTools:**
 ```bash
@@ -156,7 +222,7 @@ which antechamber parmchk2 tleap acpype
 python -m prism.forcefield.gaff ligand.mol2
 python -m prism.forcefield.openff ligand.sdf
 python -m prism.forcefield.opls_aa ligand.mol2
-python -m prism.forcefield.swissparam ligand.mol2 MMFF-based
+python -m prism.forcefield.swissparam ligand.mol2 mmff-based
 ```
 
 ## References
