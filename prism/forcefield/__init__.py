@@ -79,6 +79,13 @@ try:
 except ImportError:
     pass
 
+# Converters
+try:
+    from .converters import AmberToCharmmConverter
+    __all__.append("AmberToCharmmConverter")
+except ImportError:
+    pass
+
 
 def list_available_generators():
     """

@@ -5,6 +5,7 @@ __pycache__/
 
 # Archive directory (deprecated files)
 Archive/
+.playwright*/
 
 # C extensions
 *.so
@@ -82,3 +83,5 @@ Thumbs.db
 test/*
 <import>/
 *.egg-info
+
+

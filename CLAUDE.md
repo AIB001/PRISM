@@ -71,3 +71,12 @@ output_dir = system.build()
 ## Testing
 
 Test data in `test/4xb4/` contains complete protein-ligand example. MDP templates generated dynamically based on configuration.
+
+Git commit message format: `[module] description;xxx`. Don't be too long!
+
+## FEbuilder Ligand Conversion
+
+- Environment: `conda activate /home/gxf1212/.conda/envs/prism` then `pip install -e .` (or `pip install .`) so the `prism` package and converters are importable system-wide.
+- From repo root run `python test/modeling/FEbuilder_FF/AMBER/generate_charmm_ff.py` to batch convert every `*.mol2` in `test/modeling/FEbuilder_FF/AMBER/` (38/42 by default).
+- The script calls `GAFFForceFieldGenerator` to populate `test/modeling/FEbuilder_FF/AMBER/_build/<name>/LIG.amb2gmx` and then feeds that into `AmberToCharmmConverter`, yielding `<name>.rtf/.prm/.pdb` plus `<name>_3D.mol2` inside the AMBER directory by default (override with `--charmm-dir` if needed).
+- Regenerate individual molecules or switch residue name via `python .../generate_charmm_ff.py --resname XXX path/to/file.mol2`; add `--overwrite` if cached GAFF files should be replaced.
