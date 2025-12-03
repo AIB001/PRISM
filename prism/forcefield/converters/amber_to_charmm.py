@@ -250,6 +250,18 @@ class AmberToCharmmConverter:
         if not self.mol2_path.exists():
             raise FileNotFoundError(f"Input MOL2 not found: {self.mol2_path}")
 
+    def _make_unique_type(self, amber_type: str) -> str:
+        """
+        为AMBER类型名添加残基前缀以避免与CHARMM力场冲突。
+
+        Args:
+            amber_type: AMBER原子类型名（如'ca', 'c3', 'sy'）
+
+        Returns:
+            唯一类型名（如'LIG_ca', 'LIG_c3', 'LIG_sy'）
+        """
+        return f"{self.residue_name}_{amber_type}"
+
     def convert(self) -> Dict[str, Path]:
         parser = ItpParser(self.itp_path)
         parser.parse()
@@ -286,8 +298,9 @@ class AmberToCharmmConverter:
         lines.append(f"RESI {self.residue_name:<8}{total_charge:12.3f}")
         lines.append("GROUP")
         for atom in atoms:
+            unique_type = self._make_unique_type(atom.type_name)
             lines.append(
-                f"ATOM {atom.atom_name:<4} {atom.type_name:<6} {atom.charge:8.4f} ! mass={atom.mass:6.3f}"
+                f"ATOM {atom.atom_name:<4} {unique_type:<10} {atom.charge:8.4f} ! mass={atom.mass:6.3f}"
             )
         lines.append("")
         lines.extend(self._format_bonds(atoms, bonds))
@@ -316,46 +329,46 @@ class AmberToCharmmConverter:
         lines.append("")
         lines.append("BONDS")
         for bond in parser.bonds:
-            name_i = parser.atoms[bond.i - 1].type_name
-            name_j = parser.atoms[bond.j - 1].type_name
+            name_i = self._make_unique_type(parser.atoms[bond.i - 1].type_name)
+            name_j = self._make_unique_type(parser.atoms[bond.j - 1].type_name)
             k = self._convert_bond_k(bond.k_kj_per_nm2)
             req = bond.length_nm * NM_TO_ANG
-            lines.append(f"{name_i:<6}{name_j:<6}{k:10.3f}{req:10.4f}")
+            lines.append(f"{name_i:<10}{name_j:<10}{k:10.3f}{req:10.4f}")
 
         lines.append("")
         lines.append("ANGLES")
         for angle in parser.angles:
-            ai = parser.atoms[angle.i - 1].type_name
-            aj = parser.atoms[angle.j - 1].type_name
-            ak = parser.atoms[angle.k - 1].type_name
+            ai = self._make_unique_type(parser.atoms[angle.i - 1].type_name)
+            aj = self._make_unique_type(parser.atoms[angle.j - 1].type_name)
+            ak = self._make_unique_type(parser.atoms[angle.k - 1].type_name)
             ktheta = self._convert_angle_k(angle.k_kj_per_rad2)
             th0 = angle.theta_deg
-            lines.append(f"{ai:<6}{aj:<6}{ak:<6}{ktheta:10.3f}{th0:10.3f}")
+            lines.append(f"{ai:<10}{aj:<10}{ak:<10}{ktheta:10.3f}{th0:10.3f}")
 
         lines.append("")
         lines.append("DIHEDRALS")
         for dih in parser.dihedrals:
-            ai = parser.atoms[dih.i - 1].type_name
-            aj = parser.atoms[dih.j - 1].type_name
-            ak = parser.atoms[dih.k - 1].type_name
-            al = parser.atoms[dih.l - 1].type_name
+            ai = self._make_unique_type(parser.atoms[dih.i - 1].type_name)
+            aj = self._make_unique_type(parser.atoms[dih.j - 1].type_name)
+            ak = self._make_unique_type(parser.atoms[dih.k - 1].type_name)
+            al = self._make_unique_type(parser.atoms[dih.l - 1].type_name)
             kchi = dih.k_kj * KJ_TO_KCAL
             if abs(kchi) < 1e-6:
                 continue
             lines.append(
-                f"{ai:<6}{aj:<6}{ak:<6}{al:<6}{kchi:10.4f}{dih.multiplicity:4d}{dih.phase_deg:10.3f}"
+                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kchi:10.4f}{dih.multiplicity:4d}{dih.phase_deg:10.3f}"
             )
 
         lines.append("")
         lines.append("IMPROPERS")
         for imp in parser.impropers:
-            ai = parser.atoms[imp.i - 1].type_name
-            aj = parser.atoms[imp.j - 1].type_name
-            ak = parser.atoms[imp.k - 1].type_name
-            al = parser.atoms[imp.l - 1].type_name
+            ai = self._make_unique_type(parser.atoms[imp.i - 1].type_name)
+            aj = self._make_unique_type(parser.atoms[imp.j - 1].type_name)
+            ak = self._make_unique_type(parser.atoms[imp.k - 1].type_name)
+            al = self._make_unique_type(parser.atoms[imp.l - 1].type_name)
             kpsi = imp.k_kj * KJ_TO_KCAL
             lines.append(
-                f"{ai:<6}{aj:<6}{ak:<6}{al:<6}{kpsi:10.4f}{imp.phase_deg:10.3f}"
+                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kpsi:10.4f}{imp.phase_deg:10.3f}"
             )
 
         lines.append("")
@@ -374,19 +387,21 @@ class AmberToCharmmConverter:
         masses: Dict[str, float] = {}
         elements: Dict[str, str] = {}
         for atom in atoms:
-            masses.setdefault(atom.type_name, atom.mass)
-            elements.setdefault(atom.type_name, self._guess_element(atom.atom_name))
+            unique_type = self._make_unique_type(atom.type_name)
+            masses.setdefault(unique_type, atom.mass)
+            elements.setdefault(unique_type, self._guess_element(atom.atom_name))
         entries: List[str] = []
         for idx, name in enumerate(sorted(masses.keys()), start=1):
             mass = masses[name]
             element = elements.get(name, name[0].upper())
-            entries.append(f"MASS {idx:5d} {name:<6} {mass:10.4f} {element}")
+            entries.append(f"MASS {idx:5d} {name:<10} {mass:10.4f} {element}")
         return entries
 
     def _format_nonbonded(self, atomtypes: Dict[str, AtomTypeRecord]) -> List[str]:
         lines = ["NONBONDED nbxmod 5 atom cdiel shift vatom vswitch vfswitch -1 0.0"]
         lines.append("!atom  ignored   epsilon   Rmin/2  ignored  eps,1-4 Rmin/2,1-4")
         for name, record in atomtypes.items():
+            unique_type = self._make_unique_type(name)
             if record.sigma_nm == 0.0 and record.epsilon_kj == 0.0:
                 rmin_over2 = 0.0
             else:
@@ -394,7 +409,7 @@ class AmberToCharmmConverter:
                 rmin_over2 = rmin / 2.0
             eps = -abs(record.epsilon_kj * KJ_TO_KCAL)
             lines.append(
-                f"{name:<6}{0.0:10.2f}{eps:10.5f}{rmin_over2:10.4f}{0.0:10.2f}{eps:10.5f}{rmin_over2:10.4f}"
+                f"{unique_type:<10}{0.0:10.2f}{eps:10.5f}{rmin_over2:10.4f}{0.0:10.2f}{eps:10.5f}{rmin_over2:10.4f}"
             )
         return lines
 

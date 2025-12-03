@@ -77,7 +77,9 @@
       "Read(//home/gxf1212/.npm/_npx/15c61037b1978c83/node_modules/.bin/**)",
       "Bash(python -m pytest:*)",
       "Bash(python -c:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "mcp__filesystem__directory_tree",
+      "mcp__filesystem__write_file"
     ],
     "deny": [],
     "ask": []
