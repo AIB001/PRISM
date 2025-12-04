@@ -79,7 +79,8 @@
       "Bash(python -c:*)",
       "Bash(pip install:*)",
       "mcp__filesystem__directory_tree",
-      "mcp__filesystem__write_file"
+      "mcp__filesystem__write_file",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

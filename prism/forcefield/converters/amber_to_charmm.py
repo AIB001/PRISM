@@ -252,21 +252,18 @@ class AmberToCharmmConverter:
 
     def _make_unique_type(self, amber_type: str) -> str:
         """
-        为AMBER类型名添加残基前缀以避免与CHARMM力场冲突。
-
-        Args:
-            amber_type: AMBER原子类型名（如'ca', 'c3', 'sy'）
-
-        Returns:
-            唯一类型名（如'LIG_ca', 'LIG_c3', 'LIG_sy'）
+        生成不超过4字符的GAFF原子类型名字（如 l_ca, l_sy）。
         """
-        return f"{self.residue_name}_{amber_type}"
+        prefix = (self.residue_name[:1] or "L")[0].lower()
+        core = amber_type.lower()
+        if len(core) > 3:
+            core = core[:3]
+        return f"{prefix}{core}"
 
     def convert(self) -> Dict[str, Path]:
         parser = ItpParser(self.itp_path)
         parser.parse()
         atomtypes = parse_atomtypes(self.atomtypes_path)
-
         rtf_path = self.output_prefix.with_suffix(".rtf")
         prm_path = self.output_prefix.with_suffix(".prm")
         pdb_path = self.output_prefix.with_suffix(".pdb")
@@ -353,10 +350,9 @@ class AmberToCharmmConverter:
             ak = self._make_unique_type(parser.atoms[dih.k - 1].type_name)
             al = self._make_unique_type(parser.atoms[dih.l - 1].type_name)
             kchi = dih.k_kj * KJ_TO_KCAL
-            if abs(kchi) < 1e-6:
-                continue
+            multiplicity = dih.multiplicity if dih.multiplicity > 0 else 1
             lines.append(
-                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kchi:10.4f}{dih.multiplicity:4d}{dih.phase_deg:10.3f}"
+                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kchi:10.4f}{multiplicity:4d}{dih.phase_deg:10.3f}"
             )
 
         lines.append("")
