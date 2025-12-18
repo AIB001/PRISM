@@ -14,34 +14,72 @@ from ..core.publication_utils import apply_publication_style, PUBLICATION_FONTS,
 
 
 def plot_rmsd_simple_timeseries(rmsd_results: Dict,
-                               output_path: str,
-                               title: str = "") -> bool:
+                               output_path: str = None,
+                               title: str = "",
+                               ax: Optional[plt.Axes] = None,
+                               time_per_frame_ns: float = 0.5,
+                               ylabel: str = "Ligand RMSD (Å)",
+                               **kwargs):
     """
     Create simple RMSD time series plot matching the example format.
+
+    Supports both standalone and panel modes for multi-panel figures.
 
     Parameters
     ----------
     rmsd_results : dict
         Dictionary with trajectory names as keys and RMSD data as values
-    output_path : str
-        Path to save the plot
+    output_path : str, optional
+        Path to save the plot. Required if ax is None (standalone mode).
     title : str
         Plot title (empty by default for publication style)
+    ax : matplotlib.axes.Axes, optional
+        If provided, plot on this axis (panel mode).
+        If None, create new figure (standalone mode).
+    time_per_frame_ns : float
+        Time interval per frame in nanoseconds (default: 0.5)
+    ylabel : str
+        Y-axis label (default: "Ligand RMSD (Å)")
+    **kwargs : dict
+        Additional styling parameters (e.g., colors, linewidth)
 
     Returns
     -------
-    bool
-        True if successful, False otherwise
+    bool or matplotlib.axes.Axes
+        If standalone mode (ax=None): returns True/False for success
+        If panel mode (ax provided): returns the axis object
+
+    Examples
+    --------
+    # Standalone mode (backward compatible - original usage)
+    >>> plot_rmsd_simple_timeseries(rmsd_data, "output.png")
+
+    # Panel mode (new functionality for multi-panel figures)
+    >>> fig, axes = plt.subplots(2, 2)
+    >>> plot_rmsd_simple_timeseries(rmsd_data, ax=axes[0, 0])
     """
     try:
         print("📈 RMSD timeseries analysis showing structural stability over simulation time")
-        apply_publication_style()
 
-        # Create single panel figure (matching example)
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+        # Determine mode: standalone (ax=None) or panel (ax provided)
+        if ax is None:
+            # Standalone mode - create new figure (original behavior)
+            if output_path is None:
+                raise ValueError("output_path is required when ax is None (standalone mode)")
+
+            apply_publication_style()
+            fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+            own_figure = True
+        else:
+            # Panel mode - use provided axis
+            own_figure = False
+
+        # ========== Core plotting logic (shared by both modes) ==========
 
         # Use different colors for each trajectory
-        colors = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#C55A11']
+        colors = kwargs.get('colors', ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#C55A11'])
+        linewidth = kwargs.get('linewidth', 1.5)
+        alpha = kwargs.get('alpha', 0.85)
 
         # Plot all trajectories with different colors
         for i, (traj_name, rmsd_data) in enumerate(rmsd_results.items()):
@@ -51,13 +89,14 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
                 protein_rmsd = rmsd_data
 
             if len(protein_rmsd) > 0:
-                time = np.arange(len(protein_rmsd)) * 0.5  # 0.5 ns intervals
+                time = np.arange(len(protein_rmsd)) * time_per_frame_ns
                 color = colors[i % len(colors)]
-                ax.plot(time, protein_rmsd, color=color, linewidth=1.5, alpha=0.85, label=traj_name)
+                ax.plot(time, protein_rmsd, color=color, linewidth=linewidth,
+                       alpha=alpha, label=traj_name)
 
         # Format exactly like the example
         ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-        ax.set_ylabel('Ligand RMSD (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')  # Match example label
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
         ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
 
         # Remove grid and titles for clean look
@@ -79,17 +118,28 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
             ax.legend(loc='best', fontsize=PUBLICATION_FONTS['legend'], framealpha=0.9)
 
         # Only add title if provided
+        if title:
+            ax.set_title(title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold')
 
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
-        plt.close()
+        # ========== Mode-specific post-processing ==========
 
-        return True
+        if own_figure:
+            # Standalone mode: save and close figure
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            plt.close()
+            return True
+        else:
+            # Panel mode: return axis, caller handles saving
+            return ax
 
     except Exception as e:
         print(f"Error in RMSD plotting: {e}")
-        return False
+        if own_figure:
+            return False
+        else:
+            raise  # Panel mode: raise exception for caller to handle
 
 
 def plot_rmsd_analysis(rmsd_results: Dict,
@@ -213,34 +263,72 @@ def plot_rmsd_analysis(rmsd_results: Dict,
 
 
 def plot_rmsf_analysis(rmsf_results: Dict,
-                      output_path: str,
-                      title: str = "") -> bool:
+                      output_path: str = None,
+                      title: str = "",
+                      ax: Optional[plt.Axes] = None,
+                      **kwargs) -> bool:
     """
     Plot RMSF analysis results.
+
+    Supports both standalone and panel modes. For panel mode with single axis,
+    plots only the per-residue RMSF (not the distribution).
 
     Parameters
     ----------
     rmsf_results : dict
         Dictionary with trajectory names as keys and RMSF data as values
-    output_path : str
-        Path to save the plot
+    output_path : str, optional
+        Path to save the plot. Required if ax is None (standalone mode).
     title : str
         Plot title
+    ax : matplotlib.axes.Axes, optional
+        If provided, plot on this single axis (panel mode - per-residue only).
+        If None, create 2-panel figure (standalone mode).
+    **kwargs : dict
+        Additional styling parameters
 
     Returns
     -------
-    bool
-        True if successful, False otherwise
+    bool or matplotlib.axes.Axes
+        If standalone mode (ax=None): returns True/False for success
+        If panel mode (ax provided): returns the axis object
+
+    Examples
+    --------
+    # Standalone mode (backward compatible - creates 2-panel figure)
+    >>> plot_rmsf_analysis(rmsf_data, "output.png")
+
+    # Panel mode (new - single panel with per-residue RMSF)
+    >>> fig, axes = plt.subplots(2, 2)
+    >>> plot_rmsf_analysis(rmsf_data, ax=axes[0, 0])
     """
     try:
-        print("📈 RMSF 2-panel analysis: per-residue fluctuations and distribution comparison")
-        apply_publication_style()
+        print("📈 RMSF analysis: per-residue fluctuations" + (" and distribution" if ax is None else ""))
 
-        fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+        # Determine mode
+        if ax is None:
+            # Standalone mode - create 2-panel figure (original behavior)
+            if output_path is None:
+                raise ValueError("output_path is required when ax is None (standalone mode)")
 
-        # Plot 1: RMSF per residue
-        ax1 = axes[0]
+            apply_publication_style()
+            fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
+            ax1 = axes[0]
+            ax2 = axes[1]
+            own_figure = True
+        else:
+            # Panel mode - use single provided axis (per-residue RMSF only)
+            ax1 = ax
+            ax2 = None
+            own_figure = False
+
+        # ========== Core plotting logic ==========
+
+        colors = kwargs.get('colors', ['#1f77b4', '#ff7f0e', '#2ca02c'])
+        linewidth = kwargs.get('linewidth', 2)
+        alpha = kwargs.get('alpha', 0.8)
+
+        # Plot 1: RMSF per residue (always plotted)
         for i, (traj_name, rmsf_data) in enumerate(rmsf_results.items()):
             if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
                 residue_indices, rmsf_values = rmsf_data[:2]
@@ -251,43 +339,62 @@ def plot_rmsf_analysis(rmsf_results: Dict,
                 continue
 
             if len(rmsf_values) > 0:
-                ax1.plot(residue_indices, rmsf_values, color=colors[i % 3],
-                        label=traj_name, linewidth=2, alpha=0.8)
+                ax1.plot(residue_indices, rmsf_values, color=colors[i % len(colors)],
+                        label=traj_name, linewidth=linewidth, alpha=alpha)
 
-        ax1.set_xlabel('Residue Index', fontfamily='Times New Roman')
-        ax1.set_ylabel('RMSF (Å)', fontfamily='Times New Roman')
-        ax1.legend()
+        ax1.set_xlabel('Residue Index', fontsize=PUBLICATION_FONTS['axis_label'],
+                      fontweight='bold', fontfamily='Times New Roman')
+        ax1.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'],
+                      fontweight='bold', fontfamily='Times New Roman')
+        ax1.legend(fontsize=PUBLICATION_FONTS['legend'])
         ax1.grid(True, alpha=0.3)
+        ax1.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
 
-        # Plot 2: RMSF distribution
-        ax2 = axes[1]
-        all_rmsf = []
-        for rmsf_data in rmsf_results.values():
-            if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
-                rmsf_values = rmsf_data[1]
-            elif isinstance(rmsf_data, dict) and 'rmsf' in rmsf_data:
-                rmsf_values = rmsf_data['rmsf']
-            else:
-                continue
+        # Plot 2: RMSF distribution (only in standalone mode)
+        if ax2 is not None:
+            all_rmsf = []
+            for rmsf_data in rmsf_results.values():
+                if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
+                    rmsf_values = rmsf_data[1]
+                elif isinstance(rmsf_data, dict) and 'rmsf' in rmsf_data:
+                    rmsf_values = rmsf_data['rmsf']
+                else:
+                    continue
 
-            if len(rmsf_values) > 0:
-                all_rmsf.extend(rmsf_values)
+                if len(rmsf_values) > 0:
+                    all_rmsf.extend(rmsf_values)
 
-        if all_rmsf:
-            ax2.hist(all_rmsf, bins=30, alpha=0.7, color='lightcoral', edgecolor='black')
-            ax2.set_xlabel('RMSF (Å)', fontfamily='Times New Roman')
-            ax2.set_ylabel('Frequency', fontfamily='Times New Roman')
-            ax2.grid(True, alpha=0.3)
+            if all_rmsf:
+                ax2.hist(all_rmsf, bins=30, alpha=0.7, color='lightcoral', edgecolor='black')
+                ax2.set_xlabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'],
+                             fontweight='bold', fontfamily='Times New Roman')
+                ax2.set_ylabel('Frequency', fontsize=PUBLICATION_FONTS['axis_label'],
+                             fontweight='bold', fontfamily='Times New Roman')
+                ax2.grid(True, alpha=0.3)
+                ax2.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
 
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
+        # ========== Mode-specific post-processing ==========
 
-        return True
+        if own_figure:
+            # Standalone mode: save and close
+            if title:
+                fig.suptitle(title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold')
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            return True
+        else:
+            # Panel mode: return axis
+            if title:
+                ax1.set_title(title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold')
+            return ax1
 
     except Exception as e:
         print(f"Error in RMSF plotting: {e}")
-        return False
+        if own_figure:
+            return False
+        else:
+            raise
 
 
 def plot_rmsf_with_auto_chains(rmsf_results: Dict[str, Tuple[np.ndarray, np.ndarray]],

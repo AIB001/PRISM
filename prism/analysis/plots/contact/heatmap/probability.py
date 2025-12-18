@@ -19,13 +19,15 @@ from .....utils.residue import format_residue_list
 
 def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
 
-                                  output_path: str,
+                                  output_path: str = None,
 
                                   title: str = "",
 
                                   separate_panels: bool = False,
 
-                                  residue_format: str = "1letter") -> bool:
+                                  residue_format: str = "1letter",
+
+                                  ax: Optional[plt.Axes] = None) -> bool:
 
     """
 
@@ -41,9 +43,9 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
 
         Dictionary with residue names as keys and trajectory data as nested dict
 
-    output_path : str
+    output_path : str, optional
 
-        Path to save the figure
+        Path to save the figure (required in standalone mode, ignored in panel mode)
 
     title : str
 
@@ -57,23 +59,51 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
 
         Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
+    ax : matplotlib.axes.Axes, optional
+
+        Axes object to plot on. If provided, function operates in panel mode.
+
 
 
     Returns
 
     -------
 
-    bool
+    bool or matplotlib.axes.Axes
 
-        True if successful
+        In standalone mode (ax=None): Returns True if successful
+
+        In panel mode (ax provided): Returns the Axes object
 
     """
 
+    # Detect mode
+
+    if ax is None:
+
+        # Standalone mode - original behavior
+
+        if output_path is None:
+
+            raise ValueError("output_path is required in standalone mode (when ax is not provided)")
+
+        own_figure = True
+
+    else:
+
+        # Panel mode - use provided axis
+
+        own_figure = False
+
+
+
     try:
 
-        print("🔥 Contact probability heatmap with annotations showing residue-trajectory interactions")
+        if own_figure:
 
-        apply_publication_style()
+            print("🔥 Contact probability heatmap with annotations showing residue-trajectory interactions")
+
+            apply_publication_style()
 
         from ...core.publication_utils import PUBLICATION_FONTS
 
@@ -103,23 +133,27 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        # Use wider figsize for more residues (15+)
+        # Create figure only in standalone mode
 
-        if len(residues) > 12:
+        if own_figure:
 
-            figsize = get_standard_figsize('wide')  # (16, 6)
+            # Use wider figsize for more residues (15+)
 
-        elif len(residues) > 6:
+            if len(residues) > 12:
 
-            figsize = get_standard_figsize('horizontal')  # (12, 6)
+                figsize = get_standard_figsize('wide')  # (16, 6)
 
-        else:
+            elif len(residues) > 6:
 
-            figsize = get_standard_figsize('single')  # (8, 6)
+                figsize = get_standard_figsize('horizontal')  # (12, 6)
+
+            else:
+
+                figsize = get_standard_figsize('single')  # (8, 6)
 
 
 
-        fig, ax = plt.subplots(figsize=figsize)
+            fig, ax = plt.subplots(figsize=figsize)
 
 
 
@@ -175,15 +209,25 @@ def plot_contact_heatmap_annotated(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        plt.tight_layout()
+        # Handle output based on mode
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+        if own_figure:
 
-                   facecolor='white', edgecolor='none')
+            plt.tight_layout()
 
-        plt.close()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight',
 
-        return True
+                       facecolor='white', edgecolor='none')
+
+            plt.close()
+
+            return True
+
+        else:
+
+            # Panel mode - return the axis
+
+            return ax
 
 
 

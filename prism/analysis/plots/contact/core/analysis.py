@@ -243,13 +243,15 @@ def plot_contact_analysis(contact_results: Dict,
 
 def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
-                             output_path: str,
+                             output_path: str = None,
 
                              title: str = "",
 
                              separate_panels: bool = False,
 
-                             residue_format: str = "1letter") -> bool:
+                             residue_format: str = "1letter",
+
+                             ax: Optional[plt.Axes] = None) -> bool:
 
     """
 
@@ -267,9 +269,9 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
         Format: {'ASP618': {'Repeat1': 98.1, 'Repeat2': 100.0, 'Repeat3': 65.3}, ...}
 
-    output_path : str
+    output_path : str, optional
 
-        Path to save the main figure
+        Path to save the main figure (required in standalone mode, ignored in panel mode)
 
     title : str
 
@@ -283,23 +285,51 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
         Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
 
+    ax : matplotlib.axes.Axes, optional
+
+        Axes object to plot on. If provided, function operates in panel mode.
+
 
 
     Returns
 
     -------
 
-    bool
+    bool or matplotlib.axes.Axes
 
-        True if successful
+        In standalone mode (ax=None): Returns True if successful
+
+        In panel mode (ax provided): Returns the Axes object
 
     """
 
+    # Detect mode
+
+    if ax is None:
+
+        # Standalone mode - original behavior
+
+        if output_path is None:
+
+            raise ValueError("output_path is required in standalone mode (when ax is not provided)")
+
+        own_figure = True
+
+    else:
+
+        # Panel mode - use provided axis
+
+        own_figure = False
+
+
+
     try:
 
-        print("📊 Grouped contact probability bars showing residue-specific interactions across trajectories")
+        if own_figure:
 
-        apply_publication_style()
+            print("📊 Grouped contact probability bars showing residue-specific interactions across trajectories")
+
+            apply_publication_style()
 
 
 
@@ -385,7 +415,11 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+        # Create figure only in standalone mode
+
+        if own_figure:
+
+            fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
 
 
 
@@ -451,35 +485,45 @@ def plot_grouped_contact_bars(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        plt.tight_layout()
+        # Handle output based on mode
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+        if own_figure:
 
-                   facecolor='white', edgecolor='none')
+            plt.tight_layout()
 
+            plt.savefig(output_path, dpi=300, bbox_inches='tight',
 
-
-        # Save separate panels if requested (only if filename doesn't already contain the suffix)
-
-        if separate_panels:
-
-            base_path = Path(output_path)
-
-            # 避免重复添加后缀
-
-            if "_grouped_bars" not in base_path.stem:
-
-                separate_path = base_path.parent / f"{base_path.stem}_grouped_bars{base_path.suffix}"
-
-                plt.savefig(separate_path, dpi=300, bbox_inches='tight',
-
-                           facecolor='white', edgecolor='none')
+                       facecolor='white', edgecolor='none')
 
 
 
-        plt.close()
+            # Save separate panels if requested (only if filename doesn't already contain the suffix)
 
-        return True
+            if separate_panels:
+
+                base_path = Path(output_path)
+
+                # 避免重复添加后缀
+
+                if "_grouped_bars" not in base_path.stem:
+
+                    separate_path = base_path.parent / f"{base_path.stem}_grouped_bars{base_path.suffix}"
+
+                    plt.savefig(separate_path, dpi=300, bbox_inches='tight',
+
+                               facecolor='white', edgecolor='none')
+
+
+
+            plt.close()
+
+            return True
+
+        else:
+
+            # Panel mode - return the axis
+
+            return ax
 
 
 
