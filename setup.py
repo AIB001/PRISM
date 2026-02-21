@@ -38,7 +38,7 @@ extras_require = {
         "rdkit>=2021.0",  # Optional for coordinate alignment
     ],
     "swissparam": [
-        "mechanize>=0.4.0",
+        # SwissParam now uses command-line API via curl (no Python dependencies)
     ],
     "protonation": [
         "propka>=3.4.0",  # For pKa-based protonation state prediction
@@ -53,6 +53,7 @@ extras_require = {
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
         "requests>=2.25.0",
+        # SwissParam uses curl (no Python dependencies)
         "mechanize>=0.4.0",
         "propka>=3.4.0",
         "mdtraj>=1.9.0",

@@ -343,11 +343,13 @@ def plot_comparison_contact_distances_violin(
 
 def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
-                                  output_path: str,
+                                  output_path: str = None,
 
                                   title: str = "Key Residue Contact Analysis",
 
-                             residue_format: str = "1letter") -> bool:
+                                  residue_format: str = "1letter",
+
+                                  ax: Optional[plt.Axes] = None) -> bool:
 
     """
 
@@ -371,13 +373,21 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
         Format: {'ASP618': {'Repeat1': 98.1, 'Repeat2': 100.0, 'Repeat3': 65.3}, ...}
 
-    output_path : str
+    output_path : str, optional
 
-        Path to save the figure
+        Path to save the figure (required in standalone mode, ignored in panel mode)
 
     title : str
 
         Main plot title
+
+    residue_format : str
+
+        Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
+
+    ax : matplotlib.axes.Axes, optional
+
+        Axes object to plot on. If provided, function operates in panel mode.
 
 
 
@@ -385,17 +395,41 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
     -------
 
-    bool
+    bool or matplotlib.axes.Axes
 
-        True if successful
+        In standalone mode (ax=None): Returns True if successful
+
+        In panel mode (ax provided): Returns the Axes object
 
     """
 
+    # Detect mode
+
+    if ax is None:
+
+        # Standalone mode - original behavior
+
+        if output_path is None:
+
+            raise ValueError("output_path is required in standalone mode (when ax is not provided)")
+
+        own_figure = True
+
+    else:
+
+        # Panel mode - use provided axis
+
+        own_figure = False
+
+
+
     try:
 
-        print("🎻 Key residue contact violin plot showing probability distributions across trajectories")
+        if own_figure:
 
-        apply_publication_style()
+            print("🎻 Key residue contact violin plot showing probability distributions across trajectories")
+
+            apply_publication_style()
 
 
 
@@ -465,25 +499,29 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        # Use wider figsize for more residues (15+)
+        # Create figure only in standalone mode
 
-        if len(available_residues) > 12:
+        if own_figure:
 
-            figsize = get_standard_figsize('wide')  # (16, 6)
+            # Use wider figsize for more residues (15+)
 
-        elif len(available_residues) > 6:
+            if len(available_residues) > 12:
 
-            figsize = get_standard_figsize('horizontal')  # (12, 6)
+                figsize = get_standard_figsize('wide')  # (16, 6)
 
-        else:
+            elif len(available_residues) > 6:
 
-            figsize = get_standard_figsize('single')  # (8, 6)
+                figsize = get_standard_figsize('horizontal')  # (12, 6)
+
+            else:
+
+                figsize = get_standard_figsize('single')  # (8, 6)
 
 
 
-        # Create violin plot with seaborn
+            # Create violin plot with seaborn
 
-        fig, ax = plt.subplots(figsize=figsize)
+            fig, ax = plt.subplots(figsize=figsize)
 
 
 
@@ -573,17 +611,25 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
 
 
-        plt.tight_layout()
+        # Handle output based on mode
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
+        if own_figure:
 
-                   facecolor='white', edgecolor='none')
+            plt.tight_layout()
 
-        plt.close()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight',
 
+                       facecolor='white', edgecolor='none')
 
+            plt.close()
 
-        return True
+            return True
+
+        else:
+
+            # Panel mode - return the axis
+
+            return ax
 
 
 

@@ -126,9 +126,10 @@ def plot_hbond_analysis(hbond_results: Dict,
 
 def plot_key_residue_hbonds(hbond_results: Dict,
                            key_residues: List[str],
-                           output_path: str,
+                           output_path: str = None,
                            title: str = "Key Residue Hydrogen Bonds",
-                           residue_format: str = "1letter") -> bool:
+                           residue_format: str = "1letter",
+                           ax: Optional[plt.Axes] = None) -> bool:
     """
     Plot hydrogen bond analysis for specific key residues.
 
@@ -138,27 +139,42 @@ def plot_key_residue_hbonds(hbond_results: Dict,
         Dictionary with trajectory names as keys and hydrogen bond data as values
     key_residues : list
         List of key residue names to highlight
-    output_path : str
-        Path to save the plot
+    output_path : str, optional
+        Path to save the plot (required in standalone mode, ignored in panel mode)
     title : str
         Plot title
     residue_format : str
         Amino acid display format: "1letter" (e.g., D618) or "3letter" (e.g., ASP618)
+    ax : matplotlib.axes.Axes, optional
+        Axes object to plot on. If provided, function operates in panel mode (single plot).
 
     Returns
     -------
-    bool
-        True if successful, False otherwise
+    bool or matplotlib.axes.Axes
+        In standalone mode (ax=None): Returns True if successful
+        In panel mode (ax provided): Returns the Axes object
     """
+    # Detect mode
+    if ax is None:
+        # Standalone mode - original behavior with 2-panel figure
+        if output_path is None:
+            raise ValueError("output_path is required in standalone mode (when ax is not provided)")
+        own_figure = True
+    else:
+        # Panel mode - single plot on provided axis
+        own_figure = False
+
     try:
-        print("🔗 Key residue hydrogen bond analysis: frequency and stability comparison")
-        apply_publication_style()
-
-        fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
-
-        # Plot 1: Key residue H-bond frequencies
-        ax1 = axes[0]
+        if own_figure:
+            print("🔗 Key residue hydrogen bond analysis: frequency and stability comparison")
+            apply_publication_style()
+            fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+            ax1 = axes[0]
+        else:
+            # Panel mode - use provided axis for frequency plot
+            ax1 = ax
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
         residue_counts = {res: [] for res in key_residues}
 
         for traj_name, hbond_data in hbond_results.items():
@@ -184,26 +200,31 @@ def plot_key_residue_hbonds(hbond_results: Dict,
             ax1.grid(True, alpha=0.3, axis='y')
             plt.setp(ax1.get_xticklabels(), rotation=45)
 
-        # Plot 2: H-bond stability over time
-        ax2 = axes[1]
-        for i, (traj_name, hbond_data) in enumerate(hbond_results.items()):
-            if isinstance(hbond_data, dict) and 'hbond_stability' in hbond_data:
-                stability = hbond_data['hbond_stability']
-                if len(stability) > 0:
-                    time = np.arange(len(stability)) * 0.5
-                    ax2.plot(time, stability, color=colors[i % 3],
-                            label=traj_name, linewidth=2, alpha=0.8)
+        # Plot 2: H-bond stability over time (only in standalone mode)
+        if own_figure:
+            ax2 = axes[1]
+            for i, (traj_name, hbond_data) in enumerate(hbond_results.items()):
+                if isinstance(hbond_data, dict) and 'hbond_stability' in hbond_data:
+                    stability = hbond_data['hbond_stability']
+                    if len(stability) > 0:
+                        time = np.arange(len(stability)) * 0.5
+                        ax2.plot(time, stability, color=colors[i % 3],
+                                label=traj_name, linewidth=2, alpha=0.8)
 
-        ax2.set_xlabel('Time (ns)', fontfamily='Times New Roman')
-        ax2.set_ylabel('Stability', fontfamily='Times New Roman')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+            ax2.set_xlabel('Time (ns)', fontfamily='Times New Roman')
+            ax2.set_ylabel('Stability', fontfamily='Times New Roman')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
 
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-
-        return True
+        # Handle output based on mode
+        if own_figure:
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            return True
+        else:
+            # Panel mode - return the axis
+            return ax
 
     except Exception as e:
         print(f"Error in key residue hydrogen bond plotting: {e}")

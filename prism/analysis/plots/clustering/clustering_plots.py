@@ -35,7 +35,8 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
                         save_path: Optional[str] = None,
                         show_centers: bool = True,
                         show_hulls: bool = False,
-                        alpha: float = 0.7) -> Tuple[plt.Figure, plt.Axes]:
+                        alpha: float = 0.7,
+                        ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
     Create 2D scatter plot of clusters in PCA space.
 
@@ -55,11 +56,14 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
         Whether to show convex hulls around clusters
     alpha : float
         Point transparency
+    ax : matplotlib.axes.Axes, optional
+        Axes object to plot on. If provided, function operates in panel mode.
 
     Returns
     -------
-    tuple
-        (figure, axes) objects
+    tuple or matplotlib.axes.Axes
+        In standalone mode (ax=None): Returns (figure, axes) tuple
+        In panel mode (ax provided): Returns axes object only
     """
     if 'coordinates_reduced' not in clustering_results:
         raise ValueError("coordinates_reduced not found in clustering results")
@@ -67,62 +71,70 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
     coordinates = clustering_results['coordinates_reduced']
     labels = clustering_results['labels']
 
-    if figsize is None:
-        figsize = get_standard_figsize("single")
+    # Detect mode
+    if ax is None:
+        # Standalone mode
+        own_figure = True
+        if figsize is None:
+            figsize = get_standard_figsize("single")
+        plt.style.use('default')
+        with plt.rc_context(get_publication_style()):
+            fig, ax = plt.subplots(figsize=figsize)
+    else:
+        # Panel mode
+        own_figure = False
+        fig = None
 
-    plt.style.use('default')
-    with plt.rc_context(get_publication_style()):
-        fig, ax = plt.subplots(figsize=figsize)
+    # Get unique cluster labels (excluding noise if present)
+    unique_labels = set(labels)
+    if -1 in unique_labels:  # Remove noise label for DBSCAN
+        unique_labels.remove(-1)
 
-        # Get unique cluster labels (excluding noise if present)
-        unique_labels = set(labels)
-        if -1 in unique_labels:  # Remove noise label for DBSCAN
-            unique_labels.remove(-1)
+    colors = plt.cm.Set3(np.linspace(0, 1, len(unique_labels)))
 
-        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_labels)))
+    # Plot noise points first (if any)
+    if -1 in labels:
+        noise_mask = labels == -1
+        ax.scatter(coordinates[noise_mask, 0], coordinates[noise_mask, 1],
+                  c='gray', alpha=alpha*0.5, s=30, label='Noise',
+                  edgecolor='black', linewidth=0.5)
 
-        # Plot noise points first (if any)
-        if -1 in labels:
-            noise_mask = labels == -1
-            ax.scatter(coordinates[noise_mask, 0], coordinates[noise_mask, 1],
-                      c='gray', alpha=alpha*0.5, s=30, label='Noise',
-                      edgecolor='black', linewidth=0.5)
+    # Plot clusters
+    for i, (cluster_id, color) in enumerate(zip(sorted(unique_labels), colors)):
+        cluster_mask = labels == cluster_id
+        cluster_coords = coordinates[cluster_mask]
 
-        # Plot clusters
-        for i, (cluster_id, color) in enumerate(zip(sorted(unique_labels), colors)):
-            cluster_mask = labels == cluster_id
-            cluster_coords = coordinates[cluster_mask]
+        ax.scatter(cluster_coords[:, 0], cluster_coords[:, 1],
+                  c=[color], alpha=alpha, s=50,
+                  label=f'Cluster {cluster_id}',
+                  edgecolor='black', linewidth=0.5)
 
-            ax.scatter(cluster_coords[:, 0], cluster_coords[:, 1],
-                      c=[color], alpha=alpha, s=50,
-                      label=f'Cluster {cluster_id}',
-                      edgecolor='black', linewidth=0.5)
+        # Show cluster centers
+        if show_centers and 'cluster_centers' in clustering_results:
+            centers = clustering_results['cluster_centers']
+            if len(centers) > cluster_id:
+                ax.scatter(centers[cluster_id, 0], centers[cluster_id, 1],
+                          c='red', marker='x', s=200, linewidths=3,
+                          label=f'Center {cluster_id}' if i == 0 else "")
 
-            # Show cluster centers
-            if show_centers and 'cluster_centers' in clustering_results:
-                centers = clustering_results['cluster_centers']
-                if len(centers) > cluster_id:
-                    ax.scatter(centers[cluster_id, 0], centers[cluster_id, 1],
-                              c='red', marker='x', s=200, linewidths=3,
-                              label=f'Center {cluster_id}' if i == 0 else "")
+        # Show convex hulls
+        if show_hulls and len(cluster_coords) > 2:
+            try:
+                from scipy.spatial import ConvexHull
+                hull = ConvexHull(cluster_coords[:, :2])
+                for simplex in hull.simplices:
+                    ax.plot(cluster_coords[simplex, 0], cluster_coords[simplex, 1],
+                           'k--', alpha=0.3, linewidth=1)
+            except ImportError:
+                logger.warning("scipy not available for convex hulls")
 
-            # Show convex hulls
-            if show_hulls and len(cluster_coords) > 2:
-                try:
-                    from scipy.spatial import ConvexHull
-                    hull = ConvexHull(cluster_coords[:, :2])
-                    for simplex in hull.simplices:
-                        ax.plot(cluster_coords[simplex, 0], cluster_coords[simplex, 1],
-                               'k--', alpha=0.3, linewidth=1)
-                except ImportError:
-                    logger.warning("scipy not available for convex hulls")
-
-        # Styling
-        ax.set_xlabel('Principal Component 1', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel('Principal Component 2', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    # Styling
+    ax.set_xlabel('Principal Component 1', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    ax.set_ylabel('Principal Component 2', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
 
 
-        # Print statistics (removed from plot to avoid hiding content)
+    # Print statistics (removed from plot to avoid hiding content)
+    if own_figure:
         n_clusters = len(unique_labels)
         if 'silhouette_score' in clustering_results:
             silhouette = clustering_results['silhouette_score']
@@ -130,30 +142,34 @@ def plot_cluster_scatter(clustering_results: Dict[str, Any],
         else:
             print(f"  📊 Clustering statistics: {n_clusters} clusters")
 
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
 
-        # Clean spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1.2)
-        ax.spines['bottom'].set_linewidth(1.2)
+    # Clean spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.2)
+    ax.spines['bottom'].set_linewidth(1.2)
 
+    # Handle output based on mode
+    if own_figure:
         plt.tight_layout()
-
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             logger.info(f"Cluster scatter plot saved: {save_path}")
-
-    return fig, ax
+        return fig, ax
+    else:
+        # Panel mode - return only axes
+        return ax
 
 
 def plot_cluster_timeline(clustering_results: Dict[str, Any],
                          times: Optional[np.ndarray] = None,
                          title: str = "",
                          figsize: Optional[Tuple[float, float]] = None,
-                         save_path: Optional[str] = None) -> Tuple[plt.Figure, plt.Axes]:
+                         save_path: Optional[str] = None,
+                         ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot cluster assignment over simulation time.
 
@@ -169,11 +185,14 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
         Figure size
     save_path : str, optional
         Path to save figure
+    ax : matplotlib.axes.Axes, optional
+        Axes object to plot on. If provided, function operates in panel mode.
 
     Returns
     -------
-    tuple
-        (figure, axes) objects
+    tuple or matplotlib.axes.Axes
+        In standalone mode (ax=None): Returns (figure, axes) tuple
+        In panel mode (ax provided): Returns axes object only
     """
     labels = clustering_results['labels']
     frame_indices = clustering_results.get('frame_indices', list(range(len(labels))))
@@ -204,115 +223,123 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
     else:
         times = times[:len(labels)]
 
-    if figsize is None:
-        figsize = get_standard_figsize("single")
+    # Detect mode
+    if ax is None:
+        # Standalone mode
+        own_figure = True
+        if figsize is None:
+            figsize = get_standard_figsize("single")
+        plt.style.use('default')
+        with plt.rc_context(get_publication_style()):
+            fig, ax = plt.subplots(figsize=figsize)
+    else:
+        # Panel mode
+        own_figure = False
+        fig = None
 
-    plt.style.use('default')
-    with plt.rc_context(get_publication_style()):
-        fig, ax = plt.subplots(figsize=figsize)
+    # Create color map for clusters
+    unique_labels = sorted(set(labels))
+    if -1 in unique_labels:
+        unique_labels.remove(-1)
+        unique_labels.append(-1)  # Put noise at end
 
-        # Create color map for clusters
-        unique_labels = sorted(set(labels))
-        if -1 in unique_labels:
-            unique_labels.remove(-1)
-            unique_labels.append(-1)  # Put noise at end
+    colors = plt.cm.Set3(np.linspace(0, 1, len(unique_labels)))
+    color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+    if -1 in color_map:
+        color_map[-1] = 'gray'  # Special color for noise
 
-        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_labels)))
-        color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
-        if -1 in color_map:
-            color_map[-1] = 'gray'  # Special color for noise
+    # Plot timeline as thick horizontal bar segments
+    # Group consecutive frames with same cluster into continuous segments
+    segments = []
 
-        # Plot timeline as thick horizontal bar segments
-        # Group consecutive frames with same cluster into continuous segments
-        segments = []
+    if len(labels) == 0:
+        # No data to plot
+        pass
+    elif len(labels) == 1:
+        # Single frame - create a single segment with some width
+        time_width = 0.05 if len(times) == 1 else (times[-1] - times[0]) * 0.1
+        segments.append({
+            'cluster': labels[0],
+            't_start': times[0] - time_width/2,
+            't_end': times[0] + time_width/2,
+            'start_idx': 0,
+            'end_idx': 0
+        })
+    else:
+        # Multiple frames - group into segments
+        start_idx = 0
 
-        if len(labels) == 0:
-            # No data to plot
-            pass
-        elif len(labels) == 1:
-            # Single frame - create a single segment with some width
-            time_width = 0.05 if len(times) == 1 else (times[-1] - times[0]) * 0.1
-            segments.append({
-                'cluster': labels[0],
-                't_start': times[0] - time_width/2,
-                't_end': times[0] + time_width/2,
-                'start_idx': 0,
-                'end_idx': 0
-            })
+        for i in range(1, len(labels)):
+            if labels[i] != labels[i-1]:
+                # Cluster changed, save previous segment
+                segments.append({
+                    'cluster': labels[start_idx],
+                    't_start': times[start_idx],
+                    't_end': times[i-1],
+                    'start_idx': start_idx,
+                    'end_idx': i-1
+                })
+                start_idx = i
+
+        # Add final segment
+        segments.append({
+            'cluster': labels[start_idx],
+            't_start': times[start_idx],
+            't_end': times[-1],
+            'start_idx': start_idx,
+            'end_idx': len(labels)-1
+        })
+
+    # Draw thick horizontal lines for each segment
+    for seg in segments:
+        cluster = seg['cluster']
+        color = color_map[cluster]
+
+        # Use thick horizontal lines to show cluster occupancy over time
+        ax.hlines(y=cluster, xmin=seg['t_start'], xmax=seg['t_end'],
+                 colors=color, linewidth=10, alpha=0.85, zorder=3)
+
+        # Add small markers at segment boundaries for clarity
+        if seg['start_idx'] == seg['end_idx']:
+            # Single point segment - just add one marker
+            ax.scatter([seg['t_start'] + (seg['t_end'] - seg['t_start'])/2], [cluster],
+                      c=[color], s=60, alpha=0.9,
+                      edgecolor='black', linewidth=0.5, zorder=4)
         else:
-            # Multiple frames - group into segments
-            start_idx = 0
+            # Multi-point segment - add markers at both ends
+            ax.scatter([seg['t_start'], seg['t_end']], [cluster, cluster],
+                      c=[color, color], s=40, alpha=0.9,
+                      edgecolor='black', linewidth=0.5, zorder=4)
 
-            for i in range(1, len(labels)):
-                if labels[i] != labels[i-1]:
-                    # Cluster changed, save previous segment
-                    segments.append({
-                        'cluster': labels[start_idx],
-                        't_start': times[start_idx],
-                        't_end': times[i-1],
-                        'start_idx': start_idx,
-                        'end_idx': i-1
-                    })
-                    start_idx = i
+    # Add trajectory boundaries if combined trajectories
+    if 'trajectory_metadata' in clustering_results:
+        metadata = clustering_results['trajectory_metadata']
+        frames_per_traj = metadata.get('frames_per_trajectory', [])
 
-            # Add final segment
-            segments.append({
-                'cluster': labels[start_idx],
-                't_start': times[start_idx],
-                't_end': times[-1],
-                'start_idx': start_idx,
-                'end_idx': len(labels)-1
-            })
+        if len(frames_per_traj) > 1:
+            # Calculate boundary positions
+            cumulative_frames = 0
+            for i, n_frames in enumerate(frames_per_traj[:-1]):  # Don't add line after last trajectory
+                cumulative_frames += n_frames
+                boundary_time = times[cumulative_frames] if cumulative_frames < len(times) else times[-1]
+                ax.axvline(x=boundary_time, color='red', linestyle='--',
+                          alpha=0.5, linewidth=2, zorder=1,
+                          label='Trajectory boundary' if i == 0 else '')
 
-        # Draw thick horizontal lines for each segment
-        for seg in segments:
-            cluster = seg['cluster']
-            color = color_map[cluster]
+    # Add horizontal lines for each cluster
+    for cluster in unique_labels:
+        if cluster != -1:
+            ax.axhline(y=cluster, color='gray', linestyle='--', alpha=0.2, linewidth=1, zorder=1)
 
-            # Use thick horizontal lines to show cluster occupancy over time
-            ax.hlines(y=cluster, xmin=seg['t_start'], xmax=seg['t_end'],
-                     colors=color, linewidth=10, alpha=0.85, zorder=3)
+    # Calculate cluster populations
+    cluster_stats = {}
+    for cluster in unique_labels:
+        count = np.sum(labels == cluster)
+        percentage = count / len(labels) * 100
+        cluster_stats[cluster] = {'count': count, 'percentage': percentage}
 
-            # Add small markers at segment boundaries for clarity
-            if seg['start_idx'] == seg['end_idx']:
-                # Single point segment - just add one marker
-                ax.scatter([seg['t_start'] + (seg['t_end'] - seg['t_start'])/2], [cluster],
-                          c=[color], s=60, alpha=0.9,
-                          edgecolor='black', linewidth=0.5, zorder=4)
-            else:
-                # Multi-point segment - add markers at both ends
-                ax.scatter([seg['t_start'], seg['t_end']], [cluster, cluster],
-                          c=[color, color], s=40, alpha=0.9,
-                          edgecolor='black', linewidth=0.5, zorder=4)
-
-        # Add trajectory boundaries if combined trajectories
-        if 'trajectory_metadata' in clustering_results:
-            metadata = clustering_results['trajectory_metadata']
-            frames_per_traj = metadata.get('frames_per_trajectory', [])
-
-            if len(frames_per_traj) > 1:
-                # Calculate boundary positions
-                cumulative_frames = 0
-                for i, n_frames in enumerate(frames_per_traj[:-1]):  # Don't add line after last trajectory
-                    cumulative_frames += n_frames
-                    boundary_time = times[cumulative_frames] if cumulative_frames < len(times) else times[-1]
-                    ax.axvline(x=boundary_time, color='red', linestyle='--',
-                              alpha=0.5, linewidth=2, zorder=1,
-                              label='Trajectory boundary' if i == 0 else '')
-
-        # Add horizontal lines for each cluster
-        for cluster in unique_labels:
-            if cluster != -1:
-                ax.axhline(y=cluster, color='gray', linestyle='--', alpha=0.2, linewidth=1, zorder=1)
-
-        # Calculate cluster populations
-        cluster_stats = {}
-        for cluster in unique_labels:
-            count = np.sum(labels == cluster)
-            percentage = count / len(labels) * 100
-            cluster_stats[cluster] = {'count': count, 'percentage': percentage}
-
-        # Print population statistics (removed from plot to avoid hiding content)
+    # Print population statistics (removed from plot to avoid hiding content)
+    if own_figure:
         print("  📊 Cluster populations:")
         for cluster in sorted(unique_labels):
             if cluster == -1:
@@ -320,39 +347,43 @@ def plot_cluster_timeline(clustering_results: Dict[str, Any],
             else:
                 print(f"    Cluster {cluster}: {cluster_stats[cluster]['percentage']:.1f}% ({cluster_stats[cluster]['count']} frames)")
 
-        # Styling
-        ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel('Cluster ID', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    # Styling
+    ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    ax.set_ylabel('Cluster ID', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
 
-        ax.grid(True, alpha=0.3, axis='x')
+    ax.grid(True, alpha=0.3, axis='x')
 
-        # Set y-axis to show all clusters
-        if unique_labels:
-            y_min = min(unique_labels) - 0.5
-            y_max = max(unique_labels) + 0.5
-            ax.set_ylim(y_min, y_max)
-            ax.set_yticks(unique_labels)
+    # Set y-axis to show all clusters
+    if unique_labels:
+        y_min = min(unique_labels) - 0.5
+        y_max = max(unique_labels) + 0.5
+        ax.set_ylim(y_min, y_max)
+        ax.set_yticks(unique_labels)
 
-        # Add legend if trajectory boundaries are shown
-        if 'trajectory_metadata' in clustering_results:
-            metadata = clustering_results['trajectory_metadata']
-            if len(metadata.get('frames_per_trajectory', [])) > 1:
-                ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
+    # Add legend if trajectory boundaries are shown
+    if 'trajectory_metadata' in clustering_results:
+        metadata = clustering_results['trajectory_metadata']
+        if len(metadata.get('frames_per_trajectory', [])) > 1:
+            ax.legend(loc='upper right', fontsize=PUBLICATION_FONTS['legend'])
 
+    # Handle output based on mode
+    if own_figure:
         plt.tight_layout()
-
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             logger.info(f"Cluster timeline plot saved: {save_path}")
-
-    return fig, ax
+        return fig, ax
+    else:
+        # Panel mode - return only axes
+        return ax
 
 
 def plot_cluster_populations(clustering_results: Dict[str, Any],
                            title: str = "",
                            figsize: Optional[Tuple[float, float]] = None,
-                           save_path: Optional[str] = None) -> Tuple[plt.Figure, plt.Axes]:
+                           save_path: Optional[str] = None,
+                           ax: Optional[plt.Axes] = None) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot cluster population distribution as bar chart.
 
@@ -366,71 +397,84 @@ def plot_cluster_populations(clustering_results: Dict[str, Any],
         Figure size
     save_path : str, optional
         Path to save figure
+    ax : matplotlib.axes.Axes, optional
+        Axes object to plot on. If provided, function operates in panel mode.
 
     Returns
     -------
-    tuple
-        (figure, axes) objects
+    tuple or matplotlib.axes.Axes
+        In standalone mode (ax=None): Returns (figure, axes) tuple
+        In panel mode (ax provided): Returns axes object only
     """
     labels = clustering_results['labels']
 
-    if figsize is None:
-        figsize = get_standard_figsize("single")
+    # Detect mode
+    if ax is None:
+        # Standalone mode
+        own_figure = True
+        if figsize is None:
+            figsize = get_standard_figsize("single")
+        plt.style.use('default')
+        with plt.rc_context(get_publication_style()):
+            fig, ax = plt.subplots(figsize=figsize)
+    else:
+        # Panel mode
+        own_figure = False
+        fig = None
 
-    plt.style.use('default')
-    with plt.rc_context(get_publication_style()):
-        fig, ax = plt.subplots(figsize=figsize)
+    # Calculate populations
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    percentages = counts / len(labels) * 100
 
-        # Calculate populations
-        unique_labels, counts = np.unique(labels, return_counts=True)
-        percentages = counts / len(labels) * 100
+    # Prepare colors
+    colors = []
+    cluster_names = []
+    for label in unique_labels:
+        if label == -1:
+            colors.append('gray')
+            cluster_names.append('Noise')
+        else:
+            colors.append(plt.cm.Set3(label / max(1, max(unique_labels))))
+            cluster_names.append(f'Cluster {label}')
 
-        # Prepare colors
-        colors = []
-        cluster_names = []
-        for label in unique_labels:
-            if label == -1:
-                colors.append('gray')
-                cluster_names.append('Noise')
-            else:
-                colors.append(plt.cm.Set3(label / max(1, max(unique_labels))))
-                cluster_names.append(f'Cluster {label}')
+    # Create bar chart
+    bars = ax.bar(range(len(unique_labels)), percentages, color=colors,
+                 alpha=0.8, edgecolor='black', linewidth=1.2)
 
-        # Create bar chart
-        bars = ax.bar(range(len(unique_labels)), percentages, color=colors,
-                     alpha=0.8, edgecolor='black', linewidth=1.2)
+    # Add percentage labels on bars
+    for i, (bar, percentage) in enumerate(zip(bars, percentages)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+               f'{percentage:.1f}%', ha='center', va='bottom',
+               fontsize=PUBLICATION_FONTS['value_text'], weight='bold')
 
-        # Add percentage labels on bars
-        for i, (bar, percentage) in enumerate(zip(bars, percentages)):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
-                   f'{percentage:.1f}%', ha='center', va='bottom',
-                   fontsize=PUBLICATION_FONTS['value_text'], weight='bold')
+    # Styling
+    ax.set_xlabel('Clusters', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    ax.set_ylabel('Population (%)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
 
-        # Styling
-        ax.set_xlabel('Clusters', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel('Population (%)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+    ax.set_xticks(range(len(unique_labels)))
+    ax.set_xticklabels(cluster_names, fontsize=PUBLICATION_FONTS['tick_label'])
+    ax.set_ylim(0, max(percentages) * 1.15)  # Add space for labels
+    ax.grid(True, alpha=0.3, axis='y')
+    ax.set_axisbelow(True)
 
-        ax.set_xticks(range(len(unique_labels)))
-        ax.set_xticklabels(cluster_names, fontsize=PUBLICATION_FONTS['tick_label'])
-        ax.set_ylim(0, max(percentages) * 1.15)  # Add space for labels
-        ax.grid(True, alpha=0.3, axis='y')
-        ax.set_axisbelow(True)
+    # Clean spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.2)
+    ax.spines['bottom'].set_linewidth(1.2)
 
-        # Clean spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(1.2)
-        ax.spines['bottom'].set_linewidth(1.2)
-
+    # Handle output based on mode
+    if own_figure:
         plt.tight_layout()
-
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches='tight',
                        facecolor='white', edgecolor='none')
             logger.info(f"Cluster populations plot saved: {save_path}")
-
-    return fig, ax
+        return fig, ax
+    else:
+        # Panel mode - return only axes
+        return ax
 
 
 def plot_rmsd_matrix(rmsd_matrix: np.ndarray,
