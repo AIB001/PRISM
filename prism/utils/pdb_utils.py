@@ -187,7 +187,7 @@ def apply_pka_predictions(input_pdb: str,
     dict
         Dictionary with renames applied and statistics
     """
-    from prism.utils.propka_protonation import PropkaProtonator
+    from prism.utils.protonation import PropkaProtonator
 
     input_path = Path(input_pdb)
     output_path = Path(output_pdb)

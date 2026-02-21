@@ -31,7 +31,6 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
-import re
 
 logger = logging.getLogger(__name__)
 
