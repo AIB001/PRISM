@@ -3,8 +3,7 @@
 PRISM MCP Server - AI Agent interface for protein-ligand system building.
 
 This MCP server exposes PRISM's molecular dynamics system building capabilities
-as tools that AI agents (Claude, ChatGPT, etc.) can call through natural
-language conversation.
+as tools that AI agents (Claude, etc.) can call through natural language.
 
 Usage:
     # Test with MCP Inspector (browser-based debug UI)
@@ -67,33 +66,95 @@ class _StdoutToStderr:
         sys.stdout = self._original
 
 
+def _ensure_prism_importable():
+    """Add PRISM root to sys.path if not already present."""
+    prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if prism_root not in sys.path:
+        sys.path.insert(0, prism_root)
+
+
 # ==========================================================================
 #  Tool 1: Check Dependencies
 # ==========================================================================
 @mcp.tool()
 def check_dependencies() -> str:
-    """Check if all required dependencies for PRISM are installed and available.
+    """Check if all required dependencies for PRISM are installed.
 
-    Checks for the following software/libraries:
-    - GROMACS (molecular dynamics engine)
-    - pdbfixer (protein structure preparation)
-    - antechamber (AmberTools, for GAFF/GAFF2 force fields)
-    - OpenFF toolkit (for OpenFF force field)
+    Checks:
+    - GROMACS (molecular dynamics engine, required)
+    - pdbfixer (protein structure preparation, recommended)
+    - AmberTools / antechamber (for GAFF/GAFF2 ligand force fields)
+    - OpenFF toolkit (for OpenFF ligand force field)
+    - PROPKA (for pKa-based histidine protonation prediction)
+    - Gaussian g16 (for high-precision RESP charge calculation, optional)
     - MDTraj (for trajectory analysis)
     - RDKit (for chemical informatics)
+
+    Call this tool first to verify the user's environment before building.
 
     Returns a JSON object with each dependency name mapped to true/false.
     """
     logger.info("Checking PRISM dependencies...")
     try:
         with _StdoutToStderr():
-            # Add PRISM to path if needed
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
+            _ensure_prism_importable()
+            import subprocess, shutil
 
-            import prism as pm
-            deps = pm.check_dependencies()
+            deps = {
+                "gromacs": False,
+                "pdbfixer": False,
+                "antechamber": False,
+                "openff": False,
+                "propka": False,
+                "gaussian_g16": False,
+                "mdtraj": False,
+                "rdkit": False,
+            }
+
+            # GROMACS
+            try:
+                from prism.utils.environment import GromacsEnvironment
+                GromacsEnvironment()
+                deps["gromacs"] = True
+            except Exception:
+                pass
+
+            # pdbfixer
+            deps["pdbfixer"] = shutil.which("pdbfixer") is not None
+
+            # AmberTools (antechamber)
+            deps["antechamber"] = shutil.which("antechamber") is not None
+
+            # OpenFF
+            try:
+                import openff.toolkit
+                deps["openff"] = True
+            except ImportError:
+                pass
+
+            # PROPKA
+            try:
+                import propka
+                deps["propka"] = True
+            except ImportError:
+                pass
+
+            # Gaussian g16
+            deps["gaussian_g16"] = shutil.which("g16") is not None
+
+            # MDTraj
+            try:
+                import mdtraj
+                deps["mdtraj"] = True
+            except ImportError:
+                pass
+
+            # RDKit
+            try:
+                import rdkit
+                deps["rdkit"] = True
+            except ImportError:
+                pass
 
         logger.info(f"Dependencies: {deps}")
         return json.dumps(deps, indent=2)
@@ -111,25 +172,25 @@ def list_forcefields() -> str:
     """List all available force fields for protein-ligand system building.
 
     Returns two categories:
-    1. Protein force fields: detected from the user's GROMACS installation
-       (e.g., amber99sb, amber14sb, charmm27, etc.)
-    2. Ligand force fields: supported by PRISM for small molecule parameterization
-       (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+    1. Protein force fields: detected from the user's GROMACS installation.
+       Recommended: amber14sb (well-validated, modern AMBER force field).
+    2. Ligand force fields: supported by PRISM for small molecule parameterization.
+       Recommended: gaff2 (improved GAFF with better torsion parameters).
 
-    Use this tool to help the user choose appropriate force fields before building.
+    Common protein + ligand combinations:
+    - amber14sb + gaff2  (recommended default)
+    - amber99sb + gaff   (classic, widely used)
+    - amber19sb + gaff2  (latest AMBER, requires OPC water: --water opc)
+    - charmm36  + cgenff (CHARMM ecosystem)
+
+    Use this tool to help the user choose appropriate force fields.
     """
     logger.info("Listing available force fields...")
     try:
         with _StdoutToStderr():
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
+            _ensure_prism_importable()
 
-            from prism.forcefield import get_generator_info
-
-            ligand_info = get_generator_info()
-
-            # Try to get protein force fields from GROMACS
+            # Protein force fields from GROMACS
             protein_ffs = []
             try:
                 from prism.utils.environment import GromacsEnvironment
@@ -138,15 +199,26 @@ def list_forcefields() -> str:
             except Exception:
                 protein_ffs = ["(GROMACS not detected - cannot list protein force fields)"]
 
+            # Ligand force fields - hardcoded from PRISM's actual support
+            ligand_ffs = {
+                "gaff": "GAFF force field (AmberTools). Classic, widely used.",
+                "gaff2": "GAFF2 force field (AmberTools). Improved torsion parameters. RECOMMENDED.",
+                "openff": "Open Force Field (openff-toolkit). Modern, data-driven.",
+                "cgenff": "CGenFF (CHARMM General FF). Requires web-downloaded files from cgenff.com. CLI only (use --forcefield-path).",
+                "opls": "OPLS-AA (via LigParGen server). Requires internet.",
+                "mmff": "MMFF-based (via SwissParam server). Requires internet.",
+                "match": "MATCH (via SwissParam server). Requires internet.",
+                "hybrid": "Hybrid MMFF-MATCH (via SwissParam server). Requires internet.",
+            }
+
         result = {
             "protein_forcefields": protein_ffs,
-            "ligand_forcefields": {
-                name: info["description"] for name, info in ligand_info.items()
+            "ligand_forcefields": ligand_ffs,
+            "recommended": {
+                "protein": "amber14sb",
+                "ligand": "gaff2",
+                "water": "tip3p",
             },
-            "ligand_forcefield_cli_options": [
-                "gaff", "gaff2", "openff", "cgenff",
-                "opls", "mmff", "match", "hybrid",
-            ],
         }
         return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -156,16 +228,17 @@ def list_forcefields() -> str:
 
 
 # ==========================================================================
-#  Tool 3: Build Standard MD System (Normal Mode)
+#  Tool 3: Build Standard MD System
 # ==========================================================================
 @mcp.tool()
 def build_system(
     protein_path: str,
-    ligand_path: str,
+    ligand_paths: str,
     output_dir: str = "prism_output",
-    ligand_forcefield: str = "gaff",
-    forcefield: str = "amber99sb",
+    ligand_forcefield: str = "gaff2",
+    forcefield: str = "amber14sb",
     water_model: str = "tip3p",
+    protonation: str = "gromacs",
     temperature: float = 310.0,
     ph: float = 7.0,
     production_ns: float = 500.0,
@@ -173,47 +246,66 @@ def build_system(
     box_shape: str = "cubic",
     salt_concentration: float = 0.15,
     ligand_charge: int = 0,
+    gaussian_method: Optional[str] = None,
+    do_optimization: bool = False,
     overwrite: bool = False,
 ) -> str:
     """Build a complete protein-ligand system for GROMACS molecular dynamics simulation.
 
-    This is the main building tool. It takes a protein PDB file and a ligand file,
-    then performs the full workflow:
+    This is the main building tool. It takes a protein PDB and one or more ligand
+    files, then performs the full workflow:
+      1. Generate ligand force field parameters
+      2. Clean and prepare the protein structure
+      3. Build GROMACS system (topology, solvation, ions)
+      4. Generate MDP parameter files (em, nvt, npt, md)
+      5. Generate localrun.sh script for GPU-accelerated simulation
 
-    Step 1: Generate ligand force field parameters (GAFF/GAFF2/OpenFF/etc.)
-    Step 2: Clean and prepare the protein structure (remove artifacts, handle metals)
-    Step 3: Build GROMACS system:
-            - pdb2gmx (protein topology)
-            - Combine protein + ligand
-            - Create simulation box
-            - Solvate with water
-            - Add ions to neutralize and set salt concentration
-    Step 4: Generate MDP parameter files (em.mdp, nvt.mdp, npt.mdp, md.mdp)
-    Step 5: Generate localrun.sh script for GPU-accelerated simulation
+    Recommended defaults: amber14sb protein force field + gaff2 ligand force field.
 
-    After building, the user runs: cd GMX_PROLIG_MD && bash localrun.sh
+    If the user has Gaussian (g16) installed, they can set gaussian_method to 'hf'
+    or 'dft' to use high-precision RESP charges instead of the default AM1-BCC.
+    If g16 is not available, PRISM will generate Gaussian input files and a script
+    for the user to run manually on a machine with Gaussian.
+
+    After building, the user runs:
+      cd <output_dir>/GMX_PROLIG_MD && bash localrun.sh
 
     Args:
         protein_path: Absolute path to the protein PDB file.
-        ligand_path: Absolute path to the ligand file (MOL2 or SDF format).
+        ligand_paths: Absolute path to ligand file(s). For multiple ligands,
+            separate with commas: "/path/lig1.mol2,/path/lig2.mol2"
         output_dir: Directory for all output files. Default: "prism_output".
-        ligand_forcefield: Force field for ligand parameterization.
-            Options: "gaff" (default), "gaff2", "openff", "cgenff", "opls",
-            "mmff", "match", "hybrid".
-        forcefield: Protein force field. Default: "amber99sb".
-            Common choices: "amber99sb", "amber14sb", "amber99sb-ildn", "charmm27".
+        ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
+            Options: "gaff", "gaff2", "openff", "opls", "mmff", "match", "hybrid".
+            Note: "cgenff" requires manual --forcefield-path setup via CLI.
+        forcefield: Protein force field. Default: "amber14sb" (recommended).
+            Common: "amber99sb", "amber14sb", "amber99sb-ildn", "charmm27".
+            For amber19sb, use water_model="opc".
         water_model: Water model. Default: "tip3p".
-            Options: "tip3p", "tip4p", "spc", "spce".
-        temperature: Simulation temperature in Kelvin. Default: 310 (body temperature).
+            Options: "tip3p", "tip4p", "spc", "spce", "opc" (for amber19sb).
+        protonation: Protonation method. Default: "gromacs".
+            "gromacs": Let pdb2gmx handle protonation states (default HIE).
+            "propka": Use PROPKA pKa prediction for intelligent per-residue
+            histidine states (HID/HIE/HIP). Requires propka package.
+        temperature: Simulation temperature in Kelvin. Default: 310.
         ph: pH for protonation state assignment. Default: 7.0.
         production_ns: Production MD length in nanoseconds. Default: 500.
         box_distance: Distance from protein to box edge in nm. Default: 1.5.
-        box_shape: Box shape. Options: "cubic", "dodecahedron", "octahedron". Default: "cubic".
+        box_shape: Box shape. Default: "cubic". Options: "cubic", "dodecahedron", "octahedron".
         salt_concentration: NaCl concentration in mol/L. Default: 0.15.
         ligand_charge: Net formal charge of the ligand. Default: 0.
-        overwrite: Overwrite existing output files if they exist. Default: false.
+        gaussian_method: Enable Gaussian RESP charge calculation. Default: None (disabled).
+            Set to "hf" for HF/6-31G* or "dft" for B3LYP/6-31G*.
+            If Gaussian (g16) is installed, charges are calculated automatically.
+            Otherwise, input files and a run script are generated.
+        do_optimization: Perform geometry optimization before ESP. Default: false.
+            Only used when gaussian_method is set.
+        overwrite: Overwrite existing output files. Default: false.
     """
-    logger.info(f"build_system: {protein_path} + {ligand_path} -> {output_dir}")
+    logger.info(f"build_system: {protein_path} + {ligand_paths} -> {output_dir}")
+
+    # --- Parse ligand paths (comma-separated string -> list) ---
+    lig_list = [p.strip() for p in ligand_paths.split(",") if p.strip()]
 
     # --- Input validation ---
     errors = []
@@ -222,45 +314,60 @@ def build_system(
     elif not os.path.exists(protein_path):
         errors.append(f"Protein file not found: {protein_path}")
 
-    if not os.path.isabs(ligand_path):
-        errors.append(f"ligand_path must be an absolute path, got: {ligand_path}")
-    elif not os.path.exists(ligand_path):
-        errors.append(f"Ligand file not found: {ligand_path}")
+    for lp in lig_list:
+        if not os.path.isabs(lp):
+            errors.append(f"ligand_path must be an absolute path, got: {lp}")
+        elif not os.path.exists(lp):
+            errors.append(f"Ligand file not found: {lp}")
+
+    valid_lff = ["gaff", "gaff2", "openff", "opls", "mmff", "match", "hybrid"]
+    if ligand_forcefield not in valid_lff:
+        errors.append(f"Invalid ligand_forcefield '{ligand_forcefield}'. Options: {valid_lff}")
+    # Note: cgenff requires --forcefield-path which MCP doesn't expose; use CLI instead
+
+    if gaussian_method and gaussian_method not in ("hf", "dft"):
+        errors.append(f"gaussian_method must be 'hf' or 'dft', got: {gaussian_method}")
 
     if errors:
-        return json.dumps({"success": False, "errors": errors})
+        return json.dumps({"success": False, "errors": errors}, indent=2)
 
     # --- Run PRISM builder ---
     try:
         with _StdoutToStderr():
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
-
+            _ensure_prism_importable()
             from prism.builder import PRISMBuilder
+
+            # Single ligand: pass string; multiple: pass list
+            lig_input = lig_list[0] if len(lig_list) == 1 else lig_list
 
             builder = PRISMBuilder(
                 protein_path=protein_path,
-                ligand_paths=ligand_path,
+                ligand_paths=lig_input,
                 output_dir=output_dir,
                 ligand_forcefield=ligand_forcefield,
                 forcefield=forcefield,
                 water_model=water_model,
                 overwrite=overwrite,
+                gaussian_method=gaussian_method,
+                do_optimization=do_optimization,
             )
 
-            # Update simulation parameters from user input
+            # Apply simulation parameters
             builder.config["simulation"]["temperature"] = temperature
             builder.config["simulation"]["pH"] = ph
             builder.config["simulation"]["production_time_ns"] = production_ns
+            builder.config["simulation"]["ligand_charge"] = ligand_charge
+            builder.config["ligand_forcefield"]["charge"] = ligand_charge
             builder.config["box"]["distance"] = box_distance
             builder.config["box"]["shape"] = box_shape
             builder.config["ions"]["concentration"] = salt_concentration
-            builder.config["ligand_forcefield"]["charge"] = ligand_charge
+
+            # Apply protonation method
+            builder.config.setdefault("protonation", {})["method"] = protonation
 
             result_dir = builder.run()
 
-        # --- Collect output file paths ---
+        # --- Collect output info ---
         gmx_dir = os.path.join(result_dir, "GMX_PROLIG_MD")
         mdp_dir = os.path.join(result_dir, "mdps")
         files = {}
@@ -274,42 +381,38 @@ def build_system(
                 if os.path.exists(p):
                     files[name] = p
 
-        return json.dumps(
-            {
-                "success": True,
-                "output_dir": result_dir,
-                "gmx_dir": gmx_dir,
-                "message": (
-                    f"System built successfully!\n"
-                    f"To run the simulation:\n"
-                    f"  cd {gmx_dir}\n"
-                    f"  bash localrun.sh"
-                ),
-                "files": files,
-                "parameters": {
-                    "protein_forcefield": forcefield,
-                    "ligand_forcefield": ligand_forcefield,
-                    "water_model": water_model,
-                    "temperature_K": temperature,
-                    "pH": ph,
-                    "production_ns": production_ns,
-                    "box_distance_nm": box_distance,
-                    "salt_concentration_M": salt_concentration,
-                },
+        return json.dumps({
+            "success": True,
+            "output_dir": result_dir,
+            "gmx_dir": gmx_dir,
+            "message": (
+                f"System built successfully!\n"
+                f"To run the simulation:\n"
+                f"  cd {gmx_dir}\n"
+                f"  bash localrun.sh"
+            ),
+            "files": files,
+            "parameters": {
+                "protein_forcefield": forcefield,
+                "ligand_forcefield": ligand_forcefield,
+                "water_model": water_model,
+                "protonation": protonation,
+                "temperature_K": temperature,
+                "pH": ph,
+                "production_ns": production_ns,
+                "box_distance_nm": box_distance,
+                "salt_concentration_M": salt_concentration,
+                "gaussian_method": gaussian_method,
             },
-            indent=2,
-        )
+        }, indent=2)
 
     except Exception as e:
         logger.error(f"build_system failed: {e}\n{traceback.format_exc()}")
-        return json.dumps(
-            {
-                "success": False,
-                "error": str(e),
-                "traceback": traceback.format_exc(),
-            },
-            indent=2,
-        )
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }, indent=2)
 
 
 # ==========================================================================
@@ -320,51 +423,59 @@ def build_pmf_system(
     protein_path: str,
     ligand_path: str,
     output_dir: str = "prism_pmf_output",
-    ligand_forcefield: str = "gaff",
-    forcefield: str = "amber99sb",
+    ligand_forcefield: str = "gaff2",
+    forcefield: str = "amber14sb",
+    water_model: str = "tip3p",
     box_extension_z: float = 2.0,
     umbrella_time_ns: float = 10.0,
+    umbrella_spacing: float = 0.12,
     overwrite: bool = False,
 ) -> str:
     """Build a system for PMF (Potential of Mean Force) calculation.
 
-    Sets up steered molecular dynamics (SMD) and umbrella sampling for
-    calculating the binding free energy profile of a protein-ligand complex.
+    PMF measures the binding free energy profile of a protein-ligand complex
+    using steered molecular dynamics (SMD) and umbrella sampling with WHAM.
+
+    Recommended: amber14sb + gaff2 (same as standard MD).
 
     The workflow:
-    1. Generate ligand force field
-    2. Clean protein
-    3. Align the complex so the unbinding pull vector is along the Z-axis
-    4. Build GROMACS system with an extended box in Z for pulling space
-    5. Generate index file with pull/reference/freeze atom groups
+    1. Generate ligand force field (gaff2 recommended)
+    2. Clean protein structure
+    3. Align complex so the unbinding pull vector is along the Z-axis
+    4. Build GROMACS system with extended Z-box for pulling space
+    5. Generate index file with pull/reference/freeze groups
     6. Generate SMD and umbrella sampling MDP files and run scripts
 
-    After building, the user runs two scripts sequentially:
-      cd GMX_PROLIG_PMF && bash smd_run.sh && bash umbrella_run.sh
+    After building, the user runs:
+      cd <output_dir>/GMX_PROLIG_PMF
+      bash smd_run.sh           # Step 1: Steered MD (EM -> NVT -> NPT -> pulling)
+      bash umbrella_run.sh      # Step 2: Umbrella sampling + WHAM analysis
 
     Args:
         protein_path: Absolute path to protein PDB file.
-        ligand_path: Absolute path to ligand file (MOL2/SDF).
+        ligand_path: Absolute path to ligand file (MOL2 or SDF).
         output_dir: Output directory. Default: "prism_pmf_output".
-        ligand_forcefield: Ligand force field. Default: "gaff".
-        forcefield: Protein force field. Default: "amber99sb".
-        box_extension_z: Extra box length in Z direction (nm) for pulling space. Default: 2.0.
+        ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
+        forcefield: Protein force field. Default: "amber14sb" (recommended).
+        water_model: Water model. Default: "tip3p".
+        box_extension_z: Extra Z-axis length (nm) for pulling space. Default: 2.0.
         umbrella_time_ns: Simulation time per umbrella window in ns. Default: 10.0.
+        umbrella_spacing: Distance between umbrella windows in nm. Default: 0.12.
         overwrite: Overwrite existing files. Default: false.
     """
     logger.info(f"build_pmf_system: {protein_path} + {ligand_path}")
 
+    errors = []
     if not os.path.exists(protein_path):
-        return json.dumps({"success": False, "error": f"Protein not found: {protein_path}"})
+        errors.append(f"Protein file not found: {protein_path}")
     if not os.path.exists(ligand_path):
-        return json.dumps({"success": False, "error": f"Ligand not found: {ligand_path}"})
+        errors.append(f"Ligand file not found: {ligand_path}")
+    if errors:
+        return json.dumps({"success": False, "errors": errors}, indent=2)
 
     try:
         with _StdoutToStderr():
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
-
+            _ensure_prism_importable()
             from prism.builder import PRISMBuilder
 
             builder = PRISMBuilder(
@@ -373,12 +484,16 @@ def build_pmf_system(
                 output_dir=output_dir,
                 ligand_forcefield=ligand_forcefield,
                 forcefield=forcefield,
+                water_model=water_model,
                 overwrite=overwrite,
                 pmf_mode=True,
                 box_extension=(0.0, 0.0, box_extension_z),
             )
+
+            # Apply PMF-specific parameters
             builder.config.setdefault("pmf", {})
             builder.config["pmf"]["umbrella_time_ns"] = umbrella_time_ns
+            builder.config["pmf"]["umbrella_spacing"] = umbrella_spacing
 
             result_dir = builder.run()
 
@@ -391,9 +506,16 @@ def build_pmf_system(
                 f"PMF system built successfully!\n"
                 f"To run the PMF workflow:\n"
                 f"  cd {pmf_dir}\n"
-                f"  bash smd_run.sh      # Step 1: Steered MD\n"
-                f"  bash umbrella_run.sh  # Step 2: Umbrella sampling + WHAM"
+                f"  bash smd_run.sh        # Step 1: Steered MD\n"
+                f"  bash umbrella_run.sh   # Step 2: Umbrella sampling + WHAM"
             ),
+            "parameters": {
+                "protein_forcefield": forcefield,
+                "ligand_forcefield": ligand_forcefield,
+                "box_extension_z_nm": box_extension_z,
+                "umbrella_time_ns": umbrella_time_ns,
+                "umbrella_spacing_nm": umbrella_spacing,
+            },
         }, indent=2)
 
     except Exception as e:
@@ -409,51 +531,59 @@ def build_rest2_system(
     protein_path: str,
     ligand_path: str,
     output_dir: str = "prism_rest2_output",
-    ligand_forcefield: str = "gaff",
-    forcefield: str = "amber99sb",
+    ligand_forcefield: str = "gaff2",
+    forcefield: str = "amber14sb",
+    water_model: str = "tip3p",
     t_ref: float = 310.0,
     t_max: float = 450.0,
     n_replicas: int = 16,
     rest2_cutoff: float = 0.5,
     overwrite: bool = False,
 ) -> str:
-    """Build a system for REST2 (Replica Exchange with Solute Tempering v2) enhanced sampling.
+    """Build a system for REST2 (Replica Exchange with Solute Tempering v2).
 
     REST2 enhances conformational sampling of the protein-ligand binding pocket
     by running multiple replicas at different effective temperatures for the
-    solute region, while keeping the solvent at the reference temperature.
+    solute (protein + ligand), while keeping the solvent at reference temperature.
+    This requires significantly more computational resources than standard MD.
+
+    Recommended: amber14sb + gaff2.
 
     The workflow:
     1. Build a standard MD system (same as build_system)
-    2. Convert GMX_PROLIG_MD to GMX_PROLIG_REST2 with scaled topologies
+    2. Convert to REST2 with scaled topologies for each replica
 
-    After building, run: cd GMX_PROLIG_REST2 && bash rest2_run.sh
+    After building, run:
+      cd <output_dir>/GMX_PROLIG_REST2 && bash rest2_run.sh
 
     Args:
         protein_path: Absolute path to protein PDB file.
-        ligand_path: Absolute path to ligand file (MOL2/SDF).
+        ligand_path: Absolute path to ligand file (MOL2 or SDF).
         output_dir: Output directory. Default: "prism_rest2_output".
-        ligand_forcefield: Ligand force field. Default: "gaff".
-        forcefield: Protein force field. Default: "amber99sb".
+        ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
+        forcefield: Protein force field. Default: "amber14sb" (recommended).
+        water_model: Water model. Default: "tip3p".
         t_ref: Reference (physical) temperature in Kelvin. Default: 310.
         t_max: Maximum effective temperature in Kelvin. Default: 450.
         n_replicas: Number of REST2 replicas. Default: 16.
-        rest2_cutoff: Distance cutoff (nm) for identifying pocket residues. Default: 0.5.
+            More replicas = better exchange rate but more compute cost.
+        rest2_cutoff: Distance cutoff (nm) for identifying binding pocket residues
+            to include in the solute region. Default: 0.5.
         overwrite: Overwrite existing files. Default: false.
     """
     logger.info(f"build_rest2_system: {protein_path} + {ligand_path}")
 
+    errors = []
     if not os.path.exists(protein_path):
-        return json.dumps({"success": False, "error": f"Protein not found: {protein_path}"})
+        errors.append(f"Protein file not found: {protein_path}")
     if not os.path.exists(ligand_path):
-        return json.dumps({"success": False, "error": f"Ligand not found: {ligand_path}"})
+        errors.append(f"Ligand file not found: {ligand_path}")
+    if errors:
+        return json.dumps({"success": False, "errors": errors}, indent=2)
 
     try:
         with _StdoutToStderr():
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
-
+            _ensure_prism_importable()
             from prism.builder import PRISMBuilder
 
             builder = PRISMBuilder(
@@ -462,6 +592,7 @@ def build_rest2_system(
                 output_dir=output_dir,
                 ligand_forcefield=ligand_forcefield,
                 forcefield=forcefield,
+                water_model=water_model,
                 overwrite=overwrite,
                 rest2_mode=True,
                 t_ref=t_ref,
@@ -483,6 +614,14 @@ def build_rest2_system(
                 f"  cd {rest2_dir}\n"
                 f"  bash rest2_run.sh"
             ),
+            "parameters": {
+                "protein_forcefield": forcefield,
+                "ligand_forcefield": ligand_forcefield,
+                "t_ref_K": t_ref,
+                "t_max_K": t_max,
+                "n_replicas": n_replicas,
+                "rest2_cutoff_nm": rest2_cutoff,
+            },
         }, indent=2)
 
     except Exception as e:
@@ -498,8 +637,9 @@ def build_mmpbsa_system(
     protein_path: str,
     ligand_path: str,
     output_dir: str = "prism_mmpbsa_output",
-    ligand_forcefield: str = "gaff",
-    forcefield: str = "amber99sb",
+    ligand_forcefield: str = "gaff2",
+    forcefield: str = "amber14sb",
+    water_model: str = "tip3p",
     mmpbsa_traj_ns: Optional[float] = None,
     gmx2amber: bool = False,
     overwrite: bool = False,
@@ -507,40 +647,44 @@ def build_mmpbsa_system(
     """Build a system for MM/PBSA binding free energy calculation.
 
     MM/PBSA estimates protein-ligand binding affinity from MD snapshots.
-    Two sub-modes are available:
+    Two sub-modes:
+    1. Single-frame (default, mmpbsa_traj_ns=None):
+       EM -> NVT -> NPT -> gmx_MMPBSA on equilibrated structure. Fast.
+    2. Trajectory-based (set mmpbsa_traj_ns to a value):
+       EM -> NVT -> NPT -> Production MD -> gmx_MMPBSA on trajectory frames.
+       More accurate but requires longer simulation.
 
-    1. Single-frame mode (default): EM -> NVT -> NPT -> MM/PBSA on the
-       equilibrated structure. Fast but less accurate.
-    2. Trajectory mode (set mmpbsa_traj_ns): EM -> NVT -> NPT -> Production MD
-       -> MM/PBSA on multiple trajectory frames. More accurate.
+    Recommended: amber14sb + gaff2.
 
-    After building, run: cd GMX_PROLIG_MMPBSA && bash mmpbsa_run.sh
+    After building, run:
+      cd <output_dir>/GMX_PROLIG_MMPBSA && bash mmpbsa_run.sh
 
     Args:
         protein_path: Absolute path to protein PDB file.
-        ligand_path: Absolute path to ligand file (MOL2/SDF).
+        ligand_path: Absolute path to ligand file (MOL2 or SDF).
         output_dir: Output directory. Default: "prism_mmpbsa_output".
-        ligand_forcefield: Ligand force field. Default: "gaff".
-        forcefield: Protein force field. Default: "amber99sb".
-        mmpbsa_traj_ns: Production MD length in ns for trajectory-based MM/PBSA.
-            If not provided, uses single-frame mode (no production MD).
-        gmx2amber: Use AMBER MMPBSA.py via parmed conversion instead of gmx_MMPBSA.
-            Requires AmberTools. Default: false.
+        ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
+        forcefield: Protein force field. Default: "amber14sb" (recommended).
+        water_model: Water model. Default: "tip3p".
+        mmpbsa_traj_ns: Production MD length in ns for trajectory-based mode.
+            If None (default), uses single-frame mode (no production MD).
+        gmx2amber: Use AMBER MMPBSA.py via parmed instead of gmx_MMPBSA.
+            Requires AmberTools with parmed. Default: false.
         overwrite: Overwrite existing files. Default: false.
     """
     logger.info(f"build_mmpbsa_system: {protein_path} + {ligand_path}")
 
+    errors = []
     if not os.path.exists(protein_path):
-        return json.dumps({"success": False, "error": f"Protein not found: {protein_path}"})
+        errors.append(f"Protein file not found: {protein_path}")
     if not os.path.exists(ligand_path):
-        return json.dumps({"success": False, "error": f"Ligand not found: {ligand_path}"})
+        errors.append(f"Ligand file not found: {ligand_path}")
+    if errors:
+        return json.dumps({"success": False, "errors": errors}, indent=2)
 
     try:
         with _StdoutToStderr():
-            prism_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if prism_root not in sys.path:
-                sys.path.insert(0, prism_root)
-
+            _ensure_prism_importable()
             from prism.builder import PRISMBuilder
 
             builder = PRISMBuilder(
@@ -549,6 +693,7 @@ def build_mmpbsa_system(
                 output_dir=output_dir,
                 ligand_forcefield=ligand_forcefield,
                 forcefield=forcefield,
+                water_model=water_model,
                 overwrite=overwrite,
                 mmpbsa_mode=True,
                 mmpbsa_traj_ns=mmpbsa_traj_ns,
@@ -569,6 +714,13 @@ def build_mmpbsa_system(
                 f"  cd {mmpbsa_dir}\n"
                 f"  bash mmpbsa_run.sh"
             ),
+            "parameters": {
+                "protein_forcefield": forcefield,
+                "ligand_forcefield": ligand_forcefield,
+                "mode": mode,
+                "mmpbsa_traj_ns": mmpbsa_traj_ns,
+                "gmx2amber": gmx2amber,
+            },
         }, indent=2)
 
     except Exception as e:
@@ -581,7 +733,11 @@ def build_mmpbsa_system(
 # ==========================================================================
 @mcp.resource("prism://config/default")
 def get_default_config() -> str:
-    """Return the default PRISM configuration YAML as a reference template."""
+    """Return the default PRISM configuration YAML as a reference template.
+
+    This shows all configurable parameters with their default values.
+    Users can export this to a file with: prism --export-config my_config.yaml
+    """
     config_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "configs", "default_config.yaml"
     )
