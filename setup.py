@@ -54,7 +54,6 @@ extras_require = {
         "rdkit>=2021.0",
         "requests>=2.25.0",
         # SwissParam uses curl (no Python dependencies)
-        "mechanize>=0.4.0",
         "propka>=3.4.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
