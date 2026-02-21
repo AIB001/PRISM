@@ -38,9 +38,23 @@ except ImportError:
 class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
     """GAFF2 force field generator wrapper - extends GAFF with gaff2 atom types"""
 
-    def __init__(self, ligand_path, output_dir, overwrite=False):
-        """Initialize GAFF2 force field generator"""
-        super().__init__(ligand_path, output_dir, overwrite)
+    def __init__(self, ligand_path, output_dir, overwrite=False, charge_mode='bcc'):
+        """
+        Initialize GAFF2 force field generator.
+
+        Parameters
+        ----------
+        ligand_path : str
+            Path to ligand file (MOL2 or SDF)
+        output_dir : str
+            Output directory for generated files
+        overwrite : bool
+            Whether to overwrite existing files
+        charge_mode : str
+            Charge calculation method: 'bcc' for AM1-BCC (default), 'gas' for fast
+            gas-phase charges (useful when RESP charges will be applied later)
+        """
+        super().__init__(ligand_path, output_dir, overwrite, charge_mode)
 
         # Override the print message to show GAFF2
         print(f"\n{'='*60}")
@@ -122,14 +136,14 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         input_mol2 = os.path.join(ff_dir, f"input_{self.ligand_name}.mol2")
         shutil.copy2(self.ligand_path, input_mol2)
 
-        print("Generating AM1-BCC charges with GAFF2 atom types...")
+        print(f"Generating charges using {self.charge_mode.upper()} method with GAFF2 atom types...")
         cmd = [
             "antechamber",
             "-i", os.path.basename(input_mol2),
             "-fi", "mol2",
             "-o", os.path.basename(amber_mol2),
             "-fo", "mol2",
-            "-c", "bcc",
+            "-c", self.charge_mode,  # Use configured charge mode
             "-s", "2",
             "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
         ]
@@ -139,21 +153,24 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         try:
             self.run_command(cmd, cwd=ff_dir)
         except Exception as e:
-            print(f"\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
-            # Try with simpler gas phase charges as fallback
-            cmd_fallback = [
-                "antechamber",
-                "-i", os.path.basename(input_mol2),
-                "-fi", "mol2",
-                "-o", os.path.basename(amber_mol2),
-                "-fo", "mol2",
-                "-c", "gas",
-                "-s", "2",
-                "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
-            ]
-            if self.net_charge != 0:
-                cmd_fallback.extend(["-nc", str(self.net_charge)])
-            self.run_command(cmd_fallback, cwd=ff_dir)
+            if self.charge_mode == 'bcc':
+                print(f"\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
+                # Try with simpler gas phase charges as fallback
+                cmd_fallback = [
+                    "antechamber",
+                    "-i", os.path.basename(input_mol2),
+                    "-fi", "mol2",
+                    "-o", os.path.basename(amber_mol2),
+                    "-fo", "mol2",
+                    "-c", "gas",
+                    "-s", "2",
+                    "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+                ]
+                if self.net_charge != 0:
+                    cmd_fallback.extend(["-nc", str(self.net_charge)])
+                self.run_command(cmd_fallback, cwd=ff_dir)
+            else:
+                raise  # Re-raise if not using bcc mode
 
         print("Generating prep file with GAFF2...")
         # Generate prep file from the charged mol2 file
@@ -227,7 +244,7 @@ quit
 
     def _process_sdf_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
         """Process SDF format files with direct antechamber conversion using GAFF2"""
-        print("Processing SDF format (direct method) with GAFF2 atom types...")
+        print(f"Processing SDF format (direct method) with {self.charge_mode.upper()} charges and GAFF2 atom types...")
 
         ff_dir = os.path.dirname(amber_mol2)
 
@@ -237,7 +254,7 @@ quit
             "-fi", "sdf",
             "-o", amber_mol2,
             "-fo", "mol2",
-            "-c", "bcc",
+            "-c", self.charge_mode,  # Use configured charge mode
             "-s", "2",
             "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
         ]

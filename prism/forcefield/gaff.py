@@ -36,10 +36,25 @@ except ImportError:
 
 class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     """GAFF force field generator wrapper"""
-    
-    def __init__(self, ligand_path, output_dir, overwrite=False):
-        """Initialize GAFF force field generator"""
+
+    def __init__(self, ligand_path, output_dir, overwrite=False, charge_mode='bcc'):
+        """
+        Initialize GAFF force field generator.
+
+        Parameters
+        ----------
+        ligand_path : str
+            Path to ligand file (MOL2 or SDF)
+        output_dir : str
+            Output directory for generated files
+        overwrite : bool
+            Whether to overwrite existing files
+        charge_mode : str
+            Charge calculation method: 'bcc' for AM1-BCC (default), 'gas' for fast
+            gas-phase charges (useful when RESP charges will be applied later)
+        """
         super().__init__(ligand_path, output_dir, overwrite)
+        self.charge_mode = charge_mode
         
         # Check if RDKit is available
         self.rdkit_available = self._check_rdkit()
@@ -69,6 +84,7 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         print(f"  File format: {self.file_format.upper()}")
         print(f"  Ligand ID: {self.ligand_id}")
         print(f"  Net charge: {number(self.net_charge)}")
+        print(f"  Charge mode: {self.charge_mode.upper()}")
         print(f"  Output directory: {path(self.output_dir)}")
         print(f"  RDKit available: {success('Yes') if self.rdkit_available else '❌ No'}")
     
@@ -394,14 +410,14 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         input_mol2 = os.path.join(ff_dir, f"input_{self.ligand_name}.mol2")
         shutil.copy2(self.ligand_path, input_mol2)
 
-        print("Generating AM1-BCC charges...")
+        print(f"Generating charges using {self.charge_mode.upper()} method...")
         cmd = [
             "antechamber",
             "-i", os.path.basename(input_mol2),
             "-fi", "mol2",
             "-o", os.path.basename(amber_mol2),
             "-fo", "mol2",
-            "-c", "bcc",
+            "-c", self.charge_mode,  # Use configured charge mode
             "-s", "2",
             "-at", "gaff"  # Explicitly specify GAFF atom types
         ]
@@ -411,21 +427,24 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         try:
             self.run_command(cmd, cwd=ff_dir)
         except subprocess.CalledProcessError as e:
-            print("\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
-            # Try with simpler gas phase charges as fallback
-            cmd_fallback = [
-                "antechamber",
-                "-i", os.path.basename(input_mol2),
-                "-fi", "mol2",
-                "-o", os.path.basename(amber_mol2),
-                "-fo", "mol2",
-                "-c", "gas",
-                "-s", "2",
-                "-at", "gaff"
-            ]
-            if self.net_charge != 0:
-                cmd_fallback.extend(["-nc", str(self.net_charge)])
-            self.run_command(cmd_fallback, cwd=ff_dir)
+            if self.charge_mode == 'bcc':
+                print("\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
+                # Try with simpler gas phase charges as fallback
+                cmd_fallback = [
+                    "antechamber",
+                    "-i", os.path.basename(input_mol2),
+                    "-fi", "mol2",
+                    "-o", os.path.basename(amber_mol2),
+                    "-fo", "mol2",
+                    "-c", "gas",
+                    "-s", "2",
+                    "-at", "gaff"
+                ]
+                if self.net_charge != 0:
+                    cmd_fallback.extend(["-nc", str(self.net_charge)])
+                self.run_command(cmd_fallback, cwd=ff_dir)
+            else:
+                raise  # Re-raise if not using bcc mode
 
         print("Generating prep file...")
         # Generate prep file from the charged mol2 file
@@ -658,15 +677,15 @@ quit
     # Add remaining methods from original file as needed
     def _process_sdf_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
         """Process SDF format files with direct antechamber conversion"""
-        print("Processing SDF format (direct method)...")
-        
+        print(f"Processing SDF format (direct method) with {self.charge_mode.upper()} charges...")
+
         cmd = [
             "antechamber",
             "-i", self.ligand_path,
             "-fi", "sdf",
             "-o", amber_mol2,
             "-fo", "mol2",
-            "-c", "bcc",
+            "-c", self.charge_mode,  # Use configured charge mode
             "-s", "2"
         ]
         if self.net_charge != 0:

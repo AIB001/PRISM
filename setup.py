@@ -41,7 +41,7 @@ extras_require = {
         # SwissParam now uses command-line API via curl (no Python dependencies)
     ],
     "protonation": [
-        "meeko>=0.5.0",  # For hydrogen optimization and protonation
+        "propka>=3.4.0",  # For pKa-based protonation state prediction
     ],
     "analysis": [
         "mdtraj>=1.9.0",      # Optional for enhanced trajectory analysis
@@ -54,7 +54,8 @@ extras_require = {
         "rdkit>=2021.0",
         "requests>=2.25.0",
         # SwissParam uses curl (no Python dependencies)
-        "meeko>=0.5.0",
+        "mechanize>=0.4.0",
+        "propka>=3.4.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
     ],

@@ -18,6 +18,8 @@ from .topology import (
     detect_protein_chains, detect_nucleic_chains, detect_all_chains,
     get_primary_protein_chain
 )
+from .pdb_utils import renumber_residues, apply_pka_predictions
+from .propka_protonation import optimize_protein_protonation_propka
 
 __all__ = [
     'GromacsEnvironment',
@@ -36,4 +38,9 @@ __all__ = [
     'detect_nucleic_chains',
     'detect_all_chains',
     'get_primary_protein_chain',
+    # PDB utilities
+    'renumber_residues',
+    'apply_pka_predictions',
+    # Protonation utilities
+    'optimize_protein_protonation_propka',
 ]

@@ -86,6 +86,21 @@ try:
 except ImportError:
     pass
 
+# Gaussian RESP module (for charge replacement)
+try:
+    from ..gaussian import (
+        GaussianRESPWorkflow,
+        RESPChargeReplacer,
+        replace_itp_charges
+    )
+    __all__.extend([
+        "GaussianRESPWorkflow",
+        "RESPChargeReplacer",
+        "replace_itp_charges"
+    ])
+except ImportError:
+    pass
+
 
 def list_available_generators():
     """
