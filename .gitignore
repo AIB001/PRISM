@@ -96,6 +96,8 @@ cache/
 
 # Project specific
 test/*
+tests/*
+.playwright-mcp/*
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
