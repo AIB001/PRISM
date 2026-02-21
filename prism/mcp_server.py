@@ -1203,22 +1203,37 @@ def check_topology(topology_path: str) -> str:
 
 
 # ==========================================================================
-#  Resource: Agent System Prompt
+#  Prompt: Agent System Prompt
 # ==========================================================================
-@mcp.resource("prism://prompts/agent")
-def get_agent_prompt() -> str:
-    """System prompt for AI agents using PRISM tools.
-
-    Returns a structured instruction document that teaches AI agents
-    the recommended PRISM workflow, force field choices, build modes,
-    troubleshooting steps, and best practices.
-    """
+def _load_agent_prompt() -> str:
+    """Load the agent prompt markdown from disk."""
     prompt_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "prompts", "agent_prompt.md"
     )
     with open(prompt_path, "r") as f:
         return f.read()
+
+
+@mcp.resource("prism://prompts/agent")
+def get_agent_prompt() -> str:
+    """System prompt for AI agents using PRISM tools."""
+    return _load_agent_prompt()
+
+
+@mcp.prompt()
+def prism_agent() -> str:
+    """PRISM assistant system prompt.
+
+    Injects the full PRISM workflow guide into the conversation, covering:
+    environment setup (GROMACS 2026.0, conda, AmberTools), recommended
+    workflow (validate → build → verify), force field choices, build modes
+    (MD/PMF/REST2/MMPBSA), and troubleshooting guidance.
+
+    Use this prompt to turn the AI agent into a PRISM-aware MD simulation
+    assistant that knows exactly how to use every PRISM tool.
+    """
+    return _load_agent_prompt()
 
 
 # ==========================================================================
