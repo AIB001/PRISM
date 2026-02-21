@@ -18,50 +18,76 @@ class PRISMSystem:
     This class provides a simplified API for the PRISMBuilder functionality.
     """
     
-    def __init__(self, protein_path, ligand_path, output_dir="prism_output", 
-                 config=None, ligand_forcefield="gaff", **kwargs):
+    def __init__(self, protein_path, ligand_paths, output_dir="prism_output",
+                 config=None, ligand_forcefield="gaff", gaussian_method=None,
+                 do_optimization=False, resp_files=None, **kwargs):
         """
         Initialize a PRISM system.
-        
+
         Parameters:
         -----------
         protein_path : str
             Path to protein PDB file
-        ligand_path : str
-            Path to ligand file (MOL2/SDF)
+        ligand_paths : str or list
+            Path(s) to ligand file(s) (MOL2/SDF) - str for single, list for multiple
         output_dir : str, optional
             Output directory (default: "prism_output")
         config : str or dict, optional
             Configuration file path or dict
         ligand_forcefield : str, optional
             Ligand force field ("gaff" or "openff", default: "gaff")
+        gaussian_method : str, optional
+            Gaussian method for RESP charges: 'hf' or 'dft'. None disables Gaussian RESP.
+        do_optimization : bool, optional
+            Whether to perform geometry optimization before ESP (default: False)
+        resp_files : str or list, optional
+            Path(s) to existing RESP mol2 file(s) to use instead of AM1-BCC charges
         **kwargs : optional
             Additional parameters for PRISMBuilder
         """
         self.protein_path = os.path.abspath(protein_path)
-        self.ligand_path = os.path.abspath(ligand_path)
+
+        # Handle both single ligand (string) and multiple ligands (list)
+        if isinstance(ligand_paths, str):
+            self.ligand_paths = [os.path.abspath(ligand_paths)]
+        elif isinstance(ligand_paths, list):
+            self.ligand_paths = [os.path.abspath(lp) for lp in ligand_paths]
+        else:
+            raise TypeError(f"ligand_paths must be str or list, got {type(ligand_paths)}")
+
+        self.ligand_count = len(self.ligand_paths)
         self.output_dir = os.path.abspath(output_dir)
         self.ligand_forcefield = ligand_forcefield
-        
+
+        # Gaussian RESP options
+        self.gaussian_method = gaussian_method
+        self.do_optimization = do_optimization
+        self.resp_files = resp_files
+
         # Validate input files
         self._validate_inputs()
-        
+
         # Process configuration
         self.config_path = self._process_config(config)
-        
+
         # Store additional parameters
         self.builder_kwargs = kwargs
-        
+
         # Initialize builder (will be created when needed)
         self._builder = None
-        
+
         # Track build status
         self._is_built = False
         self._build_output = None
-        
+
         print(f"PRISM System initialized:")
         print(f"  Protein: {self.protein_path}")
-        print(f"  Ligand: {self.ligand_path}")  
+        if self.ligand_count == 1:
+            print(f"  Ligand: {self.ligand_paths[0]}")
+        else:
+            print(f"  Ligands ({self.ligand_count}):")
+            for i, lp in enumerate(self.ligand_paths, 1):
+                print(f"    {i}. {lp}")
         print(f"  Output: {self.output_dir}")
         print(f"  Ligand FF: {self.ligand_forcefield}")
     
@@ -69,18 +95,21 @@ class PRISMSystem:
         """Validate input files exist and have correct extensions"""
         if not os.path.exists(self.protein_path):
             raise FileNotFoundError(f"Protein file not found: {self.protein_path}")
-        
-        if not os.path.exists(self.ligand_path):
-            raise FileNotFoundError(f"Ligand file not found: {self.ligand_path}")
-        
+
+        # Validate each ligand file
+        for i, ligand_path in enumerate(self.ligand_paths, 1):
+            if not os.path.exists(ligand_path):
+                raise FileNotFoundError(f"Ligand {i} file not found: {ligand_path}")
+
         # Check file extensions
         protein_ext = Path(self.protein_path).suffix.lower()
         if protein_ext != '.pdb':
             print(f"Warning: Protein file extension is {protein_ext}, expected .pdb")
-        
-        ligand_ext = Path(self.ligand_path).suffix.lower()
-        if ligand_ext not in ['.mol2', '.sdf', '.sd']:
-            print(f"Warning: Ligand file extension is {ligand_ext}, expected .mol2 or .sdf")
+
+        for i, ligand_path in enumerate(self.ligand_paths, 1):
+            ligand_ext = Path(ligand_path).suffix.lower()
+            if ligand_ext not in ['.mol2', '.sdf', '.sd']:
+                print(f"Warning: Ligand {i} file extension is {ligand_ext}, expected .mol2 or .sdf")
     
     def _process_config(self, config):
         """Process configuration input"""
@@ -110,10 +139,13 @@ class PRISMSystem:
         if self._builder is None:
             self._builder = PRISMBuilder(
                 protein_path=self.protein_path,
-                ligand_path=self.ligand_path,
+                ligand_paths=self.ligand_paths,  # Now passing list of paths
                 output_dir=self.output_dir,
                 ligand_forcefield=self.ligand_forcefield,
                 config_path=self.config_path,
+                gaussian_method=self.gaussian_method,
+                do_optimization=self.do_optimization,
+                resp_files=self.resp_files,
                 **self.builder_kwargs
             )
         return self._builder

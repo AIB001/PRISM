@@ -81,13 +81,10 @@ pressure_coupling:
   tau_p: 1.0  # Coupling time constant (ps)
   compressibility: 4.5e-05  # Compressibility (bar^-1)
 
-# Protonation state optimization
+# Protonation state prediction
 protonation:
-  method: gromacs  # Protonation method: 'gromacs' (default) or 'meeko' (experimental)
-  optimize: true  # Legacy parameter for backward compatibility
-  ph: 7.0  # Target pH for protonation (overridden by simulation.pH if not set)
-  preserve_existing_h: false  # Keep existing hydrogens (only for meeko method)
-  his_state: auto  # Histidine protonation: auto, HID, HIE, or HIP (only for meeko method)
+  method: gromacs  # 'gromacs' (default) or 'propka' (pKa-based HIS protonation)
+  ph: 7.0  # Target pH for PROPKA pKa prediction
 
 # Note: Force field and water model are specified via command line:
 # --forcefield amber99sb --water tip3p

@@ -39,7 +39,6 @@ htmlcov/
 .nox/
 .coverage
 .coverage.*
-.cache
 nosetests.xml
 coverage.xml
 *.cover
@@ -78,7 +77,28 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# Claude Code
+.claude/
+
+# Empty cache directory
+cache/
+
+# GROMACS simulation outputs (large binary files)
+*.trr
+*.xtc
+*.tpr
+*.edr
+*.cpt
+*.gro
+*.ndx
+*.xvg
+*.log
+
 # Project specific
 test/*
-<import>/
-*.egg-info
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# mypy
+.mypy_cache/

@@ -18,8 +18,15 @@ pip install -e .[all]               # All force fields
 
 ### Basic Usage
 ```bash
-# CLI
+# CLI - Single ligand
 python prism/builder.py protein.pdb ligand.mol2 -o output_dir
+
+# CLI - Multiple ligands
+prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir -lff gaff -ff amber14sb
+
+# CLI - CGenFF (requires one -ffp per ligand)
+prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir \
+  --ligand-forcefield cgenff -ffp /path/to/cgenff1 -ffp /path/to/cgenff2
 
 # Python API
 import prism as pm
@@ -43,7 +50,11 @@ output_dir = system.build()
 
 **Configuration**: CLI args > config file > defaults (`prism/configs/default_config.yaml`)
 
-**Output Structure**: `output_dir/GMX_PROLIG_MD/` (GROMACS files), `LIG.amb2gmx/` or `LIG.openff2gmx/` (ligand files), `mdps/` (MD parameters)
+**Output Structure**:
+- Single ligand: `output_dir/LIG.amb2gmx/` or `LIG.openff2gmx/` (backward compatible)
+- Multi-ligand: `output_dir/Ligand_Forcefield/LIG.amb2gmx_1/`, `LIG.amb2gmx_2/`, etc.
+- GROMACS files: `output_dir/GMX_PROLIG_MD/`
+- MD parameters: `output_dir/mdps/`
 
 ## Key Development Principles
 
@@ -57,9 +68,11 @@ output_dir = system.build()
 ## Common Issues
 
 1. **Argument parsing**: Use positional args (protein ligand options) or flags (--protein-file --ligand-file)
-2. **Ion addition failures**: Ensure system contains water molecules, check GROMACS can find solvent groups
-3. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
-4. **Memory errors**: Large systems may require more RAM during parameterization
+2. **Multi-ligand CLI**: For multiple ligands, use `-pf` and `-lf` flags (not positional) for best compatibility
+3. **CGenFF multi-ligand**: Requires one `--forcefield-path` (or `-ffp`) per ligand
+4. **Ion addition failures**: Ensure system contains water molecules, check GROMACS can find solvent groups
+5. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
+6. **Memory errors**: Large systems may require more RAM during parameterization
 
 ## Entry Points
 

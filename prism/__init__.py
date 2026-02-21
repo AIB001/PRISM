@@ -34,6 +34,16 @@ try:
 except ImportError:
     pmf = None
 
+try:
+    from . import gaussian
+except ImportError:
+    gaussian = None
+
+try:
+    from . import rest2
+except ImportError:
+    rest2 = None
+
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
     """
@@ -331,164 +341,6 @@ def get_html_generator():
             "  # OR: pip install mdtraj"
         ) from e
 
-# PMF calculation functions
-def run_pmf_workflow(md_system_dir, output_dir, config=None, **kwargs):
-    """
-    Run complete PMF calculation workflow.
-    
-    This is a high-level API function that automatically executes the complete
-    workflow from MD results to PMF calculation, including SMD, umbrella sampling,
-    and WHAM analysis.
-    
-    Parameters:
-    -----------
-    md_system_dir : str
-        Path to MD results directory containing GMX_PROLIG_MD subdirectory
-    output_dir : str
-        Output directory for PMF calculation results
-    config : str or dict, optional
-        PMF configuration file path or configuration dictionary
-    **kwargs : optional
-        Additional configuration parameters
-        
-    Returns:
-    --------
-    dict
-        Dictionary containing PMF calculation results including binding energy
-        
-    Examples:
-    ---------
-    >>> import prism as pm
-    >>> # Basic usage
-    >>> results = pm.run_pmf_workflow("./md_results", "./pmf_output")
-    >>> print(f"Binding energy: {results['binding_energy']['value']:.2f} kcal/mol")
-    
-    >>> # Using custom configuration
-    >>> config = {
-    ...     'smd': {'pull_rate': 0.01, 'nsteps': 1000000},
-    ...     'umbrella': {'production_time_ps': 15000}
-    ... }
-    >>> results = pm.run_pmf_workflow("./md_results", "./pmf_output", config=config)
-    """
-    return pmf.run_pmf_workflow(md_system_dir, output_dir, config, **kwargs)
-
-def pmf_system(system_dir, output_dir, config=None, **kwargs):
-    """
-    Create PMF system object for manual control of PMF calculations.
-    
-    This function creates a PMF system object that allows users to control
-    the PMF calculation process step by step, suitable for scenarios requiring
-    fine-grained control or debugging.
-    
-    Parameters:
-    -----------
-    system_dir : str
-        System directory path containing MD results or system to be calculated
-    output_dir : str
-        Output directory for PMF calculation results
-    config : str or dict, optional
-        PMF configuration file path or configuration dictionary
-    **kwargs : optional
-        Additional configuration parameters
-        
-    Returns:
-    --------
-    PMFSystem
-        PMF system object with step-by-step execution methods
-        
-    Examples:
-    ---------
-    >>> import prism as pm
-    >>> # Create PMF system
-    >>> pmf_sys = pm.pmf_system("./gaff_model", "./pmf_results")
-    >>> 
-    >>> # Step-by-step execution
-    >>> smd_results = pmf_sys.build(step='smd')
-    >>> # Manual SMD run: bash ./gaff_model/pmf_smd/run_smd.sh
-    >>> 
-    >>> umbrella_results = pmf_sys.build_umbrella_step()
-    >>> # Manual umbrella run: bash ./gaff_model/pmf_umbrella/run_all_umbrella.sh
-    >>> 
-    >>> analysis_results = pmf_sys.build_analysis_step()
-    >>> print(f"Binding energy: {analysis_results['binding_energy']['value']:.2f} kcal/mol")
-    
-    >>> # Or automated execution
-    >>> results = pmf_sys.run(mode='auto')
-    """
-    return pmf.pmf_system(system_dir, output_dir, config, **kwargs)
-
-def run_pmf_step(md_system_dir, output_dir, step, config=None, **kwargs):
-    """
-    Run a single step of PMF calculation.
-    
-    Allows users to execute a specific step of PMF calculation independently,
-    suitable for phased execution or error recovery scenarios.
-    
-    Parameters:
-    -----------
-    md_system_dir : str
-        MD results directory path
-    output_dir : str
-        Output directory path
-    step : str
-        Step to execute: 'builder', 'smd', 'umbrella', 'analysis'
-    config : str or dict, optional
-        Configuration file path or configuration dictionary
-    **kwargs : optional
-        Additional configuration parameters
-        
-    Returns:
-    --------
-    dict
-        Execution results for the specified step
-        
-    Examples:
-    ---------
-    >>> import prism as pm
-    >>> # Prepare SMD only
-    >>> smd_results = pm.run_pmf_step("./md_results", "./pmf_output", "smd")
-    >>> 
-    >>> # Run analysis only
-    >>> analysis_results = pm.run_pmf_step("./md_results", "./pmf_output", "analysis")
-    """
-    return pmf.run_pmf_step(md_system_dir, output_dir, step, config, **kwargs)
-
-def create_pmf_config(output_file, template='default'):
-    """
-    Create PMF configuration file template.
-    
-    Parameters:
-    -----------
-    output_file : str
-        Output configuration file path
-    template : str, optional
-        Configuration template type: 'default', 'fast', 'accurate'
-        
-    Examples:
-    ---------
-    >>> import prism as pm
-    >>> pm.create_pmf_config("my_pmf_config.yaml", template="accurate")
-    """
-    return pmf.create_pmf_config(output_file, template)
-
-def get_pmf_info():
-    """
-    Get PMF module information.
-    
-    Returns:
-    --------
-    dict
-        Detailed information about the PMF module
-        
-    Examples:
-    ---------
-    >>> import prism as pm
-    >>> info = pm.get_pmf_info()
-    >>> print(f"PMF module version: {info['version']}")
-    >>> print(f"Supported forcefields: {info['supported_forcefields']}")
-    """
-    return pmf.get_pmf_info()
-
 def process_trajectory(input_trajectory, output_trajectory, topology_file, **kwargs):
     """
     Process a trajectory to fix PBC artifacts and center protein-ligand complex.
@@ -612,13 +464,8 @@ __all__ = [
     # Module imports
     "modeling",
     "pmf",
-    
-    # PMF module APIs
-    "run_pmf_workflow",
-    "pmf_system",
-    "run_pmf_step",
-    "create_pmf_config",
-    "get_pmf_info",
+    "gaussian",
+    "rest2",
     
     # Version info
     "__version__",

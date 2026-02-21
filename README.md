@@ -183,7 +183,15 @@ python /path/to/PRISM/prism/builder.py
 
    ```bash
    # First download CGenFF files from https://cgenff.com/
+
+   # Single ligand:
    prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+
+   # Multiple ligands (requires one --forcefield-path per ligand):
+   prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir \
+     --ligand-forcefield cgenff \
+     -ffp /path/to/cgenff_ligand1 \
+     -ffp /path/to/cgenff_ligand2
    ```
 
 5. **Using OPLS-AA**:

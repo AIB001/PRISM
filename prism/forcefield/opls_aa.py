@@ -197,9 +197,14 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"Warning: Format conversion failed ({e}), uploading original file")
             return self.ligand_path
 
-    def _upload_to_ligpargen(self):
+    def _upload_to_ligpargen(self, max_retries=3):
         """
-        Upload ligand to LigParGen server and download results
+        Upload ligand to LigParGen server and download results with retry mechanism
+
+        Parameters:
+        -----------
+        max_retries : int
+            Maximum number of retry attempts (default: 3)
 
         Returns:
         --------
@@ -210,86 +215,118 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         # Create temporary working directory
         temp_dir = tempfile.mkdtemp(prefix="ligpargen_")
 
-        try:
-            # Convert to PDB format if needed (LigParGen prefers PDB)
-            upload_file = self._prepare_upload_file(temp_dir)
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"\nRetry attempt {attempt + 1}/{max_retries}...")
+                    import time
+                    time.sleep(2)  # Wait 2 seconds before retry
 
-            # Prepare the upload
-            url = "https://traken.chem.yale.edu/cgi-bin/results_lpg.py"
+                # Convert to PDB format if needed (LigParGen prefers PDB)
+                upload_file = self._prepare_upload_file(temp_dir)
 
-            with open(upload_file, 'rb') as f:
-                files = {
-                    'molpdbfile': (os.path.basename(upload_file), f, 'chemical/x-pdb')
-                }
-                data = {
-                    'chargetype': self.charge_model,
-                    'dropcharge': str(self.charge),
-                    'checkopt': '0'  # No optimization
-                }
+                # Prepare the upload
+                url = "https://traken.chem.yale.edu/cgi-bin/results_lpg.py"
 
-                print(f"Uploading {os.path.basename(upload_file)} with charge={self.charge}, model={self.charge_model}")
-                response = requests.post(url, files=files, data=data, verify=False, timeout=60)
+                with open(upload_file, 'rb') as f:
+                    files = {
+                        'molpdbfile': (os.path.basename(upload_file), f, 'chemical/x-pdb')
+                    }
+                    data = {
+                        'chargetype': self.charge_model,
+                        'dropcharge': str(self.charge),
+                        'checkopt': '0'  # No optimization
+                    }
 
-            if response.status_code != 200:
-                raise ValueError(f"Error submitting form. Response status: {response.status_code}")
+                    print(f"Uploading {os.path.basename(upload_file)} with charge={self.charge}, model={self.charge_model}")
+                    response = requests.post(url, files=files, data=data, verify=False, timeout=60)
 
-            # Check for errors
-            if "Sorry, an error has been detected in your input data" in response.content.decode():
-                raise ValueError("LigParGen detected an error in the input data. Please check your ligand file.")
+                if response.status_code != 200:
+                    last_error = f"Error submitting form. Response status: {response.status_code}"
+                    print(f"⚠ {last_error}")
+                    continue
 
-            print("Form submitted successfully")
+                # Check for errors
+                if "Sorry, an error has been detected in your input data" in response.content.decode():
+                    last_error = "LigParGen detected an error in the input data"
+                    print(f"⚠ {last_error}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise ValueError(f"{last_error}. Please check your ligand file or try a different format.")
 
-            # Parse response to find ZIP file
-            zip_match = re.search(r'value="(/tmp/UNK_\w+\.zip)"', response.text)
-            if not zip_match:
-                # Try alternative pattern
-                zip_match = re.search(r'(/tmp/[\w_]+\.zip)', response.text)
+                print("✓ Form submitted successfully")
+
+                # Parse response to find ZIP file
+                zip_match = re.search(r'value="(/tmp/UNK_\w+\.zip)"', response.text)
                 if not zip_match:
-                    # Debug: save response for inspection
-                    debug_file = os.path.join(temp_dir, "ligpargen_response.html")
-                    with open(debug_file, 'w') as f:
-                        f.write(response.text)
-                    print(f"Debug: Response saved to {debug_file}")
+                    # Try alternative pattern
+                    zip_match = re.search(r'(/tmp/[\w_]+\.zip)', response.text)
+                    if not zip_match:
+                        last_error = "No ZIP file found in LigParGen response"
+                        print(f"⚠ {last_error}")
+                        if attempt < max_retries - 1:
+                            # Debug: save response for inspection
+                            debug_file = os.path.join(temp_dir, f"ligpargen_response_attempt{attempt+1}.html")
+                            with open(debug_file, 'w') as f:
+                                f.write(response.text)
+                            print(f"  Debug: Response saved to {debug_file}")
+                            continue
+                        else:
+                            # Check for common error messages
+                            if "error" in response.text.lower():
+                                error_match = re.search(r'<p[^>]*>(.*?error.*?)</p>', response.text, re.IGNORECASE)
+                                if error_match:
+                                    raise ValueError(f"LigParGen error: {error_match.group(1)}")
+                            raise ValueError("No ZIP file found after all retry attempts. Check debug files for details.")
 
-                    # Check for common error messages
-                    if "error" in response.text.lower():
-                        error_match = re.search(r'<p[^>]*>(.*?error.*?)</p>', response.text, re.IGNORECASE)
-                        if error_match:
-                            raise ValueError(f"LigParGen error: {error_match.group(1)}")
+                zip_path = zip_match.group(1)
+                print(f"✓ Found result ZIP: {os.path.basename(zip_path)}")
 
-                    raise ValueError("No ZIP file found in LigParGen response. Check debug file for details.")
+                # Download the ZIP file
+                zip_url = "https://traken.chem.yale.edu/cgi-bin/download_lpg.py"
+                zip_data = {'fileout': zip_path}
+                zip_response = requests.post(zip_url, data=zip_data, verify=False, timeout=60)
 
-            zip_path = zip_match.group(1)
-            print(f"Found result ZIP: {os.path.basename(zip_path)}")
+                if zip_response.status_code != 200:
+                    last_error = f"Error downloading results. Status: {zip_response.status_code}"
+                    print(f"⚠ {last_error}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise ValueError(last_error)
 
-            # Download the ZIP file
-            zip_url = "https://traken.chem.yale.edu/cgi-bin/download_lpg.py"
-            zip_data = {'fileout': zip_path}
-            zip_response = requests.post(zip_url, data=zip_data, verify=False, timeout=60)
+                # Save and extract ZIP file
+                zip_file = os.path.join(temp_dir, os.path.basename(zip_path))
+                with open(zip_file, 'wb') as f:
+                    f.write(zip_response.content)
 
-            if zip_response.status_code != 200:
-                raise ValueError(f"Error downloading results. Status: {zip_response.status_code}")
+                print(f"✓ Downloaded ZIP file: {os.path.basename(zip_file)}")
 
-            # Save and extract ZIP file
-            zip_file = os.path.join(temp_dir, os.path.basename(zip_path))
-            with open(zip_file, 'wb') as f:
-                f.write(zip_response.content)
+                # Extract the ZIP file
+                extract_dir = os.path.join(temp_dir, os.path.basename(zip_path).replace('.zip', ''))
+                with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
 
-            print(f"Downloaded ZIP file: {os.path.basename(zip_file)}")
+                print(f"✓ Extracted to: {extract_dir}")
 
-            # Extract the ZIP file
-            extract_dir = os.path.join(temp_dir, os.path.basename(zip_path).replace('.zip', ''))
-            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                # Success - return the result
+                return extract_dir
 
-            print(f"Extracted to: {extract_dir}")
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠ Error during upload: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    # Cleanup on final failure
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    raise
 
-            return extract_dir
-
-        except Exception as e:
-            # Cleanup on error
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise
+        # If we get here, all retries failed
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise ValueError(f"Failed after {max_retries} attempts. Last error: {last_error}")
 
     def _process_ligpargen_output(self, lpg_dir):
         """
