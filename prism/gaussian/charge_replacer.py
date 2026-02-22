@@ -8,8 +8,6 @@ This module provides functionality to replace AM1-BCC charges in GROMACS ITP fil
 with RESP charges from Gaussian calculations.
 """
 
-import os
-import re
 import shutil
 from typing import Dict, List, Tuple, Optional
 
@@ -287,8 +285,6 @@ class RESPChargeReplacer:
             line_idx = atom['line_idx']
             if line_idx in charge_map:
                 new_charge = charge_map[line_idx]
-                old_charge = atom['charge']
-
                 # Reconstruct the line with new charge
                 parts = atom['original_parts'].copy()
                 parts[6] = f"{new_charge:.6f}"

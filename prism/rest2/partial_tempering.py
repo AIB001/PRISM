@@ -73,7 +73,6 @@ def partial_tempering(lines: List[str], lam: float) -> List[str]:
     sqrt_lam = math.sqrt(lam)
 
     current_section: Optional[str] = None
-    current_moltype: Optional[str] = None
     atom_is_solute: Dict[int, bool] = {}  # atom_nr -> is_solute for current moleculetype
 
     output: List[str] = []

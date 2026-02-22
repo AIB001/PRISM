@@ -6,13 +6,10 @@ and solute atom marking -- all in pure Python (no MDAnalysis dependency).
 Only requires `gmx` (GROMACS) for the grompp -pp step.
 """
 
-import math
 import os
 import re
-import shutil
 import subprocess
 import tempfile
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 _SECTION_RE = re.compile(r'^\s*\[\s*(\w+)\s*\]')
@@ -36,7 +33,6 @@ def parse_gro(path: str) -> Tuple[List[dict], List[float]]:
     with open(path, 'r') as f:
         lines = f.readlines()
 
-    title = lines[0].strip()
     n_atoms = int(lines[1].strip())
     atoms = []
 

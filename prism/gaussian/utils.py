@@ -323,7 +323,7 @@ def run_gaussian(gjf_file: str, timeout: Optional[int] = None) -> Tuple[bool, st
     log_file = os.path.splitext(gjf_file)[0] + ".log"
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             ['g16', gjf_file],
             cwd=os.path.dirname(gjf_file) or '.',
             timeout=timeout,

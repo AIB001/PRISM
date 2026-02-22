@@ -5,11 +5,9 @@ Creates scaled topologies, MDP files, and run scripts for REST2
 replica exchange enhanced sampling with GROMACS.
 """
 
-import math
 import os
 import re
 import shutil
-from pathlib import Path
 from typing import List, Tuple
 
 from .partial_tempering import partial_tempering

@@ -10,10 +10,10 @@ This module generates Gaussian input files (.gjf) for:
 """
 
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from .converter import CoordinateConverter
-from .utils import get_charge_multiplicity, extract_optimized_coords_from_log, ATOMIC_SYMBOLS
+from .utils import get_charge_multiplicity, extract_optimized_coords_from_log
 
 # Import color utilities
 try:

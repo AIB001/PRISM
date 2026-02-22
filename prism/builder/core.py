@@ -9,7 +9,6 @@ PMF-related methods are provided by PMFBuilderMixin (builder/pmf.py).
 """
 
 import os
-import sys
 import shutil
 from pathlib import Path
 
@@ -20,7 +19,7 @@ from ..utils.system import SystemBuilder
 from ..utils.colors import (
     print_header, print_subheader, print_step,
     print_success, print_error, print_warning, print_info,
-    success, error, warning, path, number
+    success, path, number
 )
 from ..forcefield.gaff import GAFFForceFieldGenerator
 from ..forcefield.gaff2 import GAFF2ForceFieldGenerator
@@ -559,7 +558,6 @@ class PRISMBuilder(PMFBuilderMixin):
         print_subheader("Cleaning Protein")
 
         cleaned_pdb = os.path.join(self.output_dir, f"{self.protein_name}_clean.pdb")
-        final_pdb = cleaned_pdb  # By default, return the cleaned PDB
 
         # Check for existing cleaned file
         if os.path.exists(cleaned_pdb) and not self.overwrite:

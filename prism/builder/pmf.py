@@ -13,7 +13,7 @@ import os
 from ..utils.colors import (
     print_header, print_subheader, print_step,
     print_success, print_error, print_warning, print_info,
-    success, error, warning, path, number
+    path, number
 )
 
 
@@ -104,7 +104,7 @@ class PMFBuilderMixin:
             # Step 9: Generate umbrella sampling scripts
             print_step(9, total_steps, "Generating umbrella sampling scripts")
             self.generate_pmf_plot_script()
-            umbrella_script_path = self.generate_umbrella_script()
+            self.generate_umbrella_script()
             print_success("Umbrella sampling scripts generated")
 
             print_header("PMF Workflow Complete!")

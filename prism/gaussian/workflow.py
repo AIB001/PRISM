@@ -13,13 +13,10 @@ from typing import Dict, Optional
 
 from .converter import CoordinateConverter
 from .gjf_generator import GaussianInputGenerator
-from .charge_replacer import RESPChargeReplacer
 from .utils import (
     check_gaussian_available,
     check_antechamber_available,
     get_charge_multiplicity,
-    run_gaussian,
-    verify_gaussian_termination
 )
 
 # Import color utilities

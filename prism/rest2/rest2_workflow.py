@@ -6,7 +6,6 @@ and generates a GMX_PROLIG_REST2 directory ready for REST2 enhanced sampling.
 """
 
 import os
-import sys
 import time
 
 from .topology import (
@@ -82,7 +81,7 @@ class REST2Workflow:
         try:
             from prism.utils.colors import (
                 print_header, print_step, print_success,
-                print_error, print_warning, print_info, path
+                print_error, print_info, path
             )
             use_colors = True
         except ImportError:
