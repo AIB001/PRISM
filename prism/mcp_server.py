@@ -87,7 +87,7 @@ def check_dependencies() -> str:
     - pdbfixer (protein structure preparation, recommended)
     - AmberTools / antechamber (for GAFF/GAFF2 ligand force fields)
     - OpenFF toolkit (for OpenFF ligand force field)
-    - PROPKA (for pKa-based histidine protonation prediction)
+    - PROPKA (for pKa-based protonation prediction of ionizable residues)
     - Gaussian g16 (for high-precision RESP charge calculation, optional)
     - MDTraj (for trajectory analysis)
     - RDKit (for chemical informatics)
@@ -274,7 +274,7 @@ def build_system(
         protonation: Protonation method. Default: "gromacs".
             "gromacs": Let pdb2gmx handle protonation states (default HIE).
             "propka": Use PROPKA pKa prediction for intelligent per-residue
-            histidine states (HID/HIE/HIP). Requires propka package.
+            ionizable residue states (HID/HIE/HIP, ASH/GLH, LYN/CYM/TYH). Requires propka package.
         temperature: Simulation temperature in Kelvin. Default: 310.
         ph: pH for protonation state assignment. Default: 7.0.
         production_ns: Production MD length in nanoseconds. Default: 500.

@@ -307,6 +307,7 @@ class BothForceFieldGenerator(SwissParamForceFieldGenerator):
 
 # Alias for backward compatibility
 HybridForceFieldGenerator = BothForceFieldGenerator
+HybridMMFFMATCHForceFieldGenerator = BothForceFieldGenerator
 
 
 # Convenience function for external use

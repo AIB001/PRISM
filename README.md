@@ -17,7 +17,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 - **Complete MDP Files**: Pre-configured protocols for minimization, equilibration, and production
 - **Metal Ion Support**: Intelligent recognition and handling of metal ions (Zn, Ca, Mg, Fe, etc.) with distance-based filtering
 - **Advanced Protein Cleaning**: Smart removal of heteroatoms and crystallization artifacts while preserving structural metals
-- **Protonation State Prediction**: Optional pKa-based histidine protonation with PROPKA (HID/HIE/HIP assignment)
+- **Protonation State Prediction**: Optional pKa-based protonation for ionizable residues with PROPKA (HIS/ASP/GLU/LYS/CYS/TYR)
 - **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
 
 ## Installation
@@ -80,7 +80,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 #### For Protonation State Prediction (optional):
 
 ```bash
-# PROPKA for pKa-based histidine protonation (optional)
+# PROPKA for pKa-based protonation prediction (optional)
 conda install -c conda-forge propka
 # or
 pip install propka>=3.4.0
@@ -257,17 +257,14 @@ python /path/to/PRISM/prism/builder.py
    prism protein.pdb ligand.mol2 -o output_dir --keep-crystal-water
    ```
 
-10. **With protonation optimization**:
+10. **With protonation prediction (PROPKA)**:
 
    ```bash
-   # Basic protonation at pH 7.0
-   prism protein.pdb ligand.mol2 -o output_dir --protonation
+   # Use PROPKA at pH 7.0
+   prism protein.pdb ligand.mol2 -o output_dir --protonation propka
 
    # Custom pH (7.4)
-   prism protein.pdb ligand.mol2 -o output_dir --protonation-ph 7.4
-
-   # Specific histidine state
-   prism protein.pdb ligand.mol2 -o output_dir --protonation --his-state HID
+   prism protein.pdb ligand.mol2 -o output_dir --protonation propka --pH 7.4
    ```
 
 ### Running MD Simulations
@@ -381,9 +378,8 @@ PRISM provides convenient shortcuts for frequently used parameters, allowing you
 - `-dc, --distance-cutoff`: Distance cutoff for metal ions in Å (default: 5.0)
 - `-kcw, --keep-crystal-water`: Preserve crystal water molecules (default: false)
 - `-nra, --no-remove-artifacts`: Keep crystallization artifacts (default: false)
-- `-prot, --protonation`: Enable protonation state optimization (default: false)
-- `-protph, --protonation-ph`: Target pH for protonation (default: 7.0)
-- `-hs, --his-state`: Histidine protonation state (auto, HID, HIE, HIP; default: auto)
+- `-proton, --protonation`: Protonation method (`gromacs` or `propka`; default: gromacs)
+- `--pH`: Target pH for protonation prediction (default: 7.0)
 
 **MM/PBSA Analysis**
 - `-pbsa, --mmpbsa`: Run MM/PBSA binding energy calculation
@@ -499,13 +495,13 @@ The cleaner automatically handles GROMACS requirements:
 
 ### Protonation State Prediction (PROPKA)
 
-PRISM can optionally use PROPKA to predict pKa values and assign histidine protonation states (HID/HIE/HIP) at a target pH. It renames residues in the PDB, and GROMACS `pdb2gmx -ignh` regenerates hydrogens based on those states.
+PRISM can optionally use PROPKA to predict pKa values and assign protonation states for ionizable residues (HIS/ASP/GLU/LYS/CYS/TYR) at a target pH. It renames residues in the PDB, and GROMACS `pdb2gmx -ignh` regenerates hydrogens based on those states.
 
 #### Features
 
-- **PROPKA integration**: pKa-based histidine state prediction
+- **PROPKA integration**: pKa-based ionizable residue prediction
 - **pH-based control**: Choose target pH for prediction
-- **GROMACS-ready**: Histidine renaming to HID/HIE/HIP for `pdb2gmx`
+- **GROMACS-ready**: Residue renaming for `pdb2gmx` (e.g., HID/HIE/HIP, ASH/GLH, LYN/CYM/TYH)
 
 #### Requirements
 
@@ -534,7 +530,7 @@ PRISM uses YAML configuration files for customization. Key parameters include:
 - **Box settings**: Size, shape, solvation
 - **Output controls**: Trajectory frequency, compression
 - **Protein preparation**: Advanced cleaning and ion handling options
-- **Protonation**: Optional pKa-based histidine protonation with PROPKA
+- **Protonation**: Optional pKa-based protonation for ionizable residues with PROPKA
 
 ### Protein Preparation Configuration
 
@@ -675,9 +671,9 @@ PRISM generates a complete set of files ready for MD simulation:
    - **Message**: "Warning: Unknown metal/ion MO, keeping by default"
    - **Solution**: Add custom metal to keep list in configuration or use `--ion-mode keep_all`
 
-   **Histidine State Assignment**:
-   - **Message**: "Found 3 histidine residue(s), defaulting to HIE protonation state"
-   - **Solution**: Specify histidine state explicitly: `--his-state auto`
+   **PROPKA Renaming Summary**:
+   - **Message**: "PROPKA: Renamed X residue(s)"
+   - **Note**: This is expected when `--protonation propka` is enabled
 
    **Terminal Atom Issues**:
    - **Message**: "Fixed C-terminal residues with misplaced oxygen atoms"

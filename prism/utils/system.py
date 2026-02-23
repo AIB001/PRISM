@@ -261,16 +261,18 @@ class SystemBuilder:
 
         ph = self.config.get("protonation", {}).get("ph", self.config.get("simulation", {}).get("pH", 7.0))
 
-        print(f"\n  Applying PROPKA pKa-based HIS renaming (pH {ph})...")
+        print(f"\n  Applying PROPKA pKa-based residue renaming (pH {ph})...")
         protonator = PropkaProtonator(ph=ph, verbose=True)
-        stats = protonator.rename_histidines(pdb_file, pdb_file)
+        stats = protonator.optimize_protein_protonation(pdb_file, pdb_file)
 
-        if stats["renamed"]:
-            print(f"  PROPKA: Renamed {len(stats['renamed'])} HIS residue(s):")
-            for (chain, resnum), state in stats["renamed"].items():
-                print(f"    Chain {chain} Residue {resnum}: HIS -> {state}")
+        renamed = stats.get("renamed", {})
+        if renamed:
+            print(f"  PROPKA: Renamed {len(renamed)} residue(s):")
+            for (chain, resnum, resname), new_name in renamed.items():
+                chain_label = chain or "-"
+                print(f"    Chain {chain_label} Residue {resnum}: {resname} -> {new_name}")
         else:
-            print("  PROPKA: No histidine residues found or needed renaming")
+            print("  PROPKA: No residues needed renaming")
 
     def _rename_his_for_cmap(self, pdb_file: str, ff_info: dict) -> bool:
         """Rename HIS → HISE in PDB for force fields with CMAP corrections.

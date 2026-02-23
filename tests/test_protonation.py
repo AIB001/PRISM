@@ -1,6 +1,7 @@
 """Tests for prism.utils.protonation — PropkaProtonator class."""
 
 import pytest
+import shutil
 from unittest.mock import patch, MagicMock
 
 
@@ -13,6 +14,16 @@ def _atom_line(serial, name, resname, chain, resseq, x=0.0, y=0.0, z=0.0):
         f"ATOM  {serial:5d} {name:<4s} {resname:<3s} {chain}{resseq:4d}    "
         f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {name[0]:>2s}  \n"
     )
+
+
+def _make_protonator(ph=7.0, verbose=False):
+    """Create PropkaProtonator without requiring a real PROPKA binary."""
+    from prism.utils.protonation import PropkaProtonator
+
+    with patch.object(PropkaProtonator, "_find_propka", return_value="/usr/bin/propka"), patch.object(
+        PropkaProtonator, "_check_propka_available", return_value=None
+    ):
+        return PropkaProtonator(ph=ph, verbose=verbose)
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +73,23 @@ def pdb_mixed_his(tmp_path):
     return pdb
 
 
+@pytest.fixture
+def pdb_ionizable(tmp_path):
+    """PDB with ionizable residues for full PROPKA renaming."""
+    pdb = tmp_path / "ionizable.pdb"
+    lines = [
+        _atom_line(1, "N", "ASP", "A", 1),
+        _atom_line(2, "N", "GLU", "A", 2),
+        _atom_line(3, "N", "LYS", "A", 3),
+        _atom_line(4, "N", "CYS", "A", 4),
+        _atom_line(5, "N", "TYR", "A", 5),
+        _atom_line(6, "N", "HIS", "A", 6),
+        "END\n",
+    ]
+    pdb.write_text("".join(lines))
+    return pdb
+
+
 # ---------------------------------------------------------------------------
 # TestPropkaProtonatorInit
 # ---------------------------------------------------------------------------
@@ -69,27 +97,28 @@ class TestPropkaProtonatorInit:
     """Constructor and dependency check."""
 
     def test_default_ph(self):
-        from prism.utils.protonation import PropkaProtonator
-
-        p = PropkaProtonator()
+        p = _make_protonator()
         assert p.ph == 7.0
         assert p.verbose is False
 
     def test_custom_ph(self):
-        from prism.utils.protonation import PropkaProtonator
-
-        p = PropkaProtonator(ph=4.5, verbose=True)
+        p = _make_protonator(ph=4.5, verbose=True)
         assert p.ph == 4.5
         assert p.verbose is True
 
-    def test_import_error_when_propka_missing(self):
-        """If propka is not installed, _check_propka_available should raise."""
+    def test_find_propka_raises_when_missing(self, monkeypatch):
+        """_find_propka should raise when no binary is found."""
         from prism.utils.protonation import PropkaProtonator
 
         obj = object.__new__(PropkaProtonator)
-        with patch("builtins.__import__", side_effect=ImportError("No module")):
-            with pytest.raises(ImportError, match="PROPKA is not available"):
-                obj._check_propka_available()
+
+        def _which(_name):
+            return None
+
+        monkeypatch.setattr(shutil, "which", _which)
+        monkeypatch.delenv("CONDA_PREFIX", raising=False)
+        with pytest.raises(RuntimeError, match="PROPKA not found"):
+            obj._find_propka()
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +129,7 @@ class TestRenameHistidines:
 
     def _make_protonator(self, his_states):
         """Create protonator with mocked predict_his_states."""
-        from prism.utils.protonation import PropkaProtonator
-
-        p = PropkaProtonator(ph=7.0)
+        p = _make_protonator(ph=7.0)
         p.predict_his_states = MagicMock(return_value=his_states)
         return p
 
@@ -187,3 +214,43 @@ class TestRenameHistidines:
         assert "renamed" in stats
         assert "states" in stats
         assert stats["states"] is states
+
+
+# ---------------------------------------------------------------------------
+# TestOptimizeProteinProtonation
+# ---------------------------------------------------------------------------
+class TestOptimizeProteinProtonation:
+    """Full-residue renaming in optimize_protein_protonation."""
+
+    def test_renames_ionizable_residues(self, pdb_ionizable, tmp_path):
+        p = _make_protonator(ph=7.0)
+
+        predictions = {
+            "A:1": {"resname": "ASP", "chain": "A", "resnum": "1", "pka": 9.0},
+            "A:2": {"resname": "GLU", "chain": "A", "resnum": "2", "pka": 9.0},
+            "A:3": {"resname": "LYS", "chain": "A", "resnum": "3", "pka": 5.0},
+            "A:4": {"resname": "CYS", "chain": "A", "resnum": "4", "pka": 5.0},
+            "A:5": {"resname": "TYR", "chain": "A", "resnum": "5", "pka": 5.0},
+            "A:6": {"resname": "HIS", "chain": "A", "resnum": "6", "pka": 4.0},
+        }
+
+        p.predict_pka = MagicMock(return_value=predictions)
+        out = tmp_path / "out.pdb"
+        stats = p.optimize_protein_protonation(str(pdb_ionizable), str(out))
+
+        content = out.read_text().splitlines()
+
+        def _resname_for_resnum(resnum):
+            for line in content:
+                if line.startswith("ATOM") and line[22:26].strip() == str(resnum):
+                    return line[17:20]
+            return None
+
+        assert _resname_for_resnum(1) == "ASH"
+        assert _resname_for_resnum(2) == "GLH"
+        assert _resname_for_resnum(3) == "LYN"
+        assert _resname_for_resnum(4) == "CYM"
+        assert _resname_for_resnum(5) == "TYH"
+        assert _resname_for_resnum(6) == "HIP"
+
+        assert len(stats["renamed"]) == 6

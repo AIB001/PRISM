@@ -184,7 +184,7 @@ Example usage:
         "-proton",
         choices=["gromacs", "propka"],
         default="gromacs",
-        help="Protonation method: 'gromacs' (default) or 'propka' (pKa-based HIS protonation)",
+        help="Protonation method: 'gromacs' (default) or 'propka' (pKa-based ionizable residue protonation)",
     )
     sim_group.add_argument("--production-ns", type=float, default=500, help="Production time in ns (default: 500)")
     sim_group.add_argument("--dt", type=float, default=0.002, help="Time step in ps (default: 0.002)")

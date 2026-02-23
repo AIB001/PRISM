@@ -334,7 +334,7 @@ class PropkaProtonator:
             if ph > pka:
                 return res_name, is_certain  # Deprotonated (COO-)
             else:
-                return f"{res_name[0]}SH", is_certain  # Protonated (COOH)
+                return ("ASH" if res_name == "ASP" else "GLH"), is_certain  # Protonated (COOH)
 
         elif res_name == "LYS":
             if ph < pka:
