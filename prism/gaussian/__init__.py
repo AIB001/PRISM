@@ -34,28 +34,19 @@ from .converter import CoordinateConverter, mol2_to_xyz
 from .gjf_generator import GaussianInputGenerator
 from .charge_replacer import RESPChargeReplacer, replace_itp_charges
 from .workflow import GaussianRESPWorkflow
-from .utils import (
-    check_gaussian_available,
-    check_antechamber_available,
-    calculate_charge_multiplicity,
-    ATOMIC_SYMBOLS
-)
+from .utils import check_gaussian_available, check_antechamber_available, calculate_charge_multiplicity, ATOMIC_SYMBOLS
 
 __all__ = [
     # Converter
     "CoordinateConverter",
     "mol2_to_xyz",
-
     # GJF Generator
     "GaussianInputGenerator",
-
     # Charge Replacer
     "RESPChargeReplacer",
     "replace_itp_charges",
-
     # Workflow
     "GaussianRESPWorkflow",
-
     # Utilities
     "check_gaussian_available",
     "check_antechamber_available",

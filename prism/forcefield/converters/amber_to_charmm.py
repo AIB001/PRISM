@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Utilities to convert Amber/GAFF GROMACS exports (ITP/TOP) into CHARMM RTF/PRM."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +14,7 @@ import shutil
 KJ_TO_KCAL = 0.239005736
 NM_TO_ANG = 10.0
 DEG_TO_RAD = math.pi / 180.0
-SQ_NM_TO_SQ_ANG = NM_TO_ANG ** 2
+SQ_NM_TO_SQ_ANG = NM_TO_ANG**2
 
 
 @dataclass
@@ -296,9 +297,7 @@ class AmberToCharmmConverter:
         lines.append("GROUP")
         for atom in atoms:
             unique_type = self._make_unique_type(atom.type_name)
-            lines.append(
-                f"ATOM {atom.atom_name:<4} {unique_type:<10} {atom.charge:8.4f} ! mass={atom.mass:6.3f}"
-            )
+            lines.append(f"ATOM {atom.atom_name:<4} {unique_type:<10} {atom.charge:8.4f} ! mass={atom.mass:6.3f}")
         lines.append("")
         lines.extend(self._format_bonds(atoms, bonds))
         lines.append("")
@@ -351,9 +350,7 @@ class AmberToCharmmConverter:
             al = self._make_unique_type(parser.atoms[dih.l - 1].type_name)
             kchi = dih.k_kj * KJ_TO_KCAL
             multiplicity = dih.multiplicity if dih.multiplicity > 0 else 1
-            lines.append(
-                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kchi:10.4f}{multiplicity:4d}{dih.phase_deg:10.3f}"
-            )
+            lines.append(f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kchi:10.4f}{multiplicity:4d}{dih.phase_deg:10.3f}")
 
         lines.append("")
         lines.append("IMPROPERS")
@@ -363,9 +360,7 @@ class AmberToCharmmConverter:
             ak = self._make_unique_type(parser.atoms[imp.k - 1].type_name)
             al = self._make_unique_type(parser.atoms[imp.l - 1].type_name)
             kpsi = imp.k_kj * KJ_TO_KCAL
-            lines.append(
-                f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kpsi:10.4f}{imp.phase_deg:10.3f}"
-            )
+            lines.append(f"{ai:<10}{aj:<10}{ak:<10}{al:<10}{kpsi:10.4f}{imp.phase_deg:10.3f}")
 
         lines.append("")
         lines.extend(self._format_nonbonded(atomtypes))

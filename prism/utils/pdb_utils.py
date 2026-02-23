@@ -10,17 +10,19 @@ including residue number renumbering and other common operations.
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
 
-def renumber_residues(input_pdb: str,
-                    output_pdb: str,
-                    offset: int = 0,
-                    chain_map: Optional[Dict[str, int]] = None,
-                    start_at: Optional[int] = None,
-                    keep_ter: bool = True) -> Dict[str, any]:
+def renumber_residues(
+    input_pdb: str,
+    output_pdb: str,
+    offset: int = 0,
+    chain_map: Optional[Dict[str, int]] = None,
+    start_at: Optional[int] = None,
+    keep_ter: bool = True,
+) -> Dict[str, any]:
     """
     Renumber residues in a PDB file.
 
@@ -66,27 +68,22 @@ def renumber_residues(input_pdb: str,
     if offset == 0 and start_at is None and chain_map is None:
         logger.warning("No renumbering specified (offset=0, no start_at, no chain_map)")
 
-    stats = {
-        "atoms_processed": 0,
-        "residues_renumbered": set(),
-        "chains_seen": set(),
-        "num_ter": 0
-    }
+    stats = {"atoms_processed": 0, "residues_renumbered": set(), "chains_seen": set(), "num_ter": 0}
 
     # For start_at mode: track current residue number per chain
     current_nums = {}
 
-    with open(input_path, 'r') as f_in, open(output_path, 'w') as f_out:
+    with open(input_path, "r") as f_in, open(output_path, "w") as f_out:
         for line in f_in:
             # Handle TER records
-            if line.startswith('TER'):
+            if line.startswith("TER"):
                 stats["num_ter"] += 1
                 if keep_ter:
                     f_out.write(line)
                 continue
 
             # Only process ATOM/HETATM lines
-            if not (line.startswith('ATOM') or line.startswith('HETATM')):
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
                 f_out.write(line)
                 continue
 
@@ -107,8 +104,8 @@ def renumber_residues(input_pdb: str,
             res_name = line[17:20].strip()
             chain = line[21].strip()
             res_num_str = line[22:26].strip()
-            ins_code = line[26] if len(line) > 26 else ' '
-            rest_of_line = line[27:] if len(line) > 27 else ''
+            ins_code = line[26] if len(line) > 26 else " "
+            rest_of_line = line[27:] if len(line) > 27 else ""
 
             stats["chains_seen"].add(chain)
 
@@ -138,12 +135,14 @@ def renumber_residues(input_pdb: str,
                     new_num = old_num
 
                 # Write modified line
-                new_line = (line[:17] +           # Through residue name
-                           f"{res_name:3s}" +      # Residue name (right-aligned)
-                           chain +                      # Chain ID
-                           f"{new_num:>4}" +           # New residue number (right-aligned)
-                           ins_code +                   # Insertion code
-                           rest_of_line)                # Rest of line
+                new_line = (
+                    line[:17]  # Through residue name
+                    + f"{res_name:3s}"  # Residue name (right-aligned)
+                    + chain  # Chain ID
+                    + f"{new_num:>4}"  # New residue number (right-aligned)
+                    + ins_code  # Insertion code
+                    + rest_of_line
+                )  # Rest of line
                 f_out.write(new_line)
 
             except ValueError:
@@ -153,17 +152,15 @@ def renumber_residues(input_pdb: str,
     stats["residues_renumbered"] = len(stats["residues_renumbered"])
     stats["chains_seen"] = list(stats["chains_seen"])
 
-    logger.info(f"Renumbered {stats['residues_renumbered']} residues "
-                f"in {len(stats['chains_seen'])} chains")
+    logger.info(f"Renumbered {stats['residues_renumbered']} residues " f"in {len(stats['chains_seen'])} chains")
     logger.info(f"Output: {output_path}")
 
     return stats
 
 
-def apply_pka_predictions(input_pdb: str,
-                       output_pdb: str,
-                       predictions: Dict[str, Dict],
-                       ph: float = 7.0) -> Dict[str, any]:
+def apply_pka_predictions(
+    input_pdb: str, output_pdb: str, predictions: Dict[str, Dict], ph: float = 7.0
+) -> Dict[str, any]:
     """
     Apply PROPKA3 pKa predictions to a PDB file.
 
@@ -187,7 +184,7 @@ def apply_pka_predictions(input_pdb: str,
     dict
         Dictionary with renames applied and statistics
     """
-    from prism.utils.propka_protonation import PropkaProtonator
+    from prism.utils.protonation import PropkaProtonator
 
     input_path = Path(input_pdb)
     output_path = Path(output_pdb)
@@ -209,7 +206,7 @@ def apply_pka_predictions(input_pdb: str,
             renames[key] = {"from": res_name, "to": state}
 
     # Apply renames
-    with open(input_path, 'r') as f_in, open(output_path, 'w') as f_out:
+    with open(input_path, "r") as f_in, open(output_path, "w") as f_out:
         for line in f_in:
             if not (line.startswith("ATOM") or line.startswith("HETATM")):
                 f_out.write(line)
@@ -230,12 +227,7 @@ def apply_pka_predictions(input_pdb: str,
 
     logger.info(f"Applied {len(renames)} protonation state renames")
 
-    return {
-        "renames": renames,
-        "num_renamed": len(renames),
-        "input": str(input_path),
-        "output": str(output_path)
-    }
+    return {"renames": renames, "num_renamed": len(renames), "input": str(input_path), "output": str(output_path)}
 
 
 if __name__ == "__main__":

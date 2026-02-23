@@ -11,9 +11,15 @@ Extracted from the original monolithic builder.py for maintainability.
 import os
 
 from ..utils.colors import (
-    print_header, print_subheader, print_step,
-    print_success, print_error, print_warning, print_info,
-    success, error, warning, path, number
+    print_header,
+    print_subheader,
+    print_step,
+    print_success,
+    print_error,
+    print_warning,
+    print_info,
+    path,
+    number,
 )
 
 
@@ -26,13 +32,14 @@ class PMFBuilderMixin:
 
         try:
             # Auto-compute box Z extension from pull distance if not user-specified
-            pull_distance = self.config.get('pmf', {}).get('pull_distance', 3.6)
+            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
             if self.box_extension == (0.0, 0.0, 2.0):  # default, not user-specified
                 z_ext = pull_distance + 1.0  # pull distance + 1 nm buffer
                 self.box_extension = (0.0, 0.0, z_ext)
                 self.system_builder.box_extension = self.box_extension
-                print(f"  Auto box Z extension: {z_ext:.1f} nm "
-                      f"(pull distance {pull_distance:.1f} nm + 1.0 nm buffer)")
+                print(
+                    f"  Auto box Z extension: {z_ext:.1f} nm " f"(pull distance {pull_distance:.1f} nm + 1.0 nm buffer)"
+                )
 
             # Save configuration for reference
             self.save_config()
@@ -75,13 +82,17 @@ class PMFBuilderMixin:
             print_step(6, total_steps, "Generating MD parameter files")
             self.generate_mdp_files()
             # Generate SMD-specific MDP file with custom groups
-            pull_rate = self.config.get('pmf', {}).get('pull_rate', 0.01)
-            pull_k = self.config.get('pmf', {}).get('pull_k', 1000.0)
-            pull_distance = self.config.get('pmf', {}).get('pull_distance', 3.6)
+            pull_rate = self.config.get("pmf", {}).get("pull_rate", 0.01)
+            pull_k = self.config.get("pmf", {}).get("pull_k", 1000.0)
+            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
             self.mdp_generator.generate_smd_mdp(
-                pull_rate=pull_rate, pull_k=pull_k, pull_distance=pull_distance,
-                ref_group='Protein_near_LIG', pull_group='LIG',
-                pbcatom=pbcatom, freeze_group='CA_freeze'
+                pull_rate=pull_rate,
+                pull_k=pull_k,
+                pull_distance=pull_distance,
+                ref_group="Protein_near_LIG",
+                pull_group="LIG",
+                pbcatom=pbcatom,
+                freeze_group="CA_freeze",
             )
             print_success("MDP files generated (including smd.mdp)")
 
@@ -93,18 +104,21 @@ class PMFBuilderMixin:
 
             # Step 8: Generate umbrella sampling MDP
             print_step(8, total_steps, "Generating umbrella sampling MDP")
-            umbrella_time_ns = self.config.get('pmf', {}).get('umbrella_time_ns', 10.0)
+            umbrella_time_ns = self.config.get("pmf", {}).get("umbrella_time_ns", 10.0)
             self.mdp_generator.generate_umbrella_mdp(
-                umbrella_time_ns=umbrella_time_ns, pull_k=pull_k,
-                ref_group='Protein_near_LIG', pull_group='LIG',
-                pbcatom=pbcatom, freeze_group='CA_freeze'
+                umbrella_time_ns=umbrella_time_ns,
+                pull_k=pull_k,
+                ref_group="Protein_near_LIG",
+                pull_group="LIG",
+                pbcatom=pbcatom,
+                freeze_group="CA_freeze",
             )
             print_success("Umbrella sampling MDP generated")
 
             # Step 9: Generate umbrella sampling scripts
             print_step(9, total_steps, "Generating umbrella sampling scripts")
             self.generate_pmf_plot_script()
-            umbrella_script_path = self.generate_umbrella_script()
+            self.generate_umbrella_script()
             print_success("Umbrella sampling scripts generated")
 
             print_header("PMF Workflow Complete!")
@@ -118,7 +132,7 @@ class PMFBuilderMixin:
             print(f"Box extension (Z): {number(f'{self.box_extension[2]:.1f} nm')}")
 
             if script_path:
-                gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
+                gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
                 print_header("Ready to Run PMF Simulations!")
                 print(f"\nTo run the complete PMF workflow:")
                 print(f"  1. Navigate to the SMD directory:")
@@ -133,6 +147,7 @@ class PMFBuilderMixin:
         except Exception as e:
             print_error(f"PMF workflow failed: {e}")
             import traceback
+
             traceback.print_exc()
             raise
 
@@ -162,14 +177,11 @@ class PMFBuilderMixin:
         ligand_path = self.ligand_paths[0]
 
         alignment_results = aligner.align_for_pmf(
-            protein_pdb=cleaned_protein,
-            ligand_file=ligand_path,
-            output_dir=align_dir,
-            pullvec=self.pullvec
+            protein_pdb=cleaned_protein, ligand_file=ligand_path, output_dir=align_dir, pullvec=self.pullvec
         )
 
-        aligned_protein = alignment_results['aligned_protein']
-        aligned_ligand = alignment_results['aligned_ligand']
+        aligned_protein = alignment_results["aligned_protein"]
+        aligned_ligand = alignment_results["aligned_ligand"]
 
         # Update ligand paths to use aligned ligand
         # The force field was already generated from original ligand, coordinates will be updated
@@ -201,14 +213,14 @@ class PMFBuilderMixin:
 
         aligned_coords = []  # List of (x, y, z) in Angstroms
 
-        if suffix == '.mol2':
-            with open(aligned_ligand_file, 'r') as f:
+        if suffix == ".mol2":
+            with open(aligned_ligand_file, "r") as f:
                 in_atom_section = False
                 for line in f:
-                    if line.startswith('@<TRIPOS>ATOM'):
+                    if line.startswith("@<TRIPOS>ATOM"):
                         in_atom_section = True
                         continue
-                    elif line.startswith('@<TRIPOS>'):
+                    elif line.startswith("@<TRIPOS>"):
                         in_atom_section = False
                         continue
                     if in_atom_section and line.strip():
@@ -221,8 +233,8 @@ class PMFBuilderMixin:
                                 aligned_coords.append((x, y, z))
                             except ValueError:
                                 continue
-        elif suffix in ['.sdf', '.sd']:
-            with open(aligned_ligand_file, 'r') as f:
+        elif suffix in [".sdf", ".sd"]:
+            with open(aligned_ligand_file, "r") as f:
                 lines = f.readlines()
             if len(lines) >= 4:
                 try:
@@ -252,7 +264,7 @@ class PMFBuilderMixin:
                 continue
 
             # Read original GRO file
-            with open(gro_file, 'r') as f:
+            with open(gro_file, "r") as f:
                 gro_lines = f.readlines()
 
             if len(gro_lines) < 3:
@@ -298,7 +310,7 @@ class PMFBuilderMixin:
             new_gro_lines.append(box_line)
 
             # Write updated GRO file
-            with open(gro_file, 'w') as f:
+            with open(gro_file, "w") as f:
                 f.writelines(new_gro_lines)
 
             print_success(f"  Updated coordinates in {path(gro_file)}")
@@ -318,22 +330,26 @@ class PMFBuilderMixin:
         import numpy as np
         import subprocess
 
-        gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
-        gro_file = os.path.join(gmx_smd_dir, 'solv_ions.gro')
-        index_path = os.path.join(gmx_smd_dir, 'index.ndx')
+        gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
+        gro_file = os.path.join(gmx_smd_dir, "solv_ions.gro")
+        index_path = os.path.join(gmx_smd_dir, "index.ndx")
 
         # Step 1: Generate default index with gmx make_ndx
         print("  Generating default index groups...")
-        make_ndx_cmd = [self.gromacs_env.gmx_command, 'make_ndx', '-f', gro_file, '-o', index_path]
+        make_ndx_cmd = [self.gromacs_env.gmx_command, "make_ndx", "-f", gro_file, "-o", index_path]
         process = subprocess.Popen(
-            make_ndx_cmd, cwd=gmx_smd_dir,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            make_ndx_cmd,
+            cwd=gmx_smd_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        process.communicate(input='q\n')
+        process.communicate(input="q\n")
 
         # Step 2: Parse GRO file
         print("  Parsing system coordinates...")
-        with open(gro_file, 'r') as f:
+        with open(gro_file, "r") as f:
             lines = f.readlines()
 
         n_atoms = int(lines[1].strip())
@@ -343,8 +359,7 @@ class PMFBuilderMixin:
         protein_residues = {}  # (resnum, resname) -> [(atom_idx, x, y, z), ...]
         ca_indices = []
 
-        non_protein_resnames = {'SOL', 'NA', 'CL', 'WAT', 'HOH', 'K', 'MG',
-                                'Na+', 'Cl-', 'LIG'}
+        non_protein_resnames = {"SOL", "NA", "CL", "WAT", "HOH", "K", "MG", "Na+", "Cl-", "LIG"}
 
         for i in range(2, 2 + n_atoms):
             line = lines[i]
@@ -356,7 +371,7 @@ class PMFBuilderMixin:
             y = float(line[28:36]) * 10.0
             z = float(line[36:44]) * 10.0
 
-            if resname == 'LIG':
+            if resname == "LIG":
                 lig_indices.append(atom_idx)
                 lig_coords.append([x, y, z])
             elif resname not in non_protein_resnames:
@@ -364,7 +379,7 @@ class PMFBuilderMixin:
                 if reskey not in protein_residues:
                     protein_residues[reskey] = []
                 protein_residues[reskey].append((atom_idx, x, y, z))
-                if atomname == 'CA':
+                if atomname == "CA":
                     ca_indices.append(atom_idx)
 
         # Step 3: Find protein residues near ligand
@@ -421,18 +436,19 @@ class PMFBuilderMixin:
 
         # Step 5: Append custom groups to index file
         print("  Writing custom groups to index file...")
-        with open(index_path, 'a') as f:
-            def write_group(name, indices):
-                f.write(f'\n[ {name} ]\n')
-                for j, idx in enumerate(indices):
-                    f.write(f'{idx:>6d}')
-                    if (j + 1) % 15 == 0:
-                        f.write('\n')
-                if len(indices) % 15 != 0:
-                    f.write('\n')
+        with open(index_path, "a") as f:
 
-            write_group('Protein_near_LIG', near_lig_indices)
-            write_group('CA_freeze', ca_freeze_indices)
+            def write_group(name, indices):
+                f.write(f"\n[ {name} ]\n")
+                for j, idx in enumerate(indices):
+                    f.write(f"{idx:>6d}")
+                    if (j + 1) % 15 == 0:
+                        f.write("\n")
+                if len(indices) % 15 != 0:
+                    f.write("\n")
+
+            write_group("Protein_near_LIG", near_lig_indices)
+            write_group("CA_freeze", ca_freeze_indices)
 
         # Print summary
         near_res_info = sorted([f"{rn}{rnum}" for rnum, rn in near_lig_reskeys_5A])
@@ -449,10 +465,10 @@ class PMFBuilderMixin:
 
     def generate_smd_plot_script(self):
         """Generate Python script for plotting SMD force vs position"""
-        gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
-        smd_dir = os.path.join(gmx_smd_dir, 'smd')
+        gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
+        smd_dir = os.path.join(gmx_smd_dir, "smd")
         os.makedirs(smd_dir, exist_ok=True)
-        script_path = os.path.join(smd_dir, 'plot_smd.py')
+        script_path = os.path.join(smd_dir, "plot_smd.py")
 
         script_content = '''#!/usr/bin/env python3
 """Plot SMD Force vs Position from GROMACS pull output files."""
@@ -515,17 +531,17 @@ def main():
 if __name__ == '__main__':
     main()
 '''
-        with open(script_path, 'w') as f:
+        with open(script_path, "w") as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
         return script_path
 
     def generate_pmf_plot_script(self):
         """Generate Python script for plotting PMF profile from WHAM output"""
-        gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
-        umbrella_dir = os.path.join(gmx_smd_dir, 'umbrella')
+        gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
+        umbrella_dir = os.path.join(gmx_smd_dir, "umbrella")
         os.makedirs(umbrella_dir, exist_ok=True)
-        script_path = os.path.join(umbrella_dir, 'plot_pmf.py')
+        script_path = os.path.join(umbrella_dir, "plot_pmf.py")
 
         script_content = '''#!/usr/bin/env python3
 """Plot PMF profile from GROMACS WHAM output."""
@@ -611,26 +627,26 @@ def main():
 if __name__ == '__main__':
     main()
 '''
-        with open(script_path, 'w') as f:
+        with open(script_path, "w") as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
         return script_path
 
     def generate_smd_script(self):
         """Generate smd_run.sh script for SMD simulation execution"""
-        gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
+        gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
         if not os.path.exists(gmx_smd_dir):
             print_warning("GMX_PROLIG_PMF directory not found, skipping smd_run.sh generation")
             return None
 
-        script_path = os.path.join(gmx_smd_dir, 'smd_run.sh')
+        script_path = os.path.join(gmx_smd_dir, "smd_run.sh")
 
         # Get pull parameters
-        pull_rate = self.config.get('pmf', {}).get('pull_rate', 0.01)
-        pull_k = self.config.get('pmf', {}).get('pull_k', 1000.0)
-        pull_distance = self.config.get('pmf', {}).get('pull_distance', 3.6)
+        pull_rate = self.config.get("pmf", {}).get("pull_rate", 0.01)
+        pull_k = self.config.get("pmf", {}).get("pull_k", 1000.0)
+        pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
 
-        script_content = f'''#!/bin/bash
+        script_content = f"""#!/bin/bash
 
 ######################################################
 # PRISM SMD SIMULATION SCRIPT
@@ -744,9 +760,9 @@ if [ -f ./smd/pullf.xvg ] && [ -f ./smd/pullx.xvg ]; then
         echo "  python3 ./smd/plot_smd.py ./smd/pullf.xvg ./smd/pullx.xvg ./smd/"
     fi
 fi
-'''
+"""
 
-        with open(script_path, 'w') as f:
+        with open(script_path, "w") as f:
             f.write(script_content)
 
         # Make script executable
@@ -757,19 +773,19 @@ fi
 
     def generate_umbrella_script(self):
         """Generate umbrella_run.sh script for umbrella sampling + WHAM workflow"""
-        gmx_smd_dir = os.path.join(self.output_dir, 'GMX_PROLIG_PMF')
+        gmx_smd_dir = os.path.join(self.output_dir, "GMX_PROLIG_PMF")
         if not os.path.exists(gmx_smd_dir):
             print_warning("GMX_PROLIG_PMF directory not found, skipping umbrella_run.sh generation")
             return None
 
-        script_path = os.path.join(gmx_smd_dir, 'umbrella_run.sh')
+        script_path = os.path.join(gmx_smd_dir, "umbrella_run.sh")
 
         # Get umbrella parameters
-        umbrella_spacing = self.config.get('pmf', {}).get('umbrella_spacing', 0.12)
-        wham_begin = self.config.get('pmf', {}).get('wham_begin', 1000)
-        wham_bootstrap = self.config.get('pmf', {}).get('wham_bootstrap', 200)
+        umbrella_spacing = self.config.get("pmf", {}).get("umbrella_spacing", 0.12)
+        wham_begin = self.config.get("pmf", {}).get("wham_begin", 1000)
+        wham_bootstrap = self.config.get("pmf", {}).get("wham_bootstrap", 200)
 
-        script_content = f'''#!/bin/bash
+        script_content = f"""#!/bin/bash
 
 ######################################################
 # PRISM UMBRELLA SAMPLING + WHAM SCRIPT
@@ -951,9 +967,9 @@ if [ -f ./umbrella/pmf.xvg ]; then
         echo "  python3 ./umbrella/plot_pmf.py ./umbrella/pmf.xvg ./umbrella/pmferror.xvg ./umbrella/"
     fi
 fi
-'''
+"""
 
-        with open(script_path, 'w') as f:
+        with open(script_path, "w") as f:
             f.write(script_content)
 
         os.chmod(script_path, 0o755)

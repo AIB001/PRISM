@@ -20,8 +20,10 @@ import mdtraj as md
 from ..core.config import AnalysisConfig
 from ...utils.topology import detect_all_chains
 from ...utils.mdtraj_topology import (
-    detect_all_chains_mdtraj, get_primary_protein_chain_mdtraj,
-    create_chain_selections_mdtraj, validate_chain_selections_mdtraj
+    detect_all_chains_mdtraj,
+    get_primary_protein_chain_mdtraj,
+    create_chain_selections_mdtraj,
+    validate_chain_selections_mdtraj,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,18 +37,20 @@ class RMSDAnalyzer:
         self._cache_dir = Path(config.cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def calculate_rmsd(self,
-                      universe: Union[mda.Universe, str],
-                      trajectory: Optional[Union[str, List[str]]] = None,
-                      selection: str = "protein and name CA",
-                      align_selection: Optional[str] = None,
-                      calculate_selection: Optional[str] = None,
-                      reference: Optional[mda.Universe] = None,
-                      ref_frame: int = 0,
-                      start_frame: int = 0,
-                      end_frame: Optional[int] = None,
-                      step: int = 1,
-                      cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_rmsd(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein and name CA",
+        align_selection: Optional[str] = None,
+        calculate_selection: Optional[str] = None,
+        reference: Optional[mda.Universe] = None,
+        ref_frame: int = 0,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate RMSD for a trajectory.
 
@@ -112,7 +116,7 @@ class RMSDAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached RMSD results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Set reference
@@ -125,22 +129,26 @@ class RMSDAnalyzer:
                 ref_coords = reference.select_atoms(calculate_selection).positions.copy()
 
             # Align trajectory if needed with parallel processing
-            logger.info(f"Aligning trajectory on '{align_selection}' using {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads")
-            align.AlignTraj(universe, reference,
-                          select=align_selection,
-                          filename=None).run(start=start_frame, stop=end_frame, step=step)
+            logger.info(
+                f"Aligning trajectory on '{align_selection}' using {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads"
+            )
+            align.AlignTraj(universe, reference, select=align_selection, filename=None).run(
+                start=start_frame, stop=end_frame, step=step
+            )
 
             # Calculate RMSD on specified selection
             logger.info(f"Calculating RMSD for '{calculate_selection}'")
-            rmsd_analysis = rms.RMSD(universe.select_atoms(calculate_selection),
-                                   reference.select_atoms(calculate_selection),
-                                   ref_frame=ref_frame)
+            rmsd_analysis = rms.RMSD(
+                universe.select_atoms(calculate_selection),
+                reference.select_atoms(calculate_selection),
+                ref_frame=ref_frame,
+            )
             rmsd_analysis.run(start=start_frame, stop=end_frame, step=step)
 
             rmsd_values = rmsd_analysis.results.rmsd[:, 2]  # Extract RMSD column
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(rmsd_values, f)
 
             logger.info(f"RMSD calculation completed. Mean: {np.mean(rmsd_values):.2f} Å")
@@ -150,17 +158,19 @@ class RMSDAnalyzer:
             logger.error(f"Error calculating RMSD: {e}")
             raise
 
-    def calculate_rmsf(self,
-                      universe: Union[mda.Universe, str, md.Trajectory],
-                      trajectory: Optional[Union[str, List[str]]] = None,
-                      selection: str = "protein and name CA",
-                      align_selection: Optional[str] = None,
-                      calculate_selection: Optional[str] = None,
-                      start_frame: int = 0,
-                      end_frame: Optional[int] = None,
-                      step: int = 1,
-                      cache_name: Optional[str] = None,
-                      use_mdtraj: bool = True) -> Union[Tuple[np.ndarray, np.ndarray], Dict[str, Tuple[np.ndarray, np.ndarray]]]:
+    def calculate_rmsf(
+        self,
+        universe: Union[mda.Universe, str, md.Trajectory],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein and name CA",
+        align_selection: Optional[str] = None,
+        calculate_selection: Optional[str] = None,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+        use_mdtraj: bool = True,
+    ) -> Union[Tuple[np.ndarray, np.ndarray], Dict[str, Tuple[np.ndarray, np.ndarray]]]:
         """
         Calculate Root Mean Square Fluctuation (RMSF) with automatic chain detection.
 
@@ -299,7 +309,7 @@ class RMSDAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached RMSF results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Calculate RMSF using appropriate method
@@ -308,10 +318,10 @@ class RMSDAnalyzer:
                 logger.info("Using MDTraj for RMSF calculation with automatic alignment")
 
                 # Configure OpenMP threads for optimal performance
-                original_omp_threads = os.environ.get('OMP_NUM_THREADS')
+                original_omp_threads = os.environ.get("OMP_NUM_THREADS")
                 cpu_count = os.cpu_count()
                 recommended_threads = max(1, cpu_count - 1)  # Leave one core for system tasks
-                os.environ['OMP_NUM_THREADS'] = str(recommended_threads)
+                os.environ["OMP_NUM_THREADS"] = str(recommended_threads)
                 logger.info(f"Configured OpenMP with {recommended_threads} threads (available CPUs: {cpu_count})")
 
                 try:
@@ -325,17 +335,20 @@ class RMSDAnalyzer:
                 finally:
                     # Restore original OMP_NUM_THREADS setting
                     if original_omp_threads is not None:
-                        os.environ['OMP_NUM_THREADS'] = original_omp_threads
+                        os.environ["OMP_NUM_THREADS"] = original_omp_threads
                     else:
-                        os.environ.pop('OMP_NUM_THREADS', None)
+                        os.environ.pop("OMP_NUM_THREADS", None)
             else:
                 # Use MDAnalysis for RMSF calculation (fallback)
                 logger.info("Using MDAnalysis for RMSF calculation")
 
                 # Align trajectory first with parallel processing
-                logger.info(f"Computing average structure using {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads")
+                logger.info(
+                    f"Computing average structure using {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads"
+                )
                 average = align.AverageStructure(universe, select=align_selection).run(
-                    start=start_frame, stop=end_frame, step=step)
+                    start=start_frame, stop=end_frame, step=step
+                )
                 ref = average.results.universe
 
                 logger.info(f"Aligning trajectory on '{align_selection}' to average structure")
@@ -372,7 +385,7 @@ class RMSDAnalyzer:
                         results[chain_name] = (rmsf_values, residue_ids)
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             if single_selection:
@@ -389,9 +402,9 @@ class RMSDAnalyzer:
             logger.error(f"Error calculating RMSF: {e}")
             raise
 
-    def smooth_rmsd(self, rmsd_values: np.ndarray,
-                   window_length: Optional[int] = None,
-                   polyorder: int = 3) -> np.ndarray:
+    def smooth_rmsd(
+        self, rmsd_values: np.ndarray, window_length: Optional[int] = None, polyorder: int = 3
+    ) -> np.ndarray:
         """
         Apply Savitzky-Golay smoothing to RMSD data.
 
@@ -422,17 +435,19 @@ class RMSDAnalyzer:
 
         return savgol_filter(rmsd_values, window_length, polyorder)
 
-    def calculate_rmsd_mdtraj(self,
-                              topology_file: str,
-                              trajectory_files: Union[str, List[str]],
-                              align_selection: Optional[str] = None,
-                              calculate_selection: Optional[str] = None,
-                              auto_detect_chains: bool = True,
-                              start_frame: int = 0,
-                              end_frame: Optional[int] = None,
-                              step: int = 1,
-                              ref_frame: int = 0,
-                              cache_name: Optional[str] = None) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+    def calculate_rmsd_mdtraj(
+        self,
+        topology_file: str,
+        trajectory_files: Union[str, List[str]],
+        align_selection: Optional[str] = None,
+        calculate_selection: Optional[str] = None,
+        auto_detect_chains: bool = True,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        ref_frame: int = 0,
+        cache_name: Optional[str] = None,
+    ) -> Union[np.ndarray, Dict[str, np.ndarray]]:
         """
         Calculate RMSD using MDTraj with automatic chain detection.
 
@@ -561,7 +576,9 @@ class RMSDAnalyzer:
                     sel_names = "_".join(sorted(protein_ligand_selections.keys()))
                     align_key = str(align_selection if align_selection else "auto")
                     cache_key = f"rmsd_mdtraj_{traj_name}_align_{align_key}_calc_{sel_names}_{ref_frame}_{start_frame}_{end_frame}_{step}"
-                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "").replace("{", "").replace("}", "")
+                cache_key = (
+                    cache_key.replace(" ", "_").replace("(", "").replace(")", "").replace("{", "").replace("}", "")
+                )
             else:
                 cache_key = str(cache_name)
 
@@ -571,7 +588,7 @@ class RMSDAnalyzer:
             if cache_file.exists():
                 logger.info(f"✓ Loading cached RMSD results from {cache_file.name}")
                 print(f"  ✓ Using cached RMSD data: {cache_file.name}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
             else:
                 logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
@@ -625,7 +642,7 @@ class RMSDAnalyzer:
                     logger.info(f"  {selection_name}: Mean RMSD = {np.mean(rmsd_values):.2f} Å")
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info("RMSD calculation completed successfully")
@@ -635,16 +652,18 @@ class RMSDAnalyzer:
             logger.error(f"Error calculating RMSD with MDTraj: {e}")
             raise
 
-    def calculate_rmsf_mdtraj(self,
-                              topology_file: str,
-                              trajectory_files: Union[str, List[str]],
-                              align_selection: Optional[str] = None,
-                              calculate_selection: Optional[str] = None,
-                              auto_detect_chains: bool = True,
-                              start_frame: int = 0,
-                              end_frame: Optional[int] = None,
-                              step: int = 1,
-                              cache_name: Optional[str] = None) -> Union[Tuple[np.ndarray, np.ndarray], Dict[str, Tuple[np.ndarray, np.ndarray]]]:
+    def calculate_rmsf_mdtraj(
+        self,
+        topology_file: str,
+        trajectory_files: Union[str, List[str]],
+        align_selection: Optional[str] = None,
+        calculate_selection: Optional[str] = None,
+        auto_detect_chains: bool = True,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Union[Tuple[np.ndarray, np.ndarray], Dict[str, Tuple[np.ndarray, np.ndarray]]]:
         """
         Calculate RMSF using MDTraj with automatic chain detection.
 
@@ -734,11 +753,15 @@ class RMSDAnalyzer:
                 if single_selection:
                     calc_key = calculate_selection if calculate_selection else "name CA"
                     align_key = align_selection if align_selection else "name CA"
-                    cache_key = f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{calc_key}_{start_frame}_{end_frame}_{step}"
+                    cache_key = (
+                        f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{calc_key}_{start_frame}_{end_frame}_{step}"
+                    )
                 else:
                     chain_names = "_".join(sorted(protein_chains.keys()))
                     align_key = align_selection if align_selection else "auto"
-                    cache_key = f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{chain_names}_{start_frame}_{end_frame}_{step}"
+                    cache_key = (
+                        f"rmsf_mdtraj_{traj_name}_align_{align_key}_calc_{chain_names}_{start_frame}_{end_frame}_{step}"
+                    )
                 cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
             else:
                 cache_key = cache_name
@@ -749,7 +772,7 @@ class RMSDAnalyzer:
             if cache_file.exists():
                 logger.info(f"✓ Loading cached RMSF results from {cache_file.name}")
                 print(f"  ✓ Using cached RMSF data: {cache_file.name}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
             else:
                 logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
@@ -816,7 +839,7 @@ class RMSDAnalyzer:
                     logger.info(f"  {chain_name}: {len(rmsf_values)} atoms, Mean RMSF = {np.mean(rmsf_values):.2f} Å")
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info("RMSF calculation completed successfully")
@@ -826,9 +849,9 @@ class RMSDAnalyzer:
             logger.error(f"Error calculating RMSF with MDTraj: {e}")
             raise
 
-    def _calculate_rmsf_mdtraj_single(self, trajectory: md.Trajectory,
-                                     calculate_selection: str,
-                                     align_selection: str) -> Tuple[np.ndarray, np.ndarray]:
+    def _calculate_rmsf_mdtraj_single(
+        self, trajectory: md.Trajectory, calculate_selection: str, align_selection: str
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate RMSF for a single selection using MDTraj with OpenMP parallelization.
 
@@ -857,7 +880,9 @@ class RMSDAnalyzer:
                 raise ValueError(f"No atoms found for calculation selection: {calculate_selection}")
 
             logger.info(f"Aligning trajectory using {len(align_indices)} atoms")
-            logger.info(f"Calculating RMSF for {len(calc_indices)} atoms with {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads")
+            logger.info(
+                f"Calculating RMSF for {len(calc_indices)} atoms with {os.environ.get('OMP_NUM_THREADS', 'auto')} CPU threads"
+            )
 
             # Align trajectory
             aligned_traj = trajectory.superpose(trajectory, atom_indices=align_indices)
@@ -874,7 +899,7 @@ class RMSDAnalyzer:
             rmsf_values *= 10.0
 
             # Calculate per-atom RMSF (average over x,y,z coordinates)
-            rmsf_per_atom = np.sqrt(np.mean(rmsf_values.reshape(-1, 3)**2, axis=1))
+            rmsf_per_atom = np.sqrt(np.mean(rmsf_values.reshape(-1, 3) ** 2, axis=1))
 
             # Get residue IDs for the calculation atoms
             residue_ids = np.array([trajectory.topology.atom(i).residue.resSeq for i in calc_indices])
@@ -887,9 +912,9 @@ class RMSDAnalyzer:
             logger.error(f"Error in single RMSF calculation with MDTraj: {e}")
             raise
 
-    def _calculate_rmsf_mdtraj_multi(self, trajectory: md.Trajectory,
-                                   chain_selections: Dict[str, str],
-                                   align_selection: str) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    def _calculate_rmsf_mdtraj_multi(
+        self, trajectory: md.Trajectory, chain_selections: Dict[str, str], align_selection: str
+    ) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
         """
         Calculate RMSF for multiple chains using MDTraj.
 
@@ -933,7 +958,7 @@ class RMSDAnalyzer:
 
                     # Calculate RMSF for this chain
                     mean_positions = np.mean(aligned_traj.xyz[:, calc_indices], axis=0)
-                    rmsf_values = np.sqrt(np.mean((aligned_traj.xyz[:, calc_indices] - mean_positions)**2, axis=0))
+                    rmsf_values = np.sqrt(np.mean((aligned_traj.xyz[:, calc_indices] - mean_positions) ** 2, axis=0))
                     # Convert from nm to Angstrom
                     rmsf_values *= 10.0
 
@@ -944,7 +969,9 @@ class RMSDAnalyzer:
                     residue_ids = np.array([trajectory.topology.atom(i).residue.resSeq for i in calc_indices])
 
                     results[chain_name] = (rmsf_per_atom, residue_ids)
-                    logger.info(f"  {chain_name}: {len(rmsf_per_atom)} atoms, Mean RMSF = {np.mean(rmsf_per_atom):.2f} Å")
+                    logger.info(
+                        f"  {chain_name}: {len(rmsf_per_atom)} atoms, Mean RMSF = {np.mean(rmsf_per_atom):.2f} Å"
+                    )
 
                 except Exception as e:
                     logger.error(f"Error processing {chain_name}: {e}")
@@ -956,15 +983,17 @@ class RMSDAnalyzer:
             logger.error(f"Error in multi-chain RMSF calculation with MDTraj: {e}")
             raise
 
-    def calculate_multi_trajectory_rmsf(self,
-                                      topology_file: str,
-                                      trajectory_files: List[str],
-                                      auto_detect_chains: bool = True,
-                                      align_selection: Optional[str] = None,
-                                      start_frame: int = 0,
-                                      end_frame: Optional[int] = None,
-                                      step: int = 1,
-                                      cache_name: Optional[str] = None) -> Dict[str, Dict]:
+    def calculate_multi_trajectory_rmsf(
+        self,
+        topology_file: str,
+        trajectory_files: List[str],
+        auto_detect_chains: bool = True,
+        align_selection: Optional[str] = None,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Dict[str, Dict]:
         """
         Calculate RMSF across multiple trajectories with automatic chain detection.
 
@@ -1031,7 +1060,7 @@ class RMSDAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached multi-trajectory RMSF results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Calculate RMSF for each trajectory
@@ -1057,7 +1086,7 @@ class RMSDAnalyzer:
                         start_frame=start_frame,
                         end_frame=end_frame,
                         step=step,
-                        cache_name=f"{cache_key}_{traj_name}"
+                        cache_name=f"{cache_key}_{traj_name}",
                     )
 
                     if isinstance(rmsf_data, dict):
@@ -1087,11 +1116,7 @@ class RMSDAnalyzer:
                 logger.info(f"Combining data for {chain_name}")
 
                 # Collect data from all trajectories for this chain
-                chain_data = {
-                    "trajectories": {},
-                    "combined": {},
-                    "statistics": {}
-                }
+                chain_data = {"trajectories": {}, "combined": {}, "statistics": {}}
 
                 traj_rmsf_values = []
                 traj_means = []
@@ -1123,7 +1148,7 @@ class RMSDAnalyzer:
                     chain_data["combined"] = {
                         "mean_rmsf": mean_rmsf,
                         "std_rmsf": std_rmsf,
-                        "residue_ids": reference_residue_ids
+                        "residue_ids": reference_residue_ids,
                     }
 
                     chain_data["statistics"] = {
@@ -1131,17 +1156,19 @@ class RMSDAnalyzer:
                         "overall_std": float(np.mean(std_rmsf)),
                         "trajectory_means": traj_means,
                         "n_trajectories": len(traj_rmsf_values),
-                        "n_residues": len(mean_rmsf)
+                        "n_residues": len(mean_rmsf),
                     }
 
                     combined_results[chain_name] = chain_data
 
-                    logger.info(f"  ✓ {chain_name}: {len(traj_rmsf_values)} trajectories, "
-                              f"mean RMSF = {chain_data['statistics']['overall_mean']:.2f} ± "
-                              f"{chain_data['statistics']['overall_std']:.2f} Å")
+                    logger.info(
+                        f"  ✓ {chain_name}: {len(traj_rmsf_values)} trajectories, "
+                        f"mean RMSF = {chain_data['statistics']['overall_mean']:.2f} ± "
+                        f"{chain_data['statistics']['overall_std']:.2f} Å"
+                    )
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(combined_results, f)
 
             logger.info(f"Multi-trajectory RMSF analysis completed for {len(combined_results)} chains")

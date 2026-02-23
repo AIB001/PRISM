@@ -8,15 +8,11 @@ Uses SwissParam command-line API (port 8443) for reliable force field generation
 """
 
 import os
-import sys
-import re
-import time
 import tarfile
 import shutil
 import tempfile
 import hashlib
 import subprocess
-from pathlib import Path
 
 # Import the base class
 try:
@@ -123,11 +119,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         print("\n[1] Submitting to SwissParam API and retrieving results...")
 
         # Map approach to API parameter
-        approach_map = {
-            "mmff-based": "mmff-based",
-            "match": "match",
-            "both": "both"
-        }
+        approach_map = {"mmff-based": "mmff-based", "match": "match", "both": "both"}
         api_approach = approach_map[self.approach]
 
         # Submit job and retrieve tarball directly
@@ -136,10 +128,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         ligand_dir = os.path.dirname(os.path.abspath(self.ligand_path))
         ligand_file = os.path.basename(self.ligand_path)
 
-        submit_cmd = [
-            'curl', '-F', f'myMol2=@{ligand_file}',
-            f'{self.api_base}/startparam?approach={api_approach}'
-        ]
+        submit_cmd = ["curl", "-F", f"myMol2=@{ligand_file}", f"{self.api_base}/startparam?approach={api_approach}"]
 
         try:
             print(f'    Running: curl -F "myMol2=@{ligand_file}" "{self.api_base}/startparam?approach={api_approach}"')
@@ -153,7 +142,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
             # Check if we got valid tarball data
             if len(tar_data) < 1000:
-                error_msg = tar_data.decode('utf-8', errors='ignore').strip()
+                error_msg = tar_data.decode("utf-8", errors="ignore").strip()
                 if error_msg:
                     raise RuntimeError(f"SwissParam server error: {error_msg}")
                 else:
@@ -176,11 +165,9 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                 )
             raise RuntimeError(f"Failed: {e}")
 
-
     def _extract_tarball(self, tar_data):
         """Extract tarball to temporary directory"""
         print("\n[2] Extracting force field files...")
-
 
         temp_dir = tempfile.mkdtemp(prefix="swissparam_")
 
@@ -188,14 +175,14 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         tar_hash = hashlib.md5(tar_data).hexdigest()[:8]
         tar_file = os.path.join(temp_dir, f"swissparam_{tar_hash}.tar.gz")
 
-        with open(tar_file, 'wb') as f:
+        with open(tar_file, "wb") as f:
             f.write(tar_data)
 
         # Extract
-        extract_dir = os.path.join(temp_dir, 'extracted')
+        extract_dir = os.path.join(temp_dir, "extracted")
         os.makedirs(extract_dir, exist_ok=True)
 
-        with tarfile.open(tar_file, 'r:gz') as tar:
+        with tarfile.open(tar_file, "r:gz") as tar:
             tar.extractall(extract_dir)
 
         print(f"    ✓ Extracted to: {extract_dir}")
@@ -218,45 +205,45 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                 filepath = os.path.join(root, filename)
 
                 # GROMACS topology file (.itp)
-                if filename.endswith('.itp'):
-                    if 'posre' not in filename.lower() and 'itp' not in files:
-                        files['itp'] = filepath
+                if filename.endswith(".itp"):
+                    if "posre" not in filename.lower() and "itp" not in files:
+                        files["itp"] = filepath
                         print(f"    ✓ Found .itp: {filename}")
 
                 # CHARMM parameter files
-                elif filename.endswith('.par'):
-                    if 'par' not in files:
-                        files['par'] = filepath
+                elif filename.endswith(".par"):
+                    if "par" not in files:
+                        files["par"] = filepath
                         print(f"    ✓ Found .par: {filename}")
 
-                elif filename.endswith('.rtf'):
-                    if 'rtf' not in files:
-                        files['rtf'] = filepath
+                elif filename.endswith(".rtf"):
+                    if "rtf" not in files:
+                        files["rtf"] = filepath
                         print(f"    ✓ Found .rtf: {filename}")
 
-                elif filename.endswith('.prm'):
-                    if 'prm' not in files:
-                        files['prm'] = filepath
+                elif filename.endswith(".prm"):
+                    if "prm" not in files:
+                        files["prm"] = filepath
                         print(f"    ✓ Found .prm: {filename}")
 
                 # Coordinate files
-                elif filename.endswith('.pdb'):
-                    if 'pdb' not in files:
-                        files['pdb'] = filepath
+                elif filename.endswith(".pdb"):
+                    if "pdb" not in files:
+                        files["pdb"] = filepath
                         print(f"    ✓ Found .pdb: {filename}")
 
-                elif filename.endswith('.crd'):
-                    if 'crd' not in files:
-                        files['crd'] = filepath
+                elif filename.endswith(".crd"):
+                    if "crd" not in files:
+                        files["crd"] = filepath
                         print(f"    ✓ Found .crd: {filename}")
 
-                elif filename.endswith('.gro'):
-                    if 'gro' not in files:
-                        files['gro'] = filepath
+                elif filename.endswith(".gro"):
+                    if "gro" not in files:
+                        files["gro"] = filepath
                         print(f"    ✓ Found .gro: {filename}")
 
         # Check if we got any force field files
-        if not any(files.get(k) for k in ['itp', 'par', 'rtf', 'prm']):
+        if not any(files.get(k) for k in ["itp", "par", "rtf", "prm"]):
             raise RuntimeError(
                 "No force field files found in SwissParam output. "
                 "The server may have failed to generate parameters. "
@@ -268,6 +255,8 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
     def _copy_output_files(self, files, sp_dir):
         """Copy SwissParam files to output directory"""
         print("\n[4] Copying files to output directory...")
+        if sp_dir:
+            print(f"    Source directory: {sp_dir}")
 
         # Create output directory
         os.makedirs(self.lig_ff_dir, exist_ok=True)
@@ -288,8 +277,8 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
         For SwissParam, we need at least topology files (.itp for GROMACS or .par/.rtf for CHARMM)
         """
-        has_itp = any(f.endswith('.itp') for f in os.listdir(output_dir))
-        has_charmm = any(f.endswith(('.par', '.rtf')) for f in os.listdir(output_dir))
+        has_itp = any(f.endswith(".itp") for f in os.listdir(output_dir))
+        has_charmm = any(f.endswith((".par", ".rtf")) for f in os.listdir(output_dir))
 
         return has_itp or has_charmm
 

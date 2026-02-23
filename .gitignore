@@ -5,7 +5,6 @@ __pycache__/
 
 # Archive directory (deprecated files)
 Archive/
-.playwright*/
 
 # C extensions
 *.so
@@ -47,8 +46,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
-test
-tests
 
 # Environments
 .env
@@ -98,8 +95,9 @@ cache/
 *.log
 
 # Project specific
-<import>/
-*.egg-info
+test/*
+tests/*
+.playwright-mcp/*
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/

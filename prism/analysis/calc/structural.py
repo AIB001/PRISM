@@ -8,7 +8,7 @@ Based on SciDraft-Studio implementation with PRISM integration.
 
 import numpy as np
 import MDAnalysis as mda
-from typing import List, Union, Optional, Tuple, Dict, Callable
+from typing import List, Union, Optional, Dict, Callable
 import logging
 from pathlib import Path
 import pickle
@@ -26,14 +26,16 @@ class StructuralAnalyzer:
         self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def calculate_radius_of_gyration(self,
-                                   universe: Union[mda.Universe, str],
-                                   trajectory: Optional[Union[str, List[str]]] = None,
-                                   selection: str = "protein",
-                                   start_frame: int = 0,
-                                   end_frame: Optional[int] = None,
-                                   step: int = 1,
-                                   cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_radius_of_gyration(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate radius of gyration for a selection over trajectory.
 
@@ -82,7 +84,7 @@ class StructuralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached radius of gyration results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get atoms selection
@@ -99,7 +101,7 @@ class StructuralAnalyzer:
             rgyr_values = np.array(rgyr_values)
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(rgyr_values, f)
 
             logger.info(f"Radius of gyration calculation completed. Mean: {np.mean(rgyr_values):.2f} Å")
@@ -109,14 +111,16 @@ class StructuralAnalyzer:
             logger.error(f"Error calculating radius of gyration: {e}")
             raise
 
-    def calculate_end_to_end_distance(self,
-                                    universe: Union[mda.Universe, str],
-                                    trajectory: Optional[Union[str, List[str]]] = None,
-                                    selection: str = "protein",
-                                    start_frame: int = 0,
-                                    end_frame: Optional[int] = None,
-                                    step: int = 1,
-                                    cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_end_to_end_distance(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate end-to-end distance (N-terminus to C-terminus).
 
@@ -165,7 +169,7 @@ class StructuralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached end-to-end distance results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get first and last CA atoms
@@ -184,7 +188,7 @@ class StructuralAnalyzer:
             distances = np.array(distances)
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(distances, f)
 
             logger.info(f"End-to-end distance calculation completed. Mean: {np.mean(distances):.2f} Å")
@@ -194,15 +198,17 @@ class StructuralAnalyzer:
             logger.error(f"Error calculating end-to-end distance: {e}")
             raise
 
-    def calculate_custom_property(self,
-                                universe: Union[mda.Universe, str],
-                                property_func: Callable,
-                                trajectory: Optional[Union[str, List[str]]] = None,
-                                selection: str = "protein",
-                                start_frame: int = 0,
-                                end_frame: Optional[int] = None,
-                                step: int = 1,
-                                cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_custom_property(
+        self,
+        universe: Union[mda.Universe, str],
+        property_func: Callable,
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate a custom property over trajectory frames.
 
@@ -252,7 +258,7 @@ class StructuralAnalyzer:
 
             # Create cache key
             if cache_name is None:
-                func_name = getattr(property_func, '__name__', 'custom')
+                func_name = getattr(property_func, "__name__", "custom")
                 cache_key = f"custom_{func_name}_{selection}_{start_frame}_{end_frame}_{step}"
                 cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "")
             else:
@@ -263,7 +269,7 @@ class StructuralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached custom property results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get atoms selection
@@ -280,7 +286,7 @@ class StructuralAnalyzer:
             values = np.array(values)
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(values, f)
 
             logger.info(f"Custom property calculation completed. Mean: {np.mean(values):.2f}")
@@ -290,15 +296,17 @@ class StructuralAnalyzer:
             logger.error(f"Error calculating custom property: {e}")
             raise
 
-    def compare_property_distributions(self,
-                                     universes: List[Union[mda.Universe, str]],
-                                     property_func: Optional[Callable] = None,
-                                     trajectories: Optional[List[str]] = None,
-                                     labels: Optional[List[str]] = None,
-                                     selection: str = "protein",
-                                     start_frame: int = 0,
-                                     end_frame: Optional[int] = None,
-                                     step: int = 1) -> Dict[str, List[float]]:
+    def compare_property_distributions(
+        self,
+        universes: List[Union[mda.Universe, str]],
+        property_func: Optional[Callable] = None,
+        trajectories: Optional[List[str]] = None,
+        labels: Optional[List[str]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+    ) -> Dict[str, List[float]]:
         """
         Compare property distributions across multiple systems.
 
@@ -357,9 +365,7 @@ class StructuralAnalyzer:
 
             # Calculate property for each frame
             values = []
-            frame_range = range(start_frame,
-                              end_frame if end_frame else len(univ.trajectory),
-                              step)
+            frame_range = range(start_frame, end_frame if end_frame else len(univ.trajectory), step)
 
             for frame_idx in frame_range:
                 univ.trajectory[frame_idx]

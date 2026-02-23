@@ -10,10 +10,10 @@ This module generates Gaussian input files (.gjf) for:
 """
 
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from .converter import CoordinateConverter
-from .utils import get_charge_multiplicity, extract_optimized_coords_from_log, ATOMIC_SYMBOLS
+from .utils import get_charge_multiplicity, extract_optimized_coords_from_log
 
 # Import color utilities
 try:
@@ -22,10 +22,22 @@ except ImportError:
     try:
         from prism.utils.colors import print_success, print_info, print_warning, print_error
     except ImportError:
-        def print_success(x, **kwargs): print(f"[OK] {x}")
-        def print_info(x, **kwargs): print(f"[INFO] {x}")
-        def print_warning(x, **kwargs): print(f"[WARN] {x}")
-        def print_error(x, **kwargs): print(f"[ERROR] {x}")
+
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[OK] {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[INFO] {x}")
+
+        def print_warning(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[WARN] {x}")
+
+        def print_error(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[ERROR] {x}")
 
 
 class GaussianInputGenerator:
@@ -37,14 +49,11 @@ class GaussianInputGenerator:
     """
 
     # Standard basis sets and methods for RESP
-    METHODS = {
-        'hf': 'HF',
-        'dft': 'B3LYP'
-    }
+    METHODS = {"hf": "HF", "dft": "B3LYP"}
 
-    BASIS_SET = '6-31G*'
+    BASIS_SET = "6-31G*"
 
-    def __init__(self, method: str = 'dft', nproc: int = 16, mem: str = '4GB'):
+    def __init__(self, method: str = "dft", nproc: int = 16, mem: str = "4GB"):
         """
         Initialize the Gaussian input file generator.
 
@@ -57,7 +66,7 @@ class GaussianInputGenerator:
         mem : str
             Memory allocation (default: '4GB')
         """
-        self.method = self.METHODS.get(method.lower(), 'B3LYP')
+        self.method = self.METHODS.get(method.lower(), "B3LYP")
         self.method_key = method.lower()
         self.basis_set = self.BASIS_SET
         self.nproc = nproc
@@ -75,7 +84,7 @@ class GaussianInputGenerator:
         lines = []
         for element, x, y, z in atoms:
             lines.append(f" {element:2s}    {x:14.8f}  {y:14.8f}  {z:14.8f}")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def generate_opt_gjf(self, xyz_file: str, mol2_file: str, output_file: str) -> str:
         """
@@ -107,7 +116,7 @@ class GaussianInputGenerator:
         # Generate checkpoint filename
         chk_file = os.path.splitext(os.path.basename(output_file))[0] + ".chk"
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             # Link0 section
             self._write_link0(f, chk_file)
 
@@ -129,8 +138,9 @@ class GaussianInputGenerator:
         print_success(f"  Generated: {output_file}")
         return output_file
 
-    def generate_esp_gjf(self, atoms: List[Tuple[str, float, float, float]],
-                         charge: int, multiplicity: int, output_file: str) -> str:
+    def generate_esp_gjf(
+        self, atoms: List[Tuple[str, float, float, float]], charge: int, multiplicity: int, output_file: str
+    ) -> str:
         """
         Generate Gaussian input file for ESP calculation.
 
@@ -155,7 +165,7 @@ class GaussianInputGenerator:
         # Generate checkpoint filename
         chk_file = os.path.splitext(os.path.basename(output_file))[0] + ".chk"
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             # Link0 section
             self._write_link0(f, chk_file)
 
@@ -238,7 +248,7 @@ class GaussianInputGenerator:
     def _read_xyz(self, xyz_file: str) -> List[Tuple[str, float, float, float]]:
         """Read coordinates from XYZ file."""
         atoms = []
-        with open(xyz_file, 'r') as f:
+        with open(xyz_file, "r") as f:
             lines = f.readlines()
 
         # Skip first two lines (atom count and comment)
@@ -258,7 +268,7 @@ class GaussianInputGenerator:
         charge = 0
         multiplicity = 1
 
-        with open(log_file, 'r') as f:
+        with open(log_file, "r") as f:
             for line in f:
                 if "Charge =" in line and "Multiplicity =" in line:
                     parts = line.split()
@@ -271,8 +281,7 @@ class GaussianInputGenerator:
 
         return charge, multiplicity
 
-    def generate_all_inputs(self, mol2_file: str, output_dir: str,
-                            do_optimization: bool = False) -> dict:
+    def generate_all_inputs(self, mol2_file: str, output_dir: str, do_optimization: bool = False) -> dict:
         """
         Generate all necessary Gaussian input files.
 
@@ -298,21 +307,21 @@ class GaussianInputGenerator:
         converter = CoordinateConverter(verbose=False)
         xyz_file = os.path.join(output_dir, "ligand.xyz")
         converter.mol2_to_xyz(mol2_file, xyz_file)
-        files['xyz'] = xyz_file
+        files["xyz"] = xyz_file
 
         if do_optimization:
             # Generate optimization input
             opt_gjf = os.path.join(output_dir, f"lig_opt_{self.method_key}.gjf")
             self.generate_opt_gjf(xyz_file, mol2_file, opt_gjf)
-            files['opt_gjf'] = opt_gjf
+            files["opt_gjf"] = opt_gjf
 
             # ESP will be generated from optimized coordinates later
             esp_gjf = os.path.join(output_dir, f"lig_esp_{self.method_key}.gjf")
-            files['esp_gjf'] = esp_gjf  # Placeholder path
+            files["esp_gjf"] = esp_gjf  # Placeholder path
         else:
             # Generate ESP input directly
             esp_gjf = os.path.join(output_dir, f"lig_esp_{self.method_key}.gjf")
             self.generate_esp_direct(xyz_file, mol2_file, esp_gjf)
-            files['esp_gjf'] = esp_gjf
+            files["esp_gjf"] = esp_gjf
 
         return files

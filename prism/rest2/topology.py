@@ -6,21 +6,19 @@ and solute atom marking -- all in pure Python (no MDAnalysis dependency).
 Only requires `gmx` (GROMACS) for the grompp -pp step.
 """
 
-import math
 import os
 import re
-import shutil
 import subprocess
 import tempfile
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-_SECTION_RE = re.compile(r'^\s*\[\s*(\w+)\s*\]')
+_SECTION_RE = re.compile(r"^\s*\[\s*(\w+)\s*\]")
 
 
 # ---------------------------------------------------------------------------
 # GRO file parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_gro(path: str) -> Tuple[List[dict], List[float]]:
     """Parse a GROMACS .gro file (fixed-width format).
@@ -33,10 +31,9 @@ def parse_gro(path: str) -> Tuple[List[dict], List[float]]:
         atoms: list of dicts with keys: resnr, resname, atomname, atomnr, x, y, z
         box: [bx, by, bz] in nm
     """
-    with open(path, 'r') as f:
+    with open(path, "r") as f:
         lines = f.readlines()
 
-    title = lines[0].strip()
     n_atoms = int(lines[1].strip())
     atoms = []
 
@@ -51,13 +48,17 @@ def parse_gro(path: str) -> Tuple[List[dict], List[float]]:
         y = float(line[28:36].strip())
         z = float(line[36:44].strip())
 
-        atoms.append({
-            'resnr': resnr,
-            'resname': resname,
-            'atomname': atomname,
-            'atomnr': atomnr,
-            'x': x, 'y': y, 'z': z,
-        })
+        atoms.append(
+            {
+                "resnr": resnr,
+                "resname": resname,
+                "atomname": atomname,
+                "atomnr": atomnr,
+                "x": x,
+                "y": y,
+                "z": z,
+            }
+        )
 
     # Parse box from last line
     box_line = lines[2 + n_atoms].split()
@@ -69,6 +70,7 @@ def parse_gro(path: str) -> Tuple[List[dict], List[float]]:
 # ---------------------------------------------------------------------------
 # Pocket residue detection
 # ---------------------------------------------------------------------------
+
 
 def _minimum_image_dist(dx: float, box_len: float) -> float:
     """Apply minimum image convention to a single coordinate difference."""
@@ -112,8 +114,8 @@ def find_pocket_residues(
     # Identify ligand atoms
     lig_atoms = []
     for atom in atoms:
-        if atom['resname'] in lig_resnames:
-            lig_atoms.append((atom['x'], atom['y'], atom['z']))
+        if atom["resname"] in lig_resnames:
+            lig_atoms.append((atom["x"], atom["y"], atom["z"]))
 
     if not lig_atoms:
         raise ValueError(f"No atoms found with resname(s) {sorted(lig_resnames)} in GRO file")
@@ -132,23 +134,23 @@ def find_pocket_residues(
     # Find protein residues near ligand(s)
     pocket: Dict[str, Set[int]] = {}
     for idx, atom in enumerate(atoms):
-        if atom['resname'] in lig_resnames:
+        if atom["resname"] in lig_resnames:
             continue
         # Only consider protein chains (those with Protein_ prefix)
         moltype = atom_to_moltype.get(idx)
-        if moltype is None or not moltype.startswith('Protein_chain_'):
+        if moltype is None or not moltype.startswith("Protein_chain_"):
             continue
 
-        ax, ay, az = atom['x'], atom['y'], atom['z']
+        ax, ay, az = atom["x"], atom["y"], atom["z"]
         for lx, ly, lz in lig_atoms:
             dx = _minimum_image_dist(ax - lx, bx)
             dy = _minimum_image_dist(ay - ly, by)
             dz = _minimum_image_dist(az - lz, bz)
-            dist_sq = dx*dx + dy*dy + dz*dz
+            dist_sq = dx * dx + dy * dy + dz * dz
             if dist_sq <= cutoff_sq:
                 if moltype not in pocket:
                     pocket[moltype] = set()
-                pocket[moltype].add(atom['resnr'])
+                pocket[moltype].add(atom["resnr"])
                 break  # This atom is close enough, move to next
 
     return pocket
@@ -158,7 +160,8 @@ def find_pocket_residues(
 # Topology merging (gmx grompp -pp)
 # ---------------------------------------------------------------------------
 
-def merge_topology(topol: str, gro: str, output: str, gmx: str = 'gmx') -> None:
+
+def merge_topology(topol: str, gro: str, output: str, gmx: str = "gmx") -> None:
     """Run gmx grompp -pp to produce a fully-expanded processed topology.
 
     Creates a temporary MDP file with minimal settings for preprocessing.
@@ -173,20 +176,27 @@ def merge_topology(topol: str, gro: str, output: str, gmx: str = 'gmx') -> None:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Write minimal MDP
-        mdp_path = os.path.join(tmpdir, 'minimal.mdp')
-        with open(mdp_path, 'w') as f:
-            f.write('integrator = steep\nnsteps = 0\n')
+        mdp_path = os.path.join(tmpdir, "minimal.mdp")
+        with open(mdp_path, "w") as f:
+            f.write("integrator = steep\nnsteps = 0\n")
 
-        tpr_path = os.path.join(tmpdir, 'topol.tpr')
+        tpr_path = os.path.join(tmpdir, "topol.tpr")
 
         cmd = [
-            gmx, 'grompp',
-            '-f', mdp_path,
-            '-c', gro,
-            '-p', topol,
-            '-pp', output,
-            '-o', tpr_path,
-            '-maxwarn', '10',
+            gmx,
+            "grompp",
+            "-f",
+            mdp_path,
+            "-c",
+            gro,
+            "-p",
+            topol,
+            "-pp",
+            output,
+            "-o",
+            tpr_path,
+            "-maxwarn",
+            "10",
         ]
 
         result = subprocess.run(
@@ -197,9 +207,7 @@ def merge_topology(topol: str, gro: str, output: str, gmx: str = 'gmx') -> None:
         )
 
         if not os.path.exists(output):
-            raise RuntimeError(
-                f"gmx grompp -pp failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-            )
+            raise RuntimeError(f"gmx grompp -pp failed.\nstdout: {result.stdout}\nstderr: {result.stderr}")
 
         print(f"  Processed topology written to: {output}")
 
@@ -207,6 +215,7 @@ def merge_topology(topol: str, gro: str, output: str, gmx: str = 'gmx') -> None:
 # ---------------------------------------------------------------------------
 # Parse [ molecules ] section
 # ---------------------------------------------------------------------------
+
 
 def parse_molecules_section(topol_path: str) -> List[Tuple[str, int]]:
     """Parse the [ molecules ] section from a topology file.
@@ -217,22 +226,22 @@ def parse_molecules_section(topol_path: str) -> List[Tuple[str, int]]:
     molecules = []
     in_molecules = False
 
-    with open(topol_path, 'r') as f:
+    with open(topol_path, "r") as f:
         for line in f:
             stripped = line.strip()
             m = _SECTION_RE.match(stripped)
             if m:
-                in_molecules = (m.group(1).lower() == 'molecules')
+                in_molecules = m.group(1).lower() == "molecules"
                 continue
 
             if not in_molecules:
                 continue
 
-            if not stripped or stripped.startswith(';'):
+            if not stripped or stripped.startswith(";"):
                 continue
 
             # Remove inline comments
-            data = stripped.split(';')[0].split()
+            data = stripped.split(";")[0].split()
             if len(data) >= 2:
                 name = data[0]
                 count = int(data[1])
@@ -245,6 +254,7 @@ def parse_molecules_section(topol_path: str) -> List[Tuple[str, int]]:
 # Count atoms per moleculetype in processed topology
 # ---------------------------------------------------------------------------
 
+
 def count_atoms_per_moltype(processed_top: str) -> Dict[str, int]:
     """Count the number of atoms in each moleculetype from a processed topology.
 
@@ -255,27 +265,27 @@ def count_atoms_per_moltype(processed_top: str) -> Dict[str, int]:
     current_moltype: Optional[str] = None
     current_section: Optional[str] = None
 
-    with open(processed_top, 'r') as f:
+    with open(processed_top, "r") as f:
         for line in f:
             stripped = line.strip()
             m = _SECTION_RE.match(stripped)
             if m:
                 current_section = m.group(1).lower()
-                if current_section == 'moleculetype':
+                if current_section == "moleculetype":
                     current_moltype = None  # Will be set by next data line
                 continue
 
-            if not stripped or stripped.startswith(';') or stripped.startswith('#'):
+            if not stripped or stripped.startswith(";") or stripped.startswith("#"):
                 continue
 
-            if current_section == 'moleculetype':
+            if current_section == "moleculetype":
                 # First data line: name nrexcl
                 fields = stripped.split()
                 if fields:
                     current_moltype = fields[0]
                     counts[current_moltype] = 0
 
-            elif current_section == 'atoms' and current_moltype is not None:
+            elif current_section == "atoms" and current_moltype is not None:
                 counts[current_moltype] = counts.get(current_moltype, 0) + 1
 
     return counts
@@ -284,6 +294,7 @@ def count_atoms_per_moltype(processed_top: str) -> Dict[str, int]:
 # ---------------------------------------------------------------------------
 # Mark solute atoms
 # ---------------------------------------------------------------------------
+
 
 def mark_solute_atoms(
     processed_top_path: str,
@@ -309,7 +320,7 @@ def mark_solute_atoms(
         lig_moltypes = {lig_moltype}
     else:
         lig_moltypes = set(lig_moltype)
-    with open(processed_top_path, 'r') as f:
+    with open(processed_top_path, "r") as f:
         lines = f.readlines()
 
     # First pass: identify which types need '_' duplicates
@@ -322,20 +333,20 @@ def mark_solute_atoms(
         m = _SECTION_RE.match(stripped)
         if m:
             current_section = m.group(1).lower()
-            if current_section == 'moleculetype':
+            if current_section == "moleculetype":
                 current_moltype = None
             continue
 
-        if not stripped or stripped.startswith(';') or stripped.startswith('#'):
+        if not stripped or stripped.startswith(";") or stripped.startswith("#"):
             continue
 
-        if current_section == 'moleculetype':
+        if current_section == "moleculetype":
             fields = stripped.split()
             if fields:
                 current_moltype = fields[0]
 
-        elif current_section == 'atoms' and current_moltype is not None:
-            fields = stripped.split(';')[0].split()
+        elif current_section == "atoms" and current_moltype is not None:
+            fields = stripped.split(";")[0].split()
             if len(fields) >= 7:
                 atom_type = fields[1]
                 resnr = int(fields[2])
@@ -363,9 +374,12 @@ def mark_solute_atoms(
     # the single merged section.  Subsequent occurrences are skipped entirely.
 
     # Which type sections to merge
-    _TYPE_SECTIONS = {'atomtypes', 'bondtypes', 'angletypes', 'dihedraltypes', 'pairtypes'}
+    _TYPE_SECTIONS = {"atomtypes", "bondtypes", "angletypes", "dihedraltypes", "pairtypes"}
     _TYPE_N_FIELDS = {
-        'bondtypes': 2, 'angletypes': 3, 'dihedraltypes': 4, 'pairtypes': 2,
+        "bondtypes": 2,
+        "angletypes": 3,
+        "dihedraltypes": 4,
+        "pairtypes": 2,
     }
 
     output_lines: List[str] = []
@@ -386,14 +400,16 @@ def mark_solute_atoms(
                     output_lines.append(line)
                     output_lines.extend(
                         _build_merged_type_section(
-                            lines, current_section, marked_types,
+                            lines,
+                            current_section,
+                            marked_types,
                             _TYPE_N_FIELDS.get(current_section),
                         )
                     )
                 # Skip header (both first — already appended above — and subsequent)
                 continue
 
-            if current_section == 'moleculetype':
+            if current_section == "moleculetype":
                 current_moltype = None
             output_lines.append(line)
             continue
@@ -402,23 +418,23 @@ def mark_solute_atoms(
         if current_section in _TYPE_SECTIONS:
             continue
 
-        if not stripped or stripped.startswith(';') or stripped.startswith('#'):
+        if not stripped or stripped.startswith(";") or stripped.startswith("#"):
             output_lines.append(line)
             continue
 
-        if current_section == 'moleculetype':
+        if current_section == "moleculetype":
             fields = stripped.split()
             if fields:
                 current_moltype = fields[0]
             output_lines.append(line)
 
-        elif current_section == 'atoms' and current_moltype is not None:
+        elif current_section == "atoms" and current_moltype is not None:
             output_lines.append(_mark_atom_line(line, current_moltype, lig_moltypes, pocket_residues))
 
         else:
             output_lines.append(line)
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.writelines(output_lines)
 
     print(f"  Marked topology written to: {output_path}")
@@ -428,6 +444,7 @@ def mark_solute_atoms(
 # ---------------------------------------------------------------------------
 # Helpers: merge type sections and generate REST2 duplicates
 # ---------------------------------------------------------------------------
+
 
 def _build_merged_type_section(
     all_lines: List[str],
@@ -442,7 +459,7 @@ def _build_merged_type_section(
     For bonded types:   groups by (type_tuple, funct) for contiguity,
                         then adds all '_' combinations.
     """
-    if section_name == 'atomtypes':
+    if section_name == "atomtypes":
         return _merge_atomtypes(all_lines, marked_types)
     else:
         return _merge_bonded_types(all_lines, section_name, marked_types, n_type_fields)
@@ -461,12 +478,12 @@ def _merge_atomtypes(all_lines: List[str], marked_types: Set[str]) -> List[str]:
         if m:
             current_section = m.group(1).lower()
             continue
-        if current_section != 'atomtypes':
+        if current_section != "atomtypes":
             continue
-        if not stripped or stripped.startswith(';') or stripped.startswith('#'):
+        if not stripped or stripped.startswith(";") or stripped.startswith("#"):
             continue
 
-        fields = stripped.split(';')[0].split()
+        fields = stripped.split(";")[0].split()
         if not fields:
             continue
         type_name = fields[0]
@@ -479,29 +496,29 @@ def _merge_atomtypes(all_lines: List[str], marked_types: Set[str]) -> List[str]:
     dup_lines: List[str] = []
     for line in result:
         stripped = line.strip()
-        data = stripped.split(';')[0]
-        comment = ''
-        if ';' in stripped:
-            comment = stripped[stripped.index(';'):]
+        data = stripped.split(";")[0]
+        comment = ""
+        if ";" in stripped:
+            comment = stripped[stripped.index(";") :]
         fields = data.split()
         if not fields or fields[0] not in marked_types:
             continue
 
         new_fields = list(fields)
-        new_fields[0] = fields[0] + '_'
+        new_fields[0] = fields[0] + "_"
         if len(new_fields) > 1:
             try:
                 float(new_fields[1])
             except ValueError:
-                new_fields[1] = new_fields[1] + '_'
+                new_fields[1] = new_fields[1] + "_"
 
-        dup_line = '  '.join(f'{f:>12}' if _looks_numeric(f) else f' {f}' for f in new_fields)
+        dup_line = "  ".join(f"{f:>12}" if _looks_numeric(f) else f" {f}" for f in new_fields)
         if comment:
-            dup_line += f'  {comment}'
-        dup_lines.append(dup_line + '\n')
+            dup_line += f"  {comment}"
+        dup_lines.append(dup_line + "\n")
 
     if dup_lines:
-        result.append('; REST2 solute atom type duplicates\n')
+        result.append("; REST2 solute atom type duplicates\n")
         result.extend(dup_lines)
 
     return result
@@ -545,13 +562,13 @@ def _merge_bonded_types(
             continue
         if current_section != section_name:
             continue
-        if not stripped or stripped.startswith(';') or stripped.startswith('#'):
+        if not stripped or stripped.startswith(";") or stripped.startswith("#"):
             continue
 
-        data = stripped.split(';')[0]
-        comment = ''
-        if ';' in stripped:
-            comment = stripped[stripped.index(';'):]
+        data = stripped.split(";")[0]
+        comment = ""
+        if ";" in stripped:
+            comment = stripped[stripped.index(";") :]
         fields = data.split()
         if len(fields) < n_type_fields + 1:
             continue
@@ -565,13 +582,10 @@ def _merge_bonded_types(
     result: List[str] = []
     for (type_tuple, funct), entries in groups.items():
         for fields, comment in entries:
-            dup_line = '  '.join(
-                f'{f:>12}' if _looks_numeric(f) else f'  {f}'
-                for f in fields
-            )
+            dup_line = "  ".join(f"{f:>12}" if _looks_numeric(f) else f"  {f}" for f in fields)
             if comment:
-                dup_line += f'  {comment}'
-            result.append(dup_line + '\n')
+                dup_line += f"  {comment}"
+            result.append(dup_line + "\n")
 
     # Generate REST2 '_' duplicate combinations.
     #
@@ -587,10 +601,7 @@ def _merge_bonded_types(
     dup_groups: OrderedDict = OrderedDict()  # (canonical_key, funct) -> [(fields, comment)]
 
     for (type_tuple, funct), entries in groups.items():
-        marked_positions = [
-            i for i in range(n_type_fields)
-            if type_tuple[i] in marked_types and type_tuple[i] != 'X'
-        ]
+        marked_positions = [i for i in range(n_type_fields) if type_tuple[i] in marked_types and type_tuple[i] != "X"]
         if not marked_positions:
             continue
 
@@ -600,7 +611,7 @@ def _merge_bonded_types(
             new_types = list(type_tuple)
             for bit_idx, pos in enumerate(marked_positions):
                 if combo & (1 << bit_idx):
-                    new_types[pos] = type_tuple[pos] + '_'
+                    new_types[pos] = type_tuple[pos] + "_"
 
             # Canonical key: lexicographically smaller of forward/reverse
             canonical = _canonical_bonded_key(tuple(new_types))
@@ -615,7 +626,7 @@ def _merge_bonded_types(
                 new_fields = list(fields)
                 for bit_idx, pos in enumerate(marked_positions):
                     if combo & (1 << bit_idx):
-                        new_fields[pos] = fields[pos] + '_'
+                        new_fields[pos] = fields[pos] + "_"
                 combo_entries.append((new_fields, comment))
             dup_groups[dup_key] = combo_entries
 
@@ -623,16 +634,13 @@ def _merge_bonded_types(
     dup_lines: List[str] = []
     for (canonical, funct), combo_entries in dup_groups.items():
         for fields, comment in combo_entries:
-            dup_line = '  '.join(
-                f'{f:>12}' if _looks_numeric(f) else f'  {f}'
-                for f in fields
-            )
+            dup_line = "  ".join(f"{f:>12}" if _looks_numeric(f) else f"  {f}" for f in fields)
             if comment:
-                dup_line += f'  {comment}'
-            dup_lines.append(dup_line + '\n')
+                dup_line += f"  {comment}"
+            dup_lines.append(dup_line + "\n")
 
     if dup_lines:
-        result.append(f'; REST2 solute {section_name} duplicates\n')
+        result.append(f"; REST2 solute {section_name} duplicates\n")
         result.extend(dup_lines)
 
     return result
@@ -646,10 +654,10 @@ def _mark_atom_line(
 ) -> str:
     """Mark an atom line by suffixing its type with '_' if it should be scaled."""
     stripped = line.strip()
-    data_part = stripped.split(';')[0]
-    comment_part = ''
-    if ';' in stripped:
-        comment_part = stripped[stripped.index(';'):]
+    data_part = stripped.split(";")[0]
+    comment_part = ""
+    if ";" in stripped:
+        comment_part = stripped[stripped.index(";") :]
 
     fields = data_part.split()
     if len(fields) < 7:
@@ -665,20 +673,20 @@ def _mark_atom_line(
         if resnr in pocket_residues[current_moltype]:
             should_mark = True
 
-    if should_mark and not atom_type.endswith('_'):
-        fields[1] = atom_type + '_'
+    if should_mark and not atom_type.endswith("_"):
+        fields[1] = atom_type + "_"
 
     # Reconstruct with proper spacing
     # nr(6) type(11) resnr(7) residue(7) atom(7) cgnr(7) charge(11) mass(11) ...
-    result = f'{fields[0]:>6} {fields[1]:>11}{fields[2]:>7} {fields[3]:<7} {fields[4]:>6}{fields[5]:>7}{fields[6]:>11}'
+    result = f"{fields[0]:>6} {fields[1]:>11}{fields[2]:>7} {fields[3]:<7} {fields[4]:>6}{fields[5]:>7}{fields[6]:>11}"
     if len(fields) > 7:
-        result += f'{fields[7]:>11}'
+        result += f"{fields[7]:>11}"
     for i in range(8, len(fields)):
-        result += f'{fields[i]:>11}'
+        result += f"{fields[i]:>11}"
 
     if comment_part:
-        result += f'   {comment_part}'
-    return result + '\n'
+        result += f"   {comment_part}"
+    return result + "\n"
 
 
 def _looks_numeric(s: str) -> bool:

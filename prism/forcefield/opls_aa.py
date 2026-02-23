@@ -13,6 +13,7 @@ import zipfile
 import shutil
 import tempfile
 from pathlib import Path
+import importlib.util
 
 # Import the base class
 try:
@@ -24,6 +25,7 @@ except ImportError:
 try:
     import requests
     import urllib3
+
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 except ImportError as e:
     print(f"Warning: Missing requests dependency: {e}")
@@ -35,8 +37,7 @@ except ImportError as e:
 class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
     """OPLS-AA force field generator using LigParGen"""
 
-    def __init__(self, ligand_path, output_dir, charge=0, charge_model="cm1a",
-                 align_to_input=True, overwrite=False):
+    def __init__(self, ligand_path, output_dir, charge=0, charge_model="cm1a", align_to_input=True, overwrite=False):
         """
         Initialize OPLS-AA force field generator
 
@@ -126,28 +127,25 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         except Exception as e:
             print(f"\nError during force field generation: {e}")
             import traceback
+
             traceback.print_exc()
             raise
 
     def _check_rdkit(self):
         """Check if RDKit is available"""
-        try:
-            from rdkit import Chem
-            return True
-        except ImportError:
-            return False
+        return importlib.util.find_spec("rdkit.Chem") is not None
 
     def _detect_file_format(self):
         """Detect input file format"""
         file_ext = os.path.splitext(self.ligand_path)[1].lower()
 
-        if file_ext == '.mol2':
-            return 'mol2'
-        elif file_ext in ['.sdf', '.sd', '.mol']:
-            return 'mol'
+        if file_ext == ".mol2":
+            return "mol2"
+        elif file_ext in [".sdf", ".sd", ".mol"]:
+            return "mol"
         else:
             print(f"Warning: Unknown file extension '{file_ext}', assuming MOL format")
-            return 'mol'
+            return "mol"
 
     def _prepare_upload_file(self, temp_dir):
         """
@@ -163,7 +161,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         str : Path to file ready for upload
         """
         # If already PDB, use directly
-        if self.ligand_path.lower().endswith('.pdb'):
+        if self.ligand_path.lower().endswith(".pdb"):
             return self.ligand_path
 
         # Try to convert to PDB using RDKit
@@ -177,7 +175,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"Converting {self.file_format.upper()} to PDB format for LigParGen...")
 
             # Load molecule
-            if self.file_format == 'mol2':
+            if self.file_format == "mol2":
                 mol = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
             else:  # sdf/mol
                 mol = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
@@ -221,6 +219,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 if attempt > 0:
                     print(f"\nRetry attempt {attempt + 1}/{max_retries}...")
                     import time
+
                     time.sleep(2)  # Wait 2 seconds before retry
 
                 # Convert to PDB format if needed (LigParGen prefers PDB)
@@ -229,17 +228,17 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 # Prepare the upload
                 url = "https://traken.chem.yale.edu/cgi-bin/results_lpg.py"
 
-                with open(upload_file, 'rb') as f:
-                    files = {
-                        'molpdbfile': (os.path.basename(upload_file), f, 'chemical/x-pdb')
-                    }
+                with open(upload_file, "rb") as f:
+                    files = {"molpdbfile": (os.path.basename(upload_file), f, "chemical/x-pdb")}
                     data = {
-                        'chargetype': self.charge_model,
-                        'dropcharge': str(self.charge),
-                        'checkopt': '0'  # No optimization
+                        "chargetype": self.charge_model,
+                        "dropcharge": str(self.charge),
+                        "checkopt": "0",  # No optimization
                     }
 
-                    print(f"Uploading {os.path.basename(upload_file)} with charge={self.charge}, model={self.charge_model}")
+                    print(
+                        f"Uploading {os.path.basename(upload_file)} with charge={self.charge}, model={self.charge_model}"
+                    )
                     response = requests.post(url, files=files, data=data, verify=False, timeout=60)
 
                 if response.status_code != 200:
@@ -262,31 +261,33 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 zip_match = re.search(r'value="(/tmp/UNK_\w+\.zip)"', response.text)
                 if not zip_match:
                     # Try alternative pattern
-                    zip_match = re.search(r'(/tmp/[\w_]+\.zip)', response.text)
+                    zip_match = re.search(r"(/tmp/[\w_]+\.zip)", response.text)
                     if not zip_match:
                         last_error = "No ZIP file found in LigParGen response"
                         print(f"⚠ {last_error}")
                         if attempt < max_retries - 1:
                             # Debug: save response for inspection
                             debug_file = os.path.join(temp_dir, f"ligpargen_response_attempt{attempt+1}.html")
-                            with open(debug_file, 'w') as f:
+                            with open(debug_file, "w") as f:
                                 f.write(response.text)
                             print(f"  Debug: Response saved to {debug_file}")
                             continue
                         else:
                             # Check for common error messages
                             if "error" in response.text.lower():
-                                error_match = re.search(r'<p[^>]*>(.*?error.*?)</p>', response.text, re.IGNORECASE)
+                                error_match = re.search(r"<p[^>]*>(.*?error.*?)</p>", response.text, re.IGNORECASE)
                                 if error_match:
                                     raise ValueError(f"LigParGen error: {error_match.group(1)}")
-                            raise ValueError("No ZIP file found after all retry attempts. Check debug files for details.")
+                            raise ValueError(
+                                "No ZIP file found after all retry attempts. Check debug files for details."
+                            )
 
                 zip_path = zip_match.group(1)
                 print(f"✓ Found result ZIP: {os.path.basename(zip_path)}")
 
                 # Download the ZIP file
                 zip_url = "https://traken.chem.yale.edu/cgi-bin/download_lpg.py"
-                zip_data = {'fileout': zip_path}
+                zip_data = {"fileout": zip_path}
                 zip_response = requests.post(zip_url, data=zip_data, verify=False, timeout=60)
 
                 if zip_response.status_code != 200:
@@ -299,14 +300,14 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
                 # Save and extract ZIP file
                 zip_file = os.path.join(temp_dir, os.path.basename(zip_path))
-                with open(zip_file, 'wb') as f:
+                with open(zip_file, "wb") as f:
                     f.write(zip_response.content)
 
                 print(f"✓ Downloaded ZIP file: {os.path.basename(zip_file)}")
 
                 # Extract the ZIP file
-                extract_dir = os.path.join(temp_dir, os.path.basename(zip_path).replace('.zip', ''))
-                with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                extract_dir = os.path.join(temp_dir, os.path.basename(zip_path).replace(".zip", ""))
+                with zipfile.ZipFile(zip_file, "r") as zip_ref:
                     zip_ref.extractall(extract_dir)
 
                 print(f"✓ Extracted to: {extract_dir}")
@@ -344,7 +345,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
         # Optionally align coordinates to input structure
         if self.align_to_input and self.rdkit_available:
-            self._align_coordinates(lpg_files['gro'])
+            self._align_coordinates(lpg_files["gro"])
 
         # Standardize to LIG naming
         self._standardize_files(lpg_files)
@@ -358,14 +359,14 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             for filename in filenames:
                 filepath = os.path.join(root, filename)
 
-                if filename.endswith('.gro'):
-                    files['gro'] = filepath
-                elif filename.endswith('.itp'):
-                    files['itp'] = filepath
-                elif filename.endswith('.top'):
-                    files['top'] = filepath
+                if filename.endswith(".gro"):
+                    files["gro"] = filepath
+                elif filename.endswith(".itp"):
+                    files["itp"] = filepath
+                elif filename.endswith(".top"):
+                    files["top"] = filepath
 
-        if not files.get('gro') or not files.get('itp'):
+        if not files.get("gro") or not files.get("itp"):
             raise ValueError(f"Could not find required GROMACS files in {lpg_dir}")
 
         print(f"Found LigParGen files:")
@@ -387,10 +388,10 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
         try:
             from rdkit import Chem
-            from rdkit.Chem import AllChem, rdMolAlign
+            from rdkit.Chem import rdMolAlign
 
             # Load input molecule
-            if self.file_format == 'mol2':
+            if self.file_format == "mol2":
                 mol_input = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
             else:
                 mol_input = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
@@ -400,7 +401,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 return
 
             # Load LigParGen output (convert GRO to PDB first)
-            temp_pdb = gro_file.replace('.gro', '_temp.pdb')
+            temp_pdb = gro_file.replace(".gro", "_temp.pdb")
             self._convert_gro_to_pdb(gro_file, temp_pdb)
 
             mol_lpg = Chem.MolFromPDBFile(temp_pdb, removeHs=False)
@@ -427,10 +428,10 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
     def _convert_gro_to_pdb(self, gro_file, pdb_file):
         """Convert GRO to PDB format"""
         # Simple conversion - just reformatting
-        with open(gro_file, 'r') as f:
+        with open(gro_file, "r") as f:
             lines = f.readlines()
 
-        with open(pdb_file, 'w') as f:
+        with open(pdb_file, "w") as f:
             atom_idx = 1
             for i, line in enumerate(lines):
                 if i < 2 or i >= len(lines) - 1:  # Skip header and box line
@@ -449,8 +450,10 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 z = float(line[36:44].strip()) * 10
 
                 # Write PDB format
-                f.write(f"ATOM  {atom_idx:5d}  {atomname:<4s}{resname:>3s}  {resnum:4d}    "
-                       f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atomname[0]:>2s}\n")
+                f.write(
+                    f"ATOM  {atom_idx:5d}  {atomname:<4s}{resname:>3s}  {resnum:4d}    "
+                    f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atomname[0]:>2s}\n"
+                )
                 atom_idx += 1
 
             f.write("END\n")
@@ -466,11 +469,11 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         conf = mol.GetConformer()
 
         # Read original GRO to get formatting
-        with open(gro_file, 'r') as f:
+        with open(gro_file, "r") as f:
             gro_lines = f.readlines()
 
         # Update coordinates
-        with open(gro_file, 'w') as f:
+        with open(gro_file, "w") as f:
             f.write(gro_lines[0])  # Title
             f.write(gro_lines[1])  # Atom count
 
@@ -500,16 +503,16 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         print("\n=== Standardizing to LIG naming ===")
 
         # Copy and standardize GRO file
-        if 'gro' in lpg_files:
-            self._standardize_gro(lpg_files['gro'], os.path.join(self.lig_ff_dir, "LIG.gro"))
+        if "gro" in lpg_files:
+            self._standardize_gro(lpg_files["gro"], os.path.join(self.lig_ff_dir, "LIG.gro"))
 
         # Process ITP file
-        if 'itp' in lpg_files:
-            self._standardize_itp(lpg_files['itp'], os.path.join(self.lig_ff_dir, "LIG.itp"))
+        if "itp" in lpg_files:
+            self._standardize_itp(lpg_files["itp"], os.path.join(self.lig_ff_dir, "LIG.itp"))
 
         # Process TOP file or create from ITP
-        if 'top' in lpg_files:
-            self._standardize_top(lpg_files['top'], os.path.join(self.lig_ff_dir, "LIG.top"))
+        if "top" in lpg_files:
+            self._standardize_top(lpg_files["top"], os.path.join(self.lig_ff_dir, "LIG.top"))
         else:
             self._create_top_from_itp(os.path.join(self.lig_ff_dir, "LIG.itp"))
 
@@ -523,10 +526,10 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _standardize_gro(self, source_gro, target_gro):
         """Standardize GRO file to use LIG residue name"""
-        with open(source_gro, 'r') as f:
+        with open(source_gro, "r") as f:
             lines = f.readlines()
 
-        with open(target_gro, 'w') as f:
+        with open(target_gro, "w") as f:
             f.write("LIG system\n")  # Title
 
             for i, line in enumerate(lines):
@@ -540,81 +543,79 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _standardize_itp(self, source_itp, target_itp):
         """Standardize ITP file to use LIG molecule name"""
-        with open(source_itp, 'r') as f:
+        with open(source_itp, "r") as f:
             content = f.read()
 
         # Replace molecule names with LIG (case-insensitive for all variants)
         # Common LigParGen molecule names: UNK, MOL, LIG, or ligand name
-        content = re.sub(r'\bUNK\b', 'LIG', content, flags=re.IGNORECASE)
-        content = re.sub(r'\bunk\b', 'LIG', content)
-        content = re.sub(r'\bMOL\b', 'LIG', content, flags=re.IGNORECASE)
+        content = re.sub(r"\bUNK\b", "LIG", content, flags=re.IGNORECASE)
+        content = re.sub(r"\bunk\b", "LIG", content)
+        content = re.sub(r"\bMOL\b", "LIG", content, flags=re.IGNORECASE)
 
         # Also replace in [ moleculetype ] section specifically
-        content = re.sub(r'(\[\s*moleculetype\s*\]\s*;\s*\w+\s+\w+\s+)\S+', r'\1LIG', content)
+        content = re.sub(r"(\[\s*moleculetype\s*\]\s*;\s*\w+\s+\w+\s+)\S+", r"\1LIG", content)
 
         # Replace residue names in [ atoms ] section
         # Pattern: atom_nr  type  resnr  residue  atom  cgnr  charge  mass
         # We need to replace the residue name (4th column)
         # Use regex to replace while preserving formatting
-        lines = content.split('\n')
+        lines = content.split("\n")
         new_lines = []
         in_atoms = False
 
         for line in lines:
-            if line.strip().startswith('[ atoms ]'):
+            if line.strip().startswith("[ atoms ]"):
                 in_atoms = True
                 new_lines.append(line)
-            elif in_atoms and line.strip().startswith('['):
+            elif in_atoms and line.strip().startswith("["):
                 in_atoms = False
                 new_lines.append(line)
-            elif in_atoms and not line.strip().startswith(';') and line.strip():
+            elif in_atoms and not line.strip().startswith(";") and line.strip():
                 # Use regex to replace residue name (4th field) while preserving spacing
                 # Typical format: "     1  opls_800      1    UNK     C1      1    -0.120  12.011"
                 # Replace any word in position 4 with LIG
-                modified_line = re.sub(
-                    r'^(\s*\d+\s+\S+\s+\d+\s+)\S+(\s+)',
-                    r'\1LIG\2',
-                    line
-                )
+                modified_line = re.sub(r"^(\s*\d+\s+\S+\s+\d+\s+)\S+(\s+)", r"\1LIG\2", line)
                 new_lines.append(modified_line)
             else:
                 new_lines.append(line)
 
-        content = '\n'.join(new_lines)
+        content = "\n".join(new_lines)
 
         # Add position restraints include if not present
         if "#ifdef POSRES" not in content:
-            content += "\n#ifdef POSRES\n#include \"posre_LIG.itp\"\n#endif\n"
+            content += '\n#ifdef POSRES\n#include "posre_LIG.itp"\n#endif\n'
 
-        with open(target_itp, 'w') as f:
+        with open(target_itp, "w") as f:
             f.write(content)
 
     def _standardize_top(self, source_top, target_top):
         """Standardize TOP file"""
-        with open(source_top, 'r') as f:
+        with open(source_top, "r") as f:
             content = f.read()
 
         # Replace molecule names
-        content = re.sub(r'\bUNK\b', 'LIG', content)
-        content = re.sub(r'\bunk\b', 'LIG', content)
+        content = re.sub(r"\bUNK\b", "LIG", content)
+        content = re.sub(r"\bunk\b", "LIG", content)
 
         # Update includes
         content = re.sub(r'#include\s+"[^"]*\.itp"', '#include "LIG.itp"', content)
 
-        with open(target_top, 'w') as f:
+        with open(target_top, "w") as f:
             f.write(content)
 
     def _create_top_from_itp(self, itp_file):
         """Create TOP file from ITP"""
+        if not os.path.exists(itp_file):
+            raise FileNotFoundError(f"ITP file not found: {itp_file}")
         top_file = os.path.join(self.lig_ff_dir, "LIG.top")
 
-        with open(top_file, 'w') as f:
+        with open(top_file, "w") as f:
             f.write("; OPLS-AA topology for LIG\n\n")
             f.write("[ defaults ]\n")
             f.write("; nbfunc  comb-rule  gen-pairs  fudgeLJ  fudgeQQ\n")
             f.write("1         3          yes        0.5      0.5\n\n")
-            f.write("#include \"atomtypes_LIG.itp\"\n")
-            f.write("#include \"LIG.itp\"\n\n")
+            f.write('#include "atomtypes_LIG.itp"\n')
+            f.write('#include "LIG.itp"\n\n')
             f.write("[ system ]\n")
             f.write("LIG system\n\n")
             f.write("[ molecules ]\n")
@@ -624,7 +625,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         """Extract atomtypes to separate file"""
         atomtypes_file = os.path.join(self.lig_ff_dir, "atomtypes_LIG.itp")
 
-        with open(itp_file, 'r') as f:
+        with open(itp_file, "r") as f:
             lines = f.readlines()
 
         # Find atomtypes section
@@ -646,11 +647,11 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
         # Write atomtypes file
         if atomtypes_lines:
-            with open(atomtypes_file, 'w') as f:
+            with open(atomtypes_file, "w") as f:
                 f.writelines(atomtypes_lines)
 
             # Update ITP file (remove atomtypes section)
-            with open(itp_file, 'w') as f:
+            with open(itp_file, "w") as f:
                 f.writelines(new_itp_lines)
 
     def _create_position_restraints(self, gro_file):
@@ -658,7 +659,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         posre_file = os.path.join(self.lig_ff_dir, "posre_LIG.itp")
 
         # Count atoms from GRO file
-        with open(gro_file, 'r') as f:
+        with open(gro_file, "r") as f:
             lines = f.readlines()
 
         try:
@@ -667,7 +668,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             atom_count = len(lines) - 3  # Estimate
 
         # Write position restraints
-        with open(posre_file, 'w') as f:
+        with open(posre_file, "w") as f:
             f.write("[ position_restraints ]\n")
             f.write("; atom  type      fx      fy      fz\n")
             for i in range(1, atom_count + 1):
@@ -681,7 +682,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             print("Temporary files removed")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Example usage
     import sys
 
@@ -693,11 +694,7 @@ if __name__ == '__main__':
     output_dir = os.path.dirname(ligand_file) if os.path.dirname(ligand_file) else "."
 
     generator = OPLSAAForceFieldGenerator(
-        ligand_path=ligand_file,
-        output_dir=output_dir,
-        charge=0,
-        charge_model="cm1a",
-        align_to_input=True
+        ligand_path=ligand_file, output_dir=output_dir, charge=0, charge_model="cm1a", align_to_input=True
     )
 
     result_dir = generator.run()

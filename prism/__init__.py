@@ -12,9 +12,9 @@ import multiprocessing
 
 # Enable automatic OpenMP parallelization for trajectory analysis
 # Set OMP_NUM_THREADS to use all available CPU cores by default
-if 'OMP_NUM_THREADS' not in os.environ:
+if "OMP_NUM_THREADS" not in os.environ:
     n_cores = multiprocessing.cpu_count()
-    os.environ['OMP_NUM_THREADS'] = str(n_cores)
+    os.environ["OMP_NUM_THREADS"] = str(n_cores)
 
 __version__ = "1.2.0"
 __author__ = "PRISM Development Team"
@@ -43,6 +43,7 @@ try:
     from . import rest2
 except ImportError:
     rest2 = None
+
 
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
@@ -80,6 +81,7 @@ def system(protein_path, ligand_path, config=None, **kwargs):
     """
     return PRISMSystem(protein_path, ligand_path, config=config, **kwargs)
 
+
 def build_system(protein_path, ligand_path, output_dir="prism_output", **kwargs):
     """
     Build a complete protein-ligand system (one-step function).
@@ -114,13 +116,14 @@ def build_system(protein_path, ligand_path, output_dir="prism_output", **kwargs)
     system_obj = PRISMSystem(protein_path, ligand_path, output_dir=output_dir, **kwargs)
     return system_obj.build()
 
+
 def visualize_trajectory(trajectory, topology, ligand, output="contact_analysis.html", **kwargs):
     """
     Generate interactive HTML visualization of protein-ligand contacts from MD trajectory.
-    
+
     This function creates an interactive HTML file that visualizes the contact
     patterns between protein and ligand throughout the trajectory.
-    
+
     Parameters:
     -----------
     trajectory : str
@@ -133,22 +136,22 @@ def visualize_trajectory(trajectory, topology, ligand, output="contact_analysis.
         Output HTML file path (default: "contact_analysis.html")
     **kwargs : optional
         Additional parameters for visualization
-        
+
     Returns:
     --------
     str
         Path to the generated HTML file
-        
+
     Examples:
     ---------
     >>> import prism as pm
     >>> # Basic visualization
     >>> pm.visualize_trajectory("md.xtc", "system.gro", "ligand.sdf")
-    
+
     >>> # Custom output file
     >>> pm.visualize_trajectory("trajectory.xtc", "topology.pdb", "ligand.mol2",
     ...                        output="my_analysis.html")
-    
+
     Notes:
     ------
     The generated HTML file is self-contained and can be opened in any modern
@@ -168,16 +171,17 @@ def visualize_trajectory(trajectory, topology, ligand, output="contact_analysis.
             "  # OR: conda install -c conda-forge mdtraj\n"
             "  # OR: pip install mdtraj"
         ) from e
-    
+
     return generate_html(trajectory, topology, ligand, output, **kwargs)
+
 
 def analyze_trajectory(topology, trajectory, ligand_resname="LIG", output_dir="analysis_results"):
     """
     Perform comprehensive trajectory analysis with visualization.
-    
+
     This is a convenience function that combines trajectory analysis with
     HTML visualization generation.
-    
+
     Parameters:
     -----------
     topology : str
@@ -188,18 +192,18 @@ def analyze_trajectory(topology, trajectory, ligand_resname="LIG", output_dir="a
         Residue name of ligand (default: "LIG")
     output_dir : str, optional
         Output directory for analysis results (default: "analysis_results")
-        
+
     Returns:
     --------
     TrajAnalysis
         Analysis object with results
-        
+
     Examples:
     ---------
     >>> import prism as pm
     >>> analysis = pm.analyze_trajectory("system.gro", "md.xtc")
     >>> # Results are saved in analysis_results/ directory
-    
+
     >>> # Custom ligand residue name
     >>> analysis = pm.analyze_trajectory("complex.pdb", "trajectory.dcd",
     ...                                  ligand_resname="MOL")
@@ -207,6 +211,7 @@ def analyze_trajectory(topology, trajectory, ligand_resname="LIG", output_dir="a
     traj = TrajAnalysis(topology, trajectory, ligand_resname=ligand_resname)
     traj.analyze_all(output_dir=output_dir)
     return traj
+
 
 def check_dependencies():
     """
@@ -228,57 +233,62 @@ def check_dependencies():
     import subprocess
 
     dependencies = {
-        'gromacs': False,
-        'pdbfixer': False,
-        'antechamber': False,
-        'openff': False,
-        'mdtraj': False,
-        'rdkit': False
+        "gromacs": False,
+        "pdbfixer": False,
+        "antechamber": False,
+        "openff": False,
+        "mdtraj": False,
+        "rdkit": False,
     }
 
     # Check GROMACS
     try:
         env = GromacsEnvironment()
-        dependencies['gromacs'] = True
+        dependencies["gromacs"] = True
     except:
         pass
 
     # Check pdbfixer
     try:
         import pdbfixer
-        dependencies['pdbfixer'] = True
+
+        dependencies["pdbfixer"] = True
     except:
         pass
 
     # Check for AmberTools (antechamber)
     try:
-        subprocess.run(['antechamber', '-h'], capture_output=True, check=True)
-        dependencies['antechamber'] = True
+        subprocess.run(["antechamber", "-h"], capture_output=True, check=True)
+        dependencies["antechamber"] = True
     except:
         pass
 
     # Check OpenFF
     try:
         import openff.toolkit
-        dependencies['openff'] = True
+
+        dependencies["openff"] = True
     except:
         pass
-    
+
     # Check MDTraj (for visualization)
     try:
         import mdtraj
-        dependencies['mdtraj'] = True
+
+        dependencies["mdtraj"] = True
     except:
         pass
-    
+
     # Check RDKit (optional for enhanced visualization)
     try:
         import rdkit
-        dependencies['rdkit'] = True
+
+        dependencies["rdkit"] = True
     except:
         pass
 
     return dependencies
+
 
 def list_forcefields():
     """
@@ -308,19 +318,21 @@ def list_forcefields():
         print(f"Error detecting force fields: {e}")
         return []
 
+
 def get_version():
     """Get PRISM version."""
     return __version__
 
+
 def get_html_generator():
     """
     Get HTMLGenerator class for advanced visualization usage.
-    
+
     Returns:
     --------
     HTMLGenerator
         The HTML generator class
-        
+
     Example:
     --------
     >>> import prism as pm
@@ -331,6 +343,7 @@ def get_html_generator():
     """
     try:
         from .analysis.visualization import HTMLGenerator
+
         return HTMLGenerator
     except ImportError as e:
         raise ImportError(
@@ -340,6 +353,7 @@ def get_html_generator():
             "  # OR: conda install -c conda-forge mdtraj\n"
             "  # OR: pip install mdtraj"
         ) from e
+
 
 def process_trajectory(input_trajectory, output_trajectory, topology_file, **kwargs):
     """
@@ -389,11 +403,9 @@ def process_trajectory(input_trajectory, output_trajectory, topology_file, **kwa
 
     processor = TrajectoryProcessor()
     return processor.process_trajectory(
-        input_trajectory=input_trajectory,
-        output_trajectory=output_trajectory,
-        topology_file=topology_file,
-        **kwargs
+        input_trajectory=input_trajectory, output_trajectory=output_trajectory, topology_file=topology_file, **kwargs
     )
+
 
 def batch_process_trajectories(input_trajectories, output_dir, topology_file, **kwargs):
     """
@@ -431,11 +443,9 @@ def batch_process_trajectories(input_trajectories, output_dir, topology_file, **
 
     processor = TrajectoryProcessor()
     return processor.batch_process(
-        input_trajectories=input_trajectories,
-        output_dir=output_dir,
-        topology_file=topology_file,
-        **kwargs
+        input_trajectories=input_trajectories, output_dir=output_dir, topology_file=topology_file, **kwargs
     )
+
 
 # Export main classes and functions
 __all__ = [
@@ -443,30 +453,25 @@ __all__ = [
     "PRISMBuilder",
     "PRISMSystem",
     "TrajAnalysis",
-    
     # High-level API functions
     "system",
     "build_system",
     "model",
-    
     # Analysis functions
     "analyze_trajectory",
     "visualize_trajectory",
     "get_html_generator",
     "process_trajectory",
     "batch_process_trajectories",
-    
     # Utility functions
     "check_dependencies",
     "list_forcefields",
     "get_version",
-    
     # Module imports
     "modeling",
     "pmf",
     "gaussian",
     "rest2",
-    
     # Version info
     "__version__",
 ]

@@ -7,7 +7,6 @@
 PRISM System Builder - Handles GROMACS system setup, solvation, and ion addition.
 """
 
-import os
 import re
 import shutil
 import subprocess
@@ -22,13 +21,29 @@ except ImportError:
         from prism.utils.colors import print_success, print_warning, print_info, success, warning, path, number
     except ImportError:
         # Fallback
-        def print_success(x, **kwargs): print(f"✓ {x}")
-        def print_warning(x, **kwargs): print(f"⚠ {x}")
-        def print_info(x, **kwargs): print(f"ℹ {x}")
-        def success(x): return f"✓ {x}"
-        def warning(x): return f"⚠ {x}"
-        def path(x): return x
-        def number(x): return x
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}✓ {x}")
+
+        def print_warning(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}⚠ {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}ℹ {x}")
+
+        def success(x):
+            return f"✓ {x}"
+
+        def warning(x):
+            return f"⚠ {x}"
+
+        def path(x):
+            return x
+
+        def number(x):
+            return x
 
 
 class SystemBuilder:
@@ -41,8 +56,14 @@ class SystemBuilder:
     tools to ensure consistency between coordinate and topology files.
     """
 
-    def __init__(self, config: Dict, output_dir: str, overwrite: bool = False,
-                 pmf_mode: bool = False, box_extension: Optional[Tuple[float, float, float]] = None):
+    def __init__(
+        self,
+        config: Dict,
+        output_dir: str,
+        overwrite: bool = False,
+        pmf_mode: bool = False,
+        box_extension: Optional[Tuple[float, float, float]] = None,
+    ):
         """
         Initializes the SystemBuilder.
 
@@ -85,16 +106,11 @@ class SystemBuilder:
         Raises:
             RuntimeError: If the command returns a non-zero exit code.
         """
-        cmd_str = ' '.join(map(str, command))
+        cmd_str = " ".join(map(str, command))
         print(f"Executing in {work_dir}: {cmd_str}")
 
         process = subprocess.Popen(
-            command,
-            cwd=work_dir,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            command, cwd=work_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         stdout, stderr = process.communicate(input=input_str)
 
@@ -107,8 +123,17 @@ class SystemBuilder:
 
         return stdout, stderr
 
-    def build(self, cleaned_protein_path: str, lig_ff_dirs, ff_idx: int, water_idx: int,
-              ff_info: dict = None, water_info: dict = None, nter: str = None, cter: str = None) -> str:
+    def build(
+        self,
+        cleaned_protein_path: str,
+        lig_ff_dirs,
+        ff_idx: int,
+        water_idx: int,
+        ff_info: dict = None,
+        water_info: dict = None,
+        nter: str = None,
+        cter: str = None,
+    ) -> str:
         """
         Runs the full system building workflow with support for multiple ligands.
 
@@ -134,7 +159,7 @@ class SystemBuilder:
                 return str(self.model_dir)
 
             # Store water model name for use in solvation
-            self.water_model_name = water_info.get('name', 'tip3p') if water_info else 'tip3p'
+            self.water_model_name = water_info.get("name", "tip3p") if water_info else "tip3p"
             # Store force field info for terminal atom fixing
             self.ff_info = ff_info
 
@@ -152,11 +177,13 @@ class SystemBuilder:
             fixed_pdb = self._fix_protein(cleaned_protein_path)
 
             # Apply PROPKA renaming AFTER pdbfixer (pdbfixer may revert HIS names)
-            protonation_method = self.config.get('protonation', {}).get('method', 'gromacs')
-            if protonation_method == 'propka':
+            protonation_method = self.config.get("protonation", {}).get("method", "gromacs")
+            if protonation_method == "propka":
                 self._apply_propka_renaming(fixed_pdb)
 
-            protein_gro, topol_top = self._generate_topology(fixed_pdb, ff_idx, water_idx, ff_info, water_info, nter, cter)
+            protein_gro, topol_top = self._generate_topology(
+                fixed_pdb, ff_idx, water_idx, ff_info, water_info, nter, cter
+            )
 
             # Process ligands if provided
             if lig_ff_list is not None and len(lig_ff_list) > 0:
@@ -178,6 +205,7 @@ class SystemBuilder:
         except (RuntimeError, FileNotFoundError) as e:
             print(f"\nError during system build: {e}")
             import traceback
+
             traceback.print_exc()
             return ""
 
@@ -205,18 +233,20 @@ class SystemBuilder:
                 "pdbfixer",
                 cleaned_protein,
                 "--add-residues",
-                "--output", str(fixed_pdb),
+                "--output",
+                str(fixed_pdb),
                 "--add-atoms=heavy",
                 "--keep-heterogens=all",
-                f"--ph={self.config['simulation']['pH']}"
+                f"--ph={self.config['simulation']['pH']}",
             ]
             self._run_command(command, str(self.model_dir.parent))
 
         # Fix terminal atoms for GROMACS compatibility (OXT → O or OC1/OC2)
         print("Fixing terminal atoms for GROMACS compatibility...")
         from prism.utils.cleaner import fix_terminal_atoms
+
         # Get force field name if available
-        ff_name = getattr(self, 'ff_info', {}).get('name') if hasattr(self, 'ff_info') and self.ff_info else None
+        ff_name = getattr(self, "ff_info", {}).get("name") if hasattr(self, "ff_info") and self.ff_info else None
         fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), force_field=ff_name, verbose=True)
 
         return str(fixed_pdb)
@@ -229,16 +259,15 @@ class SystemBuilder:
         """
         from .protonation import PropkaProtonator
 
-        ph = self.config.get('protonation', {}).get(
-            'ph', self.config.get('simulation', {}).get('pH', 7.0))
+        ph = self.config.get("protonation", {}).get("ph", self.config.get("simulation", {}).get("pH", 7.0))
 
         print(f"\n  Applying PROPKA pKa-based HIS renaming (pH {ph})...")
         protonator = PropkaProtonator(ph=ph, verbose=True)
         stats = protonator.rename_histidines(pdb_file, pdb_file)
 
-        if stats['renamed']:
+        if stats["renamed"]:
             print(f"  PROPKA: Renamed {len(stats['renamed'])} HIS residue(s):")
-            for (chain, resnum), state in stats['renamed'].items():
+            for (chain, resnum), state in stats["renamed"].items():
                 print(f"    Chain {chain} Residue {resnum}: HIS -> {state}")
         else:
             print("  PROPKA: No histidine residues found or needed renaming")
@@ -258,10 +287,10 @@ class SystemBuilder:
 
         Returns True if any residues were renamed.
         """
-        if not ff_info or 'path' not in ff_info:
+        if not ff_info or "path" not in ff_info:
             return False
 
-        ff_dir = Path(ff_info['path'])
+        ff_dir = Path(ff_info["path"])
         if not (ff_dir / "cmap.itp").exists():
             return False
 
@@ -269,32 +298,38 @@ class SystemBuilder:
         # PDB format (0-indexed): positions 17-19 = residue name (3 chars).
         # Replace "HIS" with "HIE" (same width) so pdb2gmx uses the [ HIE ]
         # rtp block directly and writes "HIE" as the residue name in topology.
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             lines = f.readlines()
 
         renamed_residues = set()
         new_lines = []
         for line in lines:
-            if (line.startswith('ATOM') or line.startswith('HETATM')) \
-                    and line[17:20] == 'HIS' and line[20] == ' ':
+            if (line.startswith("ATOM") or line.startswith("HETATM")) and line[17:20] == "HIS" and line[20] == " ":
                 resnum = line[22:26].strip()
                 chain = line[21].strip()
                 res_id = f"{chain}:{resnum}" if chain else resnum
                 renamed_residues.add(res_id)
-                line = line[:17] + 'HIE' + line[20:]
+                line = line[:17] + "HIE" + line[20:]
             new_lines.append(line)
 
         if renamed_residues:
-            with open(pdb_file, 'w') as f:
+            with open(pdb_file, "w") as f:
                 f.writelines(new_lines)
             print(f"  Renamed {len(renamed_residues)} HIS residue(s) → HIE for CMAP compatibility")
             return True
 
         return False
 
-    def _generate_topology(self, fixed_pdb: str, ff_idx: int, water_idx: int,
-                          ff_info: dict = None, water_info: dict = None,
-                          nter: str = None, cter: str = None) -> Tuple[str, str]:
+    def _generate_topology(
+        self,
+        fixed_pdb: str,
+        ff_idx: int,
+        water_idx: int,
+        ff_info: dict = None,
+        water_info: dict = None,
+        nter: str = None,
+        cter: str = None,
+    ) -> Tuple[str, str]:
         """Generate topology using pdb2gmx, handling histidines."""
         print("\n  Step 2: Generating topology with pdb2gmx...")
 
@@ -310,21 +345,25 @@ class SystemBuilder:
         his_renamed = self._rename_his_for_cmap(fixed_pdb, ff_info)
 
         # Check protonation method
-        protonation_method = self.config.get('protonation', {}).get('method', 'gromacs')
+        protonation_method = self.config.get("protonation", {}).get("method", "gromacs")
 
         # Build pdb2gmx command
         command = [
-            self.gmx_command, "pdb2gmx",
-            "-f", fixed_pdb,
-            "-o", str(protein_gro),
-            "-p", str(topol_top),
-            "-ignh"  # Always use -ignh to regenerate standardized hydrogens
+            self.gmx_command,
+            "pdb2gmx",
+            "-f",
+            fixed_pdb,
+            "-o",
+            str(protein_gro),
+            "-p",
+            str(topol_top),
+            "-ignh",  # Always use -ignh to regenerate standardized hydrogens
         ]
 
         # Print information about protonation method
-        if protonation_method == 'gromacs':
+        if protonation_method == "gromacs":
             print_info("  Using GROMACS protonation (pdb2gmx -ignh: ignore and regenerate all hydrogens)")
-        elif protonation_method == 'propka':
+        elif protonation_method == "propka":
             print_info("  Using PROPKA-predicted protonation states (residues renamed, pdb2gmx -ignh regenerates H)")
             print("  -> PROPKA's role: pKa-based prediction of histidine protonation states (HID/HIE/HIP)")
             print("  -> GROMACS pdb2gmx: Regenerates standardized hydrogen atoms with correct naming")
@@ -334,9 +373,9 @@ class SystemBuilder:
 
         # Use -ff and -water flags if force field info is provided
         # This is more reliable than interactive menu indexing
-        if ff_info and 'dir' in ff_info:
+        if ff_info and "dir" in ff_info:
             # Remove .ff extension from directory name for -ff flag
-            ff_name = ff_info['dir'].replace('.ff', '')
+            ff_name = ff_info["dir"].replace(".ff", "")
             command.extend(["-ff", ff_name])
             print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
         else:
@@ -344,11 +383,11 @@ class SystemBuilder:
 
         # pdb2gmx -water flag only accepts these hardcoded model names.
         # Non-standard models (e.g. OPC, OPC3) must use interactive selection.
-        PDB2GMX_WATER_MODELS = {'spc', 'spce', 'tip3p', 'tip4p', 'tip4pew', 'tip5p', 'tips3p', 'none'}
+        PDB2GMX_WATER_MODELS = {"spc", "spce", "tip3p", "tip4p", "tip4pew", "tip5p", "tips3p", "none"}
 
         use_water_flag = False
-        if water_info and 'name' in water_info:
-            water_name = water_info['name'].lower()
+        if water_info and "name" in water_info:
+            water_name = water_info["name"].lower()
             if water_name in PDB2GMX_WATER_MODELS:
                 command.extend(["-water", water_name])
                 use_water_flag = True
@@ -362,7 +401,7 @@ class SystemBuilder:
 
         # Handle terminal type selection
         # If nter or cter are specified, use interactive terminal selection mode
-        use_terminal_selection = (nter is not None or cter is not None)
+        use_terminal_selection = nter is not None or cter is not None
 
         if use_terminal_selection:
             command.append("-ter")  # Enable terminal selection
@@ -373,7 +412,7 @@ class SystemBuilder:
         input_lines = []
 
         # Build interactive input: ff selection (if no -ff flag), then water selection (if no -water flag)
-        use_ff_flag = bool(ff_info and 'dir' in ff_info)
+        use_ff_flag = bool(ff_info and "dir" in ff_info)
         if not use_ff_flag:
             input_lines.append(str(ff_idx))
         if not use_water_flag:
@@ -388,14 +427,14 @@ class SystemBuilder:
             if nter:
                 # Map terminal name to menu selection number
                 # This is a simplified approach - actual indices vary by force field
-                nter_input = self._get_terminal_menu_index(nter, 'nter', ff_info)
+                nter_input = self._get_terminal_menu_index(nter, "nter", ff_info)
                 if nter_input:
                     input_lines.append(nter_input)
             else:
                 input_lines.append("0")  # Default selection
 
             if cter:
-                cter_input = self._get_terminal_menu_index(cter, 'cter', ff_info)
+                cter_input = self._get_terminal_menu_index(cter, "cter", ff_info)
                 if cter_input:
                     input_lines.append(cter_input)
             else:
@@ -406,7 +445,7 @@ class SystemBuilder:
             # HIE is typically the first and most common choice for neutral pH.
             input_lines.extend(["1"] * histidine_count)
 
-        input_text = '\n'.join(input_lines)+'\n' if input_lines else None
+        input_text = "\n".join(input_lines) + "\n" if input_lines else None
 
         self._run_command(command, str(self.model_dir), input_str=input_text)
 
@@ -420,7 +459,9 @@ class SystemBuilder:
         ion_files = list(self.model_dir.glob("topol_Ion*.itp"))
 
         if ion_files:
-            print_success(f"Metals processed by pdb2gmx ({number(len(ion_files))} ion topology file(s) found)", prefix="  ✓")
+            print_success(
+                f"Metals processed by pdb2gmx ({number(len(ion_files))} ion topology file(s) found)", prefix="  ✓"
+            )
             for itp_file in ion_files:
                 print(f"  - {itp_file.name}")
         else:
@@ -437,7 +478,7 @@ class SystemBuilder:
         print(f"\n  Step 3: Including {number(len(lig_ff_dirs))} ligand parameters in topology...")
 
         all_atomtype_lines = []  # Store individual atomtype lines
-        seen_atomtypes = set()   # Track seen atomtype names to avoid duplicates
+        seen_atomtypes = set()  # Track seen atomtype names to avoid duplicates
         all_includes = []
         all_bonded_includes = []  # Store CGenFF *_ffbonded.itp includes
         all_molecules = []
@@ -466,17 +507,19 @@ class SystemBuilder:
                         if len(lig_ff_dirs) == 1:
                             relative_bonded_path = f"../{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
                         else:
-                            relative_bonded_path = f"../Ligand_Forcefield/{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
+                            relative_bonded_path = (
+                                f"../Ligand_Forcefield/{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
+                            )
                         all_bonded_includes.append(f'#include "{relative_bonded_path}"\n')
 
             # Collect atomtypes (if not CGenFF) - with deduplication
             if not is_cgenff:
                 if not atomtypes_itp_path.exists():
                     raise FileNotFoundError(f"Ligand {idx} atomtypes file not found: {atomtypes_itp_path}")
-                with open(atomtypes_itp_path, 'r') as f:
+                with open(atomtypes_itp_path, "r") as f:
                     for line in f:
                         # Skip headers and comments
-                        if line.strip().startswith('[') or line.strip().startswith(';') or not line.strip():
+                        if line.strip().startswith("[") or line.strip().startswith(";") or not line.strip():
                             continue
                         # Extract atomtype name (first column)
                         atomtype_name = line.split()[0] if line.split() else None
@@ -505,18 +548,18 @@ class SystemBuilder:
             print_success(f"  Processed ligand {number(idx)}: {path(lig_ff_path.name)}")
 
         # Read current topology
-        with open(topol_path, 'r') as f:
+        with open(topol_path, "r") as f:
             lines = f.readlines()
 
         # Check if already included to prevent duplication
         # Single ligand: check for LIG.xxx2gmx pattern
         # Multi-ligand: check for Ligand_Forcefield
         if len(lig_ff_dirs) == 1:
-            if any('LIG.itp' in line and '#include' in line for line in lines):
+            if any("LIG.itp" in line and "#include" in line for line in lines):
                 print("Topology already includes ligand parameters.")
                 return
         else:
-            if any('Ligand_Forcefield' in line for line in lines):
+            if any("Ligand_Forcefield" in line for line in lines):
                 print("Topology already includes multi-ligand parameters.")
                 return
 
@@ -528,7 +571,7 @@ class SystemBuilder:
             new_lines.append(line)
 
             # Insert atomtypes and ligand ITPs after the main forcefield include
-            if '#include' in line and '.ff/forcefield.itp' in line:
+            if "#include" in line and ".ff/forcefield.itp" in line:
                 if is_cgenff:
                     # CGenFF: Include bonded parameters first, then LIG.itp files
                     print_info("  Detected CGenFF force field - using integrated CHARMM atomtypes")
@@ -558,13 +601,13 @@ class SystemBuilder:
             # Add ligands to the molecules section
             if line.strip() == "[ molecules ]":
                 molecules_added = True
-            elif molecules_added and line.strip() and not line.strip().startswith(';'):
+            elif molecules_added and line.strip() and not line.strip().startswith(";"):
                 # Insert all LIG entries before the first molecule (e.g., Protein_chain_A)
                 for mol_entry in all_molecules:
                     new_lines.insert(-1, mol_entry)
                 molecules_added = False  # Prevent adding them again
 
-        with open(topol_path, 'w') as f:
+        with open(topol_path, "w") as f:
             f.writelines(new_lines)
 
         print_success(f"Topology file updated with {number(len(lig_ff_dirs))} ligand parameters")
@@ -649,7 +692,9 @@ class SystemBuilder:
             # Write box vectors from protein file
             f_out.write(prot_lines[-1])
 
-        print_success(f"Combined system: {number(prot_atom_count)} protein atoms + {number(total_lig_atoms)} ligand atoms = {number(total_atoms)} total")
+        print_success(
+            f"Combined system: {number(prot_atom_count)} protein atoms + {number(total_lig_atoms)} ligand atoms = {number(total_atoms)} total"
+        )
         return str(complex_gro)
 
     def _create_box(self, complex_gro: str) -> str:
@@ -661,7 +706,7 @@ class SystemBuilder:
             print("Using existing boxed.gro file.")
             return str(boxed_gro)
 
-        box_cfg = self.config['box']
+        box_cfg = self.config["box"]
 
         if self.pmf_mode:
             # PMF mode: Create rectangular box, then extend ONLY Z direction
@@ -672,13 +717,18 @@ class SystemBuilder:
             # This ensures X and Y dimensions fit the protein tightly
             temp_boxed = self.model_dir / "temp_boxed.gro"
             command = [
-                self.gmx_command, "editconf",
-                "-f", complex_gro,
-                "-o", str(temp_boxed),
-                "-bt", "triclinic",  # Use triclinic (rectangular) for PMF, not cubic
-                "-d", str(box_cfg['distance'])
+                self.gmx_command,
+                "editconf",
+                "-f",
+                complex_gro,
+                "-o",
+                str(temp_boxed),
+                "-bt",
+                "triclinic",  # Use triclinic (rectangular) for PMF, not cubic
+                "-d",
+                str(box_cfg["distance"]),
             ]
-            if box_cfg.get('center', True):
+            if box_cfg.get("center", True):
                 command.append("-c")
 
             self._run_command(command, str(self.model_dir))
@@ -692,13 +742,18 @@ class SystemBuilder:
         else:
             # Normal mode: Standard box creation
             command = [
-                self.gmx_command, "editconf",
-                "-f", complex_gro,
-                "-o", str(boxed_gro),
-                "-bt", box_cfg['shape'],
-                "-d", str(box_cfg['distance'])
+                self.gmx_command,
+                "editconf",
+                "-f",
+                complex_gro,
+                "-o",
+                str(boxed_gro),
+                "-bt",
+                box_cfg["shape"],
+                "-d",
+                str(box_cfg["distance"]),
             ]
-            if box_cfg.get('center', True):
+            if box_cfg.get("center", True):
                 command.append("-c")
 
             self._run_command(command, str(self.model_dir))
@@ -715,7 +770,7 @@ class SystemBuilder:
         - Extra space is added at the +Z end of the box (no atom translation)
         - This ensures the pulling space is in the correct direction
         """
-        with open(input_gro, 'r') as f:
+        with open(input_gro, "r") as f:
             lines = f.readlines()
 
         if len(lines) < 3:
@@ -737,7 +792,9 @@ class SystemBuilder:
             new_v3z = v3z + self.box_extension[2]  # Only Z extended
 
             print(f"    Original box: {v1x:.3f} x {v2y:.3f} x {v3z:.3f} nm")
-            print(f"    Extended box: {new_v1x:.3f} x {new_v2y:.3f} x {new_v3z:.3f} nm (Z +{self.box_extension[2]:.1f} nm)")
+            print(
+                f"    Extended box: {new_v1x:.3f} x {new_v2y:.3f} x {new_v3z:.3f} nm (Z +{self.box_extension[2]:.1f} nm)"
+            )
             print(f"    Extra space added at +Z end for pulling direction")
 
             # For SMD: Do NOT translate atoms - keep them at original positions
@@ -763,7 +820,7 @@ class SystemBuilder:
             new_lines.append(new_box_line)
 
             # Write output file
-            with open(output_gro, 'w') as f:
+            with open(output_gro, "w") as f:
                 f.writelines(new_lines)
 
             print(f"    Box extended successfully")
@@ -782,28 +839,33 @@ class SystemBuilder:
         # Select appropriate water model coordinate file
         # Map water model names to their coordinate files
         water_coord_files = {
-            'tip3p': 'spc216.gro',  # TIP3P uses SPC geometry
-            'tip3p_original': 'spc216.gro',
-            'spc': 'spc216.gro',
-            'spce': 'spc216.gro',
-            'opc3': 'spc216.gro',  # OPC3 is 3-point, uses SPC geometry
-            'tip4p': 'tip4p.gro',  # TIP4P has its own file with virtual sites
-            'tip4pew': 'tip4p.gro',  # TIP4P/Ew uses same geometry
-            'opc': 'tip4p.gro',   # OPC is 4-point with virtual site
-            'tip5p': 'tip5p.gro'  # TIP5P has its own file
+            "tip3p": "spc216.gro",  # TIP3P uses SPC geometry
+            "tip3p_original": "spc216.gro",
+            "spc": "spc216.gro",
+            "spce": "spc216.gro",
+            "opc3": "spc216.gro",  # OPC3 is 3-point, uses SPC geometry
+            "tip4p": "tip4p.gro",  # TIP4P has its own file with virtual sites
+            "tip4pew": "tip4p.gro",  # TIP4P/Ew uses same geometry
+            "opc": "tip4p.gro",  # OPC is 4-point with virtual site
+            "tip5p": "tip5p.gro",  # TIP5P has its own file
         }
 
-        water_model = getattr(self, 'water_model_name', 'tip3p').lower()
-        water_file = water_coord_files.get(water_model, 'spc216.gro')
+        water_model = getattr(self, "water_model_name", "tip3p").lower()
+        water_file = water_coord_files.get(water_model, "spc216.gro")
 
         print(f"Using water model: {water_model} (coordinate file: {water_file})")
 
         command = [
-            self.gmx_command, "solvate",
-            "-cp", boxed_gro,
-            "-cs", water_file,
-            "-o", str(solvated_gro),
-            "-p", topol_top
+            self.gmx_command,
+            "solvate",
+            "-cp",
+            boxed_gro,
+            "-cs",
+            water_file,
+            "-o",
+            str(solvated_gro),
+            "-p",
+            topol_top,
         ]
         self._run_command(command, str(self.model_dir))
         return str(solvated_gro)
@@ -820,7 +882,7 @@ class SystemBuilder:
             print("Using existing solv_ions.gro file.")
             return
 
-        ions_cfg = self.config['ions']
+        ions_cfg = self.config["ions"]
         temp_tpr = self.model_dir / "ions.tpr"
 
         # A minimal mdp is needed for grompp
@@ -829,12 +891,18 @@ class SystemBuilder:
             f.write("integrator=steep\nnsteps=0")
 
         grompp_cmd = [
-            self.gmx_command, "grompp",
-            "-f", str(ions_mdp_path),
-            "-c", solvated_gro,
-            "-p", topol_top,
-            "-o", str(temp_tpr),
-            "-maxwarn", "5"  # Allow some warnings
+            self.gmx_command,
+            "grompp",
+            "-f",
+            str(ions_mdp_path),
+            "-c",
+            solvated_gro,
+            "-p",
+            topol_top,
+            "-o",
+            str(temp_tpr),
+            "-maxwarn",
+            "5",  # Allow some warnings
         ]
 
         # Run grompp with improper dihedral error recovery.
@@ -844,7 +912,7 @@ class SystemBuilder:
         max_retries = 3
         grompp_success = False
         for attempt in range(max_retries + 1):
-            cmd_str = ' '.join(map(str, grompp_cmd))
+            cmd_str = " ".join(map(str, grompp_cmd))
             print(f"Executing in {self.model_dir}: {cmd_str}")
 
             result = subprocess.Popen(
@@ -853,7 +921,7 @@ class SystemBuilder:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
             )
             stdout, stderr = result.communicate()
 
@@ -865,7 +933,9 @@ class SystemBuilder:
             if "No default Per. Imp. Dih. types" in stderr and attempt < max_retries:
                 fixed = self._fix_improper_from_grompp_errors(stderr)
                 if fixed > 0:
-                    print(f"\n  Fixed {fixed} improper dihedral(s) without FF parameters, retrying grompp (attempt {attempt + 2}/{max_retries + 1})...")
+                    print(
+                        f"\n  Fixed {fixed} improper dihedral(s) without FF parameters, retrying grompp (attempt {attempt + 2}/{max_retries + 1})..."
+                    )
                     # Clean up failed tpr before retry
                     if temp_tpr.exists():
                         temp_tpr.unlink()
@@ -882,17 +952,23 @@ class SystemBuilder:
             raise RuntimeError("grompp failed after all retry attempts")
 
         genion_cmd = [
-            self.gmx_command, "genion",
-            "-s", str(temp_tpr),
-            "-o", str(ions_gro),
-            "-p", topol_top,
-            "-pname", ions_cfg['positive_ion'],
-            "-nname", ions_cfg['negative_ion'],
+            self.gmx_command,
+            "genion",
+            "-s",
+            str(temp_tpr),
+            "-o",
+            str(ions_gro),
+            "-p",
+            topol_top,
+            "-pname",
+            ions_cfg["positive_ion"],
+            "-nname",
+            ions_cfg["negative_ion"],
         ]
-        if ions_cfg.get('neutral', True):
+        if ions_cfg.get("neutral", True):
             genion_cmd.append("-neutral")
-        if ions_cfg.get('concentration', 0) > 0:
-            genion_cmd.extend(["-conc", str(ions_cfg['concentration'])])
+        if ions_cfg.get("concentration", 0) > 0:
+            genion_cmd.extend(["-conc", str(ions_cfg["concentration"])])
 
         # Provide "SOL" (the typical name for water) as input to stdin
         stdout, _ = self._run_command(genion_cmd, str(self.model_dir), input_str="SOL")
@@ -908,7 +984,7 @@ class SystemBuilder:
         """
         Parses the stdout of `gmx genion` and updates the `[ molecules ]`
         section of the topology file to ensure consistency.
-        
+
         Modern GROMACS versions (2024+) automatically update the topology when using -p flag,
         so we verify the update was successful rather than parsing stdout.
         """
@@ -916,11 +992,11 @@ class SystemBuilder:
 
         # First try to parse traditional output format for backward compatibility
         mol_counts = {}
-        pattern = re.compile(r'^\s*([A-Z0-9_]+)\s+:\s+(\d+)')
+        pattern = re.compile(r"^\s*([A-Z0-9_]+)\s+:\s+(\d+)")
         parsing = False
-        
+
         for line in genion_stdout.splitlines():
-            if 'Number of molecules:' in line:
+            if "Number of molecules:" in line:
                 parsing = True
                 continue
             if parsing:
@@ -937,8 +1013,8 @@ class SystemBuilder:
             # Verify the topology has ions by checking the [molecules] section
             with open(topol_path, "r") as f:
                 content = f.read()
-            
-            if any(ion in content for ion in ['NA ', 'CL ', 'K ', 'BR ', 'CA ']):
+
+            if any(ion in content for ion in ["NA ", "CL ", "K ", "BR ", "CA "]):
                 print_success("Topology updated with ions", prefix="  ✓")
                 return
             else:
@@ -953,7 +1029,7 @@ class SystemBuilder:
         for i, line in enumerate(top_lines):
             if line.strip() == "[ molecules ]":
                 start_index = i
-            elif start_index != -1 and line.strip().startswith('['):
+            elif start_index != -1 and line.strip().startswith("["):
                 end_index = i
                 break
         if start_index != -1 and end_index == -1:
@@ -967,9 +1043,10 @@ class SystemBuilder:
 
         # Preserve non-ion/water molecules from the original file
         original_mols = {}
-        for i in range(start_index+1, end_index):
+        for i in range(start_index + 1, end_index):
             line = top_lines[i].strip()
-            if not line or line.startswith(';'): continue
+            if not line or line.startswith(";"):
+                continue
             parts = line.split()
             if len(parts) >= 2:
                 mol_name = parts[0]
@@ -986,7 +1063,7 @@ class SystemBuilder:
                 new_molecules_section.append(f"{mol:<18} {count}\n")
 
         # Replace the old section with the new one
-        final_lines = top_lines[:start_index]+new_molecules_section+top_lines[end_index:]
+        final_lines = top_lines[:start_index] + new_molecules_section + top_lines[end_index:]
 
         with open(topol_path, "w") as f:
             f.writelines(final_lines)
@@ -1008,30 +1085,32 @@ class SystemBuilder:
         Returns:
             Menu index as string
         """
+        if ff_info:
+            print_info(f"Using force field info for terminus selection: {ff_info}")
         # Common N-terminal types (CHARMM36 and AMBER force fields)
         nter_map = {
-            'None': '0',
-            'NH3+': '1',  # Common protonated N-terminus
-            'NH3': '1',   # Alias
-            'NH2': '2',   # Neutral N-terminus
-            'GLY-NH3+': '3',
-            'PRO-NH2+': '4',
+            "None": "0",
+            "NH3+": "1",  # Common protonated N-terminus
+            "NH3": "1",  # Alias
+            "NH2": "2",  # Neutral N-terminus
+            "GLY-NH3+": "3",
+            "PRO-NH2+": "4",
         }
 
         # Common C-terminal types
         cter_map = {
-            'None': '0',
-            'COO-': '1',  # Common deprotonated C-terminus (charged)
-            'COO': '1',   # Alias
-            'COOH': '2',  # Neutral C-terminus
+            "None": "0",
+            "COO-": "1",  # Common deprotonated C-terminus (charged)
+            "COO": "1",  # Alias
+            "COOH": "2",  # Neutral C-terminus
         }
 
-        if terminus == 'nter':
-            return nter_map.get(terminal_type, '0')
-        elif terminus == 'cter':
-            return cter_map.get(terminal_type, '0')
+        if terminus == "nter":
+            return nter_map.get(terminal_type, "0")
+        elif terminus == "cter":
+            return cter_map.get(terminal_type, "0")
         else:
-            return '0'
+            return "0"
 
     def _count_histidines(self, pdb_file: str) -> int:
         """Counts unique histidine residues that need interactive protonation selection.
@@ -1041,9 +1120,9 @@ class SystemBuilder:
         _rename_his_for_cmap) don't trigger pdb2gmx prompts and are excluded.
         """
         his_residues = set()
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             for line in f:
-                if line.startswith('ATOM') and line[17:21] == 'HIS ':
+                if line.startswith("ATOM") and line[17:21] == "HIS ":
                     resnum = line[22:26].strip()
                     chain = line[21].strip()
                     res_id = f"{chain}:{resnum}" if chain else resnum
@@ -1065,28 +1144,69 @@ class SystemBuilder:
         """
         metals = []
         # True metal ions (must match cleaner.py definitions)
-        metal_names = {'ZN', 'MG', 'CA', 'FE', 'CU', 'MN', 'CO', 'NI', 'CD', 'HG',
-                      'ZN2', 'MG2', 'CA2', 'FE2', 'FE3', 'CU2', 'MN2'}
+        metal_names = {
+            "ZN",
+            "MG",
+            "CA",
+            "FE",
+            "CU",
+            "MN",
+            "CO",
+            "NI",
+            "CD",
+            "HG",
+            "ZN2",
+            "MG2",
+            "CA2",
+            "FE2",
+            "FE3",
+            "CU2",
+            "MN2",
+        }
 
         # Amino acid residues that should NEVER be treated as metals
         # These include all standard + special protonation states
         protein_residues = {
             # Standard amino acids
-            'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-            'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
+            "ALA",
+            "ARG",
+            "ASN",
+            "ASP",
+            "CYS",
+            "GLN",
+            "GLU",
+            "GLY",
+            "HIS",
+            "ILE",
+            "LEU",
+            "LYS",
+            "MET",
+            "PHE",
+            "PRO",
+            "SER",
+            "THR",
+            "TRP",
+            "TYR",
+            "VAL",
             # Special protonation states
-            'HID', 'HIE', 'HIP',  # Histidine variants
-            'CYM', 'CYX',  # Cysteine variants (deprotonated, disulfide)
-            'LYN',  # Lysine neutral
-            'ASH', 'GLH',  # Protonated acidic residues
+            "HID",
+            "HIE",
+            "HIP",  # Histidine variants
+            "CYM",
+            "CYX",  # Cysteine variants (deprotonated, disulfide)
+            "LYN",  # Lysine neutral
+            "ASH",
+            "GLH",  # Protonated acidic residues
             # Terminal variants
-            'ACE', 'NME', 'NH2'
+            "ACE",
+            "NME",
+            "NH2",
         }
 
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             for line in f:
                 # Check both ATOM and HETATM (metals may be converted to ATOM by cleaner)
-                if line.startswith('ATOM') or line.startswith('HETATM'):
+                if line.startswith("ATOM") or line.startswith("HETATM"):
                     residue_name = line[17:20].strip().upper()
                     atom_name = line[12:16].strip().upper()
 
@@ -1102,13 +1222,15 @@ class SystemBuilder:
                         y = float(line[38:46].strip())
                         z = float(line[46:54].strip())
 
-                        metals.append({
-                            'residue_name': residue_name,
-                            'atom_name': atom_name,
-                            'chain': chain,
-                            'resnum': resnum,
-                            'coords': (x, y, z)
-                        })
+                        metals.append(
+                            {
+                                "residue_name": residue_name,
+                                "atom_name": atom_name,
+                                "chain": chain,
+                                "resnum": resnum,
+                                "coords": (x, y, z),
+                            }
+                        )
 
         return metals
 
@@ -1127,13 +1249,13 @@ class SystemBuilder:
         print(f"\nAdding {len(metals)} metal ion(s) to topology and coordinates...")
 
         # Add metals to topology
-        with open(topol_file, 'r') as f:
+        with open(topol_file, "r") as f:
             topol_lines = f.readlines()
 
         # Find [ molecules ] section
         molecules_idx = -1
         for i, line in enumerate(topol_lines):
-            if line.strip() == '[ molecules ]':
+            if line.strip() == "[ molecules ]":
                 molecules_idx = i
                 break
 
@@ -1143,12 +1265,13 @@ class SystemBuilder:
 
         # Count metals by residue name
         from collections import Counter
-        metal_counts = Counter(m['residue_name'] for m in metals)
+
+        metal_counts = Counter(m["residue_name"] for m in metals)
 
         # Insert metal molecule entries after [ molecules ] header
         insert_idx = molecules_idx + 1
         # Skip comment lines
-        while insert_idx < len(topol_lines) and topol_lines[insert_idx].strip().startswith(';'):
+        while insert_idx < len(topol_lines) and topol_lines[insert_idx].strip().startswith(";"):
             insert_idx += 1
 
         for metal_name, count in metal_counts.items():
@@ -1156,11 +1279,11 @@ class SystemBuilder:
             insert_idx += 1
             print(f"  Added {metal_name}: {count}")
 
-        with open(topol_file, 'w') as f:
+        with open(topol_file, "w") as f:
             f.writelines(topol_lines)
 
         # Add metals to GRO file
-        with open(gro_file, 'r') as f:
+        with open(gro_file, "r") as f:
             gro_lines = f.readlines()
 
         # Parse current atom count
@@ -1170,13 +1293,13 @@ class SystemBuilder:
         metal_gro_lines = []
         for i, metal in enumerate(metals, start=1):
             # GRO format: resnr resname atomname atomnr x y z
-            resnum = metal['resnum']
-            resname = metal['residue_name']
-            atomname = metal['atom_name']
+            resnum = metal["resnum"]
+            resname = metal["residue_name"]
+            atomname = metal["atom_name"]
             atom_num = atom_count + i
-            x, y, z = metal['coords']
+            x, y, z = metal["coords"]
             # Convert Angstroms to nm
-            x_nm, y_nm, z_nm = x/10.0, y/10.0, z/10.0
+            x_nm, y_nm, z_nm = x / 10.0, y / 10.0, z / 10.0
 
             # GRO format line
             line = f"{int(resnum):5d}{resname:5s}{atomname:>5s}{atom_num:5d}{x_nm:8.3f}{y_nm:8.3f}{z_nm:8.3f}\n"
@@ -1188,7 +1311,7 @@ class SystemBuilder:
         # Insert metal lines before box line (last line)
         gro_lines = gro_lines[:-1] + metal_gro_lines + [gro_lines[-1]]
 
-        with open(gro_file, 'w') as f:
+        with open(gro_file, "w") as f:
             f.writelines(gro_lines)
 
         print(f"Successfully added {len(metals)} metal ion(s) to system")
@@ -1214,8 +1337,7 @@ class SystemBuilder:
         #   ERROR N [file FILENAME, line LINENUM]:
         #     No default Per. Imp. Dih. types
         error_pattern = re.compile(
-            r'ERROR\s+\d+\s+\[file\s+(.+?),\s+line\s+(\d+)\]:\s*\n\s*No default Per\. Imp\. Dih\. types',
-            re.MULTILINE
+            r"ERROR\s+\d+\s+\[file\s+(.+?),\s+line\s+(\d+)\]:\s*\n\s*No default Per\. Imp\. Dih\. types", re.MULTILINE
         )
 
         # Group errors by file
@@ -1238,13 +1360,13 @@ class SystemBuilder:
                 print(f"  Warning: Cannot find {filename}, skipping")
                 continue
 
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 lines = f.readlines()
 
             # Backup before first modification
-            backup = str(filepath) + '.backup'
+            backup = str(filepath) + ".backup"
             if not Path(backup).exists():
-                with open(backup, 'w') as f:
+                with open(backup, "w") as f:
                     f.writelines(lines)
 
             # Comment out the specific failing lines
@@ -1254,11 +1376,11 @@ class SystemBuilder:
                     lines[idx] = f"; REMOVED by PRISM (no FF params): {lines[idx]}"
                     total_fixed += 1
 
-            with open(filepath, 'w') as f:
+            with open(filepath, "w") as f:
                 f.writelines(lines)
 
         return total_fixed
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print("This script is intended to be used as a module within the PRISM package.")

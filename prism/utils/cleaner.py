@@ -18,7 +18,7 @@ Features:
 
 import os
 import numpy as np
-from typing import List, Tuple, Set, Optional
+from typing import List, Tuple, Optional
 
 
 class ProteinCleaner:
@@ -31,43 +31,110 @@ class ProteinCleaner:
 
     # Structural metals that are typically important for protein function
     STRUCTURAL_METALS = {
-        'ZN', 'MG', 'CA', 'FE', 'CU', 'MN', 'CO', 'NI', 'CD',
-        'HG', 'ZN2', 'MG2', 'CA2', 'FE2', 'FE3', 'CU2', 'MN2'
+        "ZN",
+        "MG",
+        "CA",
+        "FE",
+        "CU",
+        "MN",
+        "CO",
+        "NI",
+        "CD",
+        "HG",
+        "ZN2",
+        "MG2",
+        "CA2",
+        "FE2",
+        "FE3",
+        "CU2",
+        "MN2",
     }
 
     # Non-structural ions that can usually be safely removed
     NON_STRUCTURAL_IONS = {
-        'NA', 'CL', 'K', 'BR', 'I', 'F',
-        'NA+', 'CL-', 'K+', 'BR-', 'I-',
-        'SO4', 'PO4', 'NO3', 'CO3',
-        'SUL', 'PHO', 'NIT', 'CAR'
+        "NA",
+        "CL",
+        "K",
+        "BR",
+        "I",
+        "F",
+        "NA+",
+        "CL-",
+        "K+",
+        "BR-",
+        "I-",
+        "SO4",
+        "PO4",
+        "NO3",
+        "CO3",
+        "SUL",
+        "PHO",
+        "NIT",
+        "CAR",
     }
 
     # Crystallization artifacts and common additives (removed in smart mode)
     CRYSTALLIZATION_ARTIFACTS = {
         # Glycerol and polyols
-        'GOL', 'EDO', 'MPD', 'MRD', 'PGO', 'PG4', 'BTB',
+        "GOL",
+        "EDO",
+        "MPD",
+        "MRD",
+        "PGO",
+        "PG4",
+        "BTB",
         # PEG oligomers
-        'PEG', 'PGE', '1PE', 'P6G', 'P33', 'PE8', '2PE', 'XPE', '12P', '33O', 'P3E',
+        "PEG",
+        "PGE",
+        "1PE",
+        "P6G",
+        "P33",
+        "PE8",
+        "2PE",
+        "XPE",
+        "12P",
+        "33O",
+        "P3E",
         # Sugars (unless covalently linked to protein)
-        'NAG', 'NDG', 'BMA', 'MAN', 'GAL', 'FUC', 'GLC', 'SIA',
+        "NAG",
+        "NDG",
+        "BMA",
+        "MAN",
+        "GAL",
+        "FUC",
+        "GLC",
+        "SIA",
         # Detergents
-        'DMS', 'BOG', 'LMT', 'C8E', 'DAO', 'SDS', 'LDA',
+        "DMS",
+        "BOG",
+        "LMT",
+        "C8E",
+        "DAO",
+        "SDS",
+        "LDA",
         # Other common additives
-        'ACT', 'ACE', 'FMT', 'TRS', 'EPE', 'BCT', 'BME'
+        "ACT",
+        "ACE",
+        "FMT",
+        "TRS",
+        "EPE",
+        "BCT",
+        "BME",
     }
 
     # Water residue names
-    WATER_NAMES = {'HOH', 'WAT', 'H2O', 'TIP', 'SPC', 'SOL'}
+    WATER_NAMES = {"HOH", "WAT", "H2O", "TIP", "SPC", "SOL"}
 
-    def __init__(self,
-                 ion_mode: str = 'smart',
-                 distance_cutoff: float = 5.0,
-                 keep_crystal_water: bool = False,
-                 remove_artifacts: bool = True,
-                 keep_custom_metals: Optional[List[str]] = None,
-                 remove_custom_metals: Optional[List[str]] = None,
-                 verbose: bool = True):
+    def __init__(
+        self,
+        ion_mode: str = "smart",
+        distance_cutoff: float = 5.0,
+        keep_crystal_water: bool = False,
+        remove_artifacts: bool = True,
+        keep_custom_metals: Optional[List[str]] = None,
+        remove_custom_metals: Optional[List[str]] = None,
+        verbose: bool = True,
+    ):
         """
         Initialize the ProteinCleaner.
 
@@ -95,7 +162,7 @@ class ProteinCleaner:
         verbose : bool
             Print detailed information during cleaning
         """
-        if ion_mode not in ['keep_all', 'smart', 'remove_all']:
+        if ion_mode not in ["keep_all", "smart", "remove_all"]:
             raise ValueError(f"Invalid ion_mode: {ion_mode}. Must be 'keep_all', 'smart', or 'remove_all'")
 
         self.ion_mode = ion_mode
@@ -115,14 +182,14 @@ class ProteinCleaner:
 
         # Statistics
         self.stats = {
-            'total_atoms': 0,
-            'protein_atoms': 0,
-            'water_removed': 0,
-            'water_kept': 0,
-            'ions_removed': 0,
-            'metals_kept': 0,
-            'metals_removed_by_distance': 0,
-            'artifacts_removed': 0
+            "total_atoms": 0,
+            "protein_atoms": 0,
+            "water_removed": 0,
+            "water_kept": 0,
+            "ions_removed": 0,
+            "metals_kept": 0,
+            "metals_removed_by_distance": 0,
+            "artifacts_removed": 0,
         }
 
     def clean_pdb(self, input_pdb: str, output_pdb: str) -> dict:
@@ -161,7 +228,7 @@ class ProteinCleaner:
 
         # Process HETATM records
         kept_hetatm_lines = []
-        if self.ion_mode != 'remove_all':
+        if self.ion_mode != "remove_all":
             kept_hetatm_lines = self._process_hetatm_records(hetatm_lines, protein_coords)
 
         # Write cleaned PDB
@@ -185,15 +252,15 @@ class ProteinCleaner:
         protein_lines = []
         hetatm_lines = []
 
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             for line in f:
-                if line.startswith('ATOM'):
+                if line.startswith("ATOM"):
                     protein_lines.append(line)
-                    self.stats['total_atoms'] += 1
-                    self.stats['protein_atoms'] += 1
-                elif line.startswith('HETATM'):
+                    self.stats["total_atoms"] += 1
+                    self.stats["protein_atoms"] += 1
+                elif line.startswith("HETATM"):
                     hetatm_lines.append(line)
-                    self.stats['total_atoms'] += 1
+                    self.stats["total_atoms"] += 1
 
         return protein_lines, hetatm_lines
 
@@ -215,7 +282,7 @@ class ProteinCleaner:
         for line in protein_lines:
             # Skip hydrogen atoms
             atom_name = line[12:16].strip()
-            if atom_name.startswith('H'):
+            if atom_name.startswith("H"):
                 continue
 
             try:
@@ -228,8 +295,7 @@ class ProteinCleaner:
 
         return np.array(coords) if coords else np.array([]).reshape(0, 3)
 
-    def _process_hetatm_records(self, hetatm_lines: List[str],
-                                protein_coords: np.ndarray) -> List[str]:
+    def _process_hetatm_records(self, hetatm_lines: List[str], protein_coords: np.ndarray) -> List[str]:
         """
         Process HETATM records according to ion handling mode.
 
@@ -255,16 +321,16 @@ class ProteinCleaner:
             if residue_name in self.WATER_NAMES:
                 if self.keep_crystal_water:
                     kept_lines.append(line)
-                    self.stats['water_kept'] += 1
+                    self.stats["water_kept"] += 1
                 else:
-                    self.stats['water_removed'] += 1
+                    self.stats["water_removed"] += 1
                 continue
 
             # Handle crystallization artifacts
             if residue_name in self.CRYSTALLIZATION_ARTIFACTS:
                 if self.remove_artifacts:
                     # Remove if flag is True (default)
-                    self.stats['artifacts_removed'] += 1
+                    self.stats["artifacts_removed"] += 1
                 else:
                     # Keep if flag is False
                     kept_lines.append(line)
@@ -281,9 +347,9 @@ class ProteinCleaner:
             # Handle metal/ion based on mode
             should_keep = False
 
-            if self.ion_mode == 'keep_all':
+            if self.ion_mode == "keep_all":
                 should_keep = True
-            elif self.ion_mode == 'smart':
+            elif self.ion_mode == "smart":
                 should_keep = self._should_keep_metal_smart(residue_name, atom_name)
             # elif self.ion_mode == 'remove_all': should_keep remains False
 
@@ -299,7 +365,7 @@ class ProteinCleaner:
 
                     if min_dist > self.distance_cutoff:
                         should_keep = False
-                        self.stats['metals_removed_by_distance'] += 1
+                        self.stats["metals_removed_by_distance"] += 1
                         if self.verbose:
                             print(f"  Removed {residue_name} at distance {min_dist:.2f} Å from protein")
                 except (ValueError, IndexError):
@@ -308,9 +374,9 @@ class ProteinCleaner:
 
             if should_keep:
                 kept_lines.append(line)
-                self.stats['metals_kept'] += 1
+                self.stats["metals_kept"] += 1
             else:
-                self.stats['ions_removed'] += 1
+                self.stats["ions_removed"] += 1
 
         return kept_lines
 
@@ -339,7 +405,7 @@ class ProteinCleaner:
             return True
 
         # Common metal ion patterns
-        metal_patterns = ['ZN', 'MG', 'CA', 'FE', 'CU', 'MN', 'CO', 'NI', 'NA', 'K', 'CL']
+        metal_patterns = ["ZN", "MG", "CA", "FE", "CU", "MN", "CO", "NI", "NA", "K", "CL"]
         for pattern in metal_patterns:
             if pattern in residue_name or pattern in atom_name:
                 return True
@@ -392,7 +458,7 @@ class ProteinCleaner:
             Minimum distance in Angstroms
         """
         if len(coords) == 0:
-            return float('inf')
+            return float("inf")
 
         distances = np.sqrt(np.sum((coords - point) ** 2, axis=1))
         return float(np.min(distances))
@@ -424,20 +490,22 @@ class ProteinCleaner:
             atom_name = line[12:16].strip().upper()
 
             # Check if this is a metal ion that should be converted
-            is_metal = (residue_name in self.structural_metals or
-                       atom_name in self.structural_metals or
-                       residue_name in self.non_structural_ions or
-                       atom_name in self.non_structural_ions)
+            is_metal = (
+                residue_name in self.structural_metals
+                or atom_name in self.structural_metals
+                or residue_name in self.non_structural_ions
+                or atom_name in self.non_structural_ions
+            )
 
             if is_metal:
                 # Convert HETATM to ATOM
                 # PDB format: columns 1-6 are record type
-                atom_line = 'ATOM  ' + line[6:]
+                atom_line = "ATOM  " + line[6:]
                 metal_atom_lines.append(atom_line)
 
                 if self.verbose:
-                    chain = line[21] if len(line) > 21 else ' '
-                    resnum = line[22:26].strip() if len(line) > 26 else ''
+                    chain = line[21] if len(line) > 21 else " "
+                    resnum = line[22:26].strip() if len(line) > 26 else ""
                     print(f"  Converting {residue_name} (chain {chain}, res {resnum}) from HETATM to ATOM")
             else:
                 # Keep as HETATM (cofactors, modified residues, etc.)
@@ -480,8 +548,7 @@ class ProteinCleaner:
         # Assign metals to NEW unique chain IDs (not mixed with protein)
         # This is required because pdb2gmx doesn't allow mixed Protein/Ion types
         used_chains = set(chains.keys())
-        available_chains = [c for c in string.ascii_uppercase + string.digits
-                           if c not in used_chains]
+        available_chains = [c for c in string.ascii_uppercase + string.digits if c not in used_chains]
 
         metal_chain_idx = 0
         for line in metal_lines:
@@ -509,12 +576,13 @@ class ProteinCleaner:
                 if self.verbose:
                     res_name = line[17:20].strip()
                     resnum = line[22:26].strip()
-                    print(f"  Reassigning {res_name} {resnum} from chain {original_chain} to chain {new_chain_id} (for pdb2gmx compatibility)")
+                    print(
+                        f"  Reassigning {res_name} {resnum} from chain {original_chain} to chain {new_chain_id} (for pdb2gmx compatibility)"
+                    )
 
         return chains
 
-    def _write_pdb(self, output_pdb: str, protein_lines: List[str],
-                   hetatm_lines: List[str], input_pdb: str):
+    def _write_pdb(self, output_pdb: str, protein_lines: List[str], hetatm_lines: List[str], input_pdb: str):
         """
         Write cleaned PDB file with proper chain organization for pdb2gmx.
 
@@ -535,7 +603,7 @@ class ProteinCleaner:
         # Group protein and metal atoms by chain for proper output
         chain_atoms = self._group_by_chain(protein_lines, metal_atom_lines)
 
-        with open(output_pdb, 'w') as out:
+        with open(output_pdb, "w") as out:
             # Write header
             out.write(f"REMARK   Cleaned by PRISM ProteinCleaner\n")
             out.write(f"REMARK   Original file: {os.path.basename(input_pdb)}\n")
@@ -576,24 +644,23 @@ class ProteinCleaner:
         print(f"Total atoms read: {self.stats['total_atoms']}")
         print(f"Protein atoms: {self.stats['protein_atoms']}")
         print(f"Water molecules removed: {self.stats['water_removed']}")
-        if self.stats['water_kept'] > 0:
+        if self.stats["water_kept"] > 0:
             print(f"Water molecules kept: {self.stats['water_kept']}")
-        if self.stats['artifacts_removed'] > 0:
+        if self.stats["artifacts_removed"] > 0:
             print(f"Crystallization artifacts removed: {self.stats['artifacts_removed']} atoms")
         print(f"Ions/metals removed: {self.stats['ions_removed']}")
         print(f"Metals kept: {self.stats['metals_kept']}")
-        if self.stats['metals_removed_by_distance'] > 0:
+        if self.stats["metals_removed_by_distance"] > 0:
             print(f"Metals removed by distance filter: {self.stats['metals_removed_by_distance']}")
 
-        total_kept = self.stats['protein_atoms'] + self.stats['metals_kept'] + self.stats['water_kept']
+        total_kept = self.stats["protein_atoms"] + self.stats["metals_kept"] + self.stats["water_kept"]
         print(f"\nTotal atoms in output: {total_kept}")
         print("=" * 30)
 
 
-def clean_protein_pdb(input_pdb: str, output_pdb: str,
-                     ion_mode: str = 'smart',
-                     distance_cutoff: float = 5.0,
-                     **kwargs) -> dict:
+def clean_protein_pdb(
+    input_pdb: str, output_pdb: str, ion_mode: str = "smart", distance_cutoff: float = 5.0, **kwargs
+) -> dict:
     """
     Convenience function to clean a protein PDB file.
 
@@ -629,16 +696,11 @@ def clean_protein_pdb(input_pdb: str, output_pdb: str,
     >>> # Custom distance cutoff
     >>> stats = clean_protein_pdb('input.pdb', 'output.pdb', distance_cutoff=8.0)
     """
-    cleaner = ProteinCleaner(
-        ion_mode=ion_mode,
-        distance_cutoff=distance_cutoff,
-        **kwargs
-    )
+    cleaner = ProteinCleaner(ion_mode=ion_mode, distance_cutoff=distance_cutoff, **kwargs)
     return cleaner.clean_pdb(input_pdb, output_pdb)
 
 
-def fix_terminal_atoms(pdb_file: str, output_file: str = None,
-                      force_field: str = None, verbose: bool = True) -> str:
+def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str = None, verbose: bool = True) -> str:
     """
     Fix terminal atom naming and ordering for GROMACS compatibility.
 
@@ -688,28 +750,57 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
     use_oc1_oc2 = False
     if force_field:
         ff_lower = force_field.lower()
-        if 'mut' in ff_lower or 'star' in ff_lower:
+        if "mut" in ff_lower or "star" in ff_lower:
             use_oc1_oc2 = True
             if verbose:
                 print(f"Detected modified AMBER force field ({force_field})")
                 print("  Using OC1/OC2 terminal oxygen naming")
 
     # Backbone atom names that should appear before O in proper order
-    BACKBONE_ATOMS = {'N', 'CA', 'C'}
+    BACKBONE_ATOMS = {"N", "CA", "C"}
     # Side chain atoms that indicate O is misplaced if O appears after them
-    SIDECHAIN_INDICATORS = {'CB', 'CG', 'CG1', 'CG2', 'CD', 'CD1', 'CD2', 'CE', 'CE1', 'CE2', 'CE3',
-                           'CZ', 'CZ2', 'CZ3', 'CH2', 'NE', 'NE1', 'NE2', 'ND1', 'ND2', 'NZ',
-                           'OD1', 'OD2', 'OE1', 'OE2', 'OG', 'OG1', 'OH', 'SD', 'SG'}
+    SIDECHAIN_INDICATORS = {
+        "CB",
+        "CG",
+        "CG1",
+        "CG2",
+        "CD",
+        "CD1",
+        "CD2",
+        "CE",
+        "CE1",
+        "CE2",
+        "CE3",
+        "CZ",
+        "CZ2",
+        "CZ3",
+        "CH2",
+        "NE",
+        "NE1",
+        "NE2",
+        "ND1",
+        "ND2",
+        "NZ",
+        "OD1",
+        "OD2",
+        "OE1",
+        "OE2",
+        "OG",
+        "OG1",
+        "OH",
+        "SD",
+        "SG",
+    }
 
     all_lines = []
-    with open(pdb_file, 'r') as f:
+    with open(pdb_file, "r") as f:
         all_lines = f.readlines()
 
     # First pass: group atoms by residue
     residues = {}  # res_id -> list of (line, index, atom_name)
 
     for i, line in enumerate(all_lines):
-        if line.startswith('ATOM') or line.startswith('HETATM'):
+        if line.startswith("ATOM") or line.startswith("HETATM"):
             atom_name = line[12:16].strip()
             res_name = line[17:20].strip()
             res_num = line[22:26].strip()
@@ -718,7 +809,7 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
 
             if res_id not in residues:
                 residues[res_id] = []
-            residues[res_id].append({'line': line, 'index': i, 'atom': atom_name, 'res_name': res_name})
+            residues[res_id].append({"line": line, "index": i, "atom": atom_name, "res_name": res_name})
 
     # Second pass: identify C-terminal residues needing fixes
     c_terminal_residues = {}  # res_id -> {c_index, skip_indices, o_line}
@@ -732,17 +823,17 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
 
         # Find positions of key atoms
         for i, atom_info in enumerate(atoms):
-            atom_name = atom_info['atom']
+            atom_name = atom_info["atom"]
 
-            if atom_name == 'C':
+            if atom_name == "C":
                 c_idx = i
-                c_line = atom_info['line']  # Store C line for coordinate reference
-            elif atom_name == 'O':
+                c_line = atom_info["line"]  # Store C line for coordinate reference
+            elif atom_name == "O":
                 o_idx = i
-                o_line = atom_info['line']
-            elif atom_name == 'OXT':
+                o_line = atom_info["line"]
+            elif atom_name == "OXT":
                 oxt_idx = i
-                oxt_line = atom_info['line']
+                oxt_line = atom_info["line"]
             elif atom_name in SIDECHAIN_INDICATORS:
                 has_sidechain = True
 
@@ -760,31 +851,31 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
                 skip_atom_indices.append(o_idx)
 
             # Generate terminal oxygen atom(s) based on force field
-            source_line = atoms[oxt_idx]['line']
+            source_line = atoms[oxt_idx]["line"]
             if use_oc1_oc2:
                 # Modified AMBER: Create OC1 and OC2 (two terminal oxygens)
-                oc1_line = source_line[:12] + ' OC1' + source_line[16:]
-                oc2_line = source_line[:12] + ' OC2' + source_line[16:]
+                oc1_line = source_line[:12] + " OC1" + source_line[16:]
+                oc2_line = source_line[:12] + " OC2" + source_line[16:]
                 terminal_lines = [oc1_line, oc2_line]
             else:
                 # Standard AMBER: Single O atom
-                o_line = source_line[:12] + ' O  ' + source_line[16:]
+                o_line = source_line[:12] + " O  " + source_line[16:]
                 terminal_lines = [o_line]
 
         # Case 2: O appears after side chain atoms (misplaced terminal O)
         elif o_idx is not None and c_idx is not None and has_sidechain:
             # Check if O appears after any side chain atom
             for i, atom_info in enumerate(atoms):
-                if atom_info['atom'] in SIDECHAIN_INDICATORS and i < o_idx:
+                if atom_info["atom"] in SIDECHAIN_INDICATORS and i < o_idx:
                     needs_fix = True
                     skip_atom_indices.append(o_idx)
 
                     # Generate terminal oxygen atom(s) based on force field
-                    source_line = atoms[o_idx]['line']
+                    source_line = atoms[o_idx]["line"]
                     if use_oc1_oc2:
                         # Modified AMBER: Create OC1 and OC2
-                        oc1_line = source_line[:12] + ' OC1' + source_line[16:]
-                        oc2_line = source_line[:12] + ' OC2' + source_line[16:]
+                        oc1_line = source_line[:12] + " OC1" + source_line[16:]
+                        oc2_line = source_line[:12] + " OC2" + source_line[16:]
                         terminal_lines = [oc1_line, oc2_line]
                     else:
                         # Standard AMBER: Keep as O
@@ -793,14 +884,14 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
 
         if needs_fix and c_idx is not None and terminal_lines:
             c_terminal_residues[res_id] = {
-                'c_index': atoms[c_idx]['index'],
-                'skip_indices': [atoms[idx]['index'] for idx in skip_atom_indices],
-                'terminal_lines': terminal_lines,  # Changed from 'o_line' to support multiple lines
-                'res_name': atoms[0]['res_name'],
-                'chain': res_id.split(':')[0],
-                'res_num': res_id.split(':')[-1],
-                'is_oxt': oxt_idx is not None,
-                'use_oc1_oc2': use_oc1_oc2
+                "c_index": atoms[c_idx]["index"],
+                "skip_indices": [atoms[idx]["index"] for idx in skip_atom_indices],
+                "terminal_lines": terminal_lines,  # Changed from 'o_line' to support multiple lines
+                "res_name": atoms[0]["res_name"],
+                "chain": res_id.split(":")[0],
+                "res_num": res_id.split(":")[-1],
+                "is_oxt": oxt_idx is not None,
+                "use_oc1_oc2": use_oc1_oc2,
             }
 
     # Third pass: reconstruct file with corrected terminal residues
@@ -810,27 +901,29 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
 
     for res_id, term_info in c_terminal_residues.items():
         # Skip ALL old O/OXT positions (may be multiple when both O and OXT exist)
-        for skip_idx in term_info['skip_indices']:
+        for skip_idx in term_info["skip_indices"]:
             skip_indices.add(skip_idx)
         # Insert corrected terminal oxygen(s) right after C
-        insert_map[term_info['c_index']] = term_info['terminal_lines']
+        insert_map[term_info["c_index"]] = term_info["terminal_lines"]
         fixed_count += 1
 
         if verbose:
-            fix_type = "OXT → O" if term_info['is_oxt'] else "misplaced O"
-            skip_count = len(term_info['skip_indices'])
+            fix_type = "OXT → O" if term_info["is_oxt"] else "misplaced O"
+            skip_count = len(term_info["skip_indices"])
             atoms_removed = f"{skip_count} atom(s)" if skip_count > 1 else "1 atom"
 
-            if term_info['use_oc1_oc2']:
+            if term_info["use_oc1_oc2"]:
                 atoms_added = "OC1 and OC2"
             else:
                 atoms_added = "O"
 
-            print(f"  Fixed {fix_type} in {term_info['res_name']} {term_info['chain']}{term_info['res_num']} "
-                  f"(removed {atoms_removed}, added {atoms_added})")
+            print(
+                f"  Fixed {fix_type} in {term_info['res_name']} {term_info['chain']}{term_info['res_num']} "
+                f"(removed {atoms_removed}, added {atoms_added})"
+            )
 
     # Write output with insertions
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         for i, line in enumerate(all_lines):
             if i not in skip_indices:
                 f.write(line)
@@ -848,31 +941,28 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None,
     return output_file
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description='Clean protein PDB files with intelligent metal ion handling'
+    parser = argparse.ArgumentParser(description="Clean protein PDB files with intelligent metal ion handling")
+    parser.add_argument("input", help="Input PDB file")
+    parser.add_argument("output", help="Output PDB file")
+    parser.add_argument(
+        "--mode",
+        choices=["keep_all", "smart", "remove_all"],
+        default="smart",
+        help="Ion handling mode (default: smart)",
     )
-    parser.add_argument('input', help='Input PDB file')
-    parser.add_argument('output', help='Output PDB file')
-    parser.add_argument('--mode', choices=['keep_all', 'smart', 'remove_all'],
-                       default='smart', help='Ion handling mode (default: smart)')
-    parser.add_argument('--distance', type=float, default=5.0,
-                       help='Distance cutoff for keeping metals in Angstroms (default: 5.0)')
-    parser.add_argument('--quiet', action='store_true',
-                       help='Suppress output messages')
-    parser.add_argument('--fix-termini', action='store_true',
-                       help='Fix terminal atom names (OXT → O) for GROMACS')
+    parser.add_argument(
+        "--distance", type=float, default=5.0, help="Distance cutoff for keeping metals in Angstroms (default: 5.0)"
+    )
+    parser.add_argument("--quiet", action="store_true", help="Suppress output messages")
+    parser.add_argument("--fix-termini", action="store_true", help="Fix terminal atom names (OXT → O) for GROMACS")
 
     args = parser.parse_args()
 
     clean_protein_pdb(
-        args.input,
-        args.output,
-        ion_mode=args.mode,
-        distance_cutoff=args.distance,
-        verbose=not args.quiet
+        args.input, args.output, ion_mode=args.mode, distance_cutoff=args.distance, verbose=not args.quiet
     )
 
     if args.fix_termini:

@@ -10,10 +10,26 @@ from typing import Union, List
 
 # Three-letter to one-letter amino acid code mapping
 AA_3TO1 = {
-    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
-    'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
-    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
-    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
+    "ALA": "A",
+    "ARG": "R",
+    "ASN": "N",
+    "ASP": "D",
+    "CYS": "C",
+    "GLN": "Q",
+    "GLU": "E",
+    "GLY": "G",
+    "HIS": "H",
+    "ILE": "I",
+    "LEU": "L",
+    "LYS": "K",
+    "MET": "M",
+    "PHE": "F",
+    "PRO": "P",
+    "SER": "S",
+    "THR": "T",
+    "TRP": "W",
+    "TYR": "Y",
+    "VAL": "V",
 }
 
 # One-letter to three-letter amino acid code mapping (reverse)
@@ -45,7 +61,7 @@ def convert_residue_to_1letter(residue_name: str) -> str:
     'D618'
     """
     # Pattern: 3-letter code followed by digits
-    match = re.match(r'^([A-Z]{3})(\d+)$', residue_name)
+    match = re.match(r"^([A-Z]{3})(\d+)$", residue_name)
 
     if match:
         three_letter = match.group(1)
@@ -83,7 +99,7 @@ def convert_residue_to_3letter(residue_name: str) -> str:
     'ASP618'
     """
     # Pattern: 1-letter code followed by digits
-    match = re.match(r'^([A-Z])(\d+)$', residue_name)
+    match = re.match(r"^([A-Z])(\d+)$", residue_name)
 
     if match:
         one_letter = match.group(1)

@@ -32,7 +32,7 @@ def fix_prmtop_periodicity(prmtop_path):
     int
         Number of periodicity values that were fixed.
     """
-    with open(prmtop_path, 'r') as f:
+    with open(prmtop_path, "r") as f:
         lines = f.readlines()
 
     # Find DIHEDRAL_PERIODICITY section
@@ -45,15 +45,15 @@ def fix_prmtop_periodicity(prmtop_path):
     while i < len(lines):
         line = lines[i]
 
-        if line.startswith('%FLAG DIHEDRAL_PERIODICITY'):
+        if line.startswith("%FLAG DIHEDRAL_PERIODICITY"):
             in_section = True
             new_lines.append(line)
             i += 1
             # Next line is %FORMAT
-            if i < len(lines) and lines[i].startswith('%FORMAT'):
+            if i < len(lines) and lines[i].startswith("%FORMAT"):
                 new_lines.append(lines[i])
                 # Parse format: e.g., %FORMAT(5E16.8)
-                fmt_match = re.match(r'%FORMAT\((\d+)E(\d+)\.(\d+)\)', lines[i].strip())
+                fmt_match = re.match(r"%FORMAT\((\d+)E(\d+)\.(\d+)\)", lines[i].strip())
                 if fmt_match:
                     n_per_line = int(fmt_match.group(1))
                     field_width = int(fmt_match.group(2))
@@ -63,7 +63,7 @@ def fix_prmtop_periodicity(prmtop_path):
             continue
 
         if in_section:
-            if line.startswith('%FLAG'):
+            if line.startswith("%FLAG"):
                 # End of section
                 in_section = False
                 new_lines.append(line)
@@ -74,8 +74,8 @@ def fix_prmtop_periodicity(prmtop_path):
                 n_per_line, field_width, decimal = fmt_pattern
                 # Parse fixed-width fields
                 new_fields = []
-                for j in range(0, len(line.rstrip('\n')), field_width):
-                    field = line[j:j + field_width]
+                for j in range(0, len(line.rstrip("\n")), field_width):
+                    field = line[j : j + field_width]
                     if not field.strip():
                         new_fields.append(field)
                         continue
@@ -86,13 +86,13 @@ def fix_prmtop_periodicity(prmtop_path):
                         if int_val > 6 or int_val < 1:
                             # Clamp to valid range 1-6
                             new_val = ((int_val - 1) % 6) + 1
-                            new_fields.append(f'{sign * new_val:{field_width}.{decimal}E}')
+                            new_fields.append(f"{sign * new_val:{field_width}.{decimal}E}")
                             fixed += 1
                         else:
                             new_fields.append(field)
                     except ValueError:
                         new_fields.append(field)
-                new_lines.append(''.join(new_fields) + '\n')
+                new_lines.append("".join(new_fields) + "\n")
                 i += 1
                 continue
 
@@ -100,13 +100,13 @@ def fix_prmtop_periodicity(prmtop_path):
         i += 1
 
     if fixed:
-        with open(prmtop_path, 'w') as f:
+        with open(prmtop_path, "w") as f:
             f.writelines(new_lines)
 
     return fixed
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <prmtop_file> [prmtop_file ...]")
         sys.exit(1)

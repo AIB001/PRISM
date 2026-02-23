@@ -6,7 +6,6 @@ and generates a GMX_PROLIG_REST2 directory ready for REST2 enhanced sampling.
 """
 
 import os
-import sys
 import time
 
 from .topology import (
@@ -47,9 +46,9 @@ class REST2Workflow:
         t_max=450.0,
         n_replicas=16,
         cutoff=0.5,
-        lig_name='LIG',
+        lig_name="LIG",
         lig_moltype=None,
-        gmx='gmx',
+        gmx="gmx",
     ):
         self.md_dir = os.path.abspath(md_dir)
         self.output_dir = os.path.abspath(output_dir)
@@ -80,10 +79,8 @@ class REST2Workflow:
         """
         # Import color functions - use try/except for standalone usage
         try:
-            from prism.utils.colors import (
-                print_header, print_step, print_success,
-                print_error, print_warning, print_info, path
-            )
+            from prism.utils.colors import print_header, print_step, print_success, print_error, print_info, path
+
             use_colors = True
         except ImportError:
             use_colors = False
@@ -108,8 +105,8 @@ class REST2Workflow:
         print()
 
         # Validate inputs
-        topol_path = os.path.join(self.md_dir, 'topol.top')
-        gro_path = os.path.join(self.md_dir, 'solv_ions.gro')
+        topol_path = os.path.join(self.md_dir, "topol.top")
+        gro_path = os.path.join(self.md_dir, "solv_ions.gro")
 
         if not os.path.isdir(self.md_dir):
             msg = f"MD directory not found: {self.md_dir}"
@@ -161,7 +158,7 @@ class REST2Workflow:
             print(f"\nStep 2/{total_steps}: {step_msg}...")
 
         os.makedirs(self.output_dir, exist_ok=True)
-        processed_top = os.path.join(self.output_dir, 'processed.top')
+        processed_top = os.path.join(self.output_dir, "processed.top")
         merge_topology(topol_path, gro_path, processed_top, gmx=self.gmx)
 
         # Count atoms per moleculetype and build molecules_order
@@ -174,11 +171,9 @@ class REST2Workflow:
             molecules_order.append((name, count, n_atoms))
 
         # Find pocket residues (searches near all ligand resnames)
-        pocket = find_pocket_residues(
-            atoms, box, self.lig_names, molecules_order, self.cutoff
-        )
+        pocket = find_pocket_residues(atoms, box, self.lig_names, molecules_order, self.cutoff)
 
-        lig_label = ', '.join(self.lig_names)
+        lig_label = ", ".join(self.lig_names)
         for chain, resids in sorted(pocket.items()):
             print(f"  {chain}: {len(resids)} residues within {self.cutoff} nm of {lig_label}")
             sorted_resids = sorted(resids)
@@ -196,7 +191,7 @@ class REST2Workflow:
         else:
             print(f"\nStep 3/{total_steps}: {step_msg}...")
 
-        marked_top = os.path.join(self.output_dir, 'rest2_marked.top')
+        marked_top = os.path.join(self.output_dir, "rest2_marked.top")
         mark_solute_atoms(processed_top, marked_top, self.lig_moltypes, pocket)
 
         # ---------------------------------------------------------------

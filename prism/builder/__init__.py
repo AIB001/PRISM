@@ -11,4 +11,4 @@ Split from the original monolithic builder.py for maintainability.
 from .core import PRISMBuilder
 from .cli import main
 
-__all__ = ['PRISMBuilder', 'main']
+__all__ = ["PRISMBuilder", "main"]

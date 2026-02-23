@@ -12,8 +12,7 @@ import yaml
 class ConfigurationManager:
     """Handle configuration loading and management"""
 
-    def __init__(self, config_path=None, gromacs_env=None,
-                 forcefield_name="amber99sb", water_model_name="tip3p"):
+    def __init__(self, config_path=None, gromacs_env=None, forcefield_name="amber99sb", water_model_name="tip3p"):
         self.config_path = config_path
         self.gromacs_env = gromacs_env
         self.forcefield_name = forcefield_name
@@ -27,7 +26,7 @@ class ConfigurationManager:
 
         if self.config_path and os.path.exists(self.config_path):
             print(f"Loading configuration from: {self.config_path}")
-            with open(self.config_path, 'r') as f:
+            with open(self.config_path, "r") as f:
                 user_config = yaml.safe_load(f)
 
             # Merge user config with defaults
@@ -56,91 +55,88 @@ class ConfigurationManager:
                 4: {"name": "amber14sb", "dir": "amber14sb.ff"},
                 5: {"name": "charmm27", "dir": "charmm27.ff"},
                 6: {"name": "oplsaa", "dir": "oplsaa.ff"},
-                7: {"name": "gromos54a7", "dir": "gromos54a7.ff"}
+                7: {"name": "gromos54a7", "dir": "gromos54a7.ff"},
             }
-            gmx_command = 'gmx'
+            gmx_command = "gmx"
 
         return {
-            'general': {
-                'overwrite': False,
-                'gmx_command': gmx_command
+            "general": {"overwrite": False, "gmx_command": gmx_command},
+            "forcefield": {
+                "name": self.forcefield_name,  # Use name instead of index
+                "index": 1,  # Will be determined from name
+                "custom_forcefields": force_fields,
             },
-            'forcefield': {
-                'name': self.forcefield_name,  # Use name instead of index
-                'index': 1,  # Will be determined from name
-                'custom_forcefields': force_fields
-            },
-            'water_model': {
-                'name': self.water_model_name,  # Use name instead of index
-                'index': 1,  # Will be determined from name
-                'custom_water_models': {
+            "water_model": {
+                "name": self.water_model_name,  # Use name instead of index
+                "index": 1,  # Will be determined from name
+                "custom_water_models": {
                     1: {"name": "tip3p"},
                     2: {"name": "tip4p"},
                     3: {"name": "spc"},
                     4: {"name": "spce"},
-                    5: {"name": "none"}
-                }
+                    5: {"name": "none"},
+                },
             },
-            'box': {
-                'distance': 1.5,  # nm
-                'shape': 'cubic',  # cubic, dodecahedron, octahedron
-                'center': True
+            "box": {
+                "distance": 1.5,  # nm
+                "shape": "cubic",  # cubic, dodecahedron, octahedron
+                "center": True,
             },
-            'simulation': {
-                'temperature': 310,  # K
-                'pressure': 1.0,  # bar
-                'pH': 7.0,
-                'ligand_charge': 0,  # Default ligand charge
-                'production_time_ns': 500,  # ns
-                'dt': 0.002,  # ps
-                'equilibration_nvt_time_ps': 500,  # ps
-                'equilibration_npt_time_ps': 500  # ps
+            "simulation": {
+                "temperature": 310,  # K
+                "pressure": 1.0,  # bar
+                "pH": 7.0,
+                "ligand_charge": 0,  # Default ligand charge
+                "production_time_ns": 500,  # ns
+                "dt": 0.002,  # ps
+                "equilibration_nvt_time_ps": 500,  # ps
+                "equilibration_npt_time_ps": 500,  # ps
             },
-            'ions': {
-                'neutral': True,
-                'concentration': 0.15,  # M
-                'positive_ion': 'NA',
-                'negative_ion': 'CL'
+            "ions": {
+                "neutral": True,
+                "concentration": 0.15,  # M
+                "positive_ion": "NA",
+                "negative_ion": "CL",
             },
-            'constraints': {
-                'algorithm': 'lincs',
-                'type': 'h-bonds',  # none, h-bonds, all-bonds
-                'lincs_iter': 1,
-                'lincs_order': 4
+            "constraints": {
+                "algorithm": "lincs",
+                "type": "h-bonds",  # none, h-bonds, all-bonds
+                "lincs_iter": 1,
+                "lincs_order": 4,
             },
-            'energy_minimization': {
-                'integrator': 'steep',
-                'emtol': 200.0,  # kJ/mol/nm
-                'emstep': 0.01,
-                'nsteps': 10000
+            "energy_minimization": {
+                "integrator": "steep",
+                "emtol": 200.0,  # kJ/mol/nm
+                "emstep": 0.01,
+                "nsteps": 10000,
             },
-            'output': {
-                'trajectory_interval_ps': 500,  # ps
-                'energy_interval_ps': 10,  # ps
-                'log_interval_ps': 10,  # ps
-                'compressed_trajectory': True
+            "output": {
+                "trajectory_interval_ps": 500,  # ps
+                "energy_interval_ps": 10,  # ps
+                "log_interval_ps": 10,  # ps
+                "compressed_trajectory": True,
             },
-            'electrostatics': {
-                'coulombtype': 'PME',
-                'rcoulomb': 1.0,  # nm
-                'pme_order': 4,
-                'fourierspacing': 0.16  # nm
+            "electrostatics": {
+                "coulombtype": "PME",
+                "rcoulomb": 1.0,  # nm
+                "pme_order": 4,
+                "fourierspacing": 0.16,  # nm
             },
-            'vdw': {
-                'rvdw': 1.0,  # nm
-                'dispcorr': 'EnerPres'
+            "vdw": {
+                "rvdw": 1.0,  # nm
+                "dispcorr": "EnerPres",
             },
-            'temperature_coupling': {
-                'tcoupl': 'V-rescale',
-                'tc_grps': ['Protein', 'Non-Protein'],
-                'tau_t': [0.1, 0.1],  # ps
+            "temperature_coupling": {
+                "tcoupl": "V-rescale",
+                "tc_grps": ["Protein", "Non-Protein"],
+                "tau_t": [0.1, 0.1],  # ps
             },
-            'pressure_coupling': {
-                'pcoupl': 'C-rescale',
-                'pcoupltype': 'isotropic',
-                'tau_p': 1.0,  # ps
-                'compressibility': 4.5e-5  # bar^-1
-            }
+            "pressure_coupling": {
+                "pcoupl": "C-rescale",
+                "pcoupltype": "isotropic",
+                "tau_p": 1.0,  # ps
+                "compressibility": 4.5e-5,  # bar^-1
+            },
         }
 
     def _merge_configs(self, default, user):
@@ -164,11 +160,11 @@ class ConfigurationManager:
             return
 
         # Handle force field name
-        ff_name = self.config['forcefield'].get('name')
+        ff_name = self.config["forcefield"].get("name")
         if ff_name and isinstance(ff_name, str):
             ff_index = self.gromacs_env.get_force_field_index(ff_name)
             if ff_index:
-                self.config['forcefield']['index'] = ff_index
+                self.config["forcefield"]["index"] = ff_index
                 print(f"Force field '{ff_name}' mapped to index {ff_index}")
             else:
                 print(f"Warning: Force field '{ff_name}' not found. Available force fields:")
@@ -177,15 +173,15 @@ class ConfigurationManager:
                 raise ValueError(f"Force field '{ff_name}' not found in GROMACS installation")
 
         # Update water models for the selected force field
-        self.update_water_models(self.config['forcefield']['index'])
+        self.update_water_models(self.config["forcefield"]["index"])
 
         # Handle water model name
-        water_name = self.config['water_model'].get('name')
+        water_name = self.config["water_model"].get("name")
         if water_name and isinstance(water_name, str):
-            ff_index = self.config['forcefield']['index']
+            ff_index = self.config["forcefield"]["index"]
             wm_index = self.gromacs_env.get_water_model_index(ff_index, water_name)
             if wm_index:
-                self.config['water_model']['index'] = wm_index
+                self.config["water_model"]["index"] = wm_index
                 print(f"Water model '{water_name}' mapped to index {wm_index}")
             else:
                 print(f"Warning: Water model '{water_name}' not found for force field. Available water models:")
@@ -198,11 +194,11 @@ class ConfigurationManager:
         if self.gromacs_env:
             water_models = self.gromacs_env.get_water_models_for_forcefield(ff_index)
             if water_models:
-                self.config['water_model']['custom_water_models'] = water_models
+                self.config["water_model"]["custom_water_models"] = water_models
 
     def save_config(self, output_path):
         """Save configuration to file"""
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             yaml.dump(self.config, f, default_flow_style=False, sort_keys=False)
 
     def update_forcefield_by_name(self, ff_name):
@@ -213,8 +209,8 @@ class ConfigurationManager:
 
         ff_index = self.gromacs_env.get_force_field_index(ff_name)
         if ff_index:
-            self.config['forcefield']['name'] = ff_name
-            self.config['forcefield']['index'] = ff_index
+            self.config["forcefield"]["name"] = ff_name
+            self.config["forcefield"]["index"] = ff_index
             self.update_water_models(ff_index)
             print(f"Updated force field to '{ff_name}' (index {ff_index})")
         else:
@@ -226,11 +222,11 @@ class ConfigurationManager:
             print("Warning: Cannot update water model without GROMACS environment")
             return
 
-        ff_index = self.config['forcefield']['index']
+        ff_index = self.config["forcefield"]["index"]
         wm_index = self.gromacs_env.get_water_model_index(ff_index, water_name)
         if wm_index:
-            self.config['water_model']['name'] = water_name
-            self.config['water_model']['index'] = wm_index
+            self.config["water_model"]["name"] = water_name
+            self.config["water_model"]["index"] = wm_index
             print(f"Updated water model to '{water_name}' (index {wm_index})")
         else:
             raise ValueError(f"Water model '{water_name}' not found for current force field")

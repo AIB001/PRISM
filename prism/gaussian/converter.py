@@ -18,10 +18,22 @@ except ImportError:
     try:
         from prism.utils.colors import print_success, print_info, print_warning, print_error
     except ImportError:
-        def print_success(x, **kwargs): print(f"[OK] {x}")
-        def print_info(x, **kwargs): print(f"[INFO] {x}")
-        def print_warning(x, **kwargs): print(f"[WARN] {x}")
-        def print_error(x, **kwargs): print(f"[ERROR] {x}")
+
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[OK] {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[INFO] {x}")
+
+        def print_warning(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[WARN] {x}")
+
+        def print_error(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[ERROR] {x}")
 
 
 class CoordinateConverter:
@@ -33,19 +45,98 @@ class CoordinateConverter:
 
     # Element symbol mapping from atomic number
     ATOMIC_SYMBOLS = {
-        1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O',
-        9: 'F', 10: 'Ne', 11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P',
-        16: 'S', 17: 'Cl', 18: 'Ar', 19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti',
-        23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni', 29: 'Cu',
-        30: 'Zn', 31: 'Ga', 32: 'Ge', 33: 'As', 34: 'Se', 35: 'Br', 36: 'Kr',
-        37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc',
-        44: 'Ru', 45: 'Rh', 46: 'Pd', 47: 'Ag', 48: 'Cd', 49: 'In', 50: 'Sn',
-        51: 'Sb', 52: 'Te', 53: 'I', 54: 'Xe', 55: 'Cs', 56: 'Ba', 57: 'La',
-        58: 'Ce', 59: 'Pr', 60: 'Nd', 61: 'Pm', 62: 'Sm', 63: 'Eu', 64: 'Gd',
-        65: 'Tb', 66: 'Dy', 67: 'Ho', 68: 'Er', 69: 'Tm', 70: 'Yb', 71: 'Lu',
-        72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt',
-        79: 'Au', 80: 'Hg', 81: 'Tl', 82: 'Pb', 83: 'Bi', 84: 'Po', 85: 'At',
-        86: 'Rn', 87: 'Fr', 88: 'Ra', 89: 'Ac', 90: 'Th', 91: 'Pa', 92: 'U'
+        1: "H",
+        2: "He",
+        3: "Li",
+        4: "Be",
+        5: "B",
+        6: "C",
+        7: "N",
+        8: "O",
+        9: "F",
+        10: "Ne",
+        11: "Na",
+        12: "Mg",
+        13: "Al",
+        14: "Si",
+        15: "P",
+        16: "S",
+        17: "Cl",
+        18: "Ar",
+        19: "K",
+        20: "Ca",
+        21: "Sc",
+        22: "Ti",
+        23: "V",
+        24: "Cr",
+        25: "Mn",
+        26: "Fe",
+        27: "Co",
+        28: "Ni",
+        29: "Cu",
+        30: "Zn",
+        31: "Ga",
+        32: "Ge",
+        33: "As",
+        34: "Se",
+        35: "Br",
+        36: "Kr",
+        37: "Rb",
+        38: "Sr",
+        39: "Y",
+        40: "Zr",
+        41: "Nb",
+        42: "Mo",
+        43: "Tc",
+        44: "Ru",
+        45: "Rh",
+        46: "Pd",
+        47: "Ag",
+        48: "Cd",
+        49: "In",
+        50: "Sn",
+        51: "Sb",
+        52: "Te",
+        53: "I",
+        54: "Xe",
+        55: "Cs",
+        56: "Ba",
+        57: "La",
+        58: "Ce",
+        59: "Pr",
+        60: "Nd",
+        61: "Pm",
+        62: "Sm",
+        63: "Eu",
+        64: "Gd",
+        65: "Tb",
+        66: "Dy",
+        67: "Ho",
+        68: "Er",
+        69: "Tm",
+        70: "Yb",
+        71: "Lu",
+        72: "Hf",
+        73: "Ta",
+        74: "W",
+        75: "Re",
+        76: "Os",
+        77: "Ir",
+        78: "Pt",
+        79: "Au",
+        80: "Hg",
+        81: "Tl",
+        82: "Pb",
+        83: "Bi",
+        84: "Po",
+        85: "At",
+        86: "Rn",
+        87: "Fr",
+        88: "Ra",
+        89: "Ac",
+        90: "Th",
+        91: "Pa",
+        92: "U",
     }
 
     # Reverse mapping: symbol to atomic number
@@ -83,7 +174,7 @@ class CoordinateConverter:
         mol_name = os.path.splitext(os.path.basename(mol2_file))[0]
         in_atom_section = False
 
-        with open(mol2_file, 'r') as f:
+        with open(mol2_file, "r") as f:
             for line in f:
                 line_stripped = line.strip()
 
@@ -172,8 +263,8 @@ class CoordinateConverter:
             Element symbol (e.g., "C", "N", "Cl", "Br")
         """
         # First try to extract from atom type (before the dot)
-        if '.' in atom_type:
-            element = atom_type.split('.')[0]
+        if "." in atom_type:
+            element = atom_type.split(".")[0]
         else:
             element = atom_type
 
@@ -189,23 +280,22 @@ class CoordinateConverter:
         for length in [2, 1]:
             if len(atom_name) >= length:
                 # Extract alphabetic characters only
-                alpha_chars = ''.join(c for c in atom_name[:length+1] if c.isalpha())
+                alpha_chars = "".join(c for c in atom_name[: length + 1] if c.isalpha())
                 if len(alpha_chars) >= length:
                     candidate = self._normalize_element_symbol(alpha_chars[:length])
                     if candidate in self.SYMBOL_TO_NUMBER:
                         return candidate
 
         # Last resort: use first letter
-        first_letter = ''.join(c for c in atom_name if c.isalpha())[:1].upper()
+        first_letter = "".join(c for c in atom_name if c.isalpha())[:1].upper()
         if first_letter in self.SYMBOL_TO_NUMBER:
             return first_letter
 
         # Default to carbon if all else fails
         print_warning(f"Could not determine element for atom '{atom_name}' type '{atom_type}', defaulting to C")
-        return 'C'
+        return "C"
 
-    def write_xyz(self, atoms: List[Tuple[str, float, float, float]],
-                  xyz_file: str, comment: str = "") -> str:
+    def write_xyz(self, atoms: List[Tuple[str, float, float, float]], xyz_file: str, comment: str = "") -> str:
         """
         Write atoms to XYZ format file.
 
@@ -223,7 +313,7 @@ class CoordinateConverter:
         str
             Path to the written XYZ file
         """
-        with open(xyz_file, 'w') as f:
+        with open(xyz_file, "w") as f:
             # Number of atoms
             f.write(f"{len(atoms)}\n")
 

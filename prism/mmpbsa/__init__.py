@@ -2,4 +2,4 @@
 
 from .generator import MMPBSAGenerator
 
-__all__ = ['MMPBSAGenerator']
+__all__ = ["MMPBSAGenerator"]

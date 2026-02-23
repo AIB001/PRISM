@@ -9,46 +9,48 @@ Generate complete HTML file with JavaScript visualization
 import json
 from .utils import convert_numpy_types
 
+
 class HTMLBuilder:
     """Build complete HTML output with embedded JavaScript"""
-    
-    def generate_html(self, trajectory_file, topology_file, ligand_file, ligand_name,
-                     total_frames, ligand_data, contacts, stats):
+
+    def generate_html(
+        self, trajectory_file, topology_file, ligand_file, ligand_name, total_frames, ligand_data, contacts, stats
+    ):
         """Generate the complete HTML file"""
-        
+
         # Ensure all data is JSON serializable
         ligand_data = convert_numpy_types(ligand_data)
         contacts = convert_numpy_types(contacts)
-        
+
         # Import JavaScript code
         from .javascript_code import get_javascript_code
-        
+
         # Create the HTML using string replacement to avoid format string issues
         html_template = self._get_html_template()
-        
+
         # Replace placeholders one by one to avoid curly brace issues
         html_content = html_template
-        html_content = html_content.replace('[[trajectory_file]]', trajectory_file)
-        html_content = html_content.replace('[[topology_file]]', topology_file)
-        html_content = html_content.replace('[[ligand_file]]', ligand_file)
-        html_content = html_content.replace('[[ligand_name]]', ligand_name)
-        html_content = html_content.replace('[[total_frames]]', str(total_frames))
-        html_content = html_content.replace('[[total_contacts]]', str(stats['total_contacts']))
-        html_content = html_content.replace('[[high_freq_contacts]]', str(stats['high_freq_contacts']))
-        html_content = html_content.replace('[[max_freq_percent]]', str(stats['max_freq_percent']))
-        html_content = html_content.replace('[[n_ligand_atoms]]', str(len(ligand_data['atoms'])))
-        html_content = html_content.replace('[[ligand_atoms_json]]', json.dumps(ligand_data['atoms'], indent=2))
-        html_content = html_content.replace('[[contacts_json]]', json.dumps(contacts, indent=2))
-        html_content = html_content.replace('[[ligand_bonds_json]]', json.dumps(ligand_data['bonds'], indent=2))
-        
+        html_content = html_content.replace("[[trajectory_file]]", trajectory_file)
+        html_content = html_content.replace("[[topology_file]]", topology_file)
+        html_content = html_content.replace("[[ligand_file]]", ligand_file)
+        html_content = html_content.replace("[[ligand_name]]", ligand_name)
+        html_content = html_content.replace("[[total_frames]]", str(total_frames))
+        html_content = html_content.replace("[[total_contacts]]", str(stats["total_contacts"]))
+        html_content = html_content.replace("[[high_freq_contacts]]", str(stats["high_freq_contacts"]))
+        html_content = html_content.replace("[[max_freq_percent]]", str(stats["max_freq_percent"]))
+        html_content = html_content.replace("[[n_ligand_atoms]]", str(len(ligand_data["atoms"])))
+        html_content = html_content.replace("[[ligand_atoms_json]]", json.dumps(ligand_data["atoms"], indent=2))
+        html_content = html_content.replace("[[contacts_json]]", json.dumps(contacts, indent=2))
+        html_content = html_content.replace("[[ligand_bonds_json]]", json.dumps(ligand_data["bonds"], indent=2))
+
         # Add JavaScript code
         html_content += get_javascript_code()
-        
+
         return html_content
-    
+
     def _get_html_template(self):
         """Return the HTML template with placeholders using [[ ]] instead of { }"""
-        return r'''<!DOCTYPE html>
+        return r"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -397,4 +399,4 @@ class HTMLBuilder:
     <script>
         const LIGAND_ATOMS = [[ligand_atoms_json]];
         const CONTACTS = [[contacts_json]];
-        const LIGAND_BONDS = [[ligand_bonds_json]];'''
+        const LIGAND_BONDS = [[ligand_bonds_json]];"""

@@ -12,7 +12,6 @@ to PRISM-standardized GROMACS format.
 """
 
 import os
-import sys
 import shutil
 import re
 from pathlib import Path
@@ -134,35 +133,35 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
             # LIG.gro
             gro_file = os.path.join(lig_dir, "LIG.gro")
-            with open(gro_file, 'w') as f:
+            with open(gro_file, "w") as f:
                 f.write(gro_content)
             print(f"  - Generated: LIG.gro")
 
             # atomtypes_LIG.itp
             atomtypes_content = self._generate_atomtypes_itp()
             atomtypes_file = os.path.join(lig_dir, "atomtypes_LIG.itp")
-            with open(atomtypes_file, 'w') as f:
+            with open(atomtypes_file, "w") as f:
                 f.write(atomtypes_content)
             print(f"  - Generated: atomtypes_LIG.itp")
 
             # LIG.itp
             itp_content = self._generate_lig_itp()
             itp_file = os.path.join(lig_dir, "LIG.itp")
-            with open(itp_file, 'w') as f:
+            with open(itp_file, "w") as f:
                 f.write(itp_content)
             print(f"  - Generated: LIG.itp")
 
             # LIG.top
             top_content = self._generate_lig_top()
             top_file = os.path.join(lig_dir, "LIG.top")
-            with open(top_file, 'w') as f:
+            with open(top_file, "w") as f:
                 f.write(top_content)
             print(f"  - Generated: LIG.top")
 
             # posre_LIG.itp
             posre_content = self._generate_posre_itp(num_atoms)
             posre_file = os.path.join(lig_dir, "posre_LIG.itp")
-            with open(posre_file, 'w') as f:
+            with open(posre_file, "w") as f:
                 f.write(posre_content)
             print(f"  - Generated: posre_LIG.itp")
 
@@ -214,8 +213,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
         if not top_files:
             raise FileNotFoundError(
-                f"No TOP file found in {self.cgenff_dir}\n"
-                f"  Expected: *_gmx.top file from CGenFF website download"
+                f"No TOP file found in {self.cgenff_dir}\n" f"  Expected: *_gmx.top file from CGenFF website download"
             )
 
         self.top_file = top_files[0]
@@ -233,31 +231,31 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         """
         # Read atom names from PDB
         pdb_atom_names = []
-        with open(self.pdb_file, 'r') as f:
+        with open(self.pdb_file, "r") as f:
             for line in f:
-                if line.startswith('ATOM') or line.startswith('HETATM'):
+                if line.startswith("ATOM") or line.startswith("HETATM"):
                     atom_name = line[12:16].strip()
                     # Skip LP atoms as they'll be removed
-                    if 'LP' not in atom_name.upper():
+                    if "LP" not in atom_name.upper():
                         pdb_atom_names.append(atom_name)
 
         # Read atom names from TOP file [atoms] section
         top_atom_names = []
-        with open(self.top_file, 'r') as f:
+        with open(self.top_file, "r") as f:
             content = f.read()
 
-        section = self._extract_section(content, 'atoms')
+        section = self._extract_section(content, "atoms")
         if section:
-            for line in section.split('\n'):
+            for line in section.split("\n"):
                 line = line.strip()
-                if not line or line.startswith(';'):
+                if not line or line.startswith(";"):
                     continue
 
                 parts = line.split()
                 if len(parts) >= 5:
                     atom_name = parts[4]  # atom name is 5th column
                     # Skip LP atoms as they'll be removed
-                    if 'LP' not in atom_name.upper():
+                    if "LP" not in atom_name.upper():
                         top_atom_names.append(atom_name)
 
         # Compare counts
@@ -299,14 +297,14 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         # Box size calculation
         x_coords, y_coords, z_coords = [], [], []
 
-        with open(self.pdb_file, 'r') as f:
+        with open(self.pdb_file, "r") as f:
             for line in f:
-                if line.startswith('ATOM') or line.startswith('HETATM'):
+                if line.startswith("ATOM") or line.startswith("HETATM"):
                     # Parse PDB line
                     atom_name = line[12:16].strip()
 
                     # Skip LP (lone pair) atoms - they will be removed from topology
-                    if 'LP' in atom_name.upper():
+                    if "LP" in atom_name.upper():
                         continue
 
                     atom_count += 1
@@ -338,7 +336,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_topology(self):
         """Parse topology file"""
-        with open(self.top_file, 'r') as f:
+        with open(self.top_file, "r") as f:
             content = f.read()
 
         # Parse sections
@@ -350,13 +348,13 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_atoms_section(self, content):
         """Parse [atoms] section"""
-        section = self._extract_section(content, 'atoms')
+        section = self._extract_section(content, "atoms")
         if not section:
             return
 
-        for line in section.split('\n'):
+        for line in section.split("\n"):
             line = line.strip()
-            if not line or line.startswith(';'):
+            if not line or line.startswith(";"):
                 continue
 
             parts = line.split()
@@ -371,33 +369,32 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 mass = parts[7]
 
                 # Store atom
-                self.atoms.append({
-                    'id': atom_id,
-                    'type': atom_type,
-                    'resnum': resnum,
-                    'resname': self.moleculetype_name,  # Changed to LIG
-                    'name': atom_name,
-                    'cgnr': cgnr,
-                    'charge': charge,
-                    'mass': mass
-                })
+                self.atoms.append(
+                    {
+                        "id": atom_id,
+                        "type": atom_type,
+                        "resnum": resnum,
+                        "resname": self.moleculetype_name,  # Changed to LIG
+                        "name": atom_name,
+                        "cgnr": cgnr,
+                        "charge": charge,
+                        "mass": mass,
+                    }
+                )
 
                 # Store atomtype if not exists
                 if atom_type not in self.atomtypes:
-                    self.atomtypes[atom_type] = {
-                        'name': atom_type,
-                        'mass': mass
-                    }
+                    self.atomtypes[atom_type] = {"name": atom_type, "mass": mass}
 
     def _parse_bonds_section(self, content):
         """Parse [bonds] section"""
-        section = self._extract_section(content, 'bonds')
+        section = self._extract_section(content, "bonds")
         if not section:
             return
 
-        for line in section.split('\n'):
+        for line in section.split("\n"):
             line = line.strip()
-            if not line or line.startswith(';'):
+            if not line or line.startswith(";"):
                 continue
 
             parts = line.split()
@@ -407,13 +404,13 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_pairs_section(self, content):
         """Parse [pairs] section"""
-        section = self._extract_section(content, 'pairs')
+        section = self._extract_section(content, "pairs")
         if not section:
             return
 
-        for line in section.split('\n'):
+        for line in section.split("\n"):
             line = line.strip()
-            if not line or line.startswith(';'):
+            if not line or line.startswith(";"):
                 continue
 
             parts = line.split()
@@ -423,13 +420,13 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_angles_section(self, content):
         """Parse [angles] section"""
-        section = self._extract_section(content, 'angles')
+        section = self._extract_section(content, "angles")
         if not section:
             return
 
-        for line in section.split('\n'):
+        for line in section.split("\n"):
             line = line.strip()
-            if not line or line.startswith(';'):
+            if not line or line.startswith(";"):
                 continue
 
             parts = line.split()
@@ -440,20 +437,20 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
     def _parse_dihedrals_section(self, content):
         """Parse [dihedrals] section - both proper and improper"""
         # Find all dihedral sections
-        pattern = r'\[\s*dihedrals\s*\](.*?)(?=\[|$)'
+        pattern = r"\[\s*dihedrals\s*\](.*?)(?=\[|$)"
         matches = re.findall(pattern, content, re.DOTALL)
 
         for section in matches:
-            for line in section.split('\n'):
+            for line in section.split("\n"):
                 line = line.strip()
-                if not line or line.startswith(';'):
+                if not line or line.startswith(";"):
                     continue
 
                 parts = line.split()
                 if len(parts) >= 5:
                     # Check function type (proper=9, improper=2)
-                    funct = parts[4] if len(parts) > 4 else '9'
-                    if funct == '2':
+                    funct = parts[4] if len(parts) > 4 else "9"
+                    if funct == "2":
                         # Improper dihedral - store all parameters
                         self.dihedrals_improper.append(parts)
                     else:
@@ -462,7 +459,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _extract_section(self, content, section_name):
         """Extract a specific section from topology"""
-        pattern = rf'\[\s*{section_name}\s*\](.*?)(?=\[|$)'
+        pattern = rf"\[\s*{section_name}\s*\](.*?)(?=\[|$)"
         match = re.search(pattern, content, re.DOTALL)
         return match.group(1) if match else None
 
@@ -479,17 +476,13 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         """
         # Step 1: Identify LP atoms and build mapping
         lp_atoms = {}  # {lp_atom_id: {'charge': float, 'halogen_id': str}}
-        halogen_elements = {'F', 'Cl', 'Br', 'I', 'CL'}
+        halogen_elements = {"F", "Cl", "Br", "I", "CL"}
 
         for atom in self.atoms:
-            atom_name = atom['name'].upper()
+            atom_name = atom["name"].upper()
             # Check if atom name contains LP (e.g., LP1, LP2, LP)
-            if 'LP' in atom_name:
-                lp_atoms[atom['id']] = {
-                    'charge': float(atom['charge']),
-                    'name': atom['name'],
-                    'halogen_id': None
-                }
+            if "LP" in atom_name:
+                lp_atoms[atom["id"]] = {"charge": float(atom["charge"]), "name": atom["name"], "halogen_id": None}
 
         if not lp_atoms:
             print("  No lone pair (LP) atoms found")
@@ -508,45 +501,45 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             if atom1_id in lp_atoms:
                 # atom2 should be the halogen
                 for atom in self.atoms:
-                    if atom['id'] == atom2_id:
+                    if atom["id"] == atom2_id:
                         # Check if it's a halogen by name or type
-                        atom_name_upper = atom['name'].upper()
+                        atom_name_upper = atom["name"].upper()
                         is_halogen = any(hal in atom_name_upper for hal in halogen_elements)
                         if is_halogen or atom_name_upper[0] in halogen_elements:
-                            lp_atoms[atom1_id]['halogen_id'] = atom2_id
+                            lp_atoms[atom1_id]["halogen_id"] = atom2_id
                             print(f"    - LP {atom1_id} bonded to halogen {atom2_id} ({atom['name']})")
                         break
             elif atom2_id in lp_atoms:
                 # atom1 should be the halogen
                 for atom in self.atoms:
-                    if atom['id'] == atom1_id:
-                        atom_name_upper = atom['name'].upper()
+                    if atom["id"] == atom1_id:
+                        atom_name_upper = atom["name"].upper()
                         is_halogen = any(hal in atom_name_upper for hal in halogen_elements)
                         if is_halogen or atom_name_upper[0] in halogen_elements:
-                            lp_atoms[atom2_id]['halogen_id'] = atom1_id
+                            lp_atoms[atom2_id]["halogen_id"] = atom1_id
                             print(f"    - LP {atom2_id} bonded to halogen {atom1_id} ({atom['name']})")
                         break
 
         # Step 3: Transfer charges from LP to halogen atoms
         charge_transfers = {}  # {halogen_id: total_lp_charge}
         for lp_id, lp_data in lp_atoms.items():
-            if lp_data['halogen_id']:
-                halogen_id = lp_data['halogen_id']
+            if lp_data["halogen_id"]:
+                halogen_id = lp_data["halogen_id"]
                 if halogen_id not in charge_transfers:
                     charge_transfers[halogen_id] = 0.0
-                charge_transfers[halogen_id] += lp_data['charge']
+                charge_transfers[halogen_id] += lp_data["charge"]
 
         # Update halogen atom charges
         for atom in self.atoms:
-            if atom['id'] in charge_transfers:
-                old_charge = float(atom['charge'])
-                new_charge = old_charge + charge_transfers[atom['id']]
-                atom['charge'] = f"{new_charge:.10f}"
+            if atom["id"] in charge_transfers:
+                old_charge = float(atom["charge"])
+                new_charge = old_charge + charge_transfers[atom["id"]]
+                atom["charge"] = f"{new_charge:.10f}"
                 print(f"  Updated halogen {atom['id']} ({atom['name']}) charge: {old_charge:.6f} -> {new_charge:.6f}")
 
         # Step 4: Remove LP atoms from atoms list
         lp_atom_ids = set(lp_atoms.keys())
-        self.atoms = [atom for atom in self.atoms if atom['id'] not in lp_atom_ids]
+        self.atoms = [atom for atom in self.atoms if atom["id"] not in lp_atom_ids]
         print(f"  Removed {len(lp_atom_ids)} LP atoms from [atoms] section")
 
         # Step 5: Remove all interactions involving LP atoms
@@ -591,16 +584,16 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         atomtype_params = {}
 
         if ffnonbonded.exists():
-            with open(ffnonbonded, 'r') as f:
+            with open(ffnonbonded, "r") as f:
                 in_atomtypes = False
                 for line in f:
-                    if '[ atomtypes ]' in line:
+                    if "[ atomtypes ]" in line:
                         in_atomtypes = True
                         continue
                     if in_atomtypes:
-                        if line.strip().startswith('['):
+                        if line.strip().startswith("["):
                             break
-                        if not line.strip() or line.strip().startswith(';'):
+                        if not line.strip() or line.strip().startswith(";"):
                             continue
                         parts = line.split()
                         if len(parts) >= 7:
@@ -613,7 +606,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 content += atomtype_params[atom_type] + "\n"
             else:
                 # Default values if not found
-                mass = self.atomtypes[atom_type]['mass']
+                mass = self.atomtypes[atom_type]["mass"]
                 # Guess atomic number from mass
                 atomic_num = self._guess_atomic_number(float(mass))
                 content += f"{atom_type:10s}{atomic_num:5d}{mass:12s}  0.0000000000000000  A    0.0  0.0\n"
@@ -633,15 +626,15 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         elif mass < 20:
             return 9  # F
         elif mass < 24:
-            return 11 # Na
+            return 11  # Na
         elif mass < 28:
-            return 12 # Mg
+            return 12  # Mg
         elif mass < 32:
-            return 15 # P
+            return 15  # P
         elif mass < 36:
-            return 16 # S
+            return 16  # S
         elif mass < 40:
-            return 17 # Cl
+            return 17  # Cl
         else:
             return 6  # Default to C
 
@@ -673,8 +666,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             content += ";ai    aj   funct   parameters...\n"
             for pair in self.pairs:
                 # Write all fields including any parameters
-                content += "\t".join(f"{val:>6s}" if i < 3 else f"{val:>12s}"
-                                    for i, val in enumerate(pair)) + "\n"
+                content += "\t".join(f"{val:>6s}" if i < 3 else f"{val:>12s}" for i, val in enumerate(pair)) + "\n"
             content += "\n"
 
         # Bonds section
@@ -683,8 +675,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             content += ";ai    aj   funct   parameters...\n"
             for bond in self.bonds:
                 # Write all fields including parameters
-                content += "\t".join(f"{val:>6s}" if i < 3 else f"{val:>12s}"
-                                    for i, val in enumerate(bond)) + "\n"
+                content += "\t".join(f"{val:>6s}" if i < 3 else f"{val:>12s}" for i, val in enumerate(bond)) + "\n"
             content += "\n"
 
         # Angles section
@@ -693,8 +684,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             content += ";ai    aj    ak   funct   parameters...\n"
             for angle in self.angles:
                 # Write all fields including parameters
-                content += "\t".join(f"{val:>6s}" if i < 4 else f"{val:>12s}"
-                                    for i, val in enumerate(angle)) + "\n"
+                content += "\t".join(f"{val:>6s}" if i < 4 else f"{val:>12s}" for i, val in enumerate(angle)) + "\n"
             content += "\n"
 
         # Dihedrals section (proper)
@@ -703,8 +693,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             content += ";ai    aj    ak    al   funct   parameters...\n"
             for dihedral in self.dihedrals_proper:
                 # Write all fields including parameters
-                content += "\t".join(f"{val:>6s}" if i < 5 else f"{val:>12s}"
-                                    for i, val in enumerate(dihedral)) + "\n"
+                content += "\t".join(f"{val:>6s}" if i < 5 else f"{val:>12s}" for i, val in enumerate(dihedral)) + "\n"
             content += "\n"
 
         # Dihedrals section (improper)
@@ -713,8 +702,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             content += ";ai    aj    ak    al   funct   parameters...\n"
             for dihedral in self.dihedrals_improper:
                 # Write all fields including parameters
-                content += "\t".join(f"{val:>6s}" if i < 5 else f"{val:>12s}"
-                                    for i, val in enumerate(dihedral)) + "\n"
+                content += "\t".join(f"{val:>6s}" if i < 5 else f"{val:>12s}" for i, val in enumerate(dihedral)) + "\n"
             content += "\n"
 
         # Position restraints reference
@@ -744,7 +732,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 if ffbonded_file.stat().st_size > 200:  # More than just header
                     content += f'#include "charmm36.ff/{ffbonded_file.name}"\n'
 
-            content += '\n'
+            content += "\n"
         else:
             # Fallback: minimal topology
             content = "[ defaults ]\n"

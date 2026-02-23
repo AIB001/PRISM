@@ -10,33 +10,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Optional
-from pathlib import Path
 
 # Import publication style
-from ...core.publication_utils import apply_publication_style, PUBLICATION_COLORS, PUBLICATION_FONTS, get_standard_figsize
+from ...core.publication_utils import apply_publication_style, PUBLICATION_COLORS, get_standard_figsize
+
 # Import residue formatting utility
 from .....utils.residue import format_residue_list
 
 
-
 def plot_comparison_contact_distances_violin(
-
     group1_distances: Dict[str, np.ndarray],
-
     group2_distances: Dict[str, np.ndarray],
-
     output_path: str,
-
     group1_name: str = "Group 1",
-
     group2_name: str = "Group 2",
-
     key_residues: List[str] = None,
-
-    residue_format: str = "1letter"
-
+    residue_format: str = "1letter",
 ) -> bool:
-
     """
 
     Plot comparison violin plots for contact distances between two groups.
@@ -130,53 +120,36 @@ def plot_comparison_contact_distances_violin(
     """
 
     try:
-
         print(f"🎻 Comparison violin plot: {group1_name} vs {group2_name}")
 
         apply_publication_style()
 
         import pandas as pd
 
-
-
         # Determine residues to plot
 
         if key_residues is None:
-
             # Use all common residues
 
             common_residues = sorted(set(group1_distances.keys()) & set(group2_distances.keys()))
 
         else:
-
             # Use specified residues (filter to those present in both groups)
 
-            common_residues = [r for r in key_residues
-
-                             if r in group1_distances and r in group2_distances]
-
-
+            common_residues = [r for r in key_residues if r in group1_distances and r in group2_distances]
 
         if not common_residues:
-
             print(f"  ⚠ No common residues found between {group1_name} and {group2_name}")
 
             return False
 
-
-
         print(f"  📊 Plotting {len(common_residues)} residues")
-
-
 
         # Prepare data for split violin plot
 
         plot_data = []
 
-
-
         for residue in common_residues:
-
             # Group 1 data
 
             distances_g1 = group1_distances[residue]
@@ -184,149 +157,87 @@ def plot_comparison_contact_distances_violin(
             # Sample if too many points
 
             if len(distances_g1) > 1000:
-
                 sample_idx = np.random.choice(len(distances_g1), 1000, replace=False)
 
                 distances_g1 = distances_g1[sample_idx]
 
-
-
             for dist in distances_g1:
-
-                plot_data.append({
-
-                    'Residue': residue,
-
-                    'Group': group1_name,
-
-                    'Distance': dist
-
-                })
-
-
+                plot_data.append({"Residue": residue, "Group": group1_name, "Distance": dist})
 
             # Group 2 data
 
             distances_g2 = group2_distances[residue]
 
             if len(distances_g2) > 1000:
-
                 sample_idx = np.random.choice(len(distances_g2), 1000, replace=False)
 
                 distances_g2 = distances_g2[sample_idx]
 
-
-
             for dist in distances_g2:
-
-                plot_data.append({
-
-                    'Residue': residue,
-
-                    'Group': group2_name,
-
-                    'Distance': dist
-
-                })
-
-
+                plot_data.append({"Residue": residue, "Group": group2_name, "Distance": dist})
 
         df = pd.DataFrame(plot_data)
-
-
 
         # Figure size based on number of residues
 
         if len(common_residues) > 8:
-
-            figsize = get_standard_figsize('wide')
+            figsize = get_standard_figsize("wide")
 
         else:
-
-            figsize = get_standard_figsize('distribution')
-
-
+            figsize = get_standard_figsize("distribution")
 
         fig, ax = plt.subplots(figsize=figsize)
 
-
-
         # Color scheme for two groups
 
-        colors = [PUBLICATION_COLORS['example'][0], PUBLICATION_COLORS['example'][1]]
-
-
+        colors = [PUBLICATION_COLORS["example"][0], PUBLICATION_COLORS["example"][1]]
 
         # Create split violin plot
 
         sns.violinplot(
-
             data=df,
-
-            x='Residue',
-
-            y='Distance',
-
-            hue='Group',
-
+            x="Residue",
+            y="Distance",
+            hue="Group",
             split=True,  # Split violins
-
             palette=colors,
-
             inner=None,  # No inner markers
-
-            ax=ax
-
+            ax=ax,
         )
-
-
 
         # Format residue names for display
 
         residues_display = format_residue_list(common_residues, residue_format)
 
-
-
         # Formatting
 
-        ax.set_ylabel('Contact Distance (Å)')
+        ax.set_ylabel("Contact Distance (Å)")
 
-        ax.set_xlabel('Amino Acid Residues')
+        ax.set_xlabel("Amino Acid Residues")
 
         ax.set_xticks(range(len(common_residues)))
 
-        ax.set_xticklabels(residues_display, rotation=45, ha='center')
+        ax.set_xticklabels(residues_display, rotation=45, ha="center")
 
-        ax.grid(True, alpha=0.3, axis='y')
+        ax.grid(True, alpha=0.3, axis="y")
 
-        ax.set_facecolor('#FAFAFA')
-
-
+        ax.set_facecolor("#FAFAFA")
 
         # Legend
 
-        ax.legend(loc='upper right', frameon=True, fancybox=True, shadow=True)
-
-
+        ax.legend(loc="upper right", frameon=True, fancybox=True, shadow=True)
 
         plt.tight_layout()
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
 
         plt.close()
-
-
 
         print(f"  ✅ Comparison plot saved: {output_path}")
 
         return True
 
-
-
     except Exception as e:
-
         print(f"Error in comparison violin plot: {e}")
 
         import traceback
@@ -336,21 +247,13 @@ def plot_comparison_contact_distances_violin(
         return False
 
 
-
-
-
-
-
-def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
-
-                                  output_path: str = None,
-
-                                  title: str = "Key Residue Contact Analysis",
-
-                                  residue_format: str = "1letter",
-
-                                  ax: Optional[plt.Axes] = None) -> bool:
-
+def plot_key_residue_contact_violin(
+    contact_data: Dict[str, Dict[str, float]],
+    output_path: str = None,
+    title: str = "Key Residue Contact Analysis",
+    residue_format: str = "1letter",
+    ax: Optional[plt.Axes] = None,
+) -> bool:
     """
 
     Plot violin plots for key residue contacts with RemTP ligand using seaborn.
@@ -406,46 +309,32 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
     # Detect mode
 
     if ax is None:
-
         # Standalone mode - original behavior
 
         if output_path is None:
-
             raise ValueError("output_path is required in standalone mode (when ax is not provided)")
 
         own_figure = True
 
     else:
-
         # Panel mode - use provided axis
 
         own_figure = False
 
-
-
     try:
-
         if own_figure:
-
             print("🎻 Key residue contact violin plot showing probability distributions across trajectories")
 
             apply_publication_style()
-
-
 
         # Use all residues in the contact_data (dynamic list)
 
         available_residues = list(contact_data.keys())
 
-
-
         if not available_residues:
-
             print("No key residue data available for violin plot")
 
             return False
-
-
 
         # Prepare data for seaborn violin plot
 
@@ -453,131 +342,61 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
         plot_data = []
 
-
-
         for residue in available_residues:
-
             for i in [1, 2, 3]:
-
-                value = contact_data[residue].get(f'Repeat{i}', 0.0)
+                value = contact_data[residue].get(f"Repeat{i}", 0.0)
 
                 if value > 0:  # Only include non-zero values
-
-                    plot_data.append({
-
-                        'Residue': residue,
-
-                        'Trajectory': f'Repeat {i}',
-
-                        'Contact_Probability': value
-
-                    })
+                    plot_data.append({"Residue": residue, "Trajectory": f"Repeat {i}", "Contact_Probability": value})
 
                 else:
-
                     # Add small value for visualization if all are zero
 
-                    plot_data.append({
-
-                        'Residue': residue,
-
-                        'Trajectory': f'Repeat {i}',
-
-                        'Contact_Probability': 0.1
-
-                    })
-
-
+                    plot_data.append({"Residue": residue, "Trajectory": f"Repeat {i}", "Contact_Probability": 0.1})
 
         if not plot_data:
-
             return False
 
-
-
         df = pd.DataFrame(plot_data)
-
-
 
         # Create figure only in standalone mode
 
         if own_figure:
-
             # Use wider figsize for more residues (15+)
 
             if len(available_residues) > 12:
-
-                figsize = get_standard_figsize('wide')  # (16, 6)
+                figsize = get_standard_figsize("wide")  # (16, 6)
 
             elif len(available_residues) > 6:
-
-                figsize = get_standard_figsize('horizontal')  # (12, 6)
+                figsize = get_standard_figsize("horizontal")  # (12, 6)
 
             else:
-
-                figsize = get_standard_figsize('single')  # (8, 6)
-
-
+                figsize = get_standard_figsize("single")  # (8, 6)
 
             # Create violin plot with seaborn
 
             fig, ax = plt.subplots(figsize=figsize)
 
-
-
         # Define colors
 
-        colors = ['#A8DADC', '#F1FAEE', '#E9C46A', '#D4A574', '#E76F51',
-
-                 '#2A9D8F', '#F4A261', '#E76F51', '#457B9D']
-
-
+        colors = ["#A8DADC", "#F1FAEE", "#E9C46A", "#D4A574", "#E76F51", "#2A9D8F", "#F4A261", "#E76F51", "#457B9D"]
 
         # Create violin plot with proper hue assignment to avoid deprecation warning
 
         violin_parts = sns.violinplot(
-
             data=df,
-
-            x='Residue',
-
-            y='Contact_Probability',
-
-            hue='Residue',
-
-            palette=colors[:len(available_residues)],
-
+            x="Residue",
+            y="Contact_Probability",
+            hue="Residue",
+            palette=colors[: len(available_residues)],
             inner=None,  # No inner representation to avoid clutter
-
             legend=False,
-
-            ax=ax
-
+            ax=ax,
         )
-
-
 
         # Add individual points
 
-        sns.stripplot(
-
-            data=df,
-
-            x='Residue',
-
-            y='Contact_Probability',
-
-            size=8,
-
-            alpha=0.7,
-
-            color='black',
-
-            ax=ax
-
-        )
-
-
+        sns.stripplot(data=df, x="Residue", y="Contact_Probability", size=8, alpha=0.7, color="black", ax=ax)
 
         # Fix tick alignment - center labels with ticks
 
@@ -587,72 +406,53 @@ def plot_key_residue_contact_violin(contact_data: Dict[str, Dict[str, float]],
 
         available_residues_display = format_residue_list(available_residues, residue_format)
 
-
-
-        ax.set_xticklabels(available_residues_display, rotation=45, ha='center')
-
-
+        ax.set_xticklabels(available_residues_display, rotation=45, ha="center")
 
         # Formatting - apply_publication_style() controls font sizes and bold automatically
 
-        ax.set_ylabel('Contact Probability (%)')
+        ax.set_ylabel("Contact Probability (%)")
 
-        ax.set_xlabel('Key Residues')
+        ax.set_xlabel("Key Residues")
+
+        if title:
+            ax.set_title(title, fontweight="bold")
 
         ax.grid(True, alpha=0.3)
 
-        ax.set_facecolor('#FAFAFA')
-
-
+        ax.set_facecolor("#FAFAFA")
 
         # Set y-axis limits
 
-        ax.set_ylim(0, max(df['Contact_Probability']) * 1.1)
-
-
+        ax.set_ylim(0, max(df["Contact_Probability"]) * 1.1)
 
         # Handle output based on mode
 
         if own_figure:
-
             plt.tight_layout()
 
-            plt.savefig(output_path, dpi=300, bbox_inches='tight',
-
-                       facecolor='white', edgecolor='none')
+            plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
 
             plt.close()
 
             return True
 
         else:
-
             # Panel mode - return the axis
 
             return ax
 
-
-
     except Exception as e:
-
         print(f"Error in key residue contact violin plot: {e}")
 
         return False
 
 
-
-
-
-
-
-def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
-
-                                       output_path: str,
-
-                                       title: str = "Residue Contact Numbers",
-
-                                       residue_format: str = "1letter") -> bool:
-
+def plot_residue_contact_numbers_violin(
+    residue_contact_data: Dict,
+    output_path: str,
+    title: str = "Residue Contact Numbers",
+    residue_format: str = "1letter",
+) -> bool:
     """
 
     Plot violin plots for residue contact numbers (normalized by atom count).
@@ -694,14 +494,11 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
     """
 
     try:
-
         print("🎻 Residue contact numbers violin plot showing normalized distributions per residue")
 
         apply_publication_style()
 
         import pandas as pd
-
-
 
         # Prepare data for violin plot
 
@@ -709,113 +506,57 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
 
         all_residues = set()
 
-
-
         for traj_name, residue_data in residue_contact_data.items():
-
             all_residues.update(residue_data.keys())
-
-
 
         all_residues = sorted(list(all_residues))
 
-
-
         for traj_name, residue_data in residue_contact_data.items():
-
             for residue in all_residues:
-
                 if residue in residue_data:
-
-                    normalized_contacts = residue_data[residue]['normalized']
+                    normalized_contacts = residue_data[residue]["normalized"]
 
                     for contact_val in normalized_contacts:
-
-                        plot_data.append({
-
-                            'Residue': residue,
-
-                            'Trajectory': traj_name,
-
-                            'Normalized_Contact_Number': contact_val
-
-                        })
-
-
+                        plot_data.append(
+                            {"Residue": residue, "Trajectory": traj_name, "Normalized_Contact_Number": contact_val}
+                        )
 
         if not plot_data:
-
             return False
-
-
 
         df = pd.DataFrame(plot_data)
 
-
-
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
-
-
+        fig, ax = plt.subplots(figsize=get_standard_figsize("single"))
 
         # Define colors
 
-        colors = ['#A8DADC', '#F1FAEE', '#E9C46A', '#D4A574', '#E76F51',
-
-                 '#2A9D8F', '#F4A261', '#E76F51', '#457B9D']
-
-
+        colors = ["#A8DADC", "#F1FAEE", "#E9C46A", "#D4A574", "#E76F51", "#2A9D8F", "#F4A261", "#E76F51", "#457B9D"]
 
         # Create violin plot
 
         violin_parts = sns.violinplot(
-
             data=df,
-
-            x='Residue',
-
-            y='Normalized_Contact_Number',
-
-            hue='Residue',
-
-            palette=colors[:len(all_residues)],
-
+            x="Residue",
+            y="Normalized_Contact_Number",
+            hue="Residue",
+            palette=colors[: len(all_residues)],
             inner=None,  # No inner representation to avoid clutter
-
             legend=False,
-
-            ax=ax
-
+            ax=ax,
         )
-
-
 
         # Add strip plot for individual points
 
-        sns.stripplot(
-
-            data=df,
-
-            x='Residue',
-
-            y='Normalized_Contact_Number',
-
-            size=4,
-
-            alpha=0.6,
-
-            color='black',
-
-            ax=ax
-
-        )
-
-
+        sns.stripplot(data=df, x="Residue", y="Normalized_Contact_Number", size=4, alpha=0.6, color="black", ax=ax)
 
         # Formatting - apply_publication_style() controls font sizes and bold
 
-        ax.set_ylabel('Normalized Contact Number')
+        ax.set_ylabel("Normalized Contact Number")
 
-        ax.set_xlabel('Key Residues')
+        ax.set_xlabel("Key Residues")
+
+        if title:
+            ax.set_title(title, fontweight="bold")
 
         ax.set_xticks(range(len(all_residues)))
 
@@ -823,54 +564,35 @@ def plot_residue_contact_numbers_violin(residue_contact_data: Dict,
 
         all_residues_display = format_residue_list(all_residues, residue_format)
 
-
-
-        ax.set_xticklabels(all_residues_display, rotation=45, ha='center')
+        ax.set_xticklabels(all_residues_display, rotation=45, ha="center")
 
         # Remove manual tick_params - let apply_publication_style() handle it
 
         ax.grid(True, alpha=0.3)
 
-        ax.set_facecolor('#FAFAFA')
-
-
+        ax.set_facecolor("#FAFAFA")
 
         plt.tight_layout()
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
 
         plt.close()
 
-
-
         return True
 
-
-
     except Exception as e:
-
         print(f"Error in residue contact numbers violin plot: {e}")
 
         return False
 
 
-
-
-
-
-
-def plot_contact_distances_violin(distance_data: Dict,
-
-                                 output_path: str,
-
-                                 title: str = "Contact Distance Distributions",
-
-                                 distance_cutoff: float = -1.0,
-
-                                 residue_format: str = "1letter") -> bool:
-
+def plot_contact_distances_violin(
+    distance_data: Dict,
+    output_path: str,
+    title: str = "Contact Distance Distributions",
+    distance_cutoff: float = -1.0,
+    residue_format: str = "1letter",
+) -> bool:
     """
 
     Plot violin plots for contact distance distributions.
@@ -920,7 +642,6 @@ def plot_contact_distances_violin(distance_data: Dict,
     """
 
     try:
-
         cutoff_msg = f"(cutoff: {distance_cutoff:.1f} Å)" if distance_cutoff > 0 else "(no cutoff)"
 
         print(f"🎻 Contact distance distributions violin plot {cutoff_msg}")
@@ -929,125 +650,72 @@ def plot_contact_distances_violin(distance_data: Dict,
 
         import pandas as pd
 
-
-
         # Prepare data for violin plot
 
         plot_data = []
 
         all_residues = set()
 
-
-
         for traj_name, residue_data in distance_data.items():
-
             all_residues.update(residue_data.keys())
-
-
 
         all_residues = sorted(list(all_residues))
 
-
-
         for traj_name, residue_data in distance_data.items():
-
             for residue in all_residues:
-
                 if residue in residue_data:
-
                     distances = residue_data[residue]
-
-
 
                     # Apply distance cutoff if specified
 
                     if distance_cutoff > 0:
-
                         distances = distances[distances <= distance_cutoff]
 
-
-
                     if len(distances) == 0:
-
                         continue
-
-
 
                     # Sample distances to avoid overloading plot
 
                     if len(distances) > 1000:
-
                         sample_indices = np.random.choice(len(distances), 1000, replace=False)
 
                         distances = distances[sample_indices]
 
-
-
                     for distance in distances:
-
-                        plot_data.append({
-
-                            'Residue': residue,
-
-                            'Trajectory': traj_name,
-
-                            'Contact_Distance': distance
-
-                        })
-
-
+                        plot_data.append({"Residue": residue, "Trajectory": traj_name, "Contact_Distance": distance})
 
         if not plot_data:
-
             return False
-
-
 
         df = pd.DataFrame(plot_data)
 
-
-
-        fig, ax = plt.subplots(figsize=get_standard_figsize('distribution'))
-
-
+        fig, ax = plt.subplots(figsize=get_standard_figsize("distribution"))
 
         # Define colors
 
-        colors = ['#A8DADC', '#F1FAEE', '#E9C46A', '#D4A574', '#E76F51',
-
-                 '#2A9D8F', '#F4A261', '#E76F51', '#457B9D']
-
-
+        colors = ["#A8DADC", "#F1FAEE", "#E9C46A", "#D4A574", "#E76F51", "#2A9D8F", "#F4A261", "#E76F51", "#457B9D"]
 
         # Create violin plot - no scattering by default
 
         violin_parts = sns.violinplot(
-
             data=df,
-
-            x='Residue',
-
-            y='Contact_Distance',
-
-            hue='Residue',
-
-            palette=colors[:len(all_residues)],
-
+            x="Residue",
+            y="Contact_Distance",
+            hue="Residue",
+            palette=colors[: len(all_residues)],
             inner=None,  # No inner representation to avoid scattering
-
             legend=False,
-
-            ax=ax
-
+            ax=ax,
         )
-
-
 
         # Formatting - apply_publication_style() controls font sizes and bold
 
-        ax.set_ylabel('Contact Distance (Å)')
+        ax.set_ylabel("Contact Distance (Å)")
 
-        ax.set_xlabel('Key Residues')
+        ax.set_xlabel("Key Residues")
+
+        if title:
+            ax.set_title(title, fontweight="bold")
 
         ax.set_xticks(range(len(all_residues)))
 
@@ -1055,51 +723,31 @@ def plot_contact_distances_violin(distance_data: Dict,
 
         all_residues_display = format_residue_list(all_residues, residue_format)
 
-
-
-        ax.set_xticklabels(all_residues_display, rotation=45, ha='center')
+        ax.set_xticklabels(all_residues_display, rotation=45, ha="center")
 
         # Remove manual tick_params - let apply_publication_style() handle it
 
         ax.grid(True, alpha=0.3)
 
-        ax.set_facecolor('#FAFAFA')
-
-
+        ax.set_facecolor("#FAFAFA")
 
         # Set y-axis limits dynamically based on data
 
         if distance_cutoff > 0:
-
-            ax.set_ylim(0, min(distance_cutoff * 1.1, df['Contact_Distance'].max() * 1.1))
+            ax.set_ylim(0, min(distance_cutoff * 1.1, df["Contact_Distance"].max() * 1.1))
 
         else:
-
-            ax.set_ylim(0, df['Contact_Distance'].max() * 1.1)
-
-
+            ax.set_ylim(0, df["Contact_Distance"].max() * 1.1)
 
         plt.tight_layout()
 
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
 
         plt.close()
 
-
-
         return True
 
-
-
     except Exception as e:
-
         print(f"Error in contact distances violin plot: {e}")
 
         return False
-
-
-
-
-

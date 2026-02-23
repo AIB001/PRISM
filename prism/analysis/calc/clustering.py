@@ -13,7 +13,6 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
-import os
 from pathlib import Path
 from typing import List, Union, Optional, Tuple, Dict
 import logging
@@ -33,13 +32,15 @@ class ClusteringAnalyzer:
         self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _load_and_align_trajectory(self,
-                                  topology: str,
-                                  trajectory: Union[str, List[str]],
-                                  align_selection: str = "protein and name CA",
-                                  start_frame: int = 0,
-                                  end_frame: Optional[int] = None,
-                                  step: int = 1) -> Tuple[md.Trajectory, Optional[Dict[str, any]]]:
+    def _load_and_align_trajectory(
+        self,
+        topology: str,
+        trajectory: Union[str, List[str]],
+        align_selection: str = "protein and name CA",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+    ) -> Tuple[md.Trajectory, Optional[Dict[str, any]]]:
         """
         Load and align trajectory using MDTraj. Supports multiple trajectory files.
 
@@ -91,10 +92,10 @@ class ClusteringAnalyzer:
             # Concatenate all trajectories
             traj = md.join(trajs)
             metadata = {
-                'frame_trajectory_map': np.array(frame_trajectory_map),
-                'n_trajectories': len(trajectory),
-                'trajectory_files': [str(Path(t).name) for t in trajectory],
-                'frames_per_trajectory': [t.n_frames for t in trajs]
+                "frame_trajectory_map": np.array(frame_trajectory_map),
+                "n_trajectories": len(trajectory),
+                "trajectory_files": [str(Path(t).name) for t in trajectory],
+                "frames_per_trajectory": [t.n_frames for t in trajs],
             }
             logger.info(f"Combined trajectory: {traj.n_frames} total frames from {len(trajectory)} trajectories")
         else:
@@ -122,7 +123,7 @@ class ClusteringAnalyzer:
             for chain in traj.topology.chains:
                 try:
                     # Count protein atoms in this chain
-                    chain_protein = traj.topology.select(f'chainid {chain.index} and protein')
+                    chain_protein = traj.topology.select(f"chainid {chain.index} and protein")
                     if len(chain_protein) > max_protein_atoms:
                         max_protein_atoms = len(chain_protein)
                         largest_chain = chain
@@ -132,10 +133,12 @@ class ClusteringAnalyzer:
             if largest_chain is not None and "name CA" in align_selection:
                 # Select CA atoms from the main protein chain
                 try:
-                    align_indices = traj.topology.select(f'chainid {largest_chain.index} and name CA')
+                    align_indices = traj.topology.select(f"chainid {largest_chain.index} and name CA")
                 except:
                     # Fallback: manual selection
-                    ca_atoms = [atom.index for atom in largest_chain.atoms if atom.name == 'CA' and atom.residue.is_protein]
+                    ca_atoms = [
+                        atom.index for atom in largest_chain.atoms if atom.name == "CA" and atom.residue.is_protein
+                    ]
                     align_indices = np.array(ca_atoms)
             else:
                 # Fallback to general protein selection
@@ -158,9 +161,7 @@ class ClusteringAnalyzer:
 
         return traj, metadata
 
-    def _extract_coordinates(self,
-                           traj: md.Trajectory,
-                           cluster_selection: str = "protein") -> np.ndarray:
+    def _extract_coordinates(self, traj: md.Trajectory, cluster_selection: str = "protein") -> np.ndarray:
         """
         Extract coordinates for clustering using MDTraj.
 
@@ -188,7 +189,7 @@ class ClusteringAnalyzer:
             for chain in traj.topology.chains:
                 try:
                     # Count protein atoms in this chain
-                    chain_protein = traj.topology.select(f'chainid {chain.index} and protein')
+                    chain_protein = traj.topology.select(f"chainid {chain.index} and protein")
                     if len(chain_protein) > max_protein_atoms:
                         max_protein_atoms = len(chain_protein)
                         largest_chain = chain
@@ -199,19 +200,23 @@ class ClusteringAnalyzer:
                 if "name CA" in cluster_selection:
                     # Only CA atoms from main protein chain
                     try:
-                        cluster_indices = traj.topology.select(f'chainid {largest_chain.index} and name CA')
+                        cluster_indices = traj.topology.select(f"chainid {largest_chain.index} and name CA")
                     except:
-                        ca_atoms = [atom.index for atom in largest_chain.atoms if atom.name == 'CA' and atom.residue.is_protein]
+                        ca_atoms = [
+                            atom.index for atom in largest_chain.atoms if atom.name == "CA" and atom.residue.is_protein
+                        ]
                         cluster_indices = np.array(ca_atoms)
                 else:
                     # All atoms in the main protein chain
                     try:
-                        cluster_indices = traj.topology.select(f'chainid {largest_chain.index} and protein')
+                        cluster_indices = traj.topology.select(f"chainid {largest_chain.index} and protein")
                     except:
                         protein_atoms = [atom.index for atom in largest_chain.atoms if atom.residue.is_protein]
                         cluster_indices = np.array(protein_atoms)
 
-            cluster_indices = np.array(cluster_indices) if not isinstance(cluster_indices, np.ndarray) else cluster_indices
+            cluster_indices = (
+                np.array(cluster_indices) if not isinstance(cluster_indices, np.ndarray) else cluster_indices
+            )
         else:
             # Standard MDTraj selection
             if cluster_selection == "protein":
@@ -229,18 +234,20 @@ class ClusteringAnalyzer:
         logger.info(f"Extracted coordinates: {coordinates.shape[0]} frames, {len(cluster_indices)} atoms")
         return coordinates
 
-    def perform_kmeans_clustering(self,
-                                 universe: str,  # Now expects topology path
-                                 trajectory: Union[str, List[str]],
-                                 n_clusters: int = 5,
-                                 align_selection: str = "protein and name CA",
-                                 cluster_selection: str = "protein",
-                                 start_frame: int = 0,
-                                 end_frame: Optional[int] = None,
-                                 step: int = 1,
-                                 use_pca: bool = True,
-                                 n_components: int = 10,
-                                 cache_name: Optional[str] = None) -> Dict:
+    def perform_kmeans_clustering(
+        self,
+        universe: str,  # Now expects topology path
+        trajectory: Union[str, List[str]],
+        n_clusters: int = 5,
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        use_pca: bool = True,
+        n_components: int = 10,
+        cache_name: Optional[str] = None,
+    ) -> Dict:
         """
         Perform K-means clustering on trajectory using pure MDTraj.
 
@@ -287,13 +294,12 @@ class ClusteringAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached clustering results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Load and align trajectory
             traj, traj_metadata = self._load_and_align_trajectory(
-                universe, trajectory, align_selection,
-                start_frame, end_frame, step
+                universe, trajectory, align_selection, start_frame, end_frame, step
             )
 
             # Extract coordinates for clustering
@@ -324,40 +330,42 @@ class ClusteringAnalyzer:
                 # For combined trajectories, create globally continuous frame indices
                 frame_indices = []
                 global_frame = 0
-                for traj_frames in traj_metadata['frames_per_trajectory']:
+                for traj_frames in traj_metadata["frames_per_trajectory"]:
                     # Each trajectory contributes frames: [global_frame, global_frame+step, ...]
                     traj_frame_indices = list(range(global_frame, global_frame + traj_frames * step, step))
                     frame_indices.extend(traj_frame_indices)
                     global_frame += traj_frames * step  # Move to next trajectory's starting point
 
                 # Ensure we have exactly the right number of frame indices
-                frame_indices = frame_indices[:len(labels)]
+                frame_indices = frame_indices[: len(labels)]
             else:
                 # For single trajectory, use simple range
                 frame_indices = [start_frame + i * step for i in range(len(labels))]
 
             # Prepare results
             results = {
-                'labels': labels,
-                'cluster_centers': kmeans.cluster_centers_,
-                'silhouette_score': silhouette,
-                'n_clusters': n_clusters,
-                'coordinates_reduced': coordinates_reduced,
-                'scaler': scaler,
-                'pca': pca,
-                'inertia': kmeans.inertia_,
-                'frame_indices': frame_indices,
-                'timestep_ns': self.config.timestep_ns  # Pass timestep for time axis calculations
+                "labels": labels,
+                "cluster_centers": kmeans.cluster_centers_,
+                "silhouette_score": silhouette,
+                "n_clusters": n_clusters,
+                "coordinates_reduced": coordinates_reduced,
+                "scaler": scaler,
+                "pca": pca,
+                "inertia": kmeans.inertia_,
+                "frame_indices": frame_indices,
+                "timestep_ns": self.config.timestep_ns,  # Pass timestep for time axis calculations
             }
 
             # Add metadata if multiple trajectories were combined
             if traj_metadata is not None:
-                results['trajectory_metadata'] = traj_metadata
-                logger.info(f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
-                          f"{len(labels)} total frames")
+                results["trajectory_metadata"] = traj_metadata
+                logger.info(
+                    f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
+                    f"{len(labels)} total frames"
+                )
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info(f"K-means clustering completed. Silhouette score: {silhouette:.3f}")
@@ -367,19 +375,21 @@ class ClusteringAnalyzer:
             logger.error(f"Error in K-means clustering: {e}")
             raise
 
-    def perform_dbscan_clustering(self,
-                                 universe: str,
-                                 trajectory: Union[str, List[str]],
-                                 eps: float = 0.5,
-                                 min_samples: int = 5,
-                                 align_selection: str = "protein and name CA",
-                                 cluster_selection: str = "protein",
-                                 start_frame: int = 0,
-                                 end_frame: Optional[int] = None,
-                                 step: int = 1,
-                                 use_pca: bool = True,
-                                 n_components: int = 10,
-                                 cache_name: Optional[str] = None) -> Dict:
+    def perform_dbscan_clustering(
+        self,
+        universe: str,
+        trajectory: Union[str, List[str]],
+        eps: float = 0.5,
+        min_samples: int = 5,
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        use_pca: bool = True,
+        n_components: int = 10,
+        cache_name: Optional[str] = None,
+    ) -> Dict:
         """
         Perform DBSCAN clustering on trajectory using pure MDTraj.
 
@@ -416,10 +426,27 @@ class ClusteringAnalyzer:
             Clustering results
         """
         try:
+            # Create cache key
+            if cache_name is None:
+                cache_key = (
+                    f"dbscan_{eps}_{min_samples}_{align_selection}_{cluster_selection}_"
+                    f"{start_frame}_{end_frame}_{step}_{use_pca}_{n_components}"
+                )
+                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
+            else:
+                cache_key = cache_name
+
+            cache_file = self._cache_dir / f"{cache_key}.pkl"
+
+            # Check cache
+            if cache_file.exists():
+                logger.info(f"Loading cached DBSCAN clustering results from {cache_file}")
+                with open(cache_file, "rb") as f:
+                    return pickle.load(f)
+
             # Load and align trajectory
             traj, traj_metadata = self._load_and_align_trajectory(
-                universe, trajectory, align_selection,
-                start_frame, end_frame, step
+                universe, trajectory, align_selection, start_frame, end_frame, step
             )
 
             # Extract coordinates for clustering
@@ -469,37 +496,45 @@ class ClusteringAnalyzer:
                 # For combined trajectories, create globally continuous frame indices
                 frame_indices = []
                 global_frame = 0
-                for traj_frames in traj_metadata['frames_per_trajectory']:
+                for traj_frames in traj_metadata["frames_per_trajectory"]:
                     # Each trajectory contributes frames: [global_frame, global_frame+step, ...]
                     traj_frame_indices = list(range(global_frame, global_frame + traj_frames * step, step))
                     frame_indices.extend(traj_frame_indices)
                     global_frame += traj_frames * step  # Move to next trajectory's starting point
 
                 # Ensure we have exactly the right number of frame indices
-                frame_indices = frame_indices[:len(labels)]
+                frame_indices = frame_indices[: len(labels)]
             else:
                 # For single trajectory, use simple range
                 frame_indices = [start_frame + i * step for i in range(len(labels))]
 
             results = {
-                'labels': labels,
-                'n_clusters': n_clusters,
-                'n_noise': n_noise,
-                'silhouette_score': silhouette,
-                'eps': eps,
-                'min_samples': min_samples,
-                'coordinates_reduced': coordinates_reduced,
-                'scaler': scaler,
-                'pca': pca,
-                'frame_indices': frame_indices,
-                'timestep_ns': self.config.timestep_ns  # Pass timestep for time axis calculations
+                "labels": labels,
+                "n_clusters": n_clusters,
+                "n_noise": n_noise,
+                "silhouette_score": silhouette,
+                "eps": eps,
+                "min_samples": min_samples,
+                "coordinates_reduced": coordinates_reduced,
+                "scaler": scaler,
+                "pca": pca,
+                "frame_indices": frame_indices,
+                "timestep_ns": self.config.timestep_ns,  # Pass timestep for time axis calculations
+                "cluster_selection": cluster_selection,
+                "align_selection": align_selection,
             }
 
             # Add metadata if multiple trajectories were combined
             if traj_metadata is not None:
-                results['trajectory_metadata'] = traj_metadata
-                logger.info(f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
-                          f"{len(labels)} total frames")
+                results["trajectory_metadata"] = traj_metadata
+                logger.info(
+                    f"Combined clustering: {traj_metadata['n_trajectories']} trajectories, "
+                    f"{len(labels)} total frames"
+                )
+
+            # Cache results
+            with open(cache_file, "wb") as f:
+                pickle.dump(results, f)
 
             logger.info(f"DBSCAN clustering completed. Clusters: {n_clusters}, Noise: {n_noise}")
             return results
@@ -508,18 +543,20 @@ class ClusteringAnalyzer:
             logger.error(f"Error in DBSCAN clustering: {e}")
             raise
 
-    def find_optimal_clusters(self,
-                             universe: str,
-                             trajectory: Union[str, List[str]],
-                             max_clusters: int = 10,
-                             method: str = "kmeans",
-                             align_selection: str = "protein and name CA",
-                             cluster_selection: str = "protein",
-                             start_frame: int = 0,
-                             end_frame: Optional[int] = None,
-                             step: int = 1,
-                             use_pca: bool = True,
-                             n_components: int = 10) -> Dict:
+    def find_optimal_clusters(
+        self,
+        universe: str,
+        trajectory: Union[str, List[str]],
+        max_clusters: int = 10,
+        method: str = "kmeans",
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        use_pca: bool = True,
+        n_components: int = 10,
+    ) -> Dict:
         """
         Find optimal number of clusters using various metrics with pure MDTraj.
 
@@ -556,8 +593,7 @@ class ClusteringAnalyzer:
         try:
             # Load and align trajectory
             traj, traj_metadata = self._load_and_align_trajectory(
-                universe, trajectory, align_selection,
-                start_frame, end_frame, step
+                universe, trajectory, align_selection, start_frame, end_frame, step
             )
 
             # Extract coordinates for clustering
@@ -590,7 +626,7 @@ class ClusteringAnalyzer:
                 silhouette = silhouette_score(coordinates_reduced, labels)
                 silhouette_scores.append(silhouette)
 
-                if hasattr(clusterer, 'inertia_'):
+                if hasattr(clusterer, "inertia_"):
                     inertias.append(clusterer.inertia_)
 
                 logger.info(f"Clusters: {n_clusters}, Silhouette: {silhouette:.3f}")
@@ -600,12 +636,12 @@ class ClusteringAnalyzer:
             optimal_clusters = cluster_range[optimal_idx]
 
             results = {
-                'cluster_range': list(cluster_range),
-                'silhouette_scores': silhouette_scores,
-                'inertias': inertias if inertias else None,
-                'optimal_clusters': optimal_clusters,
-                'optimal_silhouette': silhouette_scores[optimal_idx],
-                'method': method
+                "cluster_range": list(cluster_range),
+                "silhouette_scores": silhouette_scores,
+                "inertias": inertias if inertias else None,
+                "optimal_clusters": optimal_clusters,
+                "optimal_silhouette": silhouette_scores[optimal_idx],
+                "method": method,
             }
 
             logger.info(f"Optimal clusters: {optimal_clusters} (silhouette: {silhouette_scores[optimal_idx]:.3f})")
@@ -615,12 +651,14 @@ class ClusteringAnalyzer:
             logger.error(f"Error in cluster optimization: {e}")
             raise
 
-    def get_centroid_frames(self,
-                          clustering_results: Dict,
-                          universe: str,
-                          trajectory: Union[str, List[str]],
-                          align_selection: str = "protein and name CA",
-                          cluster_selection: str = "protein") -> Dict[int, int]:
+    def get_centroid_frames(
+        self,
+        clustering_results: Dict,
+        universe: str,
+        trajectory: Union[str, List[str]],
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein",
+    ) -> Dict[int, int]:
         """
         Find the centroid frame (closest to cluster center) for each cluster.
 
@@ -645,13 +683,27 @@ class ClusteringAnalyzer:
         try:
             # Load trajectory
             traj, _ = self._load_and_align_trajectory(
-                universe, trajectory, align_selection,
-                0, None, 1  # Use all frames for accurate centroid calculation
+                universe,
+                trajectory,
+                align_selection,
+                0,
+                None,
+                1,  # Use all frames for accurate centroid calculation
             )
 
-            labels = clustering_results['labels']
-            coordinates = clustering_results['coordinates_reduced']
-            centers = clustering_results.get('cluster_centers', None)
+            if (
+                clustering_results.get("cluster_selection")
+                and clustering_results["cluster_selection"] != cluster_selection
+            ):
+                logger.warning(
+                    "Cluster selection mismatch: results used '%s', centroid requested '%s'.",
+                    clustering_results["cluster_selection"],
+                    cluster_selection,
+                )
+
+            labels = clustering_results["labels"]
+            coordinates = clustering_results["coordinates_reduced"]
+            centers = clustering_results.get("cluster_centers", None)
 
             if centers is None:
                 raise ValueError("Cluster centers not found in clustering results")
@@ -685,13 +737,15 @@ class ClusteringAnalyzer:
             logger.error(f"Error finding centroid frames: {e}")
             raise
 
-    def save_centroid_structures(self,
-                               clustering_results: Dict,
-                               universe: str,
-                               trajectory: Union[str, List[str]],
-                               output_dir: str,
-                               align_selection: str = "protein and name CA",
-                               cluster_selection: str = "protein") -> Dict[int, str]:
+    def save_centroid_structures(
+        self,
+        clustering_results: Dict,
+        universe: str,
+        trajectory: Union[str, List[str]],
+        output_dir: str,
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein",
+    ) -> Dict[int, str]:
         """
         Save PDB files for centroid structures of each cluster.
 
@@ -718,8 +772,12 @@ class ClusteringAnalyzer:
         try:
             # Load trajectory
             traj, _ = self._load_and_align_trajectory(
-                universe, trajectory, align_selection,
-                0, None, 1  # Use all frames for accurate centroid calculation
+                universe,
+                trajectory,
+                align_selection,
+                0,
+                None,
+                1,  # Use all frames for accurate centroid calculation
             )
 
             # Get centroid frames
@@ -737,7 +795,7 @@ class ClusteringAnalyzer:
             for cluster_id, frame_idx in centroid_frames.items():
                 if frame_idx < len(traj):
                     # Extract the frame
-                    frame_traj = traj[frame_idx:frame_idx+1]
+                    frame_traj = traj[frame_idx : frame_idx + 1]
 
                     # Save as PDB
                     filename = f"centroid_cluster_{cluster_id}_frame_{frame_idx}.pdb"
@@ -752,14 +810,16 @@ class ClusteringAnalyzer:
             logger.error(f"Error saving centroid structures: {e}")
             raise
 
-    def calculate_rmsd_matrix(self,
-                            universe: str,
-                            trajectory: Union[str, List[str]],
-                            align_selection: str = "protein and name CA",
-                            cluster_selection: str = "protein and name CA",
-                            start_frame: int = 0,
-                            end_frame: Optional[int] = None,
-                            step: int = 1) -> np.ndarray:
+    def calculate_rmsd_matrix(
+        self,
+        universe: str,
+        trajectory: Union[str, List[str]],
+        align_selection: str = "protein and name CA",
+        cluster_selection: str = "protein and name CA",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+    ) -> np.ndarray:
         """
         Calculate pairwise RMSD matrix using pure MDTraj (GROMOS-style).
 
@@ -787,8 +847,7 @@ class ClusteringAnalyzer:
         """
         # Load and align trajectory
         traj, traj_metadata = self._load_and_align_trajectory(
-            universe, trajectory, align_selection,
-            start_frame, end_frame, step
+            universe, trajectory, align_selection, start_frame, end_frame, step
         )
 
         # Parse cluster selection for RMSD atoms
@@ -798,7 +857,7 @@ class ClusteringAnalyzer:
             rmsd_indices = []
             for chain in traj.topology.chains:
                 if chain.index == 0:  # Main protein chain
-                    ca_atoms = [atom.index for atom in chain.atoms if atom.name == 'CA']
+                    ca_atoms = [atom.index for atom in chain.atoms if atom.name == "CA"]
                     rmsd_indices.extend(ca_atoms)
                     break
             rmsd_indices = np.array(rmsd_indices)
@@ -812,7 +871,7 @@ class ClusteringAnalyzer:
             for i in range(traj.n_frames):
                 for j in range(i, traj.n_frames):
                     # Calculate RMSD between frames i and j
-                    rmsd_val = md.rmsd(traj[i:i+1], traj[j:j+1], atom_indices=rmsd_indices)[0]
+                    rmsd_val = md.rmsd(traj[i : i + 1], traj[j : j + 1], atom_indices=rmsd_indices)[0]
                     rmsd_matrix[i, j] = rmsd_val
                     rmsd_matrix[j, i] = rmsd_val  # Symmetric matrix
 

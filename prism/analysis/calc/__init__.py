@@ -17,13 +17,13 @@ from .dihedral import DihedralAnalyzer
 from .namd_fep import NAMDFEPAnalyzer
 
 __all__ = [
-    'ContactAnalyzer',
-    'HBondAnalyzer',
-    'DistanceAnalyzer',
-    'RMSDAnalyzer',
-    'ClusteringAnalyzer',
-    'StructuralAnalyzer',
-    'SASAAnalyzer',
-    'DihedralAnalyzer',
-    'NAMDFEPAnalyzer'
+    "ContactAnalyzer",
+    "HBondAnalyzer",
+    "DistanceAnalyzer",
+    "RMSDAnalyzer",
+    "ClusteringAnalyzer",
+    "StructuralAnalyzer",
+    "SASAAnalyzer",
+    "DihedralAnalyzer",
+    "NAMDFEPAnalyzer",
 ]
