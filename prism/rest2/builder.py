@@ -17,6 +17,7 @@ from .partial_tempering import partial_tempering
 # Temperature ladder
 # ---------------------------------------------------------------------------
 
+
 def calculate_temperature_ladder(
     t_ref: float,
     t_max: float,
@@ -54,6 +55,7 @@ def calculate_temperature_ladder(
 # MDP file generators
 # ---------------------------------------------------------------------------
 
+
 def write_em_mdp(path: str) -> None:
     """Write energy minimization MDP file."""
     content = """\
@@ -78,7 +80,7 @@ DispCorr    = EnerPres
 ; Constraints
 constraints = h-bonds
 """
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
 
 
@@ -125,7 +127,7 @@ gen_seed    = -1
 ; Position restraints
 define      = -DPOSRES
 """
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
 
 
@@ -175,7 +177,7 @@ gen_vel     = no
 ; Position restraints
 define      = -DPOSRES
 """
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
 
 
@@ -221,7 +223,7 @@ constraints = h-bonds
 ; Velocity generation
 gen_vel     = no
 """
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
 
 
@@ -229,8 +231,12 @@ gen_vel     = no
 # Script generator
 # ---------------------------------------------------------------------------
 
+
 def write_rest2_run_script(
-    path: str, n_replicas: int, t_ref: float, replex: int = 1000,
+    path: str,
+    n_replicas: int,
+    t_ref: float,
+    replex: int = 1000,
 ) -> None:
     """Write a single all-in-one REST2 run script.
 
@@ -364,7 +370,7 @@ echo "============================================================"
 echo "  REST2 Production Complete!"
 echo "============================================================"
 """
-    with open(path, 'w') as f:
+    with open(path, "w") as f:
         f.write(content)
     os.chmod(path, 0o755)
 
@@ -372,6 +378,7 @@ echo "============================================================"
 # ---------------------------------------------------------------------------
 # Main build function
 # ---------------------------------------------------------------------------
+
 
 def build_rest2(
     md_dir: str,
@@ -407,8 +414,8 @@ def build_rest2(
         print(f"    Replica {i}: T_eff = {t:.2f} K, lambda = {l:.6f}")
 
     # Write temperature ladder file
-    ladder_path = os.path.join(output_dir, 'temperature_ladder.txt')
-    with open(ladder_path, 'w') as f:
+    ladder_path = os.path.join(output_dir, "temperature_ladder.txt")
+    with open(ladder_path, "w") as f:
         f.write(f"# REST2 Temperature Ladder\n")
         f.write(f"# T_ref = {t_ref} K, T_max = {t_max} K, N_replicas = {n_replicas}\n")
         f.write(f"# Thermostat temperature for ALL replicas = {t_ref} K\n")
@@ -417,14 +424,14 @@ def build_rest2(
             f.write(f"  {i:>7d}  {t:>14.2f}  {l:>8.6f}\n")
 
     # --- Copy GRO file ---
-    shutil.copy2(gro_path, os.path.join(output_dir, 'solv_ions.gro'))
+    shutil.copy2(gro_path, os.path.join(output_dir, "solv_ions.gro"))
 
     # --- Copy original topology with all dependencies for equilibration ---
     _copy_original_topology(md_dir, original_top_path, output_dir)
 
     # --- Copy processed and marked topologies for reference ---
-    dest_processed = os.path.join(output_dir, 'processed.top')
-    dest_marked = os.path.join(output_dir, 'rest2_marked.top')
+    dest_processed = os.path.join(output_dir, "processed.top")
+    dest_marked = os.path.join(output_dir, "rest2_marked.top")
     if os.path.abspath(processed_top_path) != os.path.abspath(dest_processed):
         shutil.copy2(processed_top_path, dest_processed)
     if os.path.abspath(marked_top_path) != os.path.abspath(dest_marked):
@@ -432,28 +439,28 @@ def build_rest2(
 
     # --- Generate scaled topologies ---
     print(f"\n  Generating scaled topologies...")
-    with open(marked_top_path, 'r') as f:
+    with open(marked_top_path, "r") as f:
         marked_lines = f.readlines()
 
     for i in range(n_replicas):
-        replica_dir = os.path.join(output_dir, f'replica_{i}')
+        replica_dir = os.path.join(output_dir, f"replica_{i}")
         os.makedirs(replica_dir, exist_ok=True)
         scaled_lines = partial_tempering(marked_lines, lambdas[i])
-        with open(os.path.join(replica_dir, 'topol.top'), 'w') as f:
+        with open(os.path.join(replica_dir, "topol.top"), "w") as f:
             f.writelines(scaled_lines)
         print(f"    Replica {i}: lambda = {lambdas[i]:.6f}")
 
     # --- MDP files ---
-    mdp_dir = os.path.join(output_dir, 'mdps')
+    mdp_dir = os.path.join(output_dir, "mdps")
     os.makedirs(mdp_dir, exist_ok=True)
-    write_em_mdp(os.path.join(mdp_dir, 'em.mdp'))
-    write_nvt_mdp(os.path.join(mdp_dir, 'nvt.mdp'), t_ref)
-    write_npt_mdp(os.path.join(mdp_dir, 'npt.mdp'), t_ref)
-    write_prod_mdp(os.path.join(mdp_dir, 'prod.mdp'), t_ref)
+    write_em_mdp(os.path.join(mdp_dir, "em.mdp"))
+    write_nvt_mdp(os.path.join(mdp_dir, "nvt.mdp"), t_ref)
+    write_npt_mdp(os.path.join(mdp_dir, "npt.mdp"), t_ref)
+    write_prod_mdp(os.path.join(mdp_dir, "prod.mdp"), t_ref)
     print(f"  MDP files written to: {mdp_dir}")
 
     # --- Run script ---
-    script_path = os.path.join(output_dir, 'rest2_run.sh')
+    script_path = os.path.join(output_dir, "rest2_run.sh")
     write_rest2_run_script(script_path, n_replicas, t_ref)
     print(f"  Run script written to: {script_path}")
 
@@ -462,7 +469,7 @@ def _is_forcefield_include(inc_path: str) -> bool:
     """Check if an #include path refers to a GROMACS force field (not a local file)."""
     # Force field includes contain ".ff/" (e.g. "amber14sb.ff/forcefield.itp",
     # "charmm36.ff/tip3p.itp", "oplsaa.ff/ions.itp")
-    return '.ff/' in inc_path
+    return ".ff/" in inc_path
 
 
 def _copy_original_topology(md_dir: str, original_top_path: str, output_dir: str) -> None:
@@ -472,7 +479,7 @@ def _copy_original_topology(md_dir: str, original_top_path: str, output_dir: str
     posre_LIG.itp (included from within LIG.itp) are also copied.
     """
     md_dir = os.path.abspath(md_dir)
-    output_top = os.path.join(output_dir, 'topol_original.top')
+    output_top = os.path.join(output_dir, "topol_original.top")
     _INCLUDE_RE = re.compile(r'#include\s+"([^"]+)"')
 
     # Track files already copied to avoid duplicates
@@ -485,14 +492,14 @@ def _copy_original_topology(md_dir: str, original_top_path: str, output_dir: str
         """
         src_dir = os.path.dirname(os.path.abspath(src_path))
 
-        with open(src_path, 'r') as f:
+        with open(src_path, "r") as f:
             lines = f.readlines()
 
         new_lines = []
         for line in lines:
             stripped = line.strip()
             match = _INCLUDE_RE.search(stripped)
-            if match and stripped.startswith('#'):
+            if match and stripped.startswith("#"):
                 inc_path = match.group(1)
                 if _is_forcefield_include(inc_path):
                     # Keep force field includes as-is
@@ -508,19 +515,19 @@ def _copy_original_topology(md_dir: str, original_top_path: str, output_dir: str
                     # Copy the included file (and its own nested includes) if not done yet
                     if basename not in copied_basenames:
                         copied_basenames.add(basename)
-                        if abs_inc.endswith('.itp') or abs_inc.endswith('.top'):
+                        if abs_inc.endswith(".itp") or abs_inc.endswith(".top"):
                             _copy_and_rewrite(abs_inc, dest_inc)
                         else:
                             shutil.copy2(abs_inc, dest_inc)
 
                     # Rewrite the include to use just the basename
                     # Preserve any surrounding preprocessor context (#ifdef etc.)
-                    new_lines.append(line[:match.start(1)] + basename + line[match.end(1):])
+                    new_lines.append(line[: match.start(1)] + basename + line[match.end(1) :])
                     continue
 
             new_lines.append(line)
 
-        with open(dst_path, 'w') as f:
+        with open(dst_path, "w") as f:
             f.writelines(new_lines)
 
     _copy_and_rewrite(original_top_path, output_top)
@@ -528,7 +535,7 @@ def _copy_original_topology(md_dir: str, original_top_path: str, output_dir: str
     # Also copy any posre files from the MD directory that weren't already copied
     # (they might not be directly #included from topol.top)
     for fname in os.listdir(md_dir):
-        if fname.startswith('posre_') and fname.endswith('.itp'):
+        if fname.startswith("posre_") and fname.endswith(".itp"):
             dst = os.path.join(output_dir, fname)
             if not os.path.exists(dst):
                 shutil.copy2(os.path.join(md_dir, fname), dst)

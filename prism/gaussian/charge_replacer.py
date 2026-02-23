@@ -18,10 +18,22 @@ except ImportError:
     try:
         from prism.utils.colors import print_success, print_info, print_warning, print_error
     except ImportError:
-        def print_success(x, **kwargs): print(f"[OK] {x}")
-        def print_info(x, **kwargs): print(f"[INFO] {x}")
-        def print_warning(x, **kwargs): print(f"[WARN] {x}")
-        def print_error(x, **kwargs): print(f"[ERROR] {x}")
+
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[OK] {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[INFO] {x}")
+
+        def print_warning(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[WARN] {x}")
+
+        def print_error(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}[ERROR] {x}")
 
 
 class RESPChargeReplacer:
@@ -70,7 +82,7 @@ class RESPChargeReplacer:
         self.charges_list = []
         in_atom_section = False
 
-        with open(self.resp_mol2_path, 'r') as f:
+        with open(self.resp_mol2_path, "r") as f:
             for line in f:
                 line_stripped = line.strip()
 
@@ -118,16 +130,16 @@ class RESPChargeReplacer:
         atoms_start = -1
         atoms_end = -1
 
-        with open(itp_path, 'r') as f:
+        with open(itp_path, "r") as f:
             lines = f.readlines()
 
         for i, line in enumerate(lines):
             stripped = line.strip()
 
             # Detect section headers
-            if stripped.startswith('[') and ']' in stripped:
-                section_name = stripped.split(']')[0].split('[')[1].strip().lower()
-                if section_name == 'atoms':
+            if stripped.startswith("[") and "]" in stripped:
+                section_name = stripped.split("]")[0].split("[")[1].strip().lower()
+                if section_name == "atoms":
                     in_atoms_section = True
                     atoms_start = i
                     continue
@@ -137,23 +149,23 @@ class RESPChargeReplacer:
                     break
 
             # Parse atom lines in [ atoms ] section
-            if in_atoms_section and stripped and not stripped.startswith(';'):
+            if in_atoms_section and stripped and not stripped.startswith(";"):
                 # ITP atoms format: nr type resnr residue atom cgnr charge mass
                 # Typical: 1  c3  1  LIG  C1  1  -0.108000  12.01
                 parts = line.split()
                 if len(parts) >= 7:
                     try:
                         atom = {
-                            'line_idx': i,
-                            'nr': int(parts[0]),
-                            'type': parts[1],
-                            'resnr': int(parts[2]),
-                            'residue': parts[3],
-                            'atom': parts[4],
-                            'cgnr': int(parts[5]),
-                            'charge': float(parts[6]),
-                            'mass': float(parts[7]) if len(parts) > 7 else None,
-                            'original_parts': parts
+                            "line_idx": i,
+                            "nr": int(parts[0]),
+                            "type": parts[1],
+                            "resnr": int(parts[2]),
+                            "residue": parts[3],
+                            "atom": parts[4],
+                            "cgnr": int(parts[5]),
+                            "charge": float(parts[6]),
+                            "mass": float(parts[7]) if len(parts) > 7 else None,
+                            "original_parts": parts,
                         }
                         atoms.append(atom)
                     except (ValueError, IndexError):
@@ -177,17 +189,16 @@ class RESPChargeReplacer:
         unmatched = []
 
         for atom in itp_atoms:
-            atom_name = atom['atom']
+            atom_name = atom["atom"]
 
             if atom_name in self.charges:
-                matches[atom['line_idx']] = self.charges[atom_name]
+                matches[atom["line_idx"]] = self.charges[atom_name]
             else:
                 # Try variations
                 found = False
-                for variation in [atom_name.upper(), atom_name.lower(),
-                                  atom_name.capitalize()]:
+                for variation in [atom_name.upper(), atom_name.lower(), atom_name.capitalize()]:
                     if variation in self.charges:
-                        matches[atom['line_idx']] = self.charges[variation]
+                        matches[atom["line_idx"]] = self.charges[variation]
                         found = True
                         break
 
@@ -218,18 +229,16 @@ class RESPChargeReplacer:
         matches = {}
 
         if len(itp_atoms) != len(self.charges_list):
-            print_warning(f"  Atom count mismatch: ITP has {len(itp_atoms)}, "
-                         f"RESP has {len(self.charges_list)}")
+            print_warning(f"  Atom count mismatch: ITP has {len(itp_atoms)}, " f"RESP has {len(self.charges_list)}")
 
         # Match by order
         for i, atom in enumerate(itp_atoms):
             if i < len(self.charges_list):
-                matches[atom['line_idx']] = self.charges_list[i][1]
+                matches[atom["line_idx"]] = self.charges_list[i][1]
 
         return matches
 
-    def replace_itp_charges(self, itp_path: str, output_path: Optional[str] = None,
-                            backup: bool = True) -> str:
+    def replace_itp_charges(self, itp_path: str, output_path: Optional[str] = None, backup: bool = True) -> str:
         """
         Replace charges in ITP file with RESP charges.
 
@@ -282,11 +291,11 @@ class RESPChargeReplacer:
         # Apply charge replacements
         charges_replaced = 0
         for atom in itp_atoms:
-            line_idx = atom['line_idx']
+            line_idx = atom["line_idx"]
             if line_idx in charge_map:
                 new_charge = charge_map[line_idx]
                 # Reconstruct the line with new charge
-                parts = atom['original_parts'].copy()
+                parts = atom["original_parts"].copy()
                 parts[6] = f"{new_charge:.6f}"
 
                 # Preserve line format as much as possible
@@ -296,7 +305,7 @@ class RESPChargeReplacer:
                 charges_replaced += 1
 
         # Write output
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             f.writelines(lines)
 
         if self.verbose:
@@ -322,23 +331,28 @@ class RESPChargeReplacer:
             Formatted atom line
         """
         # Try to preserve original column alignment
+        line_ending = "\r\n" if original_line.endswith("\r\n") else "\n"
         # Standard ITP format with fixed column widths
         if len(parts) >= 8:
-            return (f"{int(parts[0]):>6}  {parts[1]:<4}  {int(parts[2]):>4}  "
-                    f"{parts[3]:<4}  {parts[4]:<4}  {int(parts[5]):>4}  "
-                    f"{float(parts[6]):>10.6f}  {float(parts[7]):>8.4f}\n")
+            return (
+                f"{int(parts[0]):>6}  {parts[1]:<4}  {int(parts[2]):>4}  "
+                f"{parts[3]:<4}  {parts[4]:<4}  {int(parts[5]):>4}  "
+                f"{float(parts[6]):>10.6f}  {float(parts[7]):>8.4f}{line_ending}"
+            )
         elif len(parts) >= 7:
-            return (f"{int(parts[0]):>6}  {parts[1]:<4}  {int(parts[2]):>4}  "
-                    f"{parts[3]:<4}  {parts[4]:<4}  {int(parts[5]):>4}  "
-                    f"{float(parts[6]):>10.6f}\n")
+            return (
+                f"{int(parts[0]):>6}  {parts[1]:<4}  {int(parts[2]):>4}  "
+                f"{parts[3]:<4}  {parts[4]:<4}  {int(parts[5]):>4}  "
+                f"{float(parts[6]):>10.6f}{line_ending}"
+            )
         else:
             # Fallback: simple space-separated
-            return "  ".join(parts) + "\n"
+            return "  ".join(parts) + line_ending
 
 
-def replace_itp_charges(itp_path: str, resp_mol2_path: str,
-                        output_path: Optional[str] = None,
-                        backup: bool = True, verbose: bool = True) -> str:
+def replace_itp_charges(
+    itp_path: str, resp_mol2_path: str, output_path: Optional[str] = None, backup: bool = True, verbose: bool = True
+) -> str:
     """
     Replace charges in ITP file with RESP charges from MOL2 file.
 

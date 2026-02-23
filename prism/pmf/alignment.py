@@ -26,24 +26,24 @@ logger = logging.getLogger(__name__)
 # Standalone helper functions for MH-optimized pulling direction
 # ============================================================
 
+
 def _is_heavy(element: str) -> bool:
     """Check if an element is a heavy atom (non-hydrogen)."""
-    return element.upper() not in ('H', 'D')
+    return element.upper() not in ("H", "D")
 
 
 def _get_element_from_atom(atom: Dict) -> str:
     """Extract element symbol from a parsed atom dict."""
     # PDB atoms have 'element' field; MOL2 atoms have 'type' field
-    elem = atom.get('element', '')
-    if not elem and 'type' in atom:
-        elem = atom['type'].split('.')[0]
+    elem = atom.get("element", "")
+    if not elem and "type" in atom:
+        elem = atom["type"].split(".")[0]
     if not elem:
-        elem = ''.join(c for c in atom.get('name', 'C') if c.isalpha())[:1]
+        elem = "".join(c for c in atom.get("name", "C") if c.isalpha())[:1]
     return elem.upper()
 
 
-def _compute_energy(lig_coords: np.ndarray, pocket_coords: np.ndarray,
-                    direction: np.ndarray) -> float:
+def _compute_energy(lig_coords: np.ndarray, pocket_coords: np.ndarray, direction: np.ndarray) -> float:
     """
     Energy = -sum over pocket atoms of (min distance to ligand pulling lines).
 
@@ -66,11 +66,7 @@ def _compute_energy(lig_coords: np.ndarray, pocket_coords: np.ndarray,
 
 def _spherical_to_cartesian(theta: float, phi: float) -> np.ndarray:
     """Convert spherical coordinates to unit vector."""
-    return np.array([
-        np.sin(theta) * np.cos(phi),
-        np.sin(theta) * np.sin(phi),
-        np.cos(theta)
-    ])
+    return np.array([np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)])
 
 
 def _cartesian_to_spherical(v: np.ndarray) -> Tuple[float, float]:
@@ -80,15 +76,18 @@ def _cartesian_to_spherical(v: np.ndarray) -> Tuple[float, float]:
     return theta, phi
 
 
-def _metropolis_hastings(lig_coords: np.ndarray, pocket_coords: np.ndarray,
-                         init_direction: np.ndarray,
-                         n_iterations: int = 100000,
-                         initial_temp: float = 2.0,
-                         cooling_rate: float = 0.99995,
-                         step_size: float = 0.15,
-                         conv_window: int = 8000,
-                         conv_threshold: float = 5e-4,
-                         verbose: bool = True) -> Tuple[np.ndarray, float, list]:
+def _metropolis_hastings(
+    lig_coords: np.ndarray,
+    pocket_coords: np.ndarray,
+    init_direction: np.ndarray,
+    n_iterations: int = 100000,
+    initial_temp: float = 2.0,
+    cooling_rate: float = 0.99995,
+    step_size: float = 0.15,
+    conv_window: int = 8000,
+    conv_threshold: float = 5e-4,
+    verbose: bool = True,
+) -> Tuple[np.ndarray, float, list]:
     """
     Minimize energy via Metropolis-Hastings on the unit sphere.
 
@@ -144,12 +143,12 @@ def _metropolis_hastings(lig_coords: np.ndarray, pocket_coords: np.ndarray,
         if verbose and ((i + 1) % 500 == 0 or i == n_iterations - 1):
             pct = (i + 1) / n_iterations
             filled = int(bar_width * pct)
-            bar = '\u2588' * filled + '\u2591' * (bar_width - filled)
+            bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
             acc_rate = accept_count / (i + 1)
             sys.stdout.write(
-                f'\r  [{bar}] {pct*100:5.1f}% | '
-                f'E={current_energy:.2f} | Best={best_energy:.2f} | '
-                f'Accept={acc_rate:.3f} | T={temp:.4e}'
+                f"\r  [{bar}] {pct*100:5.1f}% | "
+                f"E={current_energy:.2f} | Best={best_energy:.2f} | "
+                f"Accept={acc_rate:.3f} | T={temp:.4e}"
             )
             sys.stdout.flush()
 
@@ -163,18 +162,17 @@ def _metropolis_hastings(lig_coords: np.ndarray, pocket_coords: np.ndarray,
                 if verbose:
                     pct = (i + 1) / n_iterations
                     filled = int(bar_width * pct)
-                    bar = '\u2588' * filled + '\u2591' * (bar_width - filled)
+                    bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
                     sys.stdout.write(
-                        f'\r  [{bar}] {pct*100:5.1f}% | '
-                        f'E={current_energy:.2f} | Best={best_energy:.2f} | '
-                        f'Accept={accept_count/(i+1):.3f} | T={temp:.4e}'
+                        f"\r  [{bar}] {pct*100:5.1f}% | "
+                        f"E={current_energy:.2f} | Best={best_energy:.2f} | "
+                        f"Accept={accept_count/(i+1):.3f} | T={temp:.4e}"
                     )
-                    print(f'\n  Converged at iteration {i+1} '
-                          f'(relative std = {rel_std:.2e} < {conv_threshold:.0e})')
+                    print(f"\n  Converged at iteration {i+1} " f"(relative std = {rel_std:.2e} < {conv_threshold:.0e})")
                 return best_dir, best_energy, energy_history
 
     if verbose:
-        print(f'\n  Reached maximum iterations ({n_iterations})')
+        print(f"\n  Reached maximum iterations ({n_iterations})")
     return best_dir, best_energy, energy_history
 
 
@@ -202,8 +200,9 @@ class PMFAligner:
         self.pocket_cutoff = pocket_cutoff
         self.verbose = verbose
 
-    def align_for_pmf(self, protein_pdb: str, ligand_file: str, output_dir: str,
-                      pullvec: Optional[Tuple[int, int]] = None) -> Dict:
+    def align_for_pmf(
+        self, protein_pdb: str, ligand_file: str, output_dir: str, pullvec: Optional[Tuple[int, int]] = None
+    ) -> Dict:
         """
         Align protein-ligand complex for PMF calculations.
 
@@ -259,11 +258,11 @@ class PMFAligner:
         else:
             # Auto mode: MH-optimized direction
             # Extract coordinates for heavy atoms
-            lig_coords = np.array([[a['x'], a['y'], a['z']] for a in ligand_atoms])
+            lig_coords = np.array([[a["x"], a["y"], a["z"]] for a in ligand_atoms])
 
             # Find pocket residues (vectorized: any heavy atom within cutoff of any ligand atom)
             pocket_atom_list, pocket_reskeys = self._find_pocket_residues(protein_atoms, lig_coords)
-            pocket_coords = np.array([[a['x'], a['y'], a['z']] for a in pocket_atom_list])
+            pocket_coords = np.array([[a["x"], a["y"], a["z"]] for a in pocket_atom_list])
             pocket_centroid = np.mean(pocket_coords, axis=0) if len(pocket_coords) > 0 else np.zeros(3)
 
             if self.verbose:
@@ -273,14 +272,15 @@ class PMFAligner:
                 sorted_keys = sorted(pocket_reskeys, key=lambda x: (x[0], x[1]))
                 res_labels = []
                 for chain, resid in sorted_keys:
-                    resname = next(a['resname'] for a in protein_atoms
-                                   if a.get('chain', '') == chain and a['resid'] == resid)
-                    res_labels.append(f'{resname}{resid}:{chain}')
+                    resname = next(
+                        a["resname"] for a in protein_atoms if a.get("chain", "") == chain and a["resid"] == resid
+                    )
+                    res_labels.append(f"{resname}{resid}:{chain}")
                 print(f"  Residues: {', '.join(res_labels)}")
 
             # Initial direction: protein heavy-atom COM -> ligand COM
             protein_heavy = [a for a in protein_atoms if _is_heavy(_get_element_from_atom(a))]
-            protein_heavy_coords = np.array([[a['x'], a['y'], a['z']] for a in protein_heavy])
+            protein_heavy_coords = np.array([[a["x"], a["y"], a["z"]] for a in protein_heavy])
             protein_com = np.mean(protein_heavy_coords, axis=0)
             lig_com = np.mean(lig_coords, axis=0)
 
@@ -300,7 +300,9 @@ class PMFAligner:
                 print(f"\n  Running Metropolis-Hastings optimization ...\n")
 
             best_dir, best_energy, history = _metropolis_hastings(
-                lig_coords, pocket_coords, init_dir,
+                lig_coords,
+                pocket_coords,
+                init_dir,
                 n_iterations=100000,
                 initial_temp=2.0,
                 cooling_rate=0.99995,
@@ -325,19 +327,23 @@ class PMFAligner:
             pull_vector_normalized = best_dir
 
             optimization_info = {
-                'initial_direction': init_dir,
-                'initial_energy': float(init_energy),
-                'optimized_energy': float(best_energy),
-                'improvement_pct': float(improvement),
-                'pocket_residues': len(pocket_reskeys),
-                'pocket_atoms': len(pocket_atom_list),
+                "initial_direction": init_dir,
+                "initial_energy": float(init_energy),
+                "optimized_energy": float(best_energy),
+                "improvement_pct": float(improvement),
+                "pocket_residues": len(pocket_reskeys),
+                "pocket_atoms": len(pocket_atom_list),
             }
 
             # Generate PyMOL visualization script (before rotation, in original coordinates)
             pml_path = output_dir / f"visualize_{Path(protein_pdb).stem}.pml"
             self._generate_pymol_script(
-                str(pml_path), lig_com, init_dir, best_dir,
-                os.path.abspath(protein_pdb), os.path.abspath(ligand_file),
+                str(pml_path),
+                lig_com,
+                init_dir,
+                best_dir,
+                os.path.abspath(protein_pdb),
+                os.path.abspath(ligand_file),
                 pocket_reskeys,
             )
             if self.verbose:
@@ -348,27 +354,29 @@ class PMFAligner:
         rotation_matrix = self._calculate_rotation_matrix(pull_vector_normalized, z_axis)
 
         if self.verbose:
-            print(f"\n  Pull vector: ({pull_vector_normalized[0]:.3f}, {pull_vector_normalized[1]:.3f}, {pull_vector_normalized[2]:.3f})")
+            print(
+                f"\n  Pull vector: ({pull_vector_normalized[0]:.3f}, {pull_vector_normalized[1]:.3f}, {pull_vector_normalized[2]:.3f})"
+            )
             print(f"  Aligning to Z-axis...")
 
         # Step 4: Rotate around the geometric center of the entire complex
         # This minimizes spatial displacement of the structure
         all_atoms = protein_atoms + ligand_atoms
-        all_coords_arr = np.array([[a['x'], a['y'], a['z']] for a in all_atoms])
+        all_coords_arr = np.array([[a["x"], a["y"], a["z"]] for a in all_atoms])
         system_center = np.mean(all_coords_arr, axis=0)
 
         if self.verbose:
-            print(f"  Rotation center (system geometric center): "
-                  f"({system_center[0]:.2f}, {system_center[1]:.2f}, {system_center[2]:.2f})")
+            print(
+                f"  Rotation center (system geometric center): "
+                f"({system_center[0]:.2f}, {system_center[1]:.2f}, {system_center[2]:.2f})"
+            )
 
         # Apply rotation: new_coord = R @ (coord - center) + center
-        transformed_protein = self._rotate_atoms_around_center(
-            protein_atoms, rotation_matrix, system_center)
-        transformed_ligand = self._rotate_atoms_around_center(
-            ligand_atoms, rotation_matrix, system_center)
+        transformed_protein = self._rotate_atoms_around_center(protein_atoms, rotation_matrix, system_center)
+        transformed_ligand = self._rotate_atoms_around_center(ligand_atoms, rotation_matrix, system_center)
 
         # Step 5: Shift all coordinates to be positive (required for GROMACS)
-        all_coords = [[a['x'], a['y'], a['z']] for a in transformed_protein + transformed_ligand]
+        all_coords = [[a["x"], a["y"], a["z"]] for a in transformed_protein + transformed_ligand]
         min_x = min(c[0] for c in all_coords)
         min_y = min(c[1] for c in all_coords)
         min_z = min(c[2] for c in all_coords)
@@ -377,22 +385,24 @@ class PMFAligner:
         shift = np.array([-min_x + margin, -min_y + margin, -min_z + margin])
 
         for atom in transformed_protein:
-            atom['x'] += shift[0]
-            atom['y'] += shift[1]
-            atom['z'] += shift[2]
+            atom["x"] += shift[0]
+            atom["y"] += shift[1]
+            atom["z"] += shift[2]
 
         for atom in transformed_ligand:
-            atom['x'] += shift[0]
-            atom['y'] += shift[1]
-            atom['z'] += shift[2]
+            atom["x"] += shift[0]
+            atom["y"] += shift[1]
+            atom["z"] += shift[2]
 
         if self.verbose:
-            protein_z_coords = [a['z'] for a in transformed_protein]
-            ligand_z_coords = [a['z'] for a in transformed_ligand]
+            protein_z_coords = [a["z"] for a in transformed_protein]
+            ligand_z_coords = [a["z"] for a in transformed_ligand]
             print(f"  Final positions (after shift to positive coords):")
             print(f"    Protein Z range: {min(protein_z_coords):.2f} to {max(protein_z_coords):.2f} Å")
             print(f"    Ligand Z range: {min(ligand_z_coords):.2f} to {max(ligand_z_coords):.2f} Å")
-            print(f"    Ligand is {'above' if np.mean(ligand_z_coords) > np.mean(protein_z_coords) else 'at top of'} protein - ready for +Z pulling")
+            print(
+                f"    Ligand is {'above' if np.mean(ligand_z_coords) > np.mean(protein_z_coords) else 'at top of'} protein - ready for +Z pulling"
+            )
 
         # Step 8: Write aligned structures
         aligned_protein_path = output_dir / f"{Path(protein_pdb).stem}_aligned.pdb"
@@ -407,45 +417,45 @@ class PMFAligner:
             print(f"  System is ready for SMD pulling in +Z direction")
 
         result = {
-            'aligned_protein': str(aligned_protein_path),
-            'aligned_ligand': str(aligned_ligand_path),
-            'pull_vector': pull_vector_normalized,
-            'rotation_matrix': rotation_matrix,
-            'rotation_center': system_center,
-            'ligand_centroid': lig_com if pullvec is None else pull_end,
-            'pocket_centroid': pocket_centroid,
+            "aligned_protein": str(aligned_protein_path),
+            "aligned_ligand": str(aligned_ligand_path),
+            "pull_vector": pull_vector_normalized,
+            "rotation_matrix": rotation_matrix,
+            "rotation_center": system_center,
+            "ligand_centroid": lig_com if pullvec is None else pull_end,
+            "pocket_centroid": pocket_centroid,
         }
 
         if optimization_info is not None:
-            result['optimization'] = optimization_info
-            result['pymol_script'] = str(pml_path)
+            result["optimization"] = optimization_info
+            result["pymol_script"] = str(pml_path)
 
         return result
 
     def _parse_pdb(self, pdb_file: str) -> List[Dict]:
         """Parse PDB file and extract atom information."""
         atoms = []
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             for line in f:
-                if line.startswith('ATOM') or line.startswith('HETATM'):
+                if line.startswith("ATOM") or line.startswith("HETATM"):
                     try:
                         atom = {
-                            'record': line[:6].strip(),
-                            'serial': int(line[6:11].strip()),
-                            'name': line[12:16].strip(),
-                            'altloc': line[16].strip(),
-                            'resname': line[17:20].strip(),
-                            'chain': line[21].strip(),
-                            'resid': int(line[22:26].strip()),
-                            'icode': line[26].strip(),
-                            'x': float(line[30:38].strip()),
-                            'y': float(line[38:46].strip()),
-                            'z': float(line[46:54].strip()),
-                            'occupancy': float(line[54:60].strip()) if len(line) > 54 and line[54:60].strip() else 1.0,
-                            'tempfactor': float(line[60:66].strip()) if len(line) > 60 and line[60:66].strip() else 0.0,
-                            'element': line[76:78].strip() if len(line) > 76 else '',
-                            'charge': line[78:80].strip() if len(line) > 78 else '',
-                            'original_line': line
+                            "record": line[:6].strip(),
+                            "serial": int(line[6:11].strip()),
+                            "name": line[12:16].strip(),
+                            "altloc": line[16].strip(),
+                            "resname": line[17:20].strip(),
+                            "chain": line[21].strip(),
+                            "resid": int(line[22:26].strip()),
+                            "icode": line[26].strip(),
+                            "x": float(line[30:38].strip()),
+                            "y": float(line[38:46].strip()),
+                            "z": float(line[46:54].strip()),
+                            "occupancy": float(line[54:60].strip()) if len(line) > 54 and line[54:60].strip() else 1.0,
+                            "tempfactor": float(line[60:66].strip()) if len(line) > 60 and line[60:66].strip() else 0.0,
+                            "element": line[76:78].strip() if len(line) > 76 else "",
+                            "charge": line[78:80].strip() if len(line) > 78 else "",
+                            "original_line": line,
                         }
                         atoms.append(atom)
                     except (ValueError, IndexError) as e:
@@ -457,9 +467,9 @@ class PMFAligner:
         """Parse ligand file (MOL2 or SDF) and extract atom information."""
         suffix = Path(ligand_file).suffix.lower()
 
-        if suffix == '.mol2':
+        if suffix == ".mol2":
             return self._parse_mol2(ligand_file)
-        elif suffix in ['.sdf', '.sd']:
+        elif suffix in [".sdf", ".sd"]:
             return self._parse_sdf(ligand_file)
         else:
             raise ValueError(f"Unsupported ligand format: {suffix}")
@@ -469,12 +479,12 @@ class PMFAligner:
         atoms = []
         in_atom_section = False
 
-        with open(mol2_file, 'r') as f:
+        with open(mol2_file, "r") as f:
             for line in f:
-                if line.startswith('@<TRIPOS>ATOM'):
+                if line.startswith("@<TRIPOS>ATOM"):
                     in_atom_section = True
                     continue
-                elif line.startswith('@<TRIPOS>'):
+                elif line.startswith("@<TRIPOS>"):
                     in_atom_section = False
                     continue
 
@@ -483,16 +493,16 @@ class PMFAligner:
                     if len(parts) >= 6:
                         try:
                             atom = {
-                                'serial': int(parts[0]),
-                                'name': parts[1],
-                                'x': float(parts[2]),
-                                'y': float(parts[3]),
-                                'z': float(parts[4]),
-                                'type': parts[5],
-                                'resid': int(parts[6]) if len(parts) > 6 else 1,
-                                'resname': parts[7] if len(parts) > 7 else 'LIG',
-                                'charge': float(parts[8]) if len(parts) > 8 else 0.0,
-                                'original_parts': parts
+                                "serial": int(parts[0]),
+                                "name": parts[1],
+                                "x": float(parts[2]),
+                                "y": float(parts[3]),
+                                "z": float(parts[4]),
+                                "type": parts[5],
+                                "resid": int(parts[6]) if len(parts) > 6 else 1,
+                                "resname": parts[7] if len(parts) > 7 else "LIG",
+                                "charge": float(parts[8]) if len(parts) > 8 else 0.0,
+                                "original_parts": parts,
                             }
                             atoms.append(atom)
                         except (ValueError, IndexError) as e:
@@ -504,7 +514,7 @@ class PMFAligner:
         """Parse SDF file."""
         atoms = []
 
-        with open(sdf_file, 'r') as f:
+        with open(sdf_file, "r") as f:
             lines = f.readlines()
 
         # Find the atom count line (4th line typically)
@@ -525,15 +535,15 @@ class PMFAligner:
             line = lines[i]
             try:
                 atom = {
-                    'serial': i - 3,
-                    'x': float(line[0:10].strip()),
-                    'y': float(line[10:20].strip()),
-                    'z': float(line[20:30].strip()),
-                    'element': line[31:34].strip(),
-                    'name': f"{line[31:34].strip()}{i-3}",
-                    'resid': 1,
-                    'resname': 'LIG',
-                    'original_line': line
+                    "serial": i - 3,
+                    "x": float(line[0:10].strip()),
+                    "y": float(line[10:20].strip()),
+                    "z": float(line[20:30].strip()),
+                    "element": line[31:34].strip(),
+                    "name": f"{line[31:34].strip()}{i-3}",
+                    "resid": 1,
+                    "resname": "LIG",
+                    "original_line": line,
                 }
                 atoms.append(atom)
             except (ValueError, IndexError) as e:
@@ -542,11 +552,17 @@ class PMFAligner:
 
         return atoms
 
-    def _generate_pymol_script(self, filename: str, origin: np.ndarray,
-                               init_dir: np.ndarray, opt_dir: np.ndarray,
-                               pdb_path: str, ligand_path: str,
-                               pocket_reskeys: set,
-                               arrow_length: float = 30.0):
+    def _generate_pymol_script(
+        self,
+        filename: str,
+        origin: np.ndarray,
+        init_dir: np.ndarray,
+        opt_dir: np.ndarray,
+        pdb_path: str,
+        ligand_path: str,
+        pocket_reskeys: set,
+        arrow_length: float = 30.0,
+    ):
         """
         Write a PyMOL .pml script that visualizes initial and optimized pull directions.
 
@@ -566,11 +582,11 @@ class PMFAligner:
         # Build pocket selection string
         pocket_sele_parts = []
         for chain, resid in sorted(pocket_reskeys):
-            pocket_sele_parts.append(f'(chain {chain} and resi {resid})')
-        pocket_sele = ' or '.join(pocket_sele_parts) if pocket_sele_parts else 'none'
+            pocket_sele_parts.append(f"(chain {chain} and resi {resid})")
+        pocket_sele = " or ".join(pocket_sele_parts) if pocket_sele_parts else "none"
 
-        with open(filename, 'w') as f:
-            f.write(f'''\
+        with open(filename, "w") as f:
+            f.write(f"""\
 # ============================================================
 # SMD Pulling Direction Visualization
 # Generated by PRISM PMF Aligner
@@ -665,18 +681,17 @@ set label_size, 20
 zoom ligand, 15
 bg_color white
 set ray_shadow, 0
-''')
+""")
 
     def _calculate_centroid(self, atoms: List[Dict]) -> np.ndarray:
         """Calculate the centroid of a list of atoms."""
         if not atoms:
             return np.zeros(3)
 
-        coords = np.array([[a['x'], a['y'], a['z']] for a in atoms])
+        coords = np.array([[a["x"], a["y"], a["z"]] for a in atoms])
         return np.mean(coords, axis=0)
 
-    def _find_pocket_residues(self, protein_atoms: List[Dict],
-                              lig_coords: np.ndarray) -> Tuple[List[Dict], set]:
+    def _find_pocket_residues(self, protein_atoms: List[Dict], lig_coords: np.ndarray) -> Tuple[List[Dict], set]:
         """
         Find pocket residues with any heavy atom within cutoff of any ligand atom.
 
@@ -692,31 +707,31 @@ set ray_shadow, 0
             if _is_heavy(_get_element_from_atom(a)):
                 heavy_atoms.append(a)
 
-        heavy_coords = np.array([[a['x'], a['y'], a['z']] for a in heavy_atoms])
+        heavy_coords = np.array([[a["x"], a["y"], a["z"]] for a in heavy_atoms])
 
         # Vectorized: (N_prot, 1, 3) - (1, N_lig, 3) -> (N_prot, N_lig)
         diff = heavy_coords[:, np.newaxis, :] - lig_coords[np.newaxis, :, :]
         dists = np.linalg.norm(diff, axis=2)  # (N_prot, N_lig)
-        min_dists = np.min(dists, axis=1)     # (N_prot,)
+        min_dists = np.min(dists, axis=1)  # (N_prot,)
 
         # Mark residues within cutoff
         pocket_reskeys = set()
         for i, a in enumerate(heavy_atoms):
             if min_dists[i] <= self.pocket_cutoff:
-                pocket_reskeys.add((a.get('chain', ''), a['resid']))
+                pocket_reskeys.add((a.get("chain", ""), a["resid"]))
 
         # Collect all heavy atoms of pocket residues
-        pocket_atoms = [a for a in heavy_atoms
-                        if (a.get('chain', ''), a['resid']) in pocket_reskeys]
+        pocket_atoms = [a for a in heavy_atoms if (a.get("chain", ""), a["resid"]) in pocket_reskeys]
         return pocket_atoms, pocket_reskeys
 
-    def _get_pullvec_from_atoms(self, protein_atoms: List[Dict], ligand_atoms: List[Dict],
-                                 prot_atom_idx: int, lig_atom_idx: int) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_pullvec_from_atoms(
+        self, protein_atoms: List[Dict], ligand_atoms: List[Dict], prot_atom_idx: int, lig_atom_idx: int
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Get pull vector from user-specified atom indices."""
         # Find protein atom by serial number
         prot_atom = None
         for atom in protein_atoms:
-            if atom['serial'] == prot_atom_idx:
+            if atom["serial"] == prot_atom_idx:
                 prot_atom = atom
                 break
 
@@ -726,15 +741,15 @@ set ray_shadow, 0
         # Find ligand atom by serial number
         lig_atom = None
         for atom in ligand_atoms:
-            if atom['serial'] == lig_atom_idx:
+            if atom["serial"] == lig_atom_idx:
                 lig_atom = atom
                 break
 
         if lig_atom is None:
             raise ValueError(f"Ligand atom with index {lig_atom_idx} not found")
 
-        pull_start = np.array([prot_atom['x'], prot_atom['y'], prot_atom['z']])
-        pull_end = np.array([lig_atom['x'], lig_atom['y'], lig_atom['z']])
+        pull_start = np.array([prot_atom["x"], prot_atom["y"], prot_atom["z"]])
+        pull_end = np.array([lig_atom["x"], lig_atom["y"], lig_atom["z"]])
 
         return pull_start, pull_end
 
@@ -774,11 +789,7 @@ set ray_shadow, 0
 
         # Skew-symmetric cross-product matrix
         k = cross / cross_norm
-        K = np.array([
-            [0, -k[2], k[1]],
-            [k[2], 0, -k[0]],
-            [-k[1], k[0], 0]
-        ])
+        K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
 
         # Rodrigues' formula: R = I + sin(theta)*K + (1-cos(theta))*K^2
         sin_theta = cross_norm
@@ -788,8 +799,9 @@ set ray_shadow, 0
 
         return R
 
-    def _rotate_atoms_around_center(self, atoms: List[Dict], rotation_matrix: np.ndarray,
-                                     center: np.ndarray) -> List[Dict]:
+    def _rotate_atoms_around_center(
+        self, atoms: List[Dict], rotation_matrix: np.ndarray, center: np.ndarray
+    ) -> List[Dict]:
         """
         Rotate atoms around a center point.
 
@@ -800,36 +812,36 @@ set ray_shadow, 0
         """
         transformed = []
         for atom in atoms:
-            coord = np.array([atom['x'], atom['y'], atom['z']])
+            coord = np.array([atom["x"], atom["y"], atom["z"]])
             new_coord = np.dot(rotation_matrix, coord - center) + center
 
             new_atom = atom.copy()
-            new_atom['x'] = new_coord[0]
-            new_atom['y'] = new_coord[1]
-            new_atom['z'] = new_coord[2]
+            new_atom["x"] = new_coord[0]
+            new_atom["y"] = new_coord[1]
+            new_atom["z"] = new_coord[2]
             transformed.append(new_atom)
 
         return transformed
 
     def _write_pdb(self, atoms: List[Dict], output_file: str):
         """Write atoms to PDB format."""
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             f.write("REMARK   Generated by PRISM PMF Aligner\n")
             f.write("REMARK   Structure aligned with pull vector along Z-axis\n")
 
             for atom in atoms:
-                record = atom.get('record', 'ATOM')
-                serial = atom['serial']
-                name = atom['name']
-                altloc = atom.get('altloc', '')
-                resname = atom['resname']
-                chain = atom.get('chain', 'A')
-                resid = atom['resid']
-                icode = atom.get('icode', '')
-                x, y, z = atom['x'], atom['y'], atom['z']
-                occupancy = atom.get('occupancy', 1.0)
-                tempfactor = atom.get('tempfactor', 0.0)
-                element = atom.get('element', name[0])
+                record = atom.get("record", "ATOM")
+                serial = atom["serial"]
+                name = atom["name"]
+                altloc = atom.get("altloc", "")
+                resname = atom["resname"]
+                chain = atom.get("chain", "A")
+                resid = atom["resid"]
+                icode = atom.get("icode", "")
+                x, y, z = atom["x"], atom["y"], atom["z"]
+                occupancy = atom.get("occupancy", 1.0)
+                tempfactor = atom.get("tempfactor", 0.0)
+                element = atom.get("element", name[0])
 
                 # Format atom name with proper spacing
                 if len(name) < 4:
@@ -846,34 +858,34 @@ set ray_shadow, 0
         """Write ligand atoms to original format."""
         suffix = Path(original_file).suffix.lower()
 
-        if suffix == '.mol2':
+        if suffix == ".mol2":
             self._write_mol2(atoms, original_file, output_file)
-        elif suffix in ['.sdf', '.sd']:
+        elif suffix in [".sdf", ".sd"]:
             self._write_sdf(atoms, original_file, output_file)
 
     def _write_mol2(self, atoms: List[Dict], original_file: str, output_file: str):
         """Write atoms to MOL2 format, preserving original structure."""
         # Read original file to preserve non-atom sections
-        with open(original_file, 'r') as f:
+        with open(original_file, "r") as f:
             original_lines = f.readlines()
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             in_atom_section = False
             atom_idx = 0
 
             for line in original_lines:
-                if line.startswith('@<TRIPOS>ATOM'):
+                if line.startswith("@<TRIPOS>ATOM"):
                     f.write(line)
                     in_atom_section = True
                     continue
-                elif line.startswith('@<TRIPOS>'):
+                elif line.startswith("@<TRIPOS>"):
                     in_atom_section = False
                     f.write(line)
                     continue
 
                 if in_atom_section and line.strip() and atom_idx < len(atoms):
                     atom = atoms[atom_idx]
-                    parts = atom.get('original_parts', line.split())
+                    parts = atom.get("original_parts", line.split())
 
                     # Update coordinates
                     if len(parts) >= 6:
@@ -889,7 +901,7 @@ set ray_shadow, 0
 
     def _write_sdf(self, atoms: List[Dict], original_file: str, output_file: str):
         """Write atoms to SDF format, preserving original structure."""
-        with open(original_file, 'r') as f:
+        with open(original_file, "r") as f:
             original_lines = f.readlines()
 
         if len(original_lines) < 4:
@@ -899,7 +911,7 @@ set ray_shadow, 0
         counts_line = original_lines[3]
         num_atoms = int(counts_line[:3].strip())
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             # Write header (lines 0-3)
             for i in range(4):
                 f.write(original_lines[i])
@@ -910,7 +922,9 @@ set ray_shadow, 0
                     atom = atoms[i]
                     original_line = original_lines[4 + i] if 4 + i < len(original_lines) else ""
                     # Keep original line format but update coordinates
-                    rest = original_line[30:] if len(original_line) > 30 else " C   0  0  0  0  0  0  0  0  0  0  0  0\n"
+                    rest = (
+                        original_line[30:] if len(original_line) > 30 else " C   0  0  0  0  0  0  0  0  0  0  0  0\n"
+                    )
                     f.write(f"{atom['x']:10.4f}{atom['y']:10.4f}{atom['z']:10.4f}{rest}")
                 else:
                     f.write(original_lines[4 + i])
@@ -920,9 +934,13 @@ set ray_shadow, 0
                 f.write(original_lines[i])
 
 
-def align_complex_for_pmf(protein_pdb: str, ligand_file: str, output_dir: str,
-                          pullvec: Optional[Tuple[int, int]] = None,
-                          pocket_cutoff: float = 4.0) -> Dict:
+def align_complex_for_pmf(
+    protein_pdb: str,
+    ligand_file: str,
+    output_dir: str,
+    pullvec: Optional[Tuple[int, int]] = None,
+    pocket_cutoff: float = 4.0,
+) -> Dict:
     """
     Convenience function to align a protein-ligand complex for PMF calculations.
 

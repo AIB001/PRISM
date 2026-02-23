@@ -8,14 +8,12 @@ periodic boundary condition handling and maintain protein-ligand contact integri
 Integrates with GROMACS trjconv for robust trajectory processing.
 """
 
-import os
 import subprocess
-import tempfile
 import shutil
 import logging
+import importlib.util
 from pathlib import Path
-from typing import List, Union, Optional, Dict, Tuple
-import time
+from typing import List, Optional, Dict
 
 from ...utils.environment import GromacsEnvironment
 
@@ -45,11 +43,8 @@ class TrajectoryProcessor:
         self.topology_file = topology_file
 
         # Check MDTraj availability for format conversion
-        try:
-            import mdtraj
-            self.mdtraj_available = True
-        except ImportError:
-            self.mdtraj_available = False
+        self.mdtraj_available = importlib.util.find_spec("mdtraj") is not None
+        if not self.mdtraj_available:
             logger.warning("MDTraj not available. DCD conversion will not be supported.")
 
         # Initialize GROMACS environment
@@ -74,24 +69,21 @@ class TrajectoryProcessor:
 
     def _find_trjconv(self) -> str:
         """Find trjconv executable."""
-        possible_names = ['gmx', 'gmx_mpi', 'gromacs']
+        possible_names = ["gmx", "gmx_mpi", "gromacs"]
 
         for cmd_base in possible_names:
             if shutil.which(cmd_base):
                 # Test if it's a full GROMACS installation with trjconv
                 try:
-                    result = subprocess.run(
-                        [cmd_base, 'trjconv', '-h'],
-                        capture_output=True, text=True, timeout=10
-                    )
+                    result = subprocess.run([cmd_base, "trjconv", "-h"], capture_output=True, text=True, timeout=10)
                     if result.returncode == 0:
                         return cmd_base
                 except (subprocess.TimeoutExpired, FileNotFoundError):
                     continue
 
         # Try legacy individual commands
-        if shutil.which('trjconv'):
-            return 'trjconv'
+        if shutil.which("trjconv"):
+            return "trjconv"
 
         raise RuntimeError(
             "GROMACS trjconv not found. Please install GROMACS.\n"
@@ -157,11 +149,11 @@ class TrajectoryProcessor:
         """
         topo_path = Path(topology_file)
 
-        if topo_path.suffix.lower() == '.pdb':
+        if topo_path.suffix.lower() == ".pdb":
             return topology_file
 
         # Look for PDB file in same directory
-        pdb_files = list(topo_path.parent.glob('*.pdb'))
+        pdb_files = list(topo_path.parent.glob("*.pdb"))
         if pdb_files:
             logger.info(f"Using PDB topology for MDTraj: {pdb_files[0]}")
             return str(pdb_files[0])
@@ -171,15 +163,17 @@ class TrajectoryProcessor:
             f"Please provide a PDB file in the same directory as {topology_file}"
         )
 
-    def process_trajectory(self,
-                         input_trajectory: str,
-                         output_trajectory: str,
-                         topology_file: Optional[str] = None,
-                         center_selection: str = "auto",
-                         output_selection: str = "System",
-                         pbc_method: str = "atom",
-                         unit_cell: str = "compact",
-                         overwrite: bool = False) -> str:
+    def process_trajectory(
+        self,
+        input_trajectory: str,
+        output_trajectory: str,
+        topology_file: Optional[str] = None,
+        center_selection: str = "auto",
+        output_selection: str = "System",
+        pbc_method: str = "atom",
+        unit_cell: str = "compact",
+        overwrite: bool = False,
+    ) -> str:
         """
         Process a single trajectory to fix PBC artifacts and center protein-ligand complex.
 
@@ -251,14 +245,12 @@ class TrajectoryProcessor:
         trajectory_for_processing = input_trajectory
         temp_files_to_cleanup = []
 
-        if input_path.suffix.lower() == '.dcd':
+        if input_path.suffix.lower() == ".dcd":
             logger.info("DCD format detected. Converting to XTC for GROMACS processing...")
 
             # Create temporary XTC file
             temp_xtc = output_path.parent / f"temp_{input_path.stem}.xtc"
-            converted_file = self._convert_dcd_to_xtc(
-                input_trajectory, topo_file, str(temp_xtc)
-            )
+            converted_file = self._convert_dcd_to_xtc(input_trajectory, topo_file, str(temp_xtc))
             trajectory_for_processing = converted_file
             temp_files_to_cleanup.append(temp_xtc)
 
@@ -277,14 +269,22 @@ class TrajectoryProcessor:
             if needs_mdtraj:
                 # Use MDTraj for chain-specific PBC processing
                 success = self._process_pbc_with_mdtraj(
-                    topo_file, trajectory_for_processing, output_trajectory,
-                    chain_selection=center_selection, ligand_name=None
+                    topo_file,
+                    trajectory_for_processing,
+                    output_trajectory,
+                    chain_selection=center_selection,
+                    ligand_name=None,
                 )
             else:
                 # Use GROMACS two-step PBC processing
                 success = self._process_pbc_two_step(
-                    topo_file, trajectory_for_processing, output_trajectory,
-                    center_selection, output_selection, pbc_method, unit_cell
+                    topo_file,
+                    trajectory_for_processing,
+                    output_trajectory,
+                    center_selection,
+                    output_selection,
+                    pbc_method,
+                    unit_cell,
                 )
 
             if success and output_path.exists():
@@ -300,9 +300,16 @@ class TrajectoryProcessor:
                     temp_file.unlink()
                     logger.debug(f"Cleaned up temporary file: {temp_file}")
 
-    def _process_pbc_two_step(self, topology: str, input_traj: str, output_traj: str,
-                            center_selection: str, output_selection: str,
-                            pbc_method: str, unit_cell: str) -> bool:
+    def _process_pbc_two_step(
+        self,
+        topology: str,
+        input_traj: str,
+        output_traj: str,
+        center_selection: str,
+        output_selection: str,
+        pbc_method: str,
+        unit_cell: str,
+    ) -> bool:
         """
         Two-step PBC processing for protein-ligand complexes.
 
@@ -342,8 +349,14 @@ class TrajectoryProcessor:
                 temp_whole_file.unlink()
                 logger.debug(f"Cleaned up temporary file: {temp_whole_file}")
 
-    def _process_pbc_with_mdtraj(self, topology: str, input_traj: str, output_traj: str,
-                               chain_selection: Optional[str] = None, ligand_name: Optional[str] = None) -> bool:
+    def _process_pbc_with_mdtraj(
+        self,
+        topology: str,
+        input_traj: str,
+        output_traj: str,
+        chain_selection: Optional[str] = None,
+        ligand_name: Optional[str] = None,
+    ) -> bool:
         """
         Process PBC using MDTraj with chain-specific centering.
 
@@ -373,9 +386,9 @@ class TrajectoryProcessor:
 
             # Find PDB topology file for MDTraj
             topo_path = Path(topology)
-            if topo_path.suffix.lower() != '.pdb':
+            if topo_path.suffix.lower() != ".pdb":
                 # Look for PDB file in same directory
-                pdb_files = list(topo_path.parent.glob('*.pdb'))
+                pdb_files = list(topo_path.parent.glob("*.pdb"))
                 if not pdb_files:
                     logger.error("MDTraj requires PDB topology file, none found")
                     return False
@@ -436,6 +449,7 @@ class TrajectoryProcessor:
         except Exception as e:
             logger.error(f"MDTraj PBC processing failed: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -545,9 +559,14 @@ class TrajectoryProcessor:
         try:
             # Simple mapping: assume alphabetical order
             chain_map = {
-                'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5,
-                'P': None,  # Will try to detect
-                'Q': None   # Will try to detect
+                "A": 0,
+                "B": 1,
+                "C": 2,
+                "D": 3,
+                "E": 4,
+                "F": 5,
+                "P": None,  # Will try to detect
+                "Q": None,  # Will try to detect
             }
 
             if chain_letter in chain_map:
@@ -559,7 +578,7 @@ class TrajectoryProcessor:
                         return chainid
 
             # For special cases like P, Q, try to find by context
-            if chain_letter in ['P', 'Q']:
+            if chain_letter in ["P", "Q"]:
                 return self._find_special_chain(traj, chain_letter)
 
         except Exception as e:
@@ -570,6 +589,8 @@ class TrajectoryProcessor:
     def _find_special_chain(self, traj, chain_letter: str):
         """Find special chains like P (primary) or Q by context."""
         try:
+            logger.debug("Detecting special chain '%s' by ligand proximity", chain_letter)
+
             # Look for chains with ligand nearby
             from ...utils.ligand import identify_ligand_residue
 
@@ -598,9 +619,9 @@ class TrajectoryProcessor:
 
         # Chain-specific selections that GROMACS can't handle
         chain_indicators = [
-            'chain',    # "chain P"
-            'chainid',  # "chainid 0"
-            'segid',    # "segid PR1"
+            "chain",  # "chain P"
+            "chainid",  # "chainid 0"
+            "segid",  # "segid PR1"
         ]
 
         selection_lower = center_selection.lower()
@@ -659,7 +680,7 @@ class TrajectoryProcessor:
             import mdtraj as md
 
             topo_path = Path(topology)
-            pdb_files = list(topo_path.parent.glob('*.pdb'))
+            pdb_files = list(topo_path.parent.glob("*.pdb"))
             if pdb_files:
                 traj = md.load(str(pdb_files[0]))
                 ligand = identify_ligand_residue(traj)
@@ -672,31 +693,26 @@ class TrajectoryProcessor:
 
         return None
 
-    def _build_trjconv_command(self, topology: str, input_traj: str, output_traj: str,
-                              pbc_method: str, unit_cell: str, center: bool = True) -> List[str]:
+    def _build_trjconv_command(
+        self, topology: str, input_traj: str, output_traj: str, pbc_method: str, unit_cell: str, center: bool = True
+    ) -> List[str]:
         """Build trjconv command with appropriate options."""
         cmd = []
 
         # Handle different GROMACS command formats
-        if self.trjconv_cmd == 'trjconv':
+        if self.trjconv_cmd == "trjconv":
             # Legacy individual command
-            cmd = ['trjconv']
+            cmd = ["trjconv"]
         else:
             # Modern gmx interface
-            cmd = [self.trjconv_cmd, 'trjconv']
+            cmd = [self.trjconv_cmd, "trjconv"]
 
         # Add required parameters
-        cmd.extend([
-            '-s', topology,
-            '-f', input_traj,
-            '-o', output_traj,
-            '-pbc', pbc_method,
-            '-ur', unit_cell
-        ])
+        cmd.extend(["-s", topology, "-f", input_traj, "-o", output_traj, "-pbc", pbc_method, "-ur", unit_cell])
 
         # Add centering only when requested (Step 2)
         if center:
-            cmd.append('-center')
+            cmd.append("-center")
 
         return cmd
 
@@ -707,7 +723,7 @@ class TrajectoryProcessor:
         GROMACS will show available groups and we select by group name.
         """
         # For ligand names, use the name directly (GROMACS will find the group)
-        if center_selection in ['LIG', 'MOL', 'UNL', 'DRG', 'INH', 'SUB', 'HET']:
+        if center_selection in ["LIG", "MOL", "UNL", "DRG", "INH", "SUB", "HET"]:
             center_input = center_selection
             logger.info(f"Using ligand group '{center_selection}' for centering")
         elif center_selection == "protein":
@@ -725,6 +741,7 @@ class TrajectoryProcessor:
         try:
             logger.debug(f"Running command: {' '.join(cmd)}")
             logger.debug(f"Input selections: {repr(input_text)}")
+            logger.debug(f"Expected output file: {output_file}")
 
             # Run trjconv with input piped
             process = subprocess.run(
@@ -732,7 +749,7 @@ class TrajectoryProcessor:
                 input=input_text,
                 text=True,
                 capture_output=True,
-                timeout=1800  # 30 minutes timeout for large files
+                timeout=1800,  # 30 minutes timeout for large files
             )
 
             if process.returncode == 0:
@@ -752,12 +769,14 @@ class TrajectoryProcessor:
             logger.error(f"Error running trjconv: {e}")
             return False
 
-    def batch_process(self,
-                     input_trajectories: List[str],
-                     output_dir: str,
-                     topology_file: Optional[str] = None,
-                     output_suffix: str = "_processed",
-                     **kwargs) -> Dict[str, str]:
+    def batch_process(
+        self,
+        input_trajectories: List[str],
+        output_dir: str,
+        topology_file: Optional[str] = None,
+        output_suffix: str = "_processed",
+        **kwargs,
+    ) -> Dict[str, str]:
         """
         Process multiple trajectories in batch.
 
@@ -802,9 +821,7 @@ class TrajectoryProcessor:
             output_file = output_path / output_name
 
             try:
-                processed_file = self.process_trajectory(
-                    input_traj, str(output_file), topology_file, **kwargs
-                )
+                processed_file = self.process_trajectory(input_traj, str(output_file), topology_file, **kwargs)
                 results[input_traj] = processed_file
                 logger.info(f"✓ Processed: {input_traj} -> {processed_file}")
 
@@ -812,7 +829,9 @@ class TrajectoryProcessor:
                 logger.error(f"✗ Failed to process {input_traj}: {e}")
                 results[input_traj] = None
 
-        logger.info(f"Batch processing complete: {len([v for v in results.values() if v])} / {len(input_trajectories)} successful")
+        logger.info(
+            f"Batch processing complete: {len([v for v in results.values() if v])} / {len(input_trajectories)} successful"
+        )
         return results
 
     def validate_processing(self, original_file: str, processed_file: str) -> Dict[str, any]:
@@ -832,41 +851,38 @@ class TrajectoryProcessor:
             Validation results including frame counts, file sizes, etc.
         """
         validation = {
-            'original_exists': Path(original_file).exists(),
-            'processed_exists': Path(processed_file).exists(),
-            'original_size': 0,
-            'processed_size': 0,
-            'size_ratio': 0,
-            'valid': False
+            "original_exists": Path(original_file).exists(),
+            "processed_exists": Path(processed_file).exists(),
+            "original_size": 0,
+            "processed_size": 0,
+            "size_ratio": 0,
+            "valid": False,
         }
 
-        if validation['original_exists']:
-            validation['original_size'] = Path(original_file).stat().st_size
+        if validation["original_exists"]:
+            validation["original_size"] = Path(original_file).stat().st_size
 
-        if validation['processed_exists']:
-            validation['processed_size'] = Path(processed_file).stat().st_size
+        if validation["processed_exists"]:
+            validation["processed_size"] = Path(processed_file).stat().st_size
 
-        if validation['original_size'] > 0 and validation['processed_size'] > 0:
-            validation['size_ratio'] = validation['processed_size'] / validation['original_size']
+        if validation["original_size"] > 0 and validation["processed_size"] > 0:
+            validation["size_ratio"] = validation["processed_size"] / validation["original_size"]
             # Consider valid if processed file is reasonable size (10-200% of original)
-            validation['valid'] = 0.1 <= validation['size_ratio'] <= 2.0
+            validation["valid"] = 0.1 <= validation["size_ratio"] <= 2.0
 
         return validation
 
     def get_processing_info(self) -> Dict[str, any]:
         """Get information about the trajectory processing environment."""
         return {
-            'gromacs_available': bool(self.gromacs_env),
-            'trjconv_command': self.trjconv_cmd,
-            'topology_file': self.topology_file,
-            'gromacs_version': getattr(self.gromacs_env, 'version', 'unknown') if self.gromacs_env else None,
+            "gromacs_available": bool(self.gromacs_env),
+            "trjconv_command": self.trjconv_cmd,
+            "topology_file": self.topology_file,
+            "gromacs_version": getattr(self.gromacs_env, "version", "unknown") if self.gromacs_env else None,
         }
 
 
-def process_trajectory_simple(input_trajectory: str,
-                            output_trajectory: str,
-                            topology_file: str,
-                            **kwargs) -> str:
+def process_trajectory_simple(input_trajectory: str, output_trajectory: str, topology_file: str, **kwargs) -> str:
     """
     Simple function interface for trajectory processing.
 
@@ -896,10 +912,9 @@ def process_trajectory_simple(input_trajectory: str,
     return processor.process_trajectory(input_trajectory, output_trajectory, **kwargs)
 
 
-def batch_process_trajectories(input_trajectories: List[str],
-                             output_dir: str,
-                             topology_file: str,
-                             **kwargs) -> Dict[str, str]:
+def batch_process_trajectories(
+    input_trajectories: List[str], output_dir: str, topology_file: str, **kwargs
+) -> Dict[str, str]:
     """
     Simple function interface for batch trajectory processing.
 

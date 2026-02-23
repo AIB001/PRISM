@@ -8,26 +8,64 @@ residues in protein-ligand systems for MD analysis and trajectory processing.
 """
 
 import logging
-from typing import Optional, List, Union, Tuple
-from pathlib import Path
+from typing import Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
 # Common ligand residue names
-COMMON_LIGAND_NAMES = ['LIG', 'UNL', 'MOL', 'DRG', 'INH', 'SUB', 'HET']
+COMMON_LIGAND_NAMES = ["LIG", "UNL", "MOL", "DRG", "INH", "SUB", "HET"]
 
 # Standard biological residues and common solvent/ion names
 STANDARD_RESIDUES = {
     # Amino acids
-    'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-    'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
+    "ALA",
+    "ARG",
+    "ASN",
+    "ASP",
+    "CYS",
+    "GLN",
+    "GLU",
+    "GLY",
+    "HIS",
+    "ILE",
+    "LEU",
+    "LYS",
+    "MET",
+    "PHE",
+    "PRO",
+    "SER",
+    "THR",
+    "TRP",
+    "TYR",
+    "VAL",
     # Nucleotides
-    'DA', 'DT', 'DG', 'DC', 'RA', 'RU', 'RG', 'RC',
+    "DA",
+    "DT",
+    "DG",
+    "DC",
+    "RA",
+    "RU",
+    "RG",
+    "RC",
     # Water and solvents
-    'WAT', 'HOH', 'TIP3', 'TIP4', 'SOL', 'DMSO',
+    "WAT",
+    "HOH",
+    "TIP3",
+    "TIP4",
+    "SOL",
+    "DMSO",
     # Common ions
-    'NA', 'CL', 'K', 'MG', 'CA', 'ZN', 'FE', 'CU', 'MN'
+    "NA",
+    "CL",
+    "K",
+    "MG",
+    "CA",
+    "ZN",
+    "FE",
+    "CU",
+    "MN",
 }
+
 
 def identify_ligand_residue(traj, manual_ligand: Optional[str] = None):
     """
@@ -70,8 +108,9 @@ def identify_ligand_residue(traj, manual_ligand: Optional[str] = None):
 
     # Step 1: Look for common ligand names
     for residue in traj.topology.residues:
-        if (residue.name in COMMON_LIGAND_NAMES or
-            (residue.name not in STANDARD_RESIDUES and len(list(residue.atoms)) > 5)):
+        if residue.name in COMMON_LIGAND_NAMES or (
+            residue.name not in STANDARD_RESIDUES and len(list(residue.atoms)) > 5
+        ):
             ligand_residues.append(residue)
 
     # Step 2: If no obvious ligands found, find largest non-standard residue
@@ -88,7 +127,9 @@ def identify_ligand_residue(traj, manual_ligand: Optional[str] = None):
 
         if largest_residue:
             ligand_residues = [largest_residue]
-            logger.info(f"Using largest non-standard residue as ligand: {largest_residue.name}{largest_residue.resSeq} ({max_atoms} atoms)")
+            logger.info(
+                f"Using largest non-standard residue as ligand: {largest_residue.name}{largest_residue.resSeq} ({max_atoms} atoms)"
+            )
 
     if not ligand_residues:
         logger.warning("No ligand residue found automatically")
@@ -98,6 +139,7 @@ def identify_ligand_residue(traj, manual_ligand: Optional[str] = None):
     ligand = ligand_residues[0]
     logger.info(f"Auto-detected ligand: {ligand.name}{ligand.resSeq}")
     return ligand
+
 
 def get_ligand_selection_string(traj, manual_ligand: Optional[str] = None) -> Optional[str]:
     """
@@ -125,6 +167,7 @@ def get_ligand_selection_string(traj, manual_ligand: Optional[str] = None) -> Op
         return f"r_{ligand.name}"
     return None
 
+
 def validate_ligand_residue(traj, ligand_name: str) -> bool:
     """
     Check if a ligand residue exists in the trajectory.
@@ -145,6 +188,7 @@ def validate_ligand_residue(traj, ligand_name: str) -> bool:
         if residue.name == ligand_name:
             return True
     return False
+
 
 def get_ligand_center_atom(traj, manual_ligand: Optional[str] = None) -> Optional[int]:
     """
@@ -177,7 +221,7 @@ def get_ligand_center_atom(traj, manual_ligand: Optional[str] = None) -> Optiona
     # Get heavy atoms from ligand
     heavy_atoms = []
     for atom in ligand.atoms:
-        if atom.element.symbol != 'H':  # Skip hydrogens
+        if atom.element.symbol != "H":  # Skip hydrogens
             heavy_atoms.append(atom)
 
     if not heavy_atoms:
@@ -191,6 +235,7 @@ def get_ligand_center_atom(traj, manual_ligand: Optional[str] = None) -> Optiona
 
     logger.info(f"Selected atom {center_atom.index} ({center_atom.name}) for PBC centering")
     return center_atom.index
+
 
 def list_ligand_candidates(traj) -> List[Tuple[str, int, int]]:
     """
@@ -215,13 +260,15 @@ def list_ligand_candidates(traj) -> List[Tuple[str, int, int]]:
     candidates = []
 
     for residue in traj.topology.residues:
-        if (residue.name in COMMON_LIGAND_NAMES or
-            (residue.name not in STANDARD_RESIDUES and len(list(residue.atoms)) > 5)):
+        if residue.name in COMMON_LIGAND_NAMES or (
+            residue.name not in STANDARD_RESIDUES and len(list(residue.atoms)) > 5
+        ):
             candidates.append((residue.name, residue.resSeq, len(list(residue.atoms))))
 
     # Sort by atom count (largest first)
     candidates.sort(key=lambda x: x[2], reverse=True)
     return candidates
+
 
 def get_ligand_info(traj, manual_ligand: Optional[str] = None) -> Optional[dict]:
     """
@@ -249,14 +296,14 @@ def get_ligand_info(traj, manual_ligand: Optional[str] = None) -> Optional[dict]
     if not ligand:
         return None
 
-    heavy_atoms = [atom for atom in ligand.atoms if atom.element.symbol != 'H']
+    heavy_atoms = [atom for atom in ligand.atoms if atom.element.symbol != "H"]
 
     return {
-        'name': ligand.name,
-        'resid': ligand.resSeq,
-        'n_atoms': len(list(ligand.atoms)),
-        'n_heavy_atoms': len(heavy_atoms),
-        'gromacs_selection': f"r_{ligand.name}",
-        'center_atom_index': get_ligand_center_atom(traj, manual_ligand),
-        'residue_object': ligand
+        "name": ligand.name,
+        "resid": ligand.resSeq,
+        "n_atoms": len(list(ligand.atoms)),
+        "n_heavy_atoms": len(heavy_atoms),
+        "gromacs_selection": f"r_{ligand.name}",
+        "center_atom_index": get_ligand_center_atom(traj, manual_ligand),
+        "residue_object": ligand,
     }

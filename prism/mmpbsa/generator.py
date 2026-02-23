@@ -41,21 +41,28 @@ class MMPBSAGenerator:
 
     # GROMACS protein FF -> AMBER leaprc mapping
     PROTEIN_FF_MAP = {
-        'amber14sb': 'leaprc.protein.ff14SB',
-        'amber99sb': 'oldff/leaprc.ff99SB',
-        'amber99sb-ildn': 'oldff/leaprc.ff99SBildn',
-        'charmm27': 'leaprc.protein.ff14SB',  # fallback for CHARMM
+        "amber14sb": "leaprc.protein.ff14SB",
+        "amber99sb": "oldff/leaprc.ff99SB",
+        "amber99sb-ildn": "oldff/leaprc.ff99SBildn",
+        "charmm27": "leaprc.protein.ff14SB",  # fallback for CHARMM
     }
 
     # Ligand FF -> AMBER leaprc mapping
     LIGAND_FF_MAP = {
-        'gaff': 'leaprc.gaff',
-        'gaff2': 'leaprc.gaff2',
+        "gaff": "leaprc.gaff",
+        "gaff2": "leaprc.gaff2",
     }
 
-    def __init__(self, mmpbsa_dir, protein_ff_name, ligand_forcefield,
-                 temperature, traj_ns=None, trajectory_interval_ps=500,
-                 gmx2amber=False):
+    def __init__(
+        self,
+        mmpbsa_dir,
+        protein_ff_name,
+        ligand_forcefield,
+        temperature,
+        traj_ns=None,
+        trajectory_interval_ps=500,
+        gmx2amber=False,
+    ):
         self.mmpbsa_dir = mmpbsa_dir
         self.protein_ff_name = protein_ff_name.lower()
         self.ligand_forcefield = ligand_forcefield.lower()
@@ -76,7 +83,7 @@ class MMPBSAGenerator:
                 if key in self.protein_ff_name:
                     leaprc = val
                     break
-        return leaprc or 'leaprc.protein.ff14SB'
+        return leaprc or "leaprc.protein.ff14SB"
 
     def _resolve_ligand_leaprc(self):
         """Resolve ligand FF type to AMBER leaprc string.
@@ -157,8 +164,8 @@ class MMPBSAGenerator:
   radiopt = 0
 /
 """
-        input_path = os.path.join(self.mmpbsa_dir, 'mmpbsa.in')
-        with open(input_path, 'w') as f:
+        input_path = os.path.join(self.mmpbsa_dir, "mmpbsa.in")
+        with open(input_path, "w") as f:
             f.write(content)
         return input_path
 
@@ -180,23 +187,21 @@ class MMPBSAGenerator:
             backend_name = "AMBER MMPBSA.py"
             mmpbsa_tail = self._amber_mmpbsa_tail_block()
             # Copy utils.py to output dir for prmtop periodicity fix
-            utils_src = os.path.join(os.path.dirname(__file__), 'utils.py')
-            utils_dst = os.path.join(self.mmpbsa_dir, 'utils.py')
+            utils_src = os.path.join(os.path.dirname(__file__), "utils.py")
+            utils_dst = os.path.join(self.mmpbsa_dir, "utils.py")
             shutil.copy2(utils_src, utils_dst)
         else:
             backend_name = "gmx_MMPBSA"
             mmpbsa_tail = self._mmpbsa_tail_block()
 
         if self.is_trajectory:
-            workflow_desc = (
-                f"EM -> NVT -> NPT -> Production MD ({self.traj_ns} ns) -> {backend_name}"
-            )
+            workflow_desc = f"EM -> NVT -> NPT -> Production MD ({self.traj_ns} ns) -> {backend_name}"
             middle = self._production_md_block()
-            cs_path, ct_path = './prod/md.tpr', './prod/md.xtc'
+            cs_path, ct_path = "./prod/md.tpr", "./prod/md.xtc"
         else:
             workflow_desc = f"EM -> NVT -> NPT -> {backend_name} (single-frame)"
             middle = self._trjconv_block()
-            cs_path, ct_path = './npt/npt.tpr', 'single_frame.xtc'
+            cs_path, ct_path = "./npt/npt.tpr", "single_frame.xtc"
 
         script_content = (
             sim_header.format(workflow_desc=workflow_desc)
@@ -204,8 +209,8 @@ class MMPBSAGenerator:
             + mmpbsa_tail.format(cs_path=cs_path, ct_path=ct_path)
         )
 
-        script_path = os.path.join(self.mmpbsa_dir, 'mmpbsa_run.sh')
-        with open(script_path, 'w') as f:
+        script_path = os.path.join(self.mmpbsa_dir, "mmpbsa_run.sh")
+        with open(script_path, "w") as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
         return script_path
@@ -217,7 +222,7 @@ class MMPBSAGenerator:
     @staticmethod
     def _sim_header_block():
         """EM + NVT + NPT equilibration block (shared by both modes)."""
-        return '''#!/bin/bash
+        return """#!/bin/bash
 
 ######################################################
 # PRISM MM/PBSA Run Script
@@ -268,12 +273,12 @@ else
     $GMX grompp -f ../mdps/npt.mdp -c ./nvt/nvt.gro -r ./nvt/nvt.gro -t ./nvt/nvt.cpt -p topol.top -o ./npt/npt.tpr -maxwarn 999
     $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v
 fi
-'''
+"""
 
     @staticmethod
     def _production_md_block():
         """Production MD block (trajectory mode only)."""
-        return '''
+        return """
 # Production MD
 mkdir -p prod
 if [ -f ./prod/md.gro ]; then
@@ -286,16 +291,16 @@ else
     $GMX grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 999
     $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
 fi
-'''
+"""
 
     @staticmethod
     def _trjconv_block():
         """Convert NPT final structure to single-frame XTC (single-frame mode only)."""
-        return '''
+        return """
 # Convert NPT final structure to single-frame XTC for MM/PBSA
 echo "Converting NPT structure to single-frame trajectory..."
 echo "System" | $GMX trjconv -f ./npt/npt.gro -s ./npt/npt.tpr -o single_frame.xtc
-'''
+"""
 
     @staticmethod
     def _mmpbsa_tail_block():
@@ -307,7 +312,7 @@ echo "System" | $GMX trjconv -f ./npt/npt.gro -s ./npt/npt.tpr -o single_frame.x
         ligand force field (GAFF, GAFF2, OpenFF, CGenFF, etc.) and avoids
         parmchk2 failures from atom type mismatches in the original mol2.
         """
-        return '''
+        return """
 ######################################################
 # MM/PBSA CALCULATION
 ######################################################
@@ -362,12 +367,12 @@ echo "======================================================"
 echo "MM/PBSA calculation complete!"
 echo "Results: FINAL_RESULTS_MMPBSA.dat"
 echo "======================================================"
-'''
+"""
 
     @staticmethod
     def _amber_mmpbsa_tail_block():
         """parmed GROMACS->AMBER conversion + MMPBSA.py invocation block."""
-        return '''
+        return """
 ######################################################
 # GROMACS -> AMBER TOPOLOGY CONVERSION
 ######################################################
@@ -440,4 +445,4 @@ echo "======================================================"
 echo "MM/PBSA calculation complete!"
 echo "Results: FINAL_RESULTS_MMPBSA.dat"
 echo "======================================================"
-'''
+"""

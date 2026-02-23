@@ -7,22 +7,24 @@ Contains the complete JavaScript visualization code for the HTML
 Due to size constraints, this module returns the JavaScript in parts
 """
 
+
 def get_javascript_code():
     """Return the complete JavaScript code as a string"""
     return (
-        get_contact_map_class_part1() + 
-        get_contact_map_class_part2() + 
-        get_drawing_methods() +
-        get_utility_functions() +
-        r'''
+        get_contact_map_class_part1()
+        + get_contact_map_class_part2()
+        + get_drawing_methods()
+        + get_utility_functions()
+        + r"""
     </script>
 </body>
-</html>'''
+</html>"""
     )
+
 
 def get_contact_map_class_part1():
     """First part of ContactMap class - initialization and events"""
-    return r'''
+    return r"""
         class ContactMap {
             constructor() {
                 try {
@@ -221,11 +223,12 @@ def get_contact_map_class_part1():
                 this.rotationY = this.initialState.rotationY;
                 this.rotationZ = this.initialState.rotationZ;
                 this.wheelRotation = 0;
-            }'''
+            }"""
+
 
 def get_contact_map_class_part2():
     """Second part of ContactMap class - event handlers"""
-    return r'''
+    return r"""
             
             initEvents() {
                 this.canvas.addEventListener('mousedown', e => this.onMouseDown(e));
@@ -405,11 +408,12 @@ def get_contact_map_class_part2():
             
             hideTooltip() {
                 this.tooltip.style.display = 'none';
-            }'''
+            }"""
+
 
 def get_drawing_methods():
     """Return complete drawing methods for ContactMap class"""
-    return r'''
+    return r"""
             
             rotate3D(x, y, z, rotX, rotY, rotZ) {
                 let x1 = x, y1 = y, z1 = z;
@@ -1016,11 +1020,12 @@ def get_drawing_methods():
                 };
                 animate();
             }
-        }'''
+        }"""
+
 
 def get_utility_functions():
     """Return utility functions JavaScript code"""
-    return r'''
+    return r"""
         
         let contactMap;
         window.addEventListener('DOMContentLoaded', () => { 
@@ -1228,4 +1233,4 @@ def get_utility_functions():
             
             contactMap.viewOffset.x = centerX - worldX * contactMap.zoom;
             contactMap.viewOffset.y = centerY - worldY * contactMap.zoom;
-        }'''
+        }"""

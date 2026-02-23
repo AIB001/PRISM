@@ -15,20 +15,20 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 # Regex for section headers like [ atoms ], [ bonds ], etc.
-_SECTION_RE = re.compile(r'^\s*\[\s*(\w+)\s*\]')
+_SECTION_RE = re.compile(r"^\s*\[\s*(\w+)\s*\]")
 
 
 def _strip_comment(line: str) -> Tuple[str, str]:
     """Split a line into data part and comment part (including the ';')."""
-    idx = line.find(';')
+    idx = line.find(";")
     if idx == -1:
-        return line, ''
+        return line, ""
     return line[:idx], line[idx:]
 
 
 def _is_solute_type(atom_type: str) -> bool:
     """Check if an atom type is marked as solute (ends with '_')."""
-    return atom_type.endswith('_')
+    return atom_type.endswith("_")
 
 
 def _find_a_column(header_comment: str, fields: List[str]) -> Tuple[int, int]:
@@ -44,8 +44,14 @@ def _find_a_column(header_comment: str, fields: List[str]) -> Tuple[int, int]:
 
     We find the field that equals 'A' (ptype), then sigma = next, epsilon = next+1.
     """
+    if header_comment:
+        header_fields = header_comment.replace(";", "").split()
+        for i, f in enumerate(header_fields):
+            if f == "A":
+                return i + 1, i + 2
+
     for i, f in enumerate(fields):
-        if f == 'A':
+        if f == "A":
             return i + 1, i + 2
     # Fallback: assume last two columns are sigma and epsilon
     return len(fields) - 2, len(fields) - 1
@@ -85,18 +91,18 @@ def partial_tempering(lines: List[str], lam: float) -> List[str]:
         if m:
             current_section = m.group(1).lower()
             # Reset atom tracking on new moleculetype
-            if current_section == 'moleculetype':
+            if current_section == "moleculetype":
                 atom_is_solute = {}
             output.append(line)
             continue
 
         # Skip blank lines and comments
-        if not stripped or stripped.startswith(';'):
+        if not stripped or stripped.startswith(";"):
             output.append(line)
             continue
 
         # Handle #ifdef, #endif, #include, #define directives
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             output.append(line)
             continue
 
@@ -109,22 +115,22 @@ def partial_tempering(lines: List[str], lam: float) -> List[str]:
 
         # --- Process each section ---
 
-        if current_section == 'atomtypes':
+        if current_section == "atomtypes":
             output.append(_scale_atomtypes(fields, comment_part, lam))
 
-        elif current_section == 'atoms':
+        elif current_section == "atoms":
             output.append(_scale_atoms(fields, comment_part, sqrt_lam, atom_is_solute))
 
-        elif current_section == 'bonds':
+        elif current_section == "bonds":
             output.append(_scale_bonds(fields, comment_part, lam, sqrt_lam, atom_is_solute))
 
-        elif current_section == 'angles':
+        elif current_section == "angles":
             output.append(_scale_angles(fields, comment_part, lam, sqrt_lam, atom_is_solute))
 
-        elif current_section == 'dihedrals':
+        elif current_section == "dihedrals":
             output.append(_scale_dihedrals(fields, comment_part, lam, sqrt_lam, atom_is_solute))
 
-        elif current_section == 'pairs':
+        elif current_section == "pairs":
             # 3-column pairs (ai, aj, funct): no scaling needed
             # Pairs with explicit parameters would need scaling, but standard
             # AMBER topologies use 3-column pairs derived from atomtypes
@@ -143,7 +149,7 @@ def _scale_atomtypes(fields: List[str], comment: str, lam: float) -> str:
         return _reconstruct_line(fields, comment)
 
     # Find sigma/epsilon positions by looking for 'A' column
-    sigma_idx, eps_idx = _find_a_column('', fields)
+    sigma_idx, eps_idx = _find_a_column("", fields)
 
     if eps_idx < len(fields):
         try:
@@ -155,8 +161,7 @@ def _scale_atomtypes(fields: List[str], comment: str, lam: float) -> str:
     return _reconstruct_line(fields, comment)
 
 
-def _scale_atoms(fields: List[str], comment: str, sqrt_lam: float,
-                 atom_is_solute: Dict[int, bool]) -> str:
+def _scale_atoms(fields: List[str], comment: str, sqrt_lam: float, atom_is_solute: Dict[int, bool]) -> str:
     """Scale charge in [ atoms ] for solute atoms and record solute status.
 
     Processed topology format:
@@ -194,25 +199,24 @@ def _classify_interaction(atom_indices: List[int], atom_is_solute: Dict[int, boo
     """
     solute_count = sum(1 for idx in atom_indices if atom_is_solute.get(idx, False))
     if solute_count == len(atom_indices):
-        return 'all_solute'
+        return "all_solute"
     elif solute_count > 0:
-        return 'mixed'
+        return "mixed"
     else:
-        return 'all_solvent'
+        return "all_solvent"
 
 
 def _get_scale_factor(classification: str, lam: float, sqrt_lam: float) -> float:
     """Get the scaling factor based on interaction classification."""
-    if classification == 'all_solute':
+    if classification == "all_solute":
         return lam
-    elif classification == 'mixed':
+    elif classification == "mixed":
         return sqrt_lam
     else:
         return 1.0
 
 
-def _scale_bonds(fields: List[str], comment: str, lam: float, sqrt_lam: float,
-                 atom_is_solute: Dict[int, bool]) -> str:
+def _scale_bonds(fields: List[str], comment: str, lam: float, sqrt_lam: float, atom_is_solute: Dict[int, bool]) -> str:
     """Scale force constant in [ bonds ] section.
 
     Format: ai  aj  funct  [c0  c1  ...]
@@ -228,7 +232,7 @@ def _scale_bonds(fields: List[str], comment: str, lam: float, sqrt_lam: float,
         return _reconstruct_line(fields, comment)
 
     classification = _classify_interaction([ai, aj], atom_is_solute)
-    if classification == 'all_solvent':
+    if classification == "all_solvent":
         return _reconstruct_line(fields, comment)
 
     scale = _get_scale_factor(classification, lam, sqrt_lam)
@@ -244,8 +248,7 @@ def _scale_bonds(fields: List[str], comment: str, lam: float, sqrt_lam: float,
     return _reconstruct_line(fields, comment)
 
 
-def _scale_angles(fields: List[str], comment: str, lam: float, sqrt_lam: float,
-                  atom_is_solute: Dict[int, bool]) -> str:
+def _scale_angles(fields: List[str], comment: str, lam: float, sqrt_lam: float, atom_is_solute: Dict[int, bool]) -> str:
     """Scale force constant in [ angles ] section.
 
     Format: ai  aj  ak  funct  [c0  c1  ...]
@@ -262,7 +265,7 @@ def _scale_angles(fields: List[str], comment: str, lam: float, sqrt_lam: float,
         return _reconstruct_line(fields, comment)
 
     classification = _classify_interaction([ai, aj, ak], atom_is_solute)
-    if classification == 'all_solvent':
+    if classification == "all_solvent":
         return _reconstruct_line(fields, comment)
 
     scale = _get_scale_factor(classification, lam, sqrt_lam)
@@ -290,8 +293,9 @@ def _scale_angles(fields: List[str], comment: str, lam: float, sqrt_lam: float,
     return _reconstruct_line(fields, comment)
 
 
-def _scale_dihedrals(fields: List[str], comment: str, lam: float, sqrt_lam: float,
-                     atom_is_solute: Dict[int, bool]) -> str:
+def _scale_dihedrals(
+    fields: List[str], comment: str, lam: float, sqrt_lam: float, atom_is_solute: Dict[int, bool]
+) -> str:
     """Scale force constant in [ dihedrals ] section.
 
     Format: ai  aj  ak  al  funct  [params...]
@@ -309,7 +313,7 @@ def _scale_dihedrals(fields: List[str], comment: str, lam: float, sqrt_lam: floa
         return _reconstruct_line(fields, comment)
 
     classification = _classify_interaction([ai, aj, ak, al], atom_is_solute)
-    if classification == 'all_solvent':
+    if classification == "all_solvent":
         return _reconstruct_line(fields, comment)
 
     scale = _get_scale_factor(classification, lam, sqrt_lam)
@@ -345,29 +349,30 @@ def _scale_dihedrals(fields: List[str], comment: str, lam: float, sqrt_lam: floa
 def _format_sci(value: float) -> str:
     """Format a float in scientific notation matching GROMACS style."""
     if value == 0.0:
-        return '0.00000e+00'
-    return f'{value:.5e}'
+        return "0.00000e+00"
+    return f"{value:.5e}"
 
 
 def _format_decimal(value: float, decimals: int = 5) -> str:
     """Format a float in decimal notation."""
     # Use enough precision to avoid rounding issues
-    formatted = f'{value:.6f}'
+    precision = 6 if decimals == 5 else max(1, decimals)
+    formatted = f"{value:.{precision}f}"
     # Strip trailing zeros but keep at least one decimal
-    if '.' in formatted:
-        formatted = formatted.rstrip('0').rstrip('.')
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
         # Ensure at least some decimal places for readability
-        if '.' not in formatted:
-            formatted += '.0'
+        if "." not in formatted:
+            formatted += ".0"
     return formatted
 
 
 def _reconstruct_line(fields: List[str], comment: str) -> str:
     """Reconstruct a topology line from fields and optional comment."""
-    data = '  '.join(f'{f:>12}' if _looks_numeric(f) else f'  {f}' for f in fields)
+    data = "  ".join(f"{f:>12}" if _looks_numeric(f) else f"  {f}" for f in fields)
     if comment:
-        return f'{data}  {comment}\n'
-    return f'{data}\n'
+        return f"{data}  {comment}\n"
+    return f"{data}\n"
 
 
 def _looks_numeric(s: str) -> bool:
@@ -376,4 +381,4 @@ def _looks_numeric(s: str) -> bool:
         float(s)
         return True
     except ValueError:
-        return s.startswith('-') or s.startswith('+')
+        return s.startswith("-") or s.startswith("+")

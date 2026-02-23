@@ -11,7 +11,6 @@ Analyzes results from Steered MD (SMD) and umbrella sampling simulations:
 - Generate publication-quality plots and analysis reports
 """
 
-import os
 import logging
 import numpy as np
 from pathlib import Path
@@ -415,10 +414,7 @@ class PMFAnalyzer:
                 block_stds.append(0.0)
                 continue
 
-            block_means = [
-                float(np.mean(forces[i * block_size : (i + 1) * block_size]))
-                for i in range(n_blocks)
-            ]
+            block_means = [float(np.mean(forces[i * block_size : (i + 1) * block_size])) for i in range(n_blocks)]
             block_stds.append(float(np.std(block_means)))
 
         # Convergence criterion: all block stds < 20% of overall std
@@ -426,10 +422,7 @@ class PMFAnalyzer:
         threshold = 0.20 * overall_std if overall_std > 0 else float("inf")
         converged = all(s < threshold for s in block_stds) if block_stds else False
 
-        logger.info(
-            f"Convergence analysis: {len(means)} windows, "
-            f"{'converged' if converged else 'NOT converged'}"
-        )
+        logger.info(f"Convergence analysis: {len(means)} windows, " f"{'converged' if converged else 'NOT converged'}")
 
         return {
             "n_blocks": n_blocks,
@@ -457,6 +450,7 @@ class PMFAnalyzer:
         """
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
@@ -473,8 +467,13 @@ class PMFAnalyzer:
         ax = axes[0]
         ax.plot(smd["force_time"], smd["force_values"], linewidth=0.5, alpha=0.8)
         ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.5)
-        ax.axvline(x=smd["rupture_time"], color="red", linestyle="--", linewidth=0.8,
-                   label=f"Rupture: {smd['rupture_force']:.0f} kJ/mol/nm")
+        ax.axvline(
+            x=smd["rupture_time"],
+            color="red",
+            linestyle="--",
+            linewidth=0.8,
+            label=f"Rupture: {smd['rupture_force']:.0f} kJ/mol/nm",
+        )
         ax.set_xlabel("Time (ps)")
         ax.set_ylabel("Force (kJ/mol/nm)")
         ax.set_title("SMD Pull Force")
@@ -509,6 +508,7 @@ class PMFAnalyzer:
         """
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
@@ -524,14 +524,20 @@ class PMFAnalyzer:
         ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.5)
 
         # Annotate minimum
-        ax.plot(pmf["min_distance"], pmf["min_pmf"], "rv", markersize=10,
-                label=f"Min: {pmf['min_pmf']:.2f} at {pmf['min_distance']:.2f} nm")
+        ax.plot(
+            pmf["min_distance"],
+            pmf["min_pmf"],
+            "rv",
+            markersize=10,
+            label=f"Min: {pmf['min_pmf']:.2f} at {pmf['min_distance']:.2f} nm",
+        )
 
         # Annotate barrier
         if pmf["barrier_height"] > 0:
             barrier_val = pmf["min_pmf"] + pmf["barrier_height"]
-            ax.plot(pmf["barrier_distance"], barrier_val, "r^", markersize=10,
-                    label=f"Barrier: {pmf['barrier_height']:.2f}")
+            ax.plot(
+                pmf["barrier_distance"], barrier_val, "r^", markersize=10, label=f"Barrier: {pmf['barrier_height']:.2f}"
+            )
 
         ax.set_xlabel("Distance (nm)")
         ax.set_ylabel("PMF")
@@ -560,6 +566,7 @@ class PMFAnalyzer:
         """
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:

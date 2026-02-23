@@ -11,15 +11,15 @@ from .clustering_plots import (
     plot_rmsd_matrix,
     plot_cluster_optimization,
     plot_multi_trajectory_clustering,
-    plot_cluster_transition_matrix
+    plot_cluster_transition_matrix,
 )
 
 __all__ = [
-    'plot_cluster_scatter',
-    'plot_cluster_timeline',
-    'plot_cluster_populations',
-    'plot_rmsd_matrix',
-    'plot_cluster_optimization',
-    'plot_multi_trajectory_clustering',
-    'plot_cluster_transition_matrix'
+    "plot_cluster_scatter",
+    "plot_cluster_timeline",
+    "plot_cluster_populations",
+    "plot_rmsd_matrix",
+    "plot_cluster_optimization",
+    "plot_multi_trajectory_clustering",
+    "plot_cluster_transition_matrix",
 ]

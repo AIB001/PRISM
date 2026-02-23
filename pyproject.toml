@@ -3,3 +3,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F401", "ARG"]
+per-file-ignores = { "__init__.py" = ["F401"] }

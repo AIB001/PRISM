@@ -6,7 +6,6 @@ PRISM Force Field Installer - Install additional force fields to GROMACS
 """
 
 import os
-import sys
 import subprocess
 from pathlib import Path
 
@@ -40,13 +39,12 @@ class ForceFieldInstaller:
         """Detect GROMACS top directory"""
         # Try to get from gmx command
         try:
-            result = subprocess.run(['gmx', '--version'],
-                                  capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["gmx", "--version"], capture_output=True, text=True, timeout=5)
             # Parse installation directory from version output
-            for line in result.stdout.split('\n'):
-                if 'Data prefix:' in line:
-                    prefix = line.split(':')[1].strip()
-                    top_dir = os.path.join(prefix, 'share', 'gromacs', 'top')
+            for line in result.stdout.split("\n"):
+                if "Data prefix:" in line:
+                    prefix = line.split(":")[1].strip()
+                    top_dir = os.path.join(prefix, "share", "gromacs", "top")
                     if os.path.exists(top_dir):
                         return top_dir
         except:
@@ -54,10 +52,10 @@ class ForceFieldInstaller:
 
         # Common installation paths
         common_paths = [
-            '/usr/local/gromacs/share/gromacs/top',
-            '/usr/local/gromacs-2025.1/share/gromacs/top',
-            '/usr/local/gromacs-2024/share/gromacs/top',
-            '/opt/gromacs/share/gromacs/top',
+            "/usr/local/gromacs/share/gromacs/top",
+            "/usr/local/gromacs-2025.1/share/gromacs/top",
+            "/usr/local/gromacs-2024/share/gromacs/top",
+            "/opt/gromacs/share/gromacs/top",
         ]
 
         for path in common_paths:
@@ -71,8 +69,9 @@ class ForceFieldInstaller:
         # Get PRISM package location
         try:
             import prism
+
             prism_dir = Path(prism.__file__).parent
-            ff_dir = prism_dir / 'configs' / 'forcefield'
+            ff_dir = prism_dir / "configs" / "forcefield"
             if ff_dir.exists():
                 return str(ff_dir)
         except:
@@ -80,7 +79,7 @@ class ForceFieldInstaller:
 
         # Try relative to current file
         current_file = Path(__file__).resolve()
-        ff_dir = current_file.parent.parent / 'configs' / 'forcefield'
+        ff_dir = current_file.parent.parent / "configs" / "forcefield"
         if ff_dir.exists():
             return str(ff_dir)
 
@@ -93,35 +92,31 @@ class ForceFieldInstaller:
 
         forcefields = {}
         for item in sorted(self.prism_ff_dir.iterdir()):
-            if item.is_dir() and item.name.endswith('.ff'):
+            if item.is_dir() and item.name.endswith(".ff"):
                 # Get description from forcefield.doc if exists
-                desc_file = item / 'forcefield.doc'
+                desc_file = item / "forcefield.doc"
                 if desc_file.exists():
                     try:
-                        with open(desc_file, 'r') as f:
+                        with open(desc_file, "r") as f:
                             description = f.readline().strip()
                     except:
                         description = self._get_ff_description(item.name)
                 else:
                     description = self._get_ff_description(item.name)
 
-                forcefields[item.name] = {
-                    'name': item.name,
-                    'path': item,
-                    'description': description
-                }
+                forcefields[item.name] = {"name": item.name, "path": item, "description": description}
 
         return forcefields
 
     def _get_ff_description(self, ff_name):
         """Get human-readable description for force field"""
         descriptions = {
-            'a99SBdisp.ff': 'Amber99SB-disp (improved dispersion interactions)',
-            'amber14sb.ff': 'Amber14SB (recommended for proteins)',
-            'amber14sb_OL15.ff': 'Amber14SB + OL15 (proteins + nucleic acids)',
-            'charmm36-jul2022.ff': 'CHARMM36 (July 2022 update)',
+            "a99SBdisp.ff": "Amber99SB-disp (improved dispersion interactions)",
+            "amber14sb.ff": "Amber14SB (recommended for proteins)",
+            "amber14sb_OL15.ff": "Amber14SB + OL15 (proteins + nucleic acids)",
+            "charmm36-jul2022.ff": "CHARMM36 (July 2022 update)",
         }
-        return descriptions.get(ff_name, ff_name.replace('.ff', ''))
+        return descriptions.get(ff_name, ff_name.replace(".ff", ""))
 
     def _scan_installed_forcefields(self):
         """Scan installed force fields in GROMACS"""
@@ -130,7 +125,7 @@ class ForceFieldInstaller:
 
         installed = set()
         for item in self.gromacs_top_dir.iterdir():
-            if item.is_dir() and item.name.endswith('.ff'):
+            if item.is_dir() and item.name.endswith(".ff"):
                 installed.add(item.name)
 
         return installed
@@ -166,7 +161,7 @@ class ForceFieldInstaller:
             print(f"Force field '{ff_name}' is already installed")
             return True
 
-        source = self.available_ffs[ff_name]['path']
+        source = self.available_ffs[ff_name]["path"]
         target = self.gromacs_top_dir / ff_name
 
         print(f"\nInstalling {ff_name}...")
@@ -177,9 +172,9 @@ class ForceFieldInstaller:
         if not os.access(self.gromacs_top_dir, os.W_OK):
             print("\n  GROMACS directory requires sudo privileges.")
             print("  Please enter your password when prompted.\n")
-            cmd = ['sudo', 'cp', '-r', str(source), str(target)]
+            cmd = ["sudo", "cp", "-r", str(source), str(target)]
         else:
-            cmd = ['cp', '-r', str(source), str(target)]
+            cmd = ["cp", "-r", str(source), str(target)]
 
         try:
             result = subprocess.run(cmd, check=True)
@@ -218,13 +213,13 @@ class ForceFieldInstaller:
             return
 
         # Parse choice
-        if choice.lower() == 'all':
+        if choice.lower() == "all":
             ffs_to_install = list(self.available_ffs.keys())
         else:
             try:
-                indices = [int(x.strip()) for x in choice.split(',')]
+                indices = [int(x.strip()) for x in choice.split(",")]
                 ff_list = list(self.available_ffs.keys())
-                ffs_to_install = [ff_list[i-1] for i in indices if 1 <= i <= len(ff_list)]
+                ffs_to_install = [ff_list[i - 1] for i in indices if 1 <= i <= len(ff_list)]
             except (ValueError, IndexError) as e:
                 print(f"Invalid input: {e}")
                 return
@@ -285,5 +280,5 @@ def main():
     installer.install_forcefields_interactive()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

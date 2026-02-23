@@ -19,7 +19,7 @@ Usage:
 
 import logging
 
-from .colors import ColorPrinter, get_color_printer
+from .colors import get_color_printer
 
 
 class ColoredHandler(logging.StreamHandler):
@@ -27,11 +27,11 @@ class ColoredHandler(logging.StreamHandler):
 
     # Map logging levels to ColorPrinter method names
     LEVEL_STYLE = {
-        logging.DEBUG: 'dim',
-        logging.INFO: None,       # no color wrapping
-        logging.WARNING: 'warning',
-        logging.ERROR: 'error',
-        logging.CRITICAL: 'error',
+        logging.DEBUG: "dim",
+        logging.INFO: None,  # no color wrapping
+        logging.WARNING: "warning",
+        logging.ERROR: "error",
+        logging.CRITICAL: "error",
     }
 
     def __init__(self, stream=None):
@@ -73,7 +73,7 @@ def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = ColoredHandler()
-        handler.setFormatter(logging.Formatter('%(message)s'))
+        handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False  # Prevent duplicate output from root logger

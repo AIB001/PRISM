@@ -9,7 +9,7 @@ version of the MDAnalysis topology utilities.
 """
 
 import logging
-from typing import Dict, Set, List, Optional, Union, Tuple
+from typing import Dict, Optional
 import numpy as np
 import mdtraj as md
 
@@ -35,8 +35,28 @@ def detect_protein_chains_mdtraj(traj: md.Trajectory) -> Dict[str, str]:
         protein_chains = {}
 
         # Get all protein residues (standard amino acids)
-        protein_residues = {'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-                          'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'}
+        protein_residues = {
+            "ALA",
+            "ARG",
+            "ASN",
+            "ASP",
+            "CYS",
+            "GLN",
+            "GLU",
+            "GLY",
+            "HIS",
+            "ILE",
+            "LEU",
+            "LYS",
+            "MET",
+            "PHE",
+            "PRO",
+            "SER",
+            "THR",
+            "TRP",
+            "TYR",
+            "VAL",
+        }
 
         # Find protein atoms
         protein_mask = np.array([residue.name in protein_residues for residue in traj.topology.residues])
@@ -58,9 +78,7 @@ def detect_protein_chains_mdtraj(traj: md.Trajectory) -> Dict[str, str]:
             # Get CA atoms for this chain
             chain_ca_atoms = []
             for atom in traj.topology.atoms:
-                if (atom.residue.name in protein_residues and
-                    atom.residue.chain.index == chain_id and
-                    atom.name == 'CA'):
+                if atom.residue.name in protein_residues and atom.residue.chain.index == chain_id and atom.name == "CA":
                     chain_ca_atoms.append(atom.index)
 
             if len(chain_ca_atoms) > 0:
@@ -99,8 +117,26 @@ def detect_nucleic_chains_mdtraj(traj: md.Trajectory) -> Dict[str, str]:
         nucleic_chains = {}
 
         # Common nucleic acid residue names
-        nucleic_residues = {'ADE', 'GUA', 'CYT', 'URA', 'THY', 'A', 'G', 'C', 'U', 'T',
-                           'DA', 'DG', 'DC', 'DT', 'rA', 'rG', 'rC', 'rU'}
+        nucleic_residues = {
+            "ADE",
+            "GUA",
+            "CYT",
+            "URA",
+            "THY",
+            "A",
+            "G",
+            "C",
+            "U",
+            "T",
+            "DA",
+            "DG",
+            "DC",
+            "DT",
+            "rA",
+            "rG",
+            "rC",
+            "rU",
+        }
 
         # Find nucleic acid atoms
         nucleic_mask = np.array([residue.name in nucleic_residues for residue in traj.topology.residues])
@@ -122,9 +158,7 @@ def detect_nucleic_chains_mdtraj(traj: md.Trajectory) -> Dict[str, str]:
             # Get P atoms for this chain
             chain_p_atoms = []
             for atom in traj.topology.atoms:
-                if (atom.residue.name in nucleic_residues and
-                    atom.residue.chain.index == chain_id and
-                    atom.name == 'P'):
+                if atom.residue.name in nucleic_residues and atom.residue.chain.index == chain_id and atom.name == "P":
                     chain_p_atoms.append(atom.index)
 
             if len(chain_p_atoms) > 0:
@@ -136,9 +170,11 @@ def detect_nucleic_chains_mdtraj(traj: md.Trajectory) -> Dict[str, str]:
                 # Try with "O5'" or "C5'" atoms if no P atoms found
                 chain_o5_atoms = []
                 for atom in traj.topology.atoms:
-                    if (atom.residue.name in nucleic_residues and
-                        atom.residue.chain.index == chain_id and
-                        atom.name in ["O5'", "C5'"]):
+                    if (
+                        atom.residue.name in nucleic_residues
+                        and atom.residue.chain.index == chain_id
+                        and atom.name in ["O5'", "C5'"]
+                    ):
                         chain_o5_atoms.append(atom.index)
 
                 if len(chain_o5_atoms) > 0:
@@ -172,10 +208,7 @@ def detect_all_chains_mdtraj(traj: md.Trajectory) -> Dict[str, Dict[str, str]]:
             "nucleic": {"Nucleic Chain R": "chainid R and name P", ...}
         }
     """
-    all_chains = {
-        "protein": detect_protein_chains_mdtraj(traj),
-        "nucleic": detect_nucleic_chains_mdtraj(traj)
-    }
+    all_chains = {"protein": detect_protein_chains_mdtraj(traj), "nucleic": detect_nucleic_chains_mdtraj(traj)}
 
     total_protein = len(all_chains["protein"])
     total_nucleic = len(all_chains["nucleic"])
@@ -225,9 +258,9 @@ def get_primary_protein_chain_mdtraj(traj: md.Trajectory) -> Optional[str]:
     return primary_selection
 
 
-def create_chain_selections_mdtraj(traj: md.Trajectory,
-                                 include_protein: bool = True,
-                                 include_nucleic: bool = True) -> Dict[str, str]:
+def create_chain_selections_mdtraj(
+    traj: md.Trajectory, include_protein: bool = True, include_nucleic: bool = True
+) -> Dict[str, str]:
     """
     Create selection strings for all detected chains.
 
@@ -259,8 +292,7 @@ def create_chain_selections_mdtraj(traj: md.Trajectory,
     return all_selections
 
 
-def get_chain_atom_indices_mdtraj(traj: md.Trajectory,
-                                chain_selection: str) -> np.ndarray:
+def get_chain_atom_indices_mdtraj(traj: md.Trajectory, chain_selection: str) -> np.ndarray:
     """
     Get atom indices for a chain selection string.
 
@@ -285,8 +317,7 @@ def get_chain_atom_indices_mdtraj(traj: md.Trajectory,
         return np.array([])
 
 
-def validate_chain_selections_mdtraj(traj: md.Trajectory,
-                                   chain_selections: Dict[str, str]) -> Dict[str, bool]:
+def validate_chain_selections_mdtraj(traj: md.Trajectory, chain_selections: Dict[str, str]) -> Dict[str, bool]:
     """
     Validate that chain selections return atoms.
 
@@ -344,9 +375,6 @@ def get_chain_statistics_mdtraj(traj: md.Trajectory) -> Dict[str, Dict[str, int]
             atom_indices = traj.topology.select(selection)
             total_atoms += len(atom_indices)
 
-        stats[chain_type] = {
-            "n_chains": n_chains,
-            "n_atoms": total_atoms
-        }
+        stats[chain_type] = {"n_chains": n_chains, "n_atoms": total_atoms}
 
     return stats

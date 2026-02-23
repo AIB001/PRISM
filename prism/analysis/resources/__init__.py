@@ -18,7 +18,7 @@ def get_namd_fep_script() -> Path:
     Path
         Absolute path to mknamd_fep_decomp_convergence.sh
     """
-    return Path(__file__).parent / 'mknamd_fep_decomp_convergence.sh'
+    return Path(__file__).parent / "mknamd_fep_decomp_convergence.sh"
 
 
-__all__ = ['get_namd_fep_script']
+__all__ = ["get_namd_fep_script"]

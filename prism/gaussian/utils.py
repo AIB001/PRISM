@@ -15,19 +15,98 @@ from typing import Tuple, Optional
 
 # Atomic symbols mapping (atomic number to element symbol)
 ATOMIC_SYMBOLS = {
-    1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O',
-    9: 'F', 10: 'Ne', 11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P',
-    16: 'S', 17: 'Cl', 18: 'Ar', 19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti',
-    23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni', 29: 'Cu',
-    30: 'Zn', 31: 'Ga', 32: 'Ge', 33: 'As', 34: 'Se', 35: 'Br', 36: 'Kr',
-    37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc',
-    44: 'Ru', 45: 'Rh', 46: 'Pd', 47: 'Ag', 48: 'Cd', 49: 'In', 50: 'Sn',
-    51: 'Sb', 52: 'Te', 53: 'I', 54: 'Xe', 55: 'Cs', 56: 'Ba', 57: 'La',
-    58: 'Ce', 59: 'Pr', 60: 'Nd', 61: 'Pm', 62: 'Sm', 63: 'Eu', 64: 'Gd',
-    65: 'Tb', 66: 'Dy', 67: 'Ho', 68: 'Er', 69: 'Tm', 70: 'Yb', 71: 'Lu',
-    72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt',
-    79: 'Au', 80: 'Hg', 81: 'Tl', 82: 'Pb', 83: 'Bi', 84: 'Po', 85: 'At',
-    86: 'Rn', 87: 'Fr', 88: 'Ra', 89: 'Ac', 90: 'Th', 91: 'Pa', 92: 'U'
+    1: "H",
+    2: "He",
+    3: "Li",
+    4: "Be",
+    5: "B",
+    6: "C",
+    7: "N",
+    8: "O",
+    9: "F",
+    10: "Ne",
+    11: "Na",
+    12: "Mg",
+    13: "Al",
+    14: "Si",
+    15: "P",
+    16: "S",
+    17: "Cl",
+    18: "Ar",
+    19: "K",
+    20: "Ca",
+    21: "Sc",
+    22: "Ti",
+    23: "V",
+    24: "Cr",
+    25: "Mn",
+    26: "Fe",
+    27: "Co",
+    28: "Ni",
+    29: "Cu",
+    30: "Zn",
+    31: "Ga",
+    32: "Ge",
+    33: "As",
+    34: "Se",
+    35: "Br",
+    36: "Kr",
+    37: "Rb",
+    38: "Sr",
+    39: "Y",
+    40: "Zr",
+    41: "Nb",
+    42: "Mo",
+    43: "Tc",
+    44: "Ru",
+    45: "Rh",
+    46: "Pd",
+    47: "Ag",
+    48: "Cd",
+    49: "In",
+    50: "Sn",
+    51: "Sb",
+    52: "Te",
+    53: "I",
+    54: "Xe",
+    55: "Cs",
+    56: "Ba",
+    57: "La",
+    58: "Ce",
+    59: "Pr",
+    60: "Nd",
+    61: "Pm",
+    62: "Sm",
+    63: "Eu",
+    64: "Gd",
+    65: "Tb",
+    66: "Dy",
+    67: "Ho",
+    68: "Er",
+    69: "Tm",
+    70: "Yb",
+    71: "Lu",
+    72: "Hf",
+    73: "Ta",
+    74: "W",
+    75: "Re",
+    76: "Os",
+    77: "Ir",
+    78: "Pt",
+    79: "Au",
+    80: "Hg",
+    81: "Tl",
+    82: "Pb",
+    83: "Bi",
+    84: "Po",
+    85: "At",
+    86: "Rn",
+    87: "Fr",
+    88: "Ra",
+    89: "Ac",
+    90: "Th",
+    91: "Pa",
+    92: "U",
 }
 
 # Reverse mapping: symbol to atomic number
@@ -61,10 +140,28 @@ def normalize_element_symbol(element: str) -> str:
 
 # Number of valence electrons for common elements
 VALENCE_ELECTRONS = {
-    'H': 1, 'He': 2,
-    'Li': 1, 'Be': 2, 'B': 3, 'C': 4, 'N': 5, 'O': 6, 'F': 7, 'Ne': 8,
-    'Na': 1, 'Mg': 2, 'Al': 3, 'Si': 4, 'P': 5, 'S': 6, 'Cl': 7, 'Ar': 8,
-    'K': 1, 'Ca': 2, 'Br': 7, 'I': 7
+    "H": 1,
+    "He": 2,
+    "Li": 1,
+    "Be": 2,
+    "B": 3,
+    "C": 4,
+    "N": 5,
+    "O": 6,
+    "F": 7,
+    "Ne": 8,
+    "Na": 1,
+    "Mg": 2,
+    "Al": 3,
+    "Si": 4,
+    "P": 5,
+    "S": 6,
+    "Cl": 7,
+    "Ar": 8,
+    "K": 1,
+    "Ca": 2,
+    "Br": 7,
+    "I": 7,
 }
 
 
@@ -77,7 +174,7 @@ def check_gaussian_available() -> bool:
     bool
         True if g16 is available, False otherwise
     """
-    return shutil.which('g16') is not None
+    return shutil.which("g16") is not None
 
 
 def check_antechamber_available() -> bool:
@@ -89,7 +186,7 @@ def check_antechamber_available() -> bool:
     bool
         True if antechamber is available, False otherwise
     """
-    return shutil.which('antechamber') is not None
+    return shutil.which("antechamber") is not None
 
 
 def calculate_charge_multiplicity(mol2_file: str, verbose: bool = False) -> Tuple[int, int]:
@@ -118,7 +215,7 @@ def calculate_charge_multiplicity(mol2_file: str, verbose: bool = False) -> Tupl
     in_atom_section = False
     atom_count = 0
 
-    with open(mol2_file, 'r') as f:
+    with open(mol2_file, "r") as f:
         for line in f:
             line_stripped = line.strip()
 
@@ -135,8 +232,8 @@ def calculate_charge_multiplicity(mol2_file: str, verbose: bool = False) -> Tupl
                     atom_count += 1
                     # Extract element from atom type
                     atom_type = parts[5]
-                    if '.' in atom_type:
-                        element = normalize_element_symbol(atom_type.split('.')[0])
+                    if "." in atom_type:
+                        element = normalize_element_symbol(atom_type.split(".")[0])
                     else:
                         element = normalize_element_symbol(atom_type)
 
@@ -149,7 +246,7 @@ def calculate_charge_multiplicity(mol2_file: str, verbose: bool = False) -> Tupl
                         found = False
                         for length in [2, 1]:
                             if len(atom_name) >= length:
-                                alpha_chars = ''.join(c for c in atom_name[:length+1] if c.isalpha())
+                                alpha_chars = "".join(c for c in atom_name[: length + 1] if c.isalpha())
                                 if len(alpha_chars) >= length:
                                     candidate = normalize_element_symbol(alpha_chars[:length])
                                     if candidate in SYMBOL_TO_NUMBER:
@@ -251,7 +348,9 @@ def calculate_charge_multiplicity_rdkit(mol2_file: str, verbose: bool = False) -
     if verbose:
         print(f"  [DEBUG] RDKit: Atoms: {mol.GetNumAtoms()}, Total electrons: {total_electrons}")
         print(f"  [DEBUG] RDKit: Formal charge: {net_charge}, Radical electrons: {num_radical_electrons}")
-        print(f"  [DEBUG] RDKit: Actual electrons: {actual_electrons} ({'even' if actual_electrons % 2 == 0 else 'odd'})")
+        print(
+            f"  [DEBUG] RDKit: Actual electrons: {actual_electrons} ({'even' if actual_electrons % 2 == 0 else 'odd'})"
+        )
         print(f"  [DEBUG] RDKit: Multiplicity: {multiplicity}")
 
     return net_charge, multiplicity
@@ -324,16 +423,12 @@ def run_gaussian(gjf_file: str, timeout: Optional[int] = None) -> Tuple[bool, st
 
     try:
         subprocess.run(
-            ['g16', gjf_file],
-            cwd=os.path.dirname(gjf_file) or '.',
-            timeout=timeout,
-            capture_output=True,
-            text=True
+            ["g16", gjf_file], cwd=os.path.dirname(gjf_file) or ".", timeout=timeout, capture_output=True, text=True
         )
 
         # Check if calculation completed normally
         if os.path.exists(log_file):
-            with open(log_file, 'r') as f:
+            with open(log_file, "r") as f:
                 content = f.read()
                 if "Normal termination" in content:
                     return True, log_file
@@ -362,11 +457,12 @@ def extract_optimized_coords_from_log(log_file: str) -> list:
     """
     atoms = []
 
-    with open(log_file, 'r') as f:
+    with open(log_file, "r") as f:
         content = f.read()
 
     # Find the last "Standard orientation" section
     import re
+
     pattern = r"Standard orientation:.*?-+\n.*?-+\n(.*?)-+\n"
     matches = re.findall(pattern, content, re.DOTALL)
 
@@ -378,7 +474,7 @@ def extract_optimized_coords_from_log(log_file: str) -> list:
     if matches:
         # Use the last orientation found
         coord_block = matches[-1]
-        for line in coord_block.strip().split('\n'):
+        for line in coord_block.strip().split("\n"):
             parts = line.split()
             if len(parts) >= 6:
                 try:
@@ -387,7 +483,7 @@ def extract_optimized_coords_from_log(log_file: str) -> list:
                     y = float(parts[4])
                     z = float(parts[5])
 
-                    element = ATOMIC_SYMBOLS.get(atomic_num, 'X')
+                    element = ATOMIC_SYMBOLS.get(atomic_num, "X")
                     atoms.append((element, x, y, z))
                 except (ValueError, IndexError):
                     continue
@@ -412,7 +508,7 @@ def verify_gaussian_termination(log_file: str) -> bool:
     if not os.path.exists(log_file):
         return False
 
-    with open(log_file, 'r') as f:
+    with open(log_file, "r") as f:
         content = f.read()
 
     return "Normal termination" in content

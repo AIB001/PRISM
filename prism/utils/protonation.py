@@ -52,8 +52,8 @@ PROPKA_TO_GROMACS = {
     "TYR": "TYR",  # Deprotonated (O-)
     "TYH": "TYH",  # Protonated (OH)
     "ARG": "ARG",  # Always protonated at pH < 12
-    "N+ ": "N+",   # N-terminus
-    "C- ": "C-",   # C-terminus
+    "N+ ": "N+",  # N-terminus
+    "C- ": "C-",  # C-terminus
 }
 
 
@@ -89,6 +89,7 @@ class PropkaProtonator:
     def _find_propka(self) -> str:
         """Find PROPKA executable in PATH or common locations."""
         import shutil
+
         candidates = ["propka3", "propka31", "propka"]
 
         for name in candidates:
@@ -107,26 +108,16 @@ class PropkaProtonator:
                     return str(path)
 
         raise RuntimeError(
-            "PROPKA not found. Install with:\n"
-            "  conda install -c conda-forge propka\n"
-            "Or pip install propka"
+            "PROPKA not found. Install with:\n" "  conda install -c conda-forge propka\n" "Or pip install propka"
         )
 
     def _check_propka_available(self):
         """Check if PROPKA is installed and working."""
         try:
-            result = subprocess.run(
-                [self.propka_path, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run([self.propka_path, "--version"], capture_output=True, text=True, timeout=10)
             logger.info(f"PROPKA version: {result.stdout.strip() or 'unknown'}")
         except Exception as e:
-            raise RuntimeError(
-                f"PROPKA check failed: {e}\n"
-                f"Executable: {self.propka_path}"
-            ) from e
+            raise RuntimeError(f"PROPKA check failed: {e}\n" f"Executable: {self.propka_path}") from e
 
     def predict_his_states(self, pdb_file: str) -> Dict[tuple, str]:
         """
@@ -174,9 +165,7 @@ class PropkaProtonator:
 
         return his_states
 
-    def predict_pka(self,
-                   input_pdb: str,
-                   work_dir: Optional[str] = None) -> Dict[str, Any]:
+    def predict_pka(self, input_pdb: str, work_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Run PROPKA to predict pKa values for all ionizable residues.
 
@@ -216,20 +205,9 @@ class PropkaProtonator:
 
         try:
             # Run PROPKA
-            cmd = [
-                self.propka_path,
-                str(input_path),
-                "-o", str(self.ph),
-                "--quiet"
-            ]
+            cmd = [self.propka_path, str(input_path), "-o", str(self.ph), "--quiet"]
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                cwd=str(work_path)
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=str(work_path))
 
             if result.returncode != 0:
                 raise RuntimeError(f"PROPKA failed: {result.stderr}")
@@ -267,7 +245,7 @@ class PropkaProtonator:
         predictions = {}
         in_summary = False
 
-        with open(pka_file, 'r') as f:
+        with open(pka_file, "r") as f:
             for line in f:
                 line = line.strip()
 
@@ -292,12 +270,7 @@ class PropkaProtonator:
                         try:
                             pka = float(pka_str)
                             key = f"{chain}:{res_num}"
-                            predictions[key] = {
-                                "resname": res_name,
-                                "chain": chain,
-                                "resnum": res_num,
-                                "pka": pka
-                            }
+                            predictions[key] = {"resname": res_name, "chain": chain, "resnum": res_num, "pka": pka}
                         except ValueError:
                             continue
 
@@ -307,10 +280,10 @@ class PropkaProtonator:
         """Parse PROPKA .propka_input file for detailed predictions."""
         predictions = {}
 
-        with open(input_file, 'r') as f:
+        with open(input_file, "r") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
 
                 parts = line.split()
@@ -322,20 +295,13 @@ class PropkaProtonator:
                         pka = float(parts[3])
 
                         key = f"{chain}:{res_num}"
-                        predictions[key] = {
-                            "resname": res_name,
-                            "chain": chain,
-                            "resnum": res_num,
-                            "pka": pka
-                        }
+                        predictions[key] = {"resname": res_name, "chain": chain, "resnum": res_num, "pka": pka}
                     except (ValueError, IndexError):
                         continue
 
         return predictions
 
-    def determine_protonation_state(self,
-                                   res_name: str,
-                                   pka: float) -> Tuple[str, bool]:
+    def determine_protonation_state(self, res_name: str, pka: float) -> Tuple[str, bool]:
         """
         Determine protonation state based on pKa and target pH.
 
@@ -416,9 +382,9 @@ class PropkaProtonator:
         his_states = self.predict_his_states(pdb_file)
 
         stats = {
-            'total_his': len(his_states),
-            'renamed': {},
-            'states': his_states,
+            "total_his": len(his_states),
+            "renamed": {},
+            "states": his_states,
         }
 
         if not his_states:
@@ -427,13 +393,12 @@ class PropkaProtonator:
             return stats
 
         # Read PDB and rename HIS residues
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             lines = f.readlines()
 
         new_lines = []
         for line in lines:
-            if (line.startswith('ATOM') or line.startswith('HETATM')) \
-                    and line[17:20] == 'HIS' and line[20] == ' ':
+            if (line.startswith("ATOM") or line.startswith("HETATM")) and line[17:20] == "HIS" and line[20] == " ":
                 chain = line[21].strip()
                 resnum = line[22:26].strip()
                 key = (chain, resnum)
@@ -441,19 +406,18 @@ class PropkaProtonator:
                 if key in his_states:
                     new_name = his_states[key]
                     line = line[:17] + f"{new_name:3s}" + line[20:]
-                    stats['renamed'][key] = new_name
+                    stats["renamed"][key] = new_name
 
             new_lines.append(line)
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             f.writelines(new_lines)
 
         return stats
 
-    def optimize_protein_protonation(self,
-                                    input_pdb: str,
-                                    output_pdb: str,
-                                    work_dir: Optional[str] = None) -> Dict[str, Any]:
+    def optimize_protein_protonation(
+        self, input_pdb: str, output_pdb: str, work_dir: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Predict and apply protonation states for all ionizable residues.
 
@@ -498,12 +462,12 @@ class PropkaProtonator:
 
         # Apply renames to PDB
         if renames:
-            with open(input_pdb, 'r') as f:
+            with open(input_pdb, "r") as f:
                 lines = f.readlines()
 
             new_lines = []
             for line in lines:
-                if line.startswith('ATOM') or line.startswith('HETATM'):
+                if line.startswith("ATOM") or line.startswith("HETATM"):
                     line_resname = line[17:20].strip()
                     chain = line[21].strip()
                     resnum = line[22:26].strip()
@@ -515,21 +479,15 @@ class PropkaProtonator:
 
                 new_lines.append(line)
 
-            with open(output_pdb, 'w') as f:
+            with open(output_pdb, "w") as f:
                 f.writelines(new_lines)
         else:
             shutil.copy2(input_pdb, output_pdb)
 
-        return {
-            "predictions": predictions,
-            "renamed": renames,
-            "summary": summary
-        }
+        return {"predictions": predictions, "renamed": renames, "summary": summary}
 
 
-def optimize_protein_protonation_propka(input_pdb: str,
-                                       output_pdb: str,
-                                       ph: float = 7.0) -> Dict[str, Any]:
+def optimize_protein_protonation_propka(input_pdb: str, output_pdb: str, ph: float = 7.0) -> Dict[str, Any]:
     """
     Convenience function to optimize protein protonation using PROPKA.
 

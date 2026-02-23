@@ -16,24 +16,24 @@ class TestIsSoluteType:
 
     def test_solute_type_with_underscore(self):
         """Atom types ending in '_' are solute."""
-        assert _is_solute_type('CT_') is True
+        assert _is_solute_type("CT_") is True
 
     def test_solute_type_double_underscore(self):
-        assert _is_solute_type('CA__') is True
+        assert _is_solute_type("CA__") is True
 
     def test_solvent_type_no_underscore(self):
         """Atom types without trailing '_' are solvent."""
-        assert _is_solute_type('CT') is False
+        assert _is_solute_type("CT") is False
 
     def test_solvent_type_middle_underscore(self):
         """Underscore in middle doesn't make it solute."""
-        assert _is_solute_type('C_T') is False
+        assert _is_solute_type("C_T") is False
 
     def test_empty_string(self):
-        assert _is_solute_type('') is False
+        assert _is_solute_type("") is False
 
     def test_single_underscore(self):
-        assert _is_solute_type('_') is True
+        assert _is_solute_type("_") is True
 
 
 class TestClassifyInteraction:
@@ -43,31 +43,31 @@ class TestClassifyInteraction:
         """All atoms are solute -> all_solute."""
         atom_is_solute = {1: True, 2: True, 3: True}
         result = _classify_interaction([1, 2, 3], atom_is_solute)
-        assert result == 'all_solute'
+        assert result == "all_solute"
 
     def test_all_solvent(self):
         """No atoms are solute -> all_solvent."""
         atom_is_solute = {1: False, 2: False}
         result = _classify_interaction([1, 2], atom_is_solute)
-        assert result == 'all_solvent'
+        assert result == "all_solvent"
 
     def test_mixed(self):
         """Some solute, some solvent -> mixed."""
         atom_is_solute = {1: True, 2: False}
         result = _classify_interaction([1, 2], atom_is_solute)
-        assert result == 'mixed'
+        assert result == "mixed"
 
     def test_single_solute_atom(self):
         """Single solute atom -> all_solute."""
         atom_is_solute = {5: True}
         result = _classify_interaction([5], atom_is_solute)
-        assert result == 'all_solute'
+        assert result == "all_solute"
 
     def test_unknown_atom_treated_as_solvent(self):
         """Atoms not in dict default to False (solvent)."""
         atom_is_solute = {1: True}
         result = _classify_interaction([1, 99], atom_is_solute)
-        assert result == 'mixed'
+        assert result == "mixed"
 
 
 class TestGetScaleFactor:
@@ -76,28 +76,28 @@ class TestGetScaleFactor:
     def test_all_solute_gets_lambda(self):
         """All-solute interactions scale by lambda."""
         lam = 0.7
-        result = _get_scale_factor('all_solute', lam, math.sqrt(lam))
+        result = _get_scale_factor("all_solute", lam, math.sqrt(lam))
         assert result == pytest.approx(lam)
 
     def test_mixed_gets_sqrt_lambda(self):
         """Mixed interactions scale by sqrt(lambda)."""
         lam = 0.7
         sqrt_lam = math.sqrt(lam)
-        result = _get_scale_factor('mixed', lam, sqrt_lam)
+        result = _get_scale_factor("mixed", lam, sqrt_lam)
         assert result == pytest.approx(sqrt_lam)
 
     def test_all_solvent_gets_one(self):
         """All-solvent interactions are unscaled (factor = 1.0)."""
         lam = 0.7
-        result = _get_scale_factor('all_solvent', lam, math.sqrt(lam))
+        result = _get_scale_factor("all_solvent", lam, math.sqrt(lam))
         assert result == pytest.approx(1.0)
 
     def test_lambda_one_gives_no_scaling(self):
         """When lambda=1.0, all scale factors should be 1.0."""
         lam = 1.0
-        assert _get_scale_factor('all_solute', lam, math.sqrt(lam)) == pytest.approx(1.0)
-        assert _get_scale_factor('mixed', lam, math.sqrt(lam)) == pytest.approx(1.0)
-        assert _get_scale_factor('all_solvent', lam, math.sqrt(lam)) == pytest.approx(1.0)
+        assert _get_scale_factor("all_solute", lam, math.sqrt(lam)) == pytest.approx(1.0)
+        assert _get_scale_factor("mixed", lam, math.sqrt(lam)) == pytest.approx(1.0)
+        assert _get_scale_factor("all_solvent", lam, math.sqrt(lam)) == pytest.approx(1.0)
 
     def test_charge_scaling(self):
         """Charges scale by sqrt(lambda): charge * sqrt(lambda)."""

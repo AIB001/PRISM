@@ -5,6 +5,7 @@ from pathlib import Path
 
 try:
     import mdtraj as md
+
     MDTRAJ_AVAILABLE = True
 except ImportError:
     MDTRAJ_AVAILABLE = False
@@ -12,18 +13,19 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 class TrajectoryManager:
     """Manage trajectory file loading and caching for MDTraj only"""
 
     # Supported trajectory formats (MDTraj only)
     MDTRAJ_FORMATS = {
-        '.dcd': 'DCD (NAMD/CHARMM)',
-        '.xtc': 'XTC (GROMACS)',
-        '.trr': 'TRR (GROMACS)',
-        '.pdb': 'PDB',
-        '.nc': 'NetCDF (Amber)',
-        '.crd': 'CRD (CHARMM)',
-        '.mdcrd': 'MDCRD (Amber)'
+        ".dcd": "DCD (NAMD/CHARMM)",
+        ".xtc": "XTC (GROMACS)",
+        ".trr": "TRR (GROMACS)",
+        ".pdb": "PDB",
+        ".nc": "NetCDF (Amber)",
+        ".crd": "CRD (CHARMM)",
+        ".mdcrd": "MDCRD (Amber)",
     }
 
     def __init__(self):
@@ -44,9 +46,7 @@ class TrajectoryManager:
 
     def get_supported_formats(self) -> Dict[str, List[str]]:
         """Get list of supported formats"""
-        return {
-            'mdtraj': list(self.MDTRAJ_FORMATS.values())
-        }
+        return {"mdtraj": list(self.MDTRAJ_FORMATS.values())}
 
     def load_mdtraj_trajectory(self, topology_file: str, trajectory_file: str, cache_key: Optional[str] = None):
         """Load MDTraj trajectory for structural analysis"""

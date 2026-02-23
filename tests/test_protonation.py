@@ -1,7 +1,6 @@
 """Tests for prism.utils.protonation — PropkaProtonator class."""
 
 import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
@@ -55,8 +54,8 @@ def pdb_mixed_his(tmp_path):
     """PDB with one HIS and one already-renamed HIE."""
     pdb = tmp_path / "mixed.pdb"
     lines = [
-        _atom_line(1, "N", "HIS", "A", 10),   # should be renamed
-        _atom_line(2, "N", "HIE", "A", 20),   # already renamed, skip
+        _atom_line(1, "N", "HIS", "A", 10),  # should be renamed
+        _atom_line(2, "N", "HIE", "A", 20),  # already renamed, skip
         "END\n",
     ]
     pdb.write_text("".join(lines))
@@ -71,12 +70,14 @@ class TestPropkaProtonatorInit:
 
     def test_default_ph(self):
         from prism.utils.protonation import PropkaProtonator
+
         p = PropkaProtonator()
         assert p.ph == 7.0
         assert p.verbose is False
 
     def test_custom_ph(self):
         from prism.utils.protonation import PropkaProtonator
+
         p = PropkaProtonator(ph=4.5, verbose=True)
         assert p.ph == 4.5
         assert p.verbose is True
@@ -84,6 +85,7 @@ class TestPropkaProtonatorInit:
     def test_import_error_when_propka_missing(self):
         """If propka is not installed, _check_propka_available should raise."""
         from prism.utils.protonation import PropkaProtonator
+
         obj = object.__new__(PropkaProtonator)
         with patch("builtins.__import__", side_effect=ImportError("No module")):
             with pytest.raises(ImportError, match="PROPKA is not available"):
@@ -99,6 +101,7 @@ class TestRenameHistidines:
     def _make_protonator(self, his_states):
         """Create protonator with mocked predict_his_states."""
         from prism.utils.protonation import PropkaProtonator
+
         p = PropkaProtonator(ph=7.0)
         p.predict_his_states = MagicMock(return_value=his_states)
         return p

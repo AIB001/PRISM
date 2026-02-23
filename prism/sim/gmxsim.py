@@ -8,21 +8,20 @@ GROMACS simulator for PRISM MD simulations
 import os
 import subprocess
 import shutil
-from pathlib import Path
 
 
 class GMXSimulator:
     """
     GROMACS simulator class for running MD simulations.
-    
+
     This class wraps GROMACS commands and uses the localrun.sh script
     for running standard MD simulation protocols.
     """
-    
+
     def __init__(self, gmx_dir, system_files, ff_dir):
         """
         Initialize GROMACS simulator.
-        
+
         Parameters:
         -----------
         gmx_dir : str
@@ -35,34 +34,29 @@ class GMXSimulator:
         self.gmx_dir = gmx_dir
         self.system_files = system_files
         self.ff_dir = ff_dir
-        
+
         # Get localrun.sh script path
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.localrun_script = os.path.join(self.script_dir, "scripts", "localrun.sh")
-        
+
         # Check if GROMACS is available
         self._check_gromacs()
-    
+
     def _check_gromacs(self):
         """Check if GROMACS is available in the system"""
         try:
-            result = subprocess.run(
-                ["gmx", "--version"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
+            result = subprocess.run(["gmx", "--version"], capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 raise RuntimeError("GROMACS not found. Please install GROMACS.")
-            
+
             # Extract version info
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 if line.startswith("GROMACS version"):
                     print(f"Found {line}")
                     break
         except FileNotFoundError:
             raise RuntimeError("GROMACS not found. Please install GROMACS.")
-    
+
     def run(self, stages=None, gpu_id=0, ntomp=10, ntmpi=1, continue_from=None, **kwargs):
         """
         Run GROMACS MD simulation.
@@ -90,7 +84,12 @@ class GMXSimulator:
         """
         # Default stages
         if stages is None:
-            stages = ['em', 'nvt', 'npt', 'prod']
+            stages = ["em", "nvt", "npt", "prod"]
+
+        if continue_from:
+            print(f"Continue-from requested: {continue_from} (not implemented; running full workflow).")
+        if kwargs:
+            print(f"Ignoring extra parameters: {list(kwargs)}")
 
         # Copy localrun.sh to GMX directory
         target_script = os.path.join(self.gmx_dir, "localrun.sh")
@@ -119,7 +118,7 @@ class GMXSimulator:
             # Set OMP_NUM_THREADS to match ntomp to avoid conflicts
             # GROMACS requires OMP_NUM_THREADS and -ntomp to be consistent
             env = os.environ.copy()
-            env['OMP_NUM_THREADS'] = str(ntomp)
+            env["OMP_NUM_THREADS"] = str(ntomp)
 
             # Execute localrun.sh with modified environment
             result = subprocess.run(
@@ -127,7 +126,7 @@ class GMXSimulator:
                 check=True,
                 text=True,
                 capture_output=False,  # Let output stream to console
-                env=env
+                env=env,
             )
 
             # Collect output files
@@ -141,10 +140,10 @@ class GMXSimulator:
         finally:
             # Return to original directory
             os.chdir(original_dir)
-    
+
     def _create_localrun_script(self, target_path):
         """Create localrun.sh script from embedded content"""
-        script_content = '''#!/bin/bash
+        script_content = """#!/bin/bash
 
 ######################################################
 # SIMULATION PART
@@ -200,63 +199,58 @@ else
     echo "Starting Production MD from scratch..."
     gmx grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 10
     gmx mdrun -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
-fi'''
-        
-        with open(target_path, 'w') as f:
+fi"""
+
+        with open(target_path, "w") as f:
             f.write(script_content)
-    
+
     def _modify_script_parameters(self, script_path, gpu_id, ntomp, ntmpi):
         """Modify script parameters for GPU and thread settings"""
-        with open(script_path, 'r') as f:
+        with open(script_path, "r") as f:
             content = f.read()
-        
+
         # Replace GPU ID
-        content = content.replace('-gpu_id 0', f'-gpu_id {gpu_id}')
-        
+        content = content.replace("-gpu_id 0", f"-gpu_id {gpu_id}")
+
         # Replace thread settings
-        content = content.replace('-ntomp 10', f'-ntomp {ntomp}')
-        content = content.replace('-ntomp 15', f'-ntomp {ntomp}')
-        content = content.replace('-ntmpi 1', f'-ntmpi {ntmpi}')
-        
-        with open(script_path, 'w') as f:
+        content = content.replace("-ntomp 10", f"-ntomp {ntomp}")
+        content = content.replace("-ntomp 15", f"-ntomp {ntomp}")
+        content = content.replace("-ntmpi 1", f"-ntmpi {ntmpi}")
+
+        with open(script_path, "w") as f:
             f.write(content)
-    
+
     def _collect_outputs(self):
         """Collect output files from simulation"""
         outputs = {}
-        
+
         # Check for output files
         stage_outputs = {
-            'em': {
-                'gro': 'em/em.gro',
-                'edr': 'em/em.edr',
-                'log': 'em/em.log',
-                'tpr': 'em/em.tpr'
+            "em": {"gro": "em/em.gro", "edr": "em/em.edr", "log": "em/em.log", "tpr": "em/em.tpr"},
+            "nvt": {
+                "gro": "nvt/nvt.gro",
+                "edr": "nvt/nvt.edr",
+                "log": "nvt/nvt.log",
+                "tpr": "nvt/nvt.tpr",
+                "cpt": "nvt/nvt.cpt",
             },
-            'nvt': {
-                'gro': 'nvt/nvt.gro',
-                'edr': 'nvt/nvt.edr',
-                'log': 'nvt/nvt.log',
-                'tpr': 'nvt/nvt.tpr',
-                'cpt': 'nvt/nvt.cpt'
+            "npt": {
+                "gro": "npt/npt.gro",
+                "edr": "npt/npt.edr",
+                "log": "npt/npt.log",
+                "tpr": "npt/npt.tpr",
+                "cpt": "npt/npt.cpt",
             },
-            'npt': {
-                'gro': 'npt/npt.gro',
-                'edr': 'npt/npt.edr',
-                'log': 'npt/npt.log',
-                'tpr': 'npt/npt.tpr',
-                'cpt': 'npt/npt.cpt'
+            "prod": {
+                "gro": "prod/md.gro",
+                "xtc": "prod/md.xtc",
+                "edr": "prod/md.edr",
+                "log": "prod/md.log",
+                "tpr": "prod/md.tpr",
+                "cpt": "prod/md.cpt",
             },
-            'prod': {
-                'gro': 'prod/md.gro',
-                'xtc': 'prod/md.xtc',
-                'edr': 'prod/md.edr',
-                'log': 'prod/md.log',
-                'tpr': 'prod/md.tpr',
-                'cpt': 'prod/md.cpt'
-            }
         }
-        
+
         for stage, files in stage_outputs.items():
             stage_dict = {}
             for file_type, filename in files.items():
@@ -265,5 +259,5 @@ fi'''
                     stage_dict[file_type] = filepath
             if stage_dict:
                 outputs[stage] = stage_dict
-        
+
         return outputs

@@ -11,32 +11,33 @@ All plots follow PRISM publication standards with Times New Roman fonts and prop
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator, MaxNLocator
+from matplotlib.ticker import MultipleLocator
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 
 from .publication_utils import (
     get_publication_style,
-    apply_publication_style,
     get_standard_figsize,
     save_publication_figure,
     get_color_palette,
-    PUBLICATION_FONTS
+    PUBLICATION_FONTS,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def plot_namd_fep_convergence(convergence_data: pd.DataFrame,
-                               energy_type: str = 'sum_dg',
-                               xlabel: str = 'Simulation Time Fraction',
-                               ylabel: str = 'ΔG (kcal/mol)',
-                               title: str = '',
-                               figsize: Optional[Tuple[float, float]] = None,
-                               save_path: Optional[str] = None,
-                               show_components: bool = False,
-                               final_value_line: bool = True,
-                               **kwargs) -> Tuple[plt.Figure, plt.Axes]:
+def plot_namd_fep_convergence(
+    convergence_data: pd.DataFrame,
+    energy_type: str = "sum_dg",
+    xlabel: str = "Simulation Time Fraction",
+    ylabel: str = "ΔG (kcal/mol)",
+    title: str = "",
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+    show_components: bool = False,
+    final_value_line: bool = True,
+    **kwargs,
+) -> Tuple[plt.Figure, plt.Axes]:
     """
     Plot NAMD FEP convergence over simulation time.
 
@@ -72,83 +73,88 @@ def plot_namd_fep_convergence(convergence_data: pd.DataFrame,
     """
     # Set up figure with publication style
     if figsize is None:
-        figsize = get_standard_figsize('single')
+        figsize = get_standard_figsize("single")
 
     with plt.rc_context(get_publication_style()):
         fig, ax = plt.subplots(figsize=figsize)
 
         if show_components:
             # Plot all energy components
-            colors = get_color_palette('default', n_colors=4)
+            colors = get_color_palette("default", n_colors=4)
             components = [
-                ('sum_dg', 'Total ΔG', colors[0]),
-                ('sum_delec', 'ΔElec', colors[1]),
-                ('sum_dvdw', 'ΔvdW', colors[2]),
-                ('sum_couple', 'ΔCouple', colors[3])
+                ("sum_dg", "Total ΔG", colors[0]),
+                ("sum_delec", "ΔElec", colors[1]),
+                ("sum_dvdw", "ΔvdW", colors[2]),
+                ("sum_couple", "ΔCouple", colors[3]),
             ]
 
             for col_name, label, color in components:
                 if col_name in convergence_data.columns:
-                    ax.plot(convergence_data['fraction'],
-                           convergence_data[col_name],
-                           marker='o',
-                           linewidth=3,
-                           markersize=10,
-                           label=label,
-                           color=color)
+                    ax.plot(
+                        convergence_data["fraction"],
+                        convergence_data[col_name],
+                        marker="o",
+                        linewidth=3,
+                        markersize=10,
+                        label=label,
+                        color=color,
+                    )
 
                     # Print final values
                     final_val = convergence_data[col_name].iloc[-1]
                     print(f"  Final {label}: {final_val:.2f} kcal/mol")
 
-            ax.legend(frameon=True, loc='best', fontsize=PUBLICATION_FONTS['legend'])
-            ylabel = 'Energy (kcal/mol)'
+            ax.legend(frameon=True, loc="best", fontsize=PUBLICATION_FONTS["legend"])
+            ylabel = "Energy (kcal/mol)"
 
         else:
             # Plot single energy component
             if energy_type not in convergence_data.columns:
                 raise ValueError(
-                    f"Energy type '{energy_type}' not found in data. "
-                    f"Available: {list(convergence_data.columns)}"
+                    f"Energy type '{energy_type}' not found in data. " f"Available: {list(convergence_data.columns)}"
                 )
 
-            colors = get_color_palette('default', n_colors=1)
-            ax.plot(convergence_data['fraction'],
-                   convergence_data[energy_type],
-                   marker='o',
-                   linewidth=4,
-                   markersize=12,
-                   color=colors[0])
+            colors = get_color_palette("default", n_colors=1)
+            ax.plot(
+                convergence_data["fraction"],
+                convergence_data[energy_type],
+                marker="o",
+                linewidth=4,
+                markersize=12,
+                color=colors[0],
+            )
 
             # Add final value line
             if final_value_line:
                 final_value = convergence_data[energy_type].iloc[-1]
-                ax.axhline(y=final_value,
-                          color='red',
-                          linestyle='--',
-                          linewidth=2,
-                          alpha=0.7,
-                          label=f'Final: {final_value:.2f}')
-                ax.legend(frameon=True, loc='best', fontsize=PUBLICATION_FONTS['legend'])
+                ax.axhline(
+                    y=final_value,
+                    color="red",
+                    linestyle="--",
+                    linewidth=2,
+                    alpha=0.7,
+                    label=f"Final: {final_value:.2f}",
+                )
+                ax.legend(frameon=True, loc="best", fontsize=PUBLICATION_FONTS["legend"])
 
                 print(f"  Final {energy_type}: {final_value:.2f} kcal/mol")
 
         # Style axes
-        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
         if title:
-            ax.set_title(title, fontsize=PUBLICATION_FONTS['title'], weight='bold')
+            ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], weight="bold")
 
         ax.set_xlim(0, 1)
         ax.xaxis.set_major_locator(MultipleLocator(0.2))
 
         # Remove top and right spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
         # Set spine width
-        ax.spines['left'].set_linewidth(2)
-        ax.spines['bottom'].set_linewidth(2)
+        ax.spines["left"].set_linewidth(2)
+        ax.spines["bottom"].set_linewidth(2)
 
         fig.tight_layout()
 
@@ -161,17 +167,19 @@ def plot_namd_fep_convergence(convergence_data: pd.DataFrame,
         return fig, ax
 
 
-def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.ndarray]],
-                                    labels: Optional[List[str]] = None,
-                                    error_data: Optional[Union[np.ndarray, Dict[str, np.ndarray]]] = None,
-                                    xlabel: str = 'Energy Component',
-                                    ylabel: str = 'ΔG (kcal/mol)',
-                                    title: str = '',
-                                    figsize: Optional[Tuple[float, float]] = None,
-                                    save_path: Optional[str] = None,
-                                    show_values: bool = True,
-                                    zero_line: bool = True,
-                                    **kwargs) -> Tuple[plt.Figure, plt.Axes]:
+def plot_namd_fep_decomposition_bar(
+    decomp_data: Union[np.ndarray, Dict[str, np.ndarray]],
+    labels: Optional[List[str]] = None,
+    error_data: Optional[Union[np.ndarray, Dict[str, np.ndarray]]] = None,
+    xlabel: str = "Energy Component",
+    ylabel: str = "ΔG (kcal/mol)",
+    title: str = "",
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+    show_values: bool = True,
+    zero_line: bool = True,
+    **kwargs,
+) -> Tuple[plt.Figure, plt.Axes]:
     """
     Create bar chart for NAMD FEP energy decomposition.
 
@@ -209,13 +217,13 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
     """
     # Set up figure
     if figsize is None:
-        figsize = get_standard_figsize('single')
+        figsize = get_standard_figsize("single")
 
     with plt.rc_context(get_publication_style()):
         fig, ax = plt.subplots(figsize=figsize)
 
         # Component labels
-        component_labels = ['ΔG', 'ΔElec', 'ΔvdW', 'ΔCouple']
+        component_labels = ["ΔG", "ΔElec", "ΔvdW", "ΔCouple"]
 
         # Handle different input types
         if isinstance(decomp_data, dict):
@@ -225,7 +233,7 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
         else:
             datasets = [decomp_data]
             if labels is None:
-                labels = ['Data']
+                labels = ["Data"]
 
         # Handle error data
         error_datasets = None
@@ -239,7 +247,7 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
         n_datasets = len(datasets)
 
         # Get colors
-        colors = get_color_palette('default', n_colors=n_datasets)
+        colors = get_color_palette("default", n_colors=n_datasets)
 
         # Bar positioning
         width = 0.35 if n_datasets > 1 else 0.6
@@ -261,23 +269,35 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
             yerr = error_datasets[i] if error_datasets is not None else None
 
             # Plot bars
-            bars = ax.bar(x_pos, data[:n_components], width,
-                         label=label, color=color, alpha=0.8,
-                         edgecolor='black', linewidth=1.5,
-                         yerr=yerr, capsize=8,
-                         error_kw={'linewidth': 2, 'capthick': 2})
+            bars = ax.bar(
+                x_pos,
+                data[:n_components],
+                width,
+                label=label,
+                color=color,
+                alpha=0.8,
+                edgecolor="black",
+                linewidth=1.5,
+                yerr=yerr,
+                capsize=8,
+                error_kw={"linewidth": 2, "capthick": 2},
+            )
 
             # Add value labels
             if show_values:
                 for bar, value in zip(bars, data[:n_components]):
                     height = bar.get_height()
-                    va = 'bottom' if value >= 0 else 'top'
+                    va = "bottom" if value >= 0 else "top"
                     y_offset = 0.5 if value >= 0 else -0.5
-                    ax.text(bar.get_x() + bar.get_width() / 2., height + y_offset,
-                           f'{value:.1f}',
-                           ha='center', va=va,
-                           fontsize=PUBLICATION_FONTS['bar_annotation'],
-                           weight='bold')
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        height + y_offset,
+                        f"{value:.1f}",
+                        ha="center",
+                        va=va,
+                        fontsize=PUBLICATION_FONTS["bar_annotation"],
+                        weight="bold",
+                    )
 
             # Print values
             print(f"  {label}:")
@@ -289,25 +309,25 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
 
         # Add zero line
         if zero_line:
-            ax.axhline(y=0, color='black', linestyle='-', linewidth=2, alpha=0.5)
+            ax.axhline(y=0, color="black", linestyle="-", linewidth=2, alpha=0.5)
 
         # Style axes
         ax.set_xticks(x)
-        ax.set_xticklabels(component_labels, fontsize=PUBLICATION_FONTS['tick_label'])
-        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+        ax.set_xticklabels(component_labels, fontsize=PUBLICATION_FONTS["tick_label"])
+        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
         if title:
-            ax.set_title(title, fontsize=PUBLICATION_FONTS['title'], weight='bold')
+            ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], weight="bold")
 
         # Add legend if multiple datasets
         if n_datasets > 1:
-            ax.legend(frameon=True, loc='best', fontsize=PUBLICATION_FONTS['legend'])
+            ax.legend(frameon=True, loc="best", fontsize=PUBLICATION_FONTS["legend"])
 
         # Remove top and right spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(2)
-        ax.spines['bottom'].set_linewidth(2)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(2)
+        ax.spines["bottom"].set_linewidth(2)
 
         fig.tight_layout()
 
@@ -320,17 +340,18 @@ def plot_namd_fep_decomposition_bar(decomp_data: Union[np.ndarray, Dict[str, np.
         return fig, ax
 
 
-def plot_namd_fep_dg_lambda(fepout_data: pd.DataFrame,
-                            phase: str = 'complex',
-                            xlabel: str = 'λ',
-                            ylabel_deriv: str = 'dG/dλ (kcal/mol)',
-                            ylabel_accum: str = 'ΔG (kcal/mol)',
-                            title: str = '',
-                            figsize: Optional[Tuple[float, float]] = None,
-                            save_path: Optional[str] = None,
-                            show_both: bool = True,
-                            **kwargs) -> Union[Tuple[plt.Figure, plt.Axes],
-                                              Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]]:
+def plot_namd_fep_dg_lambda(
+    fepout_data: pd.DataFrame,
+    phase: str = "complex",
+    xlabel: str = "λ",
+    ylabel_deriv: str = "dG/dλ (kcal/mol)",
+    ylabel_accum: str = "ΔG (kcal/mol)",
+    title: str = "",
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+    show_both: bool = True,
+    **kwargs,
+) -> Union[Tuple[plt.Figure, plt.Axes], Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]]:
     """
     Plot dG/dλ derivative and accumulated ΔG vs λ for NAMD FEP.
 
@@ -365,21 +386,21 @@ def plot_namd_fep_dg_lambda(fepout_data: pd.DataFrame,
         Single axis if show_both=False, otherwise tuple of (ax_deriv, ax_accum)
     """
     # Check required columns
-    required_cols = ['start', 'stop', 'dG', 'dG_accum']
+    required_cols = ["start", "stop", "dG", "dG_accum"]
     if not all(col in fepout_data.columns for col in required_cols):
         raise ValueError(f"fepout_data must contain columns: {required_cols}")
 
     # Calculate lambda midpoints and derivatives
-    lambda_mid = (fepout_data['start'] + fepout_data['stop']) / 2
-    d_lambda = fepout_data['stop'] - fepout_data['start']
-    dG_dlambda = fepout_data['dG'] / d_lambda
+    lambda_mid = (fepout_data["start"] + fepout_data["stop"]) / 2
+    d_lambda = fepout_data["stop"] - fepout_data["start"]
+    dG_dlambda = fepout_data["dG"] / d_lambda
 
     # Set up figure
     if figsize is None:
         if show_both:
-            figsize = get_standard_figsize('horizontal')  # Wide format for 2 panels
+            figsize = get_standard_figsize("horizontal")  # Wide format for 2 panels
         else:
-            figsize = get_standard_figsize('single')
+            figsize = get_standard_figsize("single")
 
     with plt.rc_context(get_publication_style()):
         if show_both:
@@ -388,42 +409,38 @@ def plot_namd_fep_dg_lambda(fepout_data: pd.DataFrame,
             fig, ax_deriv = plt.subplots(figsize=figsize)
             ax_accum = None
 
-        colors = get_color_palette('default', n_colors=1)
+        colors = get_color_palette("default", n_colors=1)
 
         # Plot derivative
-        ax_deriv.plot(lambda_mid, dG_dlambda,
-                     marker='o', linewidth=3, markersize=10,
-                     color=colors[0])
-        ax_deriv.axhline(y=0, color='gray', linestyle='--', linewidth=1.5, alpha=0.5)
+        ax_deriv.plot(lambda_mid, dG_dlambda, marker="o", linewidth=3, markersize=10, color=colors[0])
+        ax_deriv.axhline(y=0, color="gray", linestyle="--", linewidth=1.5, alpha=0.5)
 
-        ax_deriv.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax_deriv.set_ylabel(ylabel_deriv, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+        ax_deriv.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
+        ax_deriv.set_ylabel(ylabel_deriv, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
         if title and not show_both:
-            ax_deriv.set_title(title, fontsize=PUBLICATION_FONTS['title'], weight='bold')
+            ax_deriv.set_title(title, fontsize=PUBLICATION_FONTS["title"], weight="bold")
 
         ax_deriv.set_xlim(0, 1)
-        ax_deriv.spines['top'].set_visible(False)
-        ax_deriv.spines['right'].set_visible(False)
-        ax_deriv.spines['left'].set_linewidth(2)
-        ax_deriv.spines['bottom'].set_linewidth(2)
+        ax_deriv.spines["top"].set_visible(False)
+        ax_deriv.spines["right"].set_visible(False)
+        ax_deriv.spines["left"].set_linewidth(2)
+        ax_deriv.spines["bottom"].set_linewidth(2)
 
         # Plot accumulated if requested
         if show_both:
-            ax_accum.plot(lambda_mid, fepout_data['dG_accum'],
-                         marker='o', linewidth=3, markersize=10,
-                         color=colors[0])
+            ax_accum.plot(lambda_mid, fepout_data["dG_accum"], marker="o", linewidth=3, markersize=10, color=colors[0])
 
-            ax_accum.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-            ax_accum.set_ylabel(ylabel_accum, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+            ax_accum.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
+            ax_accum.set_ylabel(ylabel_accum, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
 
             ax_accum.set_xlim(0, 1)
-            ax_accum.spines['top'].set_visible(False)
-            ax_accum.spines['right'].set_visible(False)
-            ax_accum.spines['left'].set_linewidth(2)
-            ax_accum.spines['bottom'].set_linewidth(2)
+            ax_accum.spines["top"].set_visible(False)
+            ax_accum.spines["right"].set_visible(False)
+            ax_accum.spines["left"].set_linewidth(2)
+            ax_accum.spines["bottom"].set_linewidth(2)
 
             # Print final value
-            final_dg = fepout_data['dG_accum'].iloc[-1]
+            final_dg = fepout_data["dG_accum"].iloc[-1]
             print(f"  {phase.capitalize()} phase final ΔG: {final_dg:.2f} kcal/mol")
 
         fig.tight_layout()
@@ -441,16 +458,18 @@ def plot_namd_fep_dg_lambda(fepout_data: pd.DataFrame,
             return fig, ax_deriv
 
 
-def plot_namd_fep_multi_comparison(system_results: Dict[str, Dict[str, np.ndarray]],
-                                   comparison_type: str = 'ddG',
-                                   xlabel: str = 'System',
-                                   ylabel: str = 'ΔΔG (kcal/mol)',
-                                   title: str = '',
-                                   figsize: Optional[Tuple[float, float]] = None,
-                                   save_path: Optional[str] = None,
-                                   show_components: bool = False,
-                                   rotate_labels: bool = True,
-                                   **kwargs) -> Tuple[plt.Figure, plt.Axes]:
+def plot_namd_fep_multi_comparison(
+    system_results: Dict[str, Dict[str, np.ndarray]],
+    comparison_type: str = "ddG",
+    xlabel: str = "System",
+    ylabel: str = "ΔΔG (kcal/mol)",
+    title: str = "",
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+    show_components: bool = False,
+    rotate_labels: bool = True,
+    **kwargs,
+) -> Tuple[plt.Figure, plt.Axes]:
     """
     Compare NAMD FEP results across multiple systems/compounds.
 
@@ -490,9 +509,9 @@ def plot_namd_fep_multi_comparison(system_results: Dict[str, Dict[str, np.ndarra
     # Set up figure
     if figsize is None:
         if show_components:
-            figsize = get_standard_figsize('wide')
+            figsize = get_standard_figsize("wide")
         else:
-            figsize = get_standard_figsize('single')
+            figsize = get_standard_figsize("single")
 
     with plt.rc_context(get_publication_style()):
         fig, ax = plt.subplots(figsize=figsize)
@@ -500,17 +519,17 @@ def plot_namd_fep_multi_comparison(system_results: Dict[str, Dict[str, np.ndarra
         system_names = list(system_results.keys())
         n_systems = len(system_names)
 
-        if comparison_type == 'ddG':
+        if comparison_type == "ddG":
             # Plot binding free energies
             ddG_values = []
             ddG_errors = []
 
             for name in system_names:
                 result = system_results[name]
-                if 'ddG' in result:
-                    ddG_values.append(result['ddG'][0])  # First element is total dG
-                    if 'ddG_std' in result:
-                        ddG_errors.append(result['ddG_std'][0])
+                if "ddG" in result:
+                    ddG_values.append(result["ddG"][0])  # First element is total dG
+                    if "ddG_std" in result:
+                        ddG_errors.append(result["ddG_std"][0])
                     else:
                         ddG_errors.append(0)
                 else:
@@ -518,71 +537,81 @@ def plot_namd_fep_multi_comparison(system_results: Dict[str, Dict[str, np.ndarra
                     ddG_values.append(0)
                     ddG_errors.append(0)
 
-            colors = get_color_palette('default', n_colors=n_systems)
+            colors = get_color_palette("default", n_colors=n_systems)
             x = np.arange(n_systems)
 
-            bars = ax.bar(x, ddG_values, color=colors, alpha=0.8,
-                         edgecolor='black', linewidth=1.5,
-                         yerr=ddG_errors, capsize=8,
-                         error_kw={'linewidth': 2, 'capthick': 2})
+            bars = ax.bar(
+                x,
+                ddG_values,
+                color=colors,
+                alpha=0.8,
+                edgecolor="black",
+                linewidth=1.5,
+                yerr=ddG_errors,
+                capsize=8,
+                error_kw={"linewidth": 2, "capthick": 2},
+            )
 
             # Add value labels
             for bar, value, error in zip(bars, ddG_values, ddG_errors):
                 height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width() / 2., height,
-                       f'{value:.1f}',
-                       ha='center', va='bottom',
-                       fontsize=PUBLICATION_FONTS['bar_annotation'],
-                       weight='bold')
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{value:.1f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=PUBLICATION_FONTS["bar_annotation"],
+                    weight="bold",
+                )
 
             # Print values
             print(f"\nBinding Free Energies (ΔΔG):")
             for name, val, err in zip(system_names, ddG_values, ddG_errors):
                 print(f"  {name}: {val:7.2f} ± {err:.2f} kcal/mol")
 
-        elif comparison_type == 'decomposition' and show_components:
+        elif comparison_type == "decomposition" and show_components:
             # Plot energy decomposition for all systems
-            component_labels = ['ΔG', 'ΔElec', 'ΔvdW', 'ΔCouple']
+            component_labels = ["ΔG", "ΔElec", "ΔvdW", "ΔCouple"]
             n_components = 4
             width = 0.8 / n_components
 
             for i, name in enumerate(system_names):
                 result = system_results[name]
-                if 'ddG' in result:
-                    data = result['ddG'][:n_components]
-                    colors = get_color_palette('default', n_colors=n_components)
+                if "ddG" in result:
+                    data = result["ddG"][:n_components]
+                    colors = get_color_palette("default", n_colors=n_components)
 
                     for j, (val, comp, color) in enumerate(zip(data, component_labels, colors)):
-                        x_pos = i + (j - n_components/2 + 0.5) * width
-                        ax.bar(x_pos, val, width, color=color,
-                              alpha=0.8, edgecolor='black', linewidth=1)
+                        x_pos = i + (j - n_components / 2 + 0.5) * width
+                        ax.bar(x_pos, val, width, color=color, alpha=0.8, edgecolor="black", linewidth=1)
 
             # Add component legend
-            legend_handles = [plt.Rectangle((0,0),1,1, fc=c, ec='black', alpha=0.8)
-                            for c in get_color_palette('default', n_colors=n_components)]
-            ax.legend(legend_handles, component_labels,
-                     frameon=True, loc='best', fontsize=PUBLICATION_FONTS['legend'])
+            legend_handles = [
+                plt.Rectangle((0, 0), 1, 1, fc=c, ec="black", alpha=0.8)
+                for c in get_color_palette("default", n_colors=n_components)
+            ]
+            ax.legend(legend_handles, component_labels, frameon=True, loc="best", fontsize=PUBLICATION_FONTS["legend"])
 
         ax.set_xticks(np.arange(n_systems))
-        ax.set_xticklabels(system_names, fontsize=PUBLICATION_FONTS['tick_label'])
+        ax.set_xticklabels(system_names, fontsize=PUBLICATION_FONTS["tick_label"])
 
         if rotate_labels and n_systems > 5:
-            ax.set_xticklabels(system_names, rotation=45, ha='right',
-                             fontsize=PUBLICATION_FONTS['tick_label'])
+            ax.set_xticklabels(system_names, rotation=45, ha="right", fontsize=PUBLICATION_FONTS["tick_label"])
 
-        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
-        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
         if title:
-            ax.set_title(title, fontsize=PUBLICATION_FONTS['title'], weight='bold')
+            ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], weight="bold")
 
         # Add zero line
-        ax.axhline(y=0, color='black', linestyle='-', linewidth=2, alpha=0.5)
+        ax.axhline(y=0, color="black", linestyle="-", linewidth=2, alpha=0.5)
 
         # Remove top and right spines
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_linewidth(2)
-        ax.spines['bottom'].set_linewidth(2)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(2)
+        ax.spines["bottom"].set_linewidth(2)
 
         fig.tight_layout()
 
@@ -595,12 +624,14 @@ def plot_namd_fep_multi_comparison(system_results: Dict[str, Dict[str, np.ndarra
         return fig, ax
 
 
-def plot_namd_fep_full_analysis(results: Dict,
-                                 output_path: Optional[str] = None,
-                                 endpoint_cutoff_multiplier: float = 3.0,
-                                 check_linearity: bool = False,
-                                 figsize: Optional[Tuple[float, float]] = None,
-                                 **kwargs) -> Tuple[plt.Figure, Tuple]:
+def plot_namd_fep_full_analysis(
+    results: Dict,
+    output_path: Optional[str] = None,
+    endpoint_cutoff_multiplier: float = 3.0,
+    check_linearity: bool = False,
+    figsize: Optional[Tuple[float, float]] = None,
+    **kwargs,
+) -> Tuple[plt.Figure, Tuple]:
     """
     Create comprehensive 4-panel FEP analysis figure matching SciDraft-Studio reference.
 
@@ -641,11 +672,9 @@ def plot_namd_fep_full_analysis(results: Dict,
 
     with plt.rc_context(get_publication_style()):
         # Create 2x2 subplot layout
-        fig, ((ax_c_deriv, ax_c_accum), (ax_l_deriv, ax_l_accum)) = plt.subplots(
-            2, 2, figsize=figsize
-        )
+        fig, ((ax_c_deriv, ax_c_accum), (ax_l_deriv, ax_l_accum)) = plt.subplots(2, 2, figsize=figsize)
 
-        colors = get_color_palette('default', n_colors=2)
+        colors = get_color_palette("default", n_colors=2)
         color_complex = colors[0]
         color_ligand = colors[1]
 
@@ -654,19 +683,19 @@ def plot_namd_fep_full_analysis(results: Dict,
 
         # Process each phase
         for phase, color, ax_deriv, ax_accum in [
-            ('complex', color_complex, ax_c_deriv, ax_c_accum),
-            ('ligand', color_ligand, ax_l_deriv, ax_l_accum)
+            ("complex", color_complex, ax_c_deriv, ax_c_accum),
+            ("ligand", color_ligand, ax_l_deriv, ax_l_accum),
         ]:
-            if f'{phase}_raw_mean' not in results or f'{phase}_lambda' not in results:
+            if f"{phase}_raw_mean" not in results or f"{phase}_lambda" not in results:
                 logger.warning(f"No data for {phase} phase")
-                ax_deriv.text(0.5, 0.5, f'No {phase} data', ha='center', va='center')
-                ax_accum.text(0.5, 0.5, f'No {phase} data', ha='center', va='center')
+                ax_deriv.text(0.5, 0.5, f"No {phase} data", ha="center", va="center")
+                ax_accum.text(0.5, 0.5, f"No {phase} data", ha="center", va="center")
                 continue
 
             # Get data (now using STD instead of SEM)
-            dG_accum_mean = results[f'{phase}_raw_mean']
-            dG_accum_std = results[f'{phase}_raw_std']  # Changed from _sem to _std
-            lambda_windows = results[f'{phase}_lambda']
+            dG_accum_mean = results[f"{phase}_raw_mean"]
+            dG_accum_std = results[f"{phase}_raw_std"]  # Changed from _sem to _std
+            lambda_windows = results[f"{phase}_lambda"]
 
             lambda_start = lambda_windows[:, 0]
             lambda_stop = lambda_windows[:, 1]
@@ -686,23 +715,35 @@ def plot_namd_fep_full_analysis(results: Dict,
             final_dG_std = dG_accum_std[-1]  # Changed from _sem to _std
 
             # Plot derivative (dG/dλ) with STD error bands
-            ax_deriv.plot(lambda_mid, dG_dlambda_mean,
-                         marker='o', linewidth=3, markersize=8,
-                         color=color, label=f'{phase.capitalize()} (Step)', linestyle='-')
-            ax_deriv.fill_between(lambda_mid,
-                                 dG_dlambda_mean - dG_dlambda_std,
-                                 dG_dlambda_mean + dG_dlambda_std,
-                                 color=color, alpha=0.2)
-            ax_deriv.axhline(y=0, color='gray', linestyle='--', linewidth=1.5, alpha=0.5)
+            ax_deriv.plot(
+                lambda_mid,
+                dG_dlambda_mean,
+                marker="o",
+                linewidth=3,
+                markersize=8,
+                color=color,
+                label=f"{phase.capitalize()} (Step)",
+                linestyle="-",
+            )
+            ax_deriv.fill_between(
+                lambda_mid, dG_dlambda_mean - dG_dlambda_std, dG_dlambda_mean + dG_dlambda_std, color=color, alpha=0.2
+            )
+            ax_deriv.axhline(y=0, color="gray", linestyle="--", linewidth=1.5, alpha=0.5)
 
             # Plot accumulated ΔG with STD error bands
-            ax_accum.plot(lambda_mid, dG_accum_mean,
-                         marker='o', linewidth=3, markersize=8,
-                         color=color, label=f'{phase.capitalize()} (Accum)', linestyle='-')
-            ax_accum.fill_between(lambda_mid,
-                                 dG_accum_mean - dG_accum_std,
-                                 dG_accum_mean + dG_accum_std,
-                                 color=color, alpha=0.2)
+            ax_accum.plot(
+                lambda_mid,
+                dG_accum_mean,
+                marker="o",
+                linewidth=3,
+                markersize=8,
+                color=color,
+                label=f"{phase.capitalize()} (Accum)",
+                linestyle="-",
+            )
+            ax_accum.fill_between(
+                lambda_mid, dG_accum_mean - dG_accum_std, dG_accum_mean + dG_accum_std, color=color, alpha=0.2
+            )
 
             # End-point catastrophe check
             middle_idx = n_windows // 2
@@ -712,13 +753,20 @@ def plot_namd_fep_full_analysis(results: Dict,
             epc_windows = []
             for idx in range(n_windows):
                 # Check first 5 and last 5 windows
-                if (idx < 5 or idx >= n_windows - 5):
+                if idx < 5 or idx >= n_windows - 5:
                     if abs(dG_dlambda_mean[idx]) > dynamic_cutoff:
                         epc_windows.append(f"λ≈{lambda_mid[idx]:.2f}")
                         # Mark with red star
-                        ax_deriv.scatter(lambda_mid[idx], dG_dlambda_mean[idx],
-                                       marker='*', s=600, color='red',
-                                       zorder=10, edgecolor='black', linewidths=2)
+                        ax_deriv.scatter(
+                            lambda_mid[idx],
+                            dG_dlambda_mean[idx],
+                            marker="*",
+                            s=600,
+                            color="red",
+                            zorder=10,
+                            edgecolor="black",
+                            linewidths=2,
+                        )
 
             if epc_windows:
                 quality_warnings.append(
@@ -727,7 +775,7 @@ def plot_namd_fep_full_analysis(results: Dict,
 
             # Linearity check (optional)
             if check_linearity:
-                for region, name in [(lambda_mid < 0.5, 'VdW'), (lambda_mid >= 0.5, 'Elec')]:
+                for region, name in [(lambda_mid < 0.5, "VdW"), (lambda_mid >= 0.5, "Elec")]:
                     if np.sum(region) > 1:
                         x = lambda_mid[region]
                         y = dG_dlambda_mean[region]
@@ -742,57 +790,59 @@ def plot_namd_fep_full_analysis(results: Dict,
                             )
 
             # Style derivative plot
-            ax_deriv.set_ylabel('\u0394G/\u0394\u03bb (kcal/mol)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+            ax_deriv.set_ylabel(
+                "\u0394G/\u0394\u03bb (kcal/mol)", fontsize=PUBLICATION_FONTS["axis_label"], weight="bold"
+            )
             ax_deriv.set_xlim(0, 1)
             ax_deriv.grid(True, alpha=0.3)
             # Keep all four spines visible
-            ax_deriv.spines['left'].set_linewidth(2)
-            ax_deriv.spines['bottom'].set_linewidth(2)
-            ax_deriv.spines['top'].set_linewidth(2)
-            ax_deriv.spines['right'].set_linewidth(2)
+            ax_deriv.spines["left"].set_linewidth(2)
+            ax_deriv.spines["bottom"].set_linewidth(2)
+            ax_deriv.spines["top"].set_linewidth(2)
+            ax_deriv.spines["right"].set_linewidth(2)
 
             # Only show x-label on bottom row
-            if phase == 'ligand':
-                ax_deriv.set_xlabel('\u03bb', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+            if phase == "ligand":
+                ax_deriv.set_xlabel("\u03bb", fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
 
             # Style accumulated plot
-            ax_accum.set_ylabel('\u0394G (kcal/mol)', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+            ax_accum.set_ylabel("\u0394G (kcal/mol)", fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
             ax_accum.set_xlim(0, 1)
             ax_accum.grid(True, alpha=0.3)
             # Keep all four spines visible
-            ax_accum.spines['left'].set_linewidth(2)
-            ax_accum.spines['bottom'].set_linewidth(2)
-            ax_accum.spines['top'].set_linewidth(2)
-            ax_accum.spines['right'].set_linewidth(2)
+            ax_accum.spines["left"].set_linewidth(2)
+            ax_accum.spines["bottom"].set_linewidth(2)
+            ax_accum.spines["top"].set_linewidth(2)
+            ax_accum.spines["right"].set_linewidth(2)
 
             # Only show x-label on bottom row
-            if phase == 'ligand':
-                ax_accum.set_xlabel('\u03bb', fontsize=PUBLICATION_FONTS['axis_label'], weight='bold')
+            if phase == "ligand":
+                ax_accum.set_xlabel("\u03bb", fontsize=PUBLICATION_FONTS["axis_label"], weight="bold")
 
             # Add legends instead of text labels
-            ax_deriv.legend(loc='upper left', frameon=True, fontsize=PUBLICATION_FONTS['legend'])
-            ax_accum.legend(loc='upper left', frameon=True, fontsize=PUBLICATION_FONTS['legend'])
+            ax_deriv.legend(loc="upper left", frameon=True, fontsize=PUBLICATION_FONTS["legend"])
+            ax_accum.legend(loc="upper left", frameon=True, fontsize=PUBLICATION_FONTS["legend"])
 
             # Add to summary (no printing)
-            n_repeats = results['statistics'].get(f'n_{phase}_repeats', 0)
+            n_repeats = results["statistics"].get(f"n_{phase}_repeats", 0)
             summary_lines.append(
                 f"{phase.capitalize()}: ΔG = {final_dG:.2f} ± {final_dG_std:.2f} kcal/mol (n={n_repeats})"
             )
 
         # Add binding free energy if both phases present
-        if 'statistics' in results:
-            stats = results['statistics']
-            if 'binding_ddG' in stats:
-                ddG = stats['binding_ddG']
-                ddG_std = stats['binding_ddG_std']
+        if "statistics" in results:
+            stats = results["statistics"]
+            if "binding_ddG" in stats:
+                ddG = stats["binding_ddG"]
+                ddG_std = stats["binding_ddG_std"]
                 summary_lines.append(f"\nBinding ΔΔG = {ddG:.2f} ± {ddG_std:.2f} kcal/mol")
 
         # Create summary text
-        summary_text = "NAMD FEP Analysis Results\n" + "="*30 + "\n"
+        summary_text = "NAMD FEP Analysis Results\n" + "=" * 30 + "\n"
         summary_text += "\n".join(summary_lines)
 
         if quality_warnings:
-            summary_text += "\n\nQuality Warnings:\n" + "="*30 + "\n"
+            summary_text += "\n\nQuality Warnings:\n" + "=" * 30 + "\n"
             summary_text += "\n".join(quality_warnings)
         else:
             summary_text += "\n\n✓ All quality checks passed"
@@ -808,9 +858,10 @@ def plot_namd_fep_full_analysis(results: Dict,
 
             # Save summary to separate text file
             from pathlib import Path
-            output_base = Path(output_path).with_suffix('')
+
+            output_base = Path(output_path).with_suffix("")
             summary_file = f"{output_base}_analysis_summary.txt"
-            with open(summary_file, 'w') as f:
+            with open(summary_file, "w") as f:
                 f.write(summary_text)
             logger.info(f"Analysis summary saved: {summary_file}")
 
