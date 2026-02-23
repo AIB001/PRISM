@@ -17,7 +17,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 - **Complete MDP Files**: Pre-configured protocols for minimization, equilibration, and production
 - **Metal Ion Support**: Intelligent recognition and handling of metal ions (Zn, Ca, Mg, Fe, etc.) with distance-based filtering
 - **Advanced Protein Cleaning**: Smart removal of heteroatoms and crystallization artifacts while preserving structural metals
-- **Protonation State Optimization**: Optional hydrogen position optimization using Meeko with pH-based protonation states
+- **Protonation State Prediction**: Optional pKa-based histidine protonation with PROPKA (HID/HIE/HIP assignment)
 - **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
 
 ## Installation
@@ -77,11 +77,13 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 
 ### Optional Dependencies
 
-#### For Protein Protonation Optimization:
+#### For Protonation State Prediction (optional):
 
 ```bash
-# Meeko for advanced protonation state optimization (optional)
-pip install meeko
+# PROPKA for pKa-based histidine protonation (optional)
+conda install -c conda-forge propka
+# or
+pip install propka>=3.4.0
 
 # Or install with PRISM protonation extras
 pip install -e .[protonation]
@@ -495,22 +497,23 @@ The cleaner automatically handles GROMACS requirements:
 - **Chain reassignment**: Proteins and metals are placed in separate chains for pdb2gmx compatibility
 - **Terminal atom fixing**: Automatic correction of C-terminal oxygen atoms
 
-### Protonation State Optimization
+### Protonation State Prediction (PROPKA)
 
-PRISM can optionally optimize hydrogen positions and protonation states using the Meeko toolkit, providing more accurate starting structures for simulations.
+PRISM can optionally use PROPKA to predict pKa values and assign histidine protonation states (HID/HIE/HIP) at a target pH. It renames residues in the PDB, and GROMACS `pdb2gmx -ignh` regenerates hydrogens based on those states.
 
 #### Features
 
-- **Meeko Integration**: Uses `reduce2.py` for initial hydrogen optimization and `mk_prepare_receptor.py` for final structure processing
-- **pH-based optimization**: Optimizes protonation states for target pH
-- **Histidine control**: Configurable histidine protonation states (auto, HID, HIE, HIP)
-- **Validation**: Checks for metals, hydrogens, and histidine residues
+- **PROPKA integration**: pKa-based histidine state prediction
+- **pH-based control**: Choose target pH for prediction
+- **GROMACS-ready**: Histidine renaming to HID/HIE/HIP for `pdb2gmx`
 
 #### Requirements
 
 ```bash
-# Install Meeko (required for protonation)
-pip install meeko
+# Install PROPKA (required for protonation prediction)
+conda install -c conda-forge propka
+# or
+pip install propka>=3.4.0
 
 # Or install with PRISM protonation extras
 pip install -e .[protonation]
@@ -518,13 +521,8 @@ pip install -e .[protonation]
 
 #### Protonation Control
 
-- **Target pH**: Configurable pH for protonation state optimization (default: 7.0)
-- **Histidine states**: Control histidine protonation:
-  - `auto` (default): Automatic selection based on local environment
-  - `HID`: Proton on ND1 (neutral, H-bond donor)
-  - `HIE`: Proton on NE2 (neutral, H-bond donor)
-  - `HIP`: Protonated on both ND1 and NE2 (positively charged)
-- **Existing hydrogens**: Option to preserve or replace existing hydrogen atoms
+- **Method**: Choose `gromacs` (default) or `propka`
+- **Target pH**: Configurable pH for PROPKA prediction (default: 7.0)
 
 ## Configuration
 
@@ -536,7 +534,7 @@ PRISM uses YAML configuration files for customization. Key parameters include:
 - **Box settings**: Size, shape, solvation
 - **Output controls**: Trajectory frequency, compression
 - **Protein preparation**: Advanced cleaning and ion handling options
-- **Protonation**: Optional hydrogen optimization with Meeko
+- **Protonation**: Optional pKa-based histidine protonation with PROPKA
 
 ### Protein Preparation Configuration
 
@@ -552,12 +550,10 @@ protein_preparation:
 ### Protonation Configuration
 
 ```yaml
-# Protonation state optimization
+# Protonation state prediction
 protonation:
-  optimize: true             # Use Meeko for optimization
-  ph: 7.0                  # Target pH
-  preserve_existing_h: false   # Keep existing hydrogens
-  his_state: auto           # Histidine: auto, HID, HIE, or HIP
+  method: gromacs  # 'gromacs' (default) or 'propka'
+  ph: 7.0          # Target pH for PROPKA pKa prediction
 ```
 
 See `configs/default.yaml` for a complete example.
@@ -666,10 +662,10 @@ PRISM generates a complete set of files ready for MD simulation:
 
 7. **Protein Preparation Issues**:
 
-   **Meeko Not Available**:
-   - **Error**: "Meeko not available for protonation optimization"
-   - **Solution**: Install with `pip install meeko` or `pip install -e .[protonation]`
-   - **Note**: PRISM will automatically fall back to basic cleaning if Meeko is not available
+   **PROPKA Not Available**:
+   - **Error**: "PROPKA not found" or similar
+   - **Solution**: Install with `conda install -c conda-forge propka` or `pip install propka>=3.4.0` (or `pip install -e .[protonation]`)
+   - **Note**: If you do not want PROPKA, keep `protonation.method: gromacs` (default)
 
    **Metal Ions Removed by Distance**:
    - **Message**: "Removed ZN at distance 6.2 Å from protein"
