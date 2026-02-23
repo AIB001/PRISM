@@ -25,12 +25,14 @@ References:
 """
 
 import os
+import re
 import subprocess
 import logging
 import tempfile
 import shutil
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, Set
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,126 @@ PROPKA_TO_GROMACS = {
     "N+ ": "N+",  # N-terminus
     "C- ": "C-",  # C-terminus
 }
+
+
+# Preferred residue name aliases per force field (checked against aminoacids.rtp)
+PROTONATION_ALIASES = {
+    # Histidine: Amber uses HID/HIE/HIP, CHARMM uses HSD/HSE/HSP
+    "HID": ["HID", "HSD"],
+    "HIE": ["HIE", "HSE"],
+    "HIP": ["HIP", "HSP"],
+    # Protonated acidic residues
+    "ASH": ["ASH", "ASPP", "ASPH"],
+    "GLH": ["GLH", "GLUP", "GLUH"],
+    # Deprotonated cysteine
+    "CYM": ["CYM", "CYD"],
+    # Deprotonated tyrosine (rare)
+    "TYH": ["TYH", "TYM"],
+}
+
+PROTONATION_FALLBACKS = {
+    # If neutral lysine is unavailable, fall back to LYS (charged)
+    "LYN": "LYS",
+    # If deprotonated tyrosine is unavailable, fall back to TYR
+    "TYH": "TYR",
+}
+
+
+def _ff_rtp_path(ff_info: Optional[Dict[str, Any]]) -> Optional[Path]:
+    """Get aminoacids.rtp path for a force field info dict."""
+    if not ff_info:
+        return None
+    ff_path = ff_info.get("path") or ff_info.get("dir")
+    if not ff_path:
+        return None
+    ff_dir = Path(ff_path)
+    if not ff_dir.is_dir():
+        return None
+    rtp = ff_dir / "aminoacids.rtp"
+    return rtp if rtp.exists() else None
+
+
+@lru_cache(maxsize=16)
+def _load_rtp_residue_names(rtp_path_str: str) -> Set[str]:
+    """Parse residue names from aminoacids.rtp."""
+    names: Set[str] = set()
+    try:
+        with open(rtp_path_str, "r") as f:
+            for line in f:
+                match = re.match(r"^\s*\[\s*([A-Za-z0-9+\-]+)\s*\]", line)
+                if match:
+                    names.add(match.group(1))
+    except Exception as exc:
+        logger.warning(f"Failed to parse rtp file {rtp_path_str}: {exc}")
+    return names
+
+
+def get_ff_residue_names(ff_info: Optional[Dict[str, Any]]) -> Optional[Set[str]]:
+    """Return residue names defined in aminoacids.rtp for a force field."""
+    rtp_path = _ff_rtp_path(ff_info)
+    if not rtp_path:
+        return None
+    return _load_rtp_residue_names(str(rtp_path))
+
+
+def resolve_protonation_resname(
+    original_resname: str, desired_state: str, ff_info: Optional[Dict[str, Any]]
+) -> Tuple[str, Optional[str]]:
+    """
+    Resolve a protonation state name to a force-field-compatible residue name.
+
+    Returns (resolved_name, note). If note is not None, a mapping/fallback occurred.
+    """
+    ff_residues = get_ff_residue_names(ff_info)
+    if not ff_residues:
+        return desired_state, None
+
+    ff_name = ""
+    if ff_info:
+        ff_name = str(ff_info.get("name") or ff_info.get("dir") or "").lower()
+    is_charmm = "charmm" in ff_name
+
+    if desired_state in ff_residues:
+        # CHARMM: HIP is phosphohistidine; prefer HSP for protonated His
+        if is_charmm and desired_state == "HIP" and "HSP" in ff_residues:
+            return "HSP", "HIP->HSP (CHARMM protonated His)"
+        return desired_state, None
+
+    aliases = list(PROTONATION_ALIASES.get(desired_state, []))
+    if is_charmm:
+        if desired_state == "HIP":
+            aliases = ["HSP"]
+        elif desired_state == "HID":
+            aliases = ["HSD", "HID"]
+        elif desired_state == "HIE":
+            aliases = ["HSE", "HIE"]
+
+    for alt in aliases:
+        if alt in ff_residues:
+            return alt, f"{desired_state}->{alt}"
+
+    if original_resname and original_resname in ff_residues:
+        return original_resname, f"{desired_state}->{original_resname} (fallback)"
+
+    fallback = PROTONATION_FALLBACKS.get(desired_state)
+    if fallback and fallback in ff_residues:
+        return fallback, f"{desired_state}->{fallback} (fallback)"
+
+    return desired_state, f"{desired_state} (unmapped)"
+
+
+def default_histidine_name(ff_info: Optional[Dict[str, Any]]) -> str:
+    """
+    Pick a neutral histidine name supported by the selected force field.
+    Preference: HIE (Amber) -> HSE (CHARMM) -> HIS -> HSD.
+    """
+    ff_residues = get_ff_residue_names(ff_info)
+    if not ff_residues:
+        return "HIE"
+    for candidate in ("HIE", "HSE", "HIS", "HSD"):
+        if candidate in ff_residues:
+            return candidate
+    return "HIS"
 
 
 class PropkaProtonator:
@@ -360,7 +482,7 @@ class PropkaProtonator:
         else:
             return res_name, is_certain
 
-    def rename_histidines(self, pdb_file: str, output_file: str) -> Dict:
+    def rename_histidines(self, pdb_file: str, output_file: str, ff_info: Optional[Dict[str, Any]] = None) -> Dict:
         """
         Predict protonation states and rename HIS residues in PDB file.
 
@@ -373,6 +495,8 @@ class PropkaProtonator:
             Path to input PDB file
         output_file : str
             Path to output PDB file with renamed residues
+        ff_info : dict, optional
+            Force field info dict (used to map residue names to available rtp entries)
 
         Returns
         -------
@@ -404,7 +528,10 @@ class PropkaProtonator:
                 key = (chain, resnum)
 
                 if key in his_states:
-                    new_name = his_states[key]
+                    desired = his_states[key]
+                    new_name, note = resolve_protonation_resname("HIS", desired, ff_info)
+                    if note and self.verbose:
+                        logger.info(f"  HIS {chain}:{resnum} {note}")
                     line = line[:17] + f"{new_name:3s}" + line[20:]
                     stats["renamed"][key] = new_name
 
@@ -416,7 +543,11 @@ class PropkaProtonator:
         return stats
 
     def optimize_protein_protonation(
-        self, input_pdb: str, output_pdb: str, work_dir: Optional[str] = None
+        self,
+        input_pdb: str,
+        output_pdb: str,
+        work_dir: Optional[str] = None,
+        ff_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Predict and apply protonation states for all ionizable residues.
@@ -433,6 +564,8 @@ class PropkaProtonator:
             Path to output PDB file with protonation states applied
         work_dir : str, optional
             Working directory for PROPKA output
+        ff_info : dict, optional
+            Force field info dict (used to map residue names to available rtp entries)
 
         Returns
         -------
@@ -452,7 +585,15 @@ class PropkaProtonator:
             chain = pred["chain"]
             resnum = pred["resnum"]
 
-            new_state, certain = self.determine_protonation_state(resname, pka)
+            desired_state, certain = self.determine_protonation_state(resname, pka)
+            mapped_state, note = resolve_protonation_resname(resname, desired_state, ff_info)
+            if note:
+                msg = f"Residue {chain}:{resnum} {resname}: {note}"
+                if "fallback" in note or "unmapped" in note:
+                    logger.warning(msg)
+                elif self.verbose:
+                    logger.info(msg)
+            new_state = mapped_state
 
             if new_state != resname:
                 renames[(chain, resnum, resname)] = new_state
@@ -482,12 +623,16 @@ class PropkaProtonator:
             with open(output_pdb, "w") as f:
                 f.writelines(new_lines)
         else:
-            shutil.copy2(input_pdb, output_pdb)
+            # If input and output are the same path, no action needed
+            if Path(input_pdb).resolve() != Path(output_pdb).resolve():
+                shutil.copy2(input_pdb, output_pdb)
 
         return {"predictions": predictions, "renamed": renames, "summary": summary}
 
 
-def optimize_protein_protonation_propka(input_pdb: str, output_pdb: str, ph: float = 7.0) -> Dict[str, Any]:
+def optimize_protein_protonation_propka(
+    input_pdb: str, output_pdb: str, ph: float = 7.0, ff_info: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Convenience function to optimize protein protonation using PROPKA.
 
@@ -499,6 +644,8 @@ def optimize_protein_protonation_propka(input_pdb: str, output_pdb: str, ph: flo
         Path to output PDB file
     ph : float
         Target pH (default: 7.0)
+    ff_info : dict, optional
+        Force field info dict (used to map residue names to available rtp entries)
 
     Returns
     -------
@@ -506,4 +653,4 @@ def optimize_protein_protonation_propka(input_pdb: str, output_pdb: str, ph: flo
         Results from protonation prediction
     """
     protonator = PropkaProtonator(ph=ph, verbose=True)
-    return protonator.optimize_protein_protonation(input_pdb, output_pdb)
+    return protonator.optimize_protein_protonation(input_pdb, output_pdb, ff_info=ff_info)

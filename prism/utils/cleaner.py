@@ -134,6 +134,8 @@ class ProteinCleaner:
         keep_custom_metals: Optional[List[str]] = None,
         remove_custom_metals: Optional[List[str]] = None,
         verbose: bool = True,
+        drop_nterm_met: Optional[str] = None,
+        forcefield_name: Optional[str] = None,
     ):
         """
         Initialize the ProteinCleaner.
@@ -170,6 +172,8 @@ class ProteinCleaner:
         self.keep_crystal_water = keep_crystal_water
         self.remove_artifacts = remove_artifacts
         self.verbose = verbose
+        self.drop_nterm_met = drop_nterm_met
+        self.forcefield_name = forcefield_name
 
         # Build custom metal sets
         self.structural_metals = self.STRUCTURAL_METALS.copy()
@@ -190,6 +194,9 @@ class ProteinCleaner:
             "metals_kept": 0,
             "metals_removed_by_distance": 0,
             "artifacts_removed": 0,
+            "nterm_met_removed": 0,
+            "nterm_met_atoms_removed": 0,
+            "nterm_met_chains": [],
         }
 
     def clean_pdb(self, input_pdb: str, output_pdb: str) -> dict:
@@ -222,6 +229,9 @@ class ProteinCleaner:
 
         # Read and parse PDB file
         protein_lines, hetatm_lines = self._read_pdb(input_pdb)
+
+        # Optionally drop N-terminal MET residues
+        protein_lines = self._handle_nterm_met(protein_lines)
 
         # Extract protein coordinates for distance calculations
         protein_coords = self._extract_protein_coords(protein_lines)
@@ -263,6 +273,74 @@ class ProteinCleaner:
                     self.stats["total_atoms"] += 1
 
         return protein_lines, hetatm_lines
+
+    def _handle_nterm_met(self, protein_lines: List[str]) -> List[str]:
+        """Optionally remove N-terminal MET residues per chain."""
+        mode = (self.drop_nterm_met or "keep").lower()
+        if mode not in {"keep", "drop", "auto"}:
+            mode = "keep"
+
+        # Identify first residue per chain
+        first_res = {}
+        for line in protein_lines:
+            if not line.startswith("ATOM"):
+                continue
+            chain = line[21]  # keep raw chain char (can be space)
+            if chain in first_res:
+                continue
+            resname = line[17:20].strip()
+            resnum = line[22:26]
+            icode = line[26:27]
+            first_res[chain] = (resname, resnum, icode)
+
+        met_chains = {
+            chain: (resnum, icode) for chain, (resname, resnum, icode) in first_res.items() if resname == "MET"
+        }
+        if not met_chains:
+            return protein_lines
+
+        ff_name = (self.forcefield_name or "").lower()
+        should_drop = mode == "drop" or (mode == "auto" and "charmm36" in ff_name)
+
+        if not should_drop:
+            if self.verbose:
+                chains = ",".join([c.strip() or "-" for c in met_chains.keys()])
+                print(f"  Detected N-terminal MET on chain(s): {chains}")
+                print("  Tip: set protein_preparation.nterm_met = 'drop' to remove them")
+            return protein_lines
+
+        # Drop N-terminal MET atoms
+        new_lines = []
+        removed_atoms = 0
+        removed_chains = []
+        for line in protein_lines:
+            if not line.startswith("ATOM"):
+                new_lines.append(line)
+                continue
+            chain = line[21]
+            if chain not in met_chains:
+                new_lines.append(line)
+                continue
+            resnum, icode = met_chains[chain]
+            if line[22:26] == resnum and line[26:27] == icode and line[17:20].strip() == "MET":
+                removed_atoms += 1
+                if chain not in removed_chains:
+                    removed_chains.append(chain)
+                continue
+            new_lines.append(line)
+
+        if removed_atoms > 0:
+            self.stats["nterm_met_removed"] = len(removed_chains)
+            self.stats["nterm_met_atoms_removed"] = removed_atoms
+            self.stats["nterm_met_chains"] = [c.strip() or "-" for c in removed_chains]
+            self.stats["protein_atoms"] -= removed_atoms
+            self.stats["total_atoms"] -= removed_atoms
+            if self.verbose:
+                chains = ",".join(self.stats["nterm_met_chains"])
+                reason = "auto (CHARMM36)" if mode == "auto" else "user request"
+                print(f"  Removed N-terminal MET on chain(s): {chains} ({reason})")
+
+        return new_lines
 
     def _extract_protein_coords(self, protein_lines: List[str]) -> np.ndarray:
         """
@@ -611,6 +689,9 @@ class ProteinCleaner:
             out.write(f"REMARK   Distance cutoff: {self.distance_cutoff} A\n")
             out.write(f"REMARK   Keep crystal water: {self.keep_crystal_water}\n")
             out.write(f"REMARK   Remove crystallization artifacts: {self.remove_artifacts}\n")
+            if self.stats.get("nterm_met_removed", 0) > 0:
+                chains = ",".join(self.stats.get("nterm_met_chains", []))
+                out.write(f"REMARK   Removed N-terminal MET on chain(s): {chains}\n")
             if metal_atom_lines:
                 out.write(f"REMARK   Converted {len(metal_atom_lines)} metal HETATM to ATOM for pdb2gmx\n")
                 out.write(f"REMARK   Metals integrated into their respective protein chains\n")
@@ -643,6 +724,9 @@ class ProteinCleaner:
         print("\n=== Cleaning Statistics ===")
         print(f"Total atoms read: {self.stats['total_atoms']}")
         print(f"Protein atoms: {self.stats['protein_atoms']}")
+        if self.stats.get("nterm_met_removed", 0) > 0:
+            chains = ",".join(self.stats.get("nterm_met_chains", []))
+            print(f"N-terminal MET removed: {self.stats['nterm_met_removed']} chain(s) ({chains})")
         print(f"Water molecules removed: {self.stats['water_removed']}")
         if self.stats["water_kept"] > 0:
             print(f"Water molecules kept: {self.stats['water_kept']}")
@@ -659,7 +743,13 @@ class ProteinCleaner:
 
 
 def clean_protein_pdb(
-    input_pdb: str, output_pdb: str, ion_mode: str = "smart", distance_cutoff: float = 5.0, **kwargs
+    input_pdb: str,
+    output_pdb: str,
+    ion_mode: str = "smart",
+    distance_cutoff: float = 5.0,
+    drop_nterm_met: Optional[str] = None,
+    forcefield_name: Optional[str] = None,
+    **kwargs,
 ) -> dict:
     """
     Convenience function to clean a protein PDB file.
@@ -696,7 +786,13 @@ def clean_protein_pdb(
     >>> # Custom distance cutoff
     >>> stats = clean_protein_pdb('input.pdb', 'output.pdb', distance_cutoff=8.0)
     """
-    cleaner = ProteinCleaner(ion_mode=ion_mode, distance_cutoff=distance_cutoff, **kwargs)
+    cleaner = ProteinCleaner(
+        ion_mode=ion_mode,
+        distance_cutoff=distance_cutoff,
+        drop_nterm_met=drop_nterm_met,
+        forcefield_name=forcefield_name,
+        **kwargs,
+    )
     return cleaner.clean_pdb(input_pdb, output_pdb)
 
 

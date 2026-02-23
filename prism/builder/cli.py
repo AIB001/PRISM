@@ -200,6 +200,15 @@ Example usage:
     ion_group.add_argument("--positive-ion", "-pion", default="NA", help="Positive ion type (default: NA)")
     ion_group.add_argument("--negative-ion", "-nion", default="CL", help="Negative ion type (default: CL)")
 
+    # Protein preparation options
+    prep_group = parser.add_argument_group("Protein preparation")
+    prep_group.add_argument(
+        "--nterm-met",
+        choices=["keep", "drop", "auto"],
+        default="keep",
+        help="Handle N-terminal MET residues: keep (default), drop, auto (drop for CHARMM36*)",
+    )
+
     # Energy minimization
     em_group = parser.add_argument_group("Energy minimization")
     em_group.add_argument(
@@ -354,6 +363,9 @@ ions:
   concentration: 0.15
   positive_ion: NA
   negative_ion: CL
+
+protein_preparation:
+  nterm_met: keep  # keep, drop, or auto (drop for CHARMM36*)
 
 constraints:
   algorithm: lincs
@@ -527,6 +539,8 @@ pressure_coupling:
         config_overrides.setdefault("ions", {})["positive_ion"] = args.positive_ion
     if args.negative_ion != "CL":
         config_overrides.setdefault("ions", {})["negative_ion"] = args.negative_ion
+    if args.nterm_met != "keep":
+        config_overrides.setdefault("protein_preparation", {})["nterm_met"] = args.nterm_met
 
     # Energy minimization overrides
     if args.em_tolerance != 200.0:

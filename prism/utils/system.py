@@ -263,7 +263,7 @@ class SystemBuilder:
 
         print(f"\n  Applying PROPKA pKa-based residue renaming (pH {ph})...")
         protonator = PropkaProtonator(ph=ph, verbose=True)
-        stats = protonator.optimize_protein_protonation(pdb_file, pdb_file)
+        stats = protonator.optimize_protein_protonation(pdb_file, pdb_file, ff_info=self.ff_info)
 
         renamed = stats.get("renamed", {})
         if renamed:
@@ -296,10 +296,22 @@ class SystemBuilder:
         if not (ff_dir / "cmap.itp").exists():
             return False
 
-        # Read and rename HIS → HIE (default HIE protonation at neutral pH)
+        from .protonation import default_histidine_name, get_ff_residue_names
+
+        ff_residues = get_ff_residue_names(ff_info)
+        if not ff_residues:
+            return False
+
+        target_name = default_histidine_name(ff_info)
+        # Only auto-rename for Amber-style histidines (HIE exists in rtp).
+        # For other force fields (e.g., CHARMM), keep interactive selection.
+        if target_name != "HIE":
+            return False
+
+        # Read and rename HIS → force-field default (neutral histidine)
         # PDB format (0-indexed): positions 17-19 = residue name (3 chars).
-        # Replace "HIS" with "HIE" (same width) so pdb2gmx uses the [ HIE ]
-        # rtp block directly and writes "HIE" as the residue name in topology.
+        # Replace "HIS" with the target name so pdb2gmx uses the correct rtp block
+        # and writes the residue name in the topology (avoids CMAP lookup errors).
         with open(pdb_file, "r") as f:
             lines = f.readlines()
 
@@ -311,13 +323,13 @@ class SystemBuilder:
                 chain = line[21].strip()
                 res_id = f"{chain}:{resnum}" if chain else resnum
                 renamed_residues.add(res_id)
-                line = line[:17] + "HIE" + line[20:]
+                line = line[:17] + f"{target_name:3s}" + line[20:]
             new_lines.append(line)
 
         if renamed_residues:
             with open(pdb_file, "w") as f:
                 f.writelines(new_lines)
-            print(f"  Renamed {len(renamed_residues)} HIS residue(s) → HIE for CMAP compatibility")
+            print(f"  Renamed {len(renamed_residues)} HIS residue(s) → {target_name} for CMAP compatibility")
             return True
 
         return False
@@ -1193,7 +1205,11 @@ class SystemBuilder:
             # Special protonation states
             "HID",
             "HIE",
-            "HIP",  # Histidine variants
+            "HIP",
+            "HSD",
+            "HSE",
+            "HSP",
+            "HSPM",  # Histidine variants
             "CYM",
             "CYX",  # Cysteine variants (deprotonated, disulfide)
             "LYN",  # Lysine neutral

@@ -104,3 +104,8 @@ tests/*
 
 # mypy
 .mypy_cache/
+.ruff_cache
+.qoder
+.playwright*
+
+

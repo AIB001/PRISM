@@ -159,7 +159,11 @@ def renumber_residues(
 
 
 def apply_pka_predictions(
-    input_pdb: str, output_pdb: str, predictions: Dict[str, Dict], ph: float = 7.0
+    input_pdb: str,
+    output_pdb: str,
+    predictions: Dict[str, Dict],
+    ph: float = 7.0,
+    ff_info: Optional[Dict[str, any]] = None,
 ) -> Dict[str, any]:
     """
     Apply PROPKA3 pKa predictions to a PDB file.
@@ -184,7 +188,7 @@ def apply_pka_predictions(
     dict
         Dictionary with renames applied and statistics
     """
-    from prism.utils.protonation import PropkaProtonator
+    from prism.utils.protonation import PropkaProtonator, resolve_protonation_resname
 
     input_path = Path(input_pdb)
     output_path = Path(output_pdb)
@@ -200,7 +204,8 @@ def apply_pka_predictions(
         if pka is None:
             continue
 
-        state, _ = protonator.determine_protonation_state(res_name, pka)
+        desired, _ = protonator.determine_protonation_state(res_name, pka)
+        state, _note = resolve_protonation_resname(res_name, desired, ff_info)
 
         if res_name != state and state != res_name + "H":
             renames[key] = {"from": res_name, "to": state}

@@ -620,6 +620,7 @@ class PRISMBuilder(PMFBuilderMixin):
             keep_crystal_water = self.config.get("protein_preparation", {}).get("keep_crystal_water", False)
         if remove_artifacts is None:
             remove_artifacts = self.config.get("protein_preparation", {}).get("remove_crystallization_artifacts", True)
+        nterm_met = self.config.get("protein_preparation", {}).get("nterm_met", "keep")
 
         # Get custom metals from config
         keep_custom = self.config.get("protein_preparation", {}).get("keep_custom_metals", [])
@@ -634,6 +635,8 @@ class PRISMBuilder(PMFBuilderMixin):
             keep_custom_metals=keep_custom if keep_custom else None,
             remove_custom_metals=remove_custom if remove_custom else None,
             verbose=True,
+            drop_nterm_met=nterm_met,
+            forcefield_name=self.forcefield["name"] if self.forcefield else None,
         )
 
         # Clean the protein
