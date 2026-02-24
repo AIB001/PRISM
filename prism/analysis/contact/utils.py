@@ -8,6 +8,7 @@ Common utility functions
 
 import numpy as np
 
+
 def convert_numpy_types(obj):
     """Recursively convert numpy types to native Python types for JSON serialization"""
     if isinstance(obj, np.integer):

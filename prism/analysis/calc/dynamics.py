@@ -9,7 +9,7 @@ and binding pocket volume analysis using MDTraj.
 
 import numpy as np
 import mdtraj as md
-from typing import List, Union, Optional, Tuple, Dict
+from typing import List, Union, Optional, Dict
 import logging
 from pathlib import Path
 
@@ -27,13 +27,15 @@ class LigandDynamicsAnalyzer:
         self._cache_dir = Path("./cache")
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def analyze_ligand_dynamics(self,
-                              topology: str,
-                              trajectory: Union[str, List[str]],
-                              ligand_name: str = "UNK",
-                              alignment_selection: str = "protein and name CA",
-                              key_residues: Optional[List[str]] = None,
-                              step: int = 1) -> Dict:
+    def analyze_ligand_dynamics(
+        self,
+        topology: str,
+        trajectory: Union[str, List[str]],
+        ligand_name: str = "UNK",
+        alignment_selection: str = "protein and name CA",
+        key_residues: Optional[List[str]] = None,
+        step: int = 1,
+    ) -> Dict:
         """
         Analyze ligand-specific dynamics including RMSD, distances, and pocket volume.
 
@@ -66,7 +68,9 @@ class LigandDynamicsAnalyzer:
             logger.info(f"Loaded trajectory: {traj.n_frames} frames, {traj.n_atoms} atoms")
 
             # Align trajectory - convert MDAnalysis syntax to MDTraj syntax
-            mdtraj_alignment_sel = alignment_selection.replace("segid PR1", "chainid 0").replace(" and name CA", " and name CA")
+            mdtraj_alignment_sel = alignment_selection.replace("segid PR1", "chainid 0").replace(
+                " and name CA", " and name CA"
+            )
             alignment_atoms = traj.topology.select(mdtraj_alignment_sel)
             if len(alignment_atoms) > 0:
                 with default_processor.configure_omp_threads():
@@ -74,7 +78,7 @@ class LigandDynamicsAnalyzer:
                 logger.info(f"Aligned trajectory using {len(alignment_atoms)} atoms")
 
             # Find ligand atoms
-            ligand_atoms = traj.topology.select(f'resname {ligand_name}')
+            ligand_atoms = traj.topology.select(f"resname {ligand_name}")
             if len(ligand_atoms) == 0:
                 logger.warning(f"No ligand atoms found for {ligand_name}")
                 return {}
@@ -93,12 +97,12 @@ class LigandDynamicsAnalyzer:
             pocket_volumes = self._calculate_pocket_volume(traj, key_residues or [])
 
             return {
-                'time': traj.time,
-                'ligand_rmsd': ligand_rmsd,
-                'distances': distance_data,
-                'pocket_volumes': pocket_volumes,
-                'ligand_name': ligand_name,
-                'n_frames': traj.n_frames
+                "time": traj.time,
+                "ligand_rmsd": ligand_rmsd,
+                "distances": distance_data,
+                "pocket_volumes": pocket_volumes,
+                "ligand_name": ligand_name,
+                "n_frames": traj.n_frames,
             }
 
         except Exception as e:
@@ -113,7 +117,7 @@ class LigandDynamicsAnalyzer:
 
             rmsd_values = []
             for frame_coords in ligand_coords:
-                rmsd = np.sqrt(np.mean((frame_coords - ref_coords)**2)) * 10  # Convert to Angstrom
+                rmsd = np.sqrt(np.mean((frame_coords - ref_coords) ** 2)) * 10  # Convert to Angstrom
                 rmsd_values.append(rmsd)
 
             return np.array(rmsd_values)
@@ -121,9 +125,9 @@ class LigandDynamicsAnalyzer:
             logger.error(f"Error calculating ligand RMSD: {e}")
             return np.array([])
 
-    def _calculate_key_distances(self, traj: md.Trajectory,
-                               ligand_atoms: np.ndarray,
-                               key_residues: List[str]) -> Dict[str, np.ndarray]:
+    def _calculate_key_distances(
+        self, traj: md.Trajectory, ligand_atoms: np.ndarray, key_residues: List[str]
+    ) -> Dict[str, np.ndarray]:
         """Calculate distances from ligand center of mass to key residues"""
         distance_data = {}
 
@@ -138,14 +142,14 @@ class LigandDynamicsAnalyzer:
                     res_atoms = []
 
                     # Try by residue name
-                    test_atoms = traj.topology.select(f'resname {res}')
+                    test_atoms = traj.topology.select(f"resname {res}")
                     if len(test_atoms) > 0:
                         res_atoms = test_atoms
                     else:
                         # Try by residue number (extract number part)
-                        res_num = ''.join(filter(str.isdigit, res))
+                        res_num = "".join(filter(str.isdigit, res))
                         if res_num:
-                            test_atoms = traj.topology.select(f'resid {res_num}')
+                            test_atoms = traj.topology.select(f"resid {res_num}")
                             if len(test_atoms) > 0:
                                 res_atoms = test_atoms
 
@@ -165,8 +169,7 @@ class LigandDynamicsAnalyzer:
 
         return distance_data
 
-    def _calculate_pocket_volume(self, traj: md.Trajectory,
-                               pocket_residues: List[str]) -> np.ndarray:
+    def _calculate_pocket_volume(self, traj: md.Trajectory, pocket_residues: List[str]) -> np.ndarray:
         """Calculate approximate binding pocket volume variation"""
         try:
             pocket_atoms = []
@@ -174,11 +177,11 @@ class LigandDynamicsAnalyzer:
             for res in pocket_residues:
                 try:
                     # Try different selection methods
-                    res_atoms = traj.topology.select(f'resname {res}')
+                    res_atoms = traj.topology.select(f"resname {res}")
                     if len(res_atoms) == 0:
-                        res_num = ''.join(filter(str.isdigit, res))
+                        res_num = "".join(filter(str.isdigit, res))
                         if res_num:
-                            res_atoms = traj.topology.select(f'resid {res_num}')
+                            res_atoms = traj.topology.select(f"resid {res_num}")
 
                     if len(res_atoms) > 0:
                         pocket_atoms.extend(res_atoms)
@@ -205,4 +208,4 @@ class LigandDynamicsAnalyzer:
 
         except Exception as e:
             logger.error(f"Error calculating pocket volume: {e}")
-            return np.zeros(getattr(traj, 'n_frames', 0))
+            return np.zeros(getattr(traj, "n_frames", 0))

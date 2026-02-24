@@ -10,7 +10,6 @@ from ...utils.residue import normalize_residue_to_3letter
 logger = logging.getLogger(__name__)
 
 
-
 class ContactAnalyzer:
     """Contact analysis module"""
 
@@ -18,117 +17,135 @@ class ContactAnalyzer:
         self.config = config
         self._cache_dir = Path(config.cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def identify_ligand_residue(self, traj):
         """Automatically identify ligand residue using PRISM utilities"""
         from ...utils.ligand import identify_ligand_residue
+
         return identify_ligand_residue(traj)
-    
+
     def get_heavy_atoms(self, residue):
         """Get heavy atom indices from residue"""
         heavy_atoms = []
         for atom in residue.atoms:
-            if atom.element.symbol != 'H':
+            if atom.element.symbol != "H":
                 heavy_atoms.append(atom.index)
         return heavy_atoms
-    
+
     def get_protein_heavy_atoms(self, traj):
         """Get protein heavy atom indices"""
         protein_atoms = []
         standard_aa = {
-            'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'ILE',
-            'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL'
+            "ALA",
+            "ARG",
+            "ASN",
+            "ASP",
+            "CYS",
+            "GLN",
+            "GLU",
+            "GLY",
+            "HIS",
+            "ILE",
+            "LEU",
+            "LYS",
+            "MET",
+            "PHE",
+            "PRO",
+            "SER",
+            "THR",
+            "TRP",
+            "TYR",
+            "VAL",
         }
-        
+
         for atom in traj.topology.atoms:
-            if (atom.residue.name in standard_aa and 
-                atom.element.symbol in ['C', 'N', 'O', 'S']):
+            if atom.residue.name in standard_aa and atom.element.symbol in ["C", "N", "O", "S"]:
                 protein_atoms.append(atom.index)
-        
+
         return protein_atoms
-    
+
     def calculate_contact_proportions(self, traj):
         """Calculate contact proportions using new method"""
         ligand_residue = self.identify_ligand_residue(traj)
         if not ligand_residue:
             raise ValueError("Could not identify ligand residue")
-        
+
         logger.warning(f"Analyzing ligand: {ligand_residue.name}{ligand_residue.resSeq}")
-        
+
         ligand_atoms = self.get_heavy_atoms(ligand_residue)
         protein_atoms = self.get_protein_heavy_atoms(traj)
-        
+
         atom_pairs = []
         pair_info = []
-        
+
         for lig_atom in ligand_atoms:
             for prot_atom in protein_atoms:
                 atom_pairs.append([lig_atom, prot_atom])
                 residue = traj.topology.atom(prot_atom).residue
                 residue_id = f"{residue.name}{residue.resSeq}"
                 pair_info.append((lig_atom, prot_atom, residue_id))
-        
+
         n_frames = traj.n_frames
         traj_sample = traj
         frame_indices = np.arange(n_frames)
-        
+
         # Configure OpenMP threads for parallel distance computation
         with default_processor.configure_omp_threads():
-            distances = md.compute_distances(traj_sample, atom_pairs, opt=True)        
+            distances = md.compute_distances(traj_sample, atom_pairs, opt=True)
         contact_threshold = self.config.contact_enter_threshold_nm
         contacts = distances < contact_threshold
-        
+
         contact_counts = {}
         residue_contacts = {}
         ligand_atom_contacts = {}
         residue_ligand_atoms = {}
         contact_distances = {}
-        
+
         for i, (lig_atom, prot_atom, residue_id) in enumerate(pair_info):
             contact_frames = int(np.sum(contacts[:, i]))
-            
+
             if contact_frames > 0:
                 contact_mask = contacts[:, i]
                 avg_distance = float(np.mean(distances[contact_mask, i]))
-                
+
                 key = (lig_atom, residue_id)
                 if key not in contact_counts:
                     contact_counts[key] = 0
                     contact_distances[key] = []
                 contact_counts[key] += contact_frames
                 contact_distances[key].append(avg_distance)
-                
+
                 if residue_id not in residue_contacts:
                     residue_contacts[residue_id] = 0
                     residue_ligand_atoms[residue_id] = {}
                 residue_contacts[residue_id] += contact_frames
-                
+
                 if lig_atom not in residue_ligand_atoms[residue_id]:
                     residue_ligand_atoms[residue_id][lig_atom] = 0
                 residue_ligand_atoms[residue_id][lig_atom] += contact_frames
-                
+
                 if lig_atom not in ligand_atom_contacts:
                     ligand_atom_contacts[lig_atom] = 0
                 ligand_atom_contacts[lig_atom] += contact_frames
-        
+
         n_frames_analyzed = len(frame_indices)
         contact_frequencies = {}
         avg_contact_distances = {}
-        
+
         for key, count in contact_counts.items():
             freq = float(count / n_frames_analyzed)
             contact_frequencies[key] = freq
             avg_contact_distances[key] = float(np.mean(contact_distances[key]))
-        
+
         residue_proportions = {}
         residue_avg_distances = {}
         residue_best_ligand_atoms = {}
-        
+
         for residue_id, count in residue_contacts.items():
             if residue_id in residue_ligand_atoms:
                 best_lig_atom = max(residue_ligand_atoms[residue_id].items(), key=lambda x: x[1])[0]
                 residue_best_ligand_atoms[residue_id] = best_lig_atom
-            
+
             ligand_atoms_contacting = set()
             residue_distances = []
             for (lig_atom, res_id), freq in contact_frequencies.items():
@@ -136,28 +153,28 @@ class ContactAnalyzer:
                     ligand_atoms_contacting.add(lig_atom)
                     if (lig_atom, res_id) in avg_contact_distances:
                         residue_distances.append(avg_contact_distances[(lig_atom, res_id)])
-            
+
             if ligand_atoms_contacting:
                 max_possible = n_frames_analyzed * len(ligand_atoms_contacting)
                 proportion = float(count / max_possible)
                 residue_proportions[residue_id] = proportion
                 if residue_distances:
                     residue_avg_distances[residue_id] = float(np.mean(residue_distances))
-        
+
         logger.warning(f"Found {len(contact_frequencies)} significant atom-residue contacts")
         logger.warning(f"Found {len(residue_proportions)} contacting residues")
-        
+
         result = {
-            'contact_frequencies': convert_numpy_types(contact_frequencies),
-            'residue_proportions': convert_numpy_types(residue_proportions),
-            'residue_avg_distances': convert_numpy_types(residue_avg_distances),
-            'residue_best_ligand_atoms': convert_numpy_types(residue_best_ligand_atoms),
-            'ligand_atom_contacts': convert_numpy_types(ligand_atom_contacts),
-            'ligand_atoms': convert_numpy_types(ligand_atoms),
-            'ligand_residue': ligand_residue,
-            'total_frames': int(n_frames_analyzed)
+            "contact_frequencies": convert_numpy_types(contact_frequencies),
+            "residue_proportions": convert_numpy_types(residue_proportions),
+            "residue_avg_distances": convert_numpy_types(residue_avg_distances),
+            "residue_best_ligand_atoms": convert_numpy_types(residue_best_ligand_atoms),
+            "ligand_atom_contacts": convert_numpy_types(ligand_atom_contacts),
+            "ligand_atoms": convert_numpy_types(ligand_atoms),
+            "ligand_residue": ligand_residue,
+            "total_frames": int(n_frames_analyzed),
         }
-        
+
         return result
 
     def detect_contacts(self, distances):
@@ -166,7 +183,9 @@ class ContactAnalyzer:
         contact_states[distances < self.config.contact_enter_threshold_nm] = 1
         return contact_states
 
-    def calculate_contacts(self, universe, trajectory=None, selection1="", selection2="", cutoff=4.0, step=1, cache_name=None):
+    def calculate_contacts(
+        self, universe, trajectory=None, selection1="", selection2="", cutoff=4.0, step=1, cache_name=None
+    ):
         """
         Calculate contacts between two selections using pure MDTraj.
 
@@ -193,6 +212,24 @@ class ContactAnalyzer:
             Boolean array indicating contacts for each frame
         """
         try:
+            # Create cache key
+            if cache_name is None:
+                traj_name = Path(trajectory).stem if trajectory else Path(universe).stem
+                sel1 = selection1 or "selection1"
+                sel2 = selection2 or "selection2"
+                cache_key = f"contacts_{traj_name}_{cutoff}A_{step}step_{sel1}_{sel2}"
+                cache_key = cache_key.replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_")
+            else:
+                cache_key = cache_name
+
+            cache_file = self._cache_dir / f"{cache_key}.pkl"
+
+            # Check cache
+            if cache_file.exists():
+                logger.info(f"Loading cached contacts from {cache_file}")
+                with open(cache_file, "rb") as f:
+                    return pickle.load(f)
+
             # Load trajectory with MDTraj
             if trajectory:
                 traj = md.load(trajectory, top=universe)
@@ -239,17 +276,26 @@ class ContactAnalyzer:
             # Check for contacts: any pair within cutoff counts as contact for that frame
             contacts_per_frame = np.any(distances < cutoff_nm, axis=1)
 
-            logger.info(f"Contact analysis complete: {np.sum(contacts_per_frame)} contact frames out of {traj.n_frames}")
+            logger.info(
+                f"Contact analysis complete: {np.sum(contacts_per_frame)} contact frames out of {traj.n_frames}"
+            )
+
+            with open(cache_file, "wb") as f:
+                pickle.dump(contacts_per_frame, f)
+            logger.info(f"Cached contacts to {cache_file.name}")
 
             return contacts_per_frame
 
         except Exception as e:
             logger.error(f"Contact calculation failed: {e}")
             import traceback
+
             logger.error(f"Traceback: {traceback.format_exc()}")
             return np.array([])
 
-    def analyze_key_residue_contacts(self, universe, trajectory, key_residues=None, cutoff=4.0, step=1, top_n=15, cache_name=None):
+    def analyze_key_residue_contacts(
+        self, universe, trajectory, key_residues=None, cutoff=4.0, step=1, top_n=15, cache_name=None
+    ):
         """
         Analyze contact probabilities for all protein residues with ligand, then return top N.
 
@@ -292,7 +338,7 @@ class ContactAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached key residue contact results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Load trajectory
@@ -318,7 +364,9 @@ class ContactAnalyzer:
             if key_residues is not None:
                 # Normalize residue names to 3-letter format for MDTraj compatibility
                 residues_to_analyze = [normalize_residue_to_3letter(res) for res in key_residues]
-                logger.info(f"Analyzing {len(residues_to_analyze)} specified residues vs {len(ligand_atoms)} ligand atoms")
+                logger.info(
+                    f"Analyzing {len(residues_to_analyze)} specified residues vs {len(ligand_atoms)} ligand atoms"
+                )
             else:
                 # Get all protein residues
                 logger.info("Analyzing all protein residues vs ligand")
@@ -340,7 +388,7 @@ class ContactAnalyzer:
                     residue_selections = [
                         f"resname {residue[:3]} and resid {residue[3:]}",  # ASP618 -> resname ASP and resid 618
                         f"residue {residue[3:]}",  # ASP618 -> residue 618
-                        f"resSeq {residue[3:]} and resname {residue[:3]}"  # ASP618 -> resSeq 618 and resname ASP
+                        f"resSeq {residue[3:]} and resname {residue[:3]}",  # ASP618 -> resSeq 618 and resname ASP
                     ]
 
                     residue_atoms = []
@@ -396,14 +444,14 @@ class ContactAnalyzer:
                     logger.info(f"  {i:2d}. {residue}: {prob:.1f}%")
 
                 # Cache results
-                with open(cache_file, 'wb') as f:
+                with open(cache_file, "wb") as f:
                     pickle.dump(top_residues, f)
                 logger.info(f"Cached key residue contact results to {cache_file}")
 
                 return top_residues
             else:
                 # Cache results
-                with open(cache_file, 'wb') as f:
+                with open(cache_file, "wb") as f:
                     pickle.dump(residue_contact_probs, f)
                 logger.info(f"Cached key residue contact results to {cache_file}")
 
@@ -452,7 +500,7 @@ class ContactAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached contact numbers timeseries from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Load trajectory
@@ -480,7 +528,9 @@ class ContactAnalyzer:
                 for prot_atom in protein_atoms:
                     atom_pairs.append([lig_atom, prot_atom])
 
-            logger.info(f"Analyzing contact numbers: {len(ligand_atoms)} ligand × {len(protein_atoms)} protein = {len(atom_pairs)} pairs")
+            logger.info(
+                f"Analyzing contact numbers: {len(ligand_atoms)} ligand × {len(protein_atoms)} protein = {len(atom_pairs)} pairs"
+            )
 
             # Calculate distances for all pairs across all frames with parallel processing
             with default_processor.configure_omp_threads():
@@ -495,14 +545,14 @@ class ContactAnalyzer:
             logger.info(f"Contact numbers range: {np.min(contacts_per_frame)}-{np.max(contacts_per_frame)} contacts")
 
             results = {
-                'contact_numbers': contacts_per_frame,
-                'times': times,
-                'total_pairs': len(atom_pairs),
-                'n_frames': len(contacts_per_frame)
+                "contact_numbers": contacts_per_frame,
+                "times": times,
+                "total_pairs": len(atom_pairs),
+                "n_frames": len(contacts_per_frame),
             }
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
             logger.info(f"Cached contact numbers timeseries to {cache_file}")
 
@@ -549,8 +599,17 @@ class ContactAnalyzer:
 
             # Default key residues
             if key_residues is None:
-                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
-                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+                key_residues = [
+                    "ASP618",
+                    "ASP623",
+                    "ASP760",
+                    "ASN691",
+                    "SER759",
+                    "THR680",
+                    "LYS551",
+                    "ARG553",
+                    "ARG555",
+                ]
             else:
                 # Normalize residue names to 3-letter format for MDTraj compatibility
                 key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
@@ -571,7 +630,7 @@ class ContactAnalyzer:
                     residue_selections = [
                         f"resname {residue[:3]} and resid {residue[3:]}",
                         f"residue {residue[3:]}",
-                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                        f"resSeq {residue[3:]} and resname {residue[:3]}",
                     ]
 
                     residue_atoms = []
@@ -606,13 +665,15 @@ class ContactAnalyzer:
                     normalized_contacts = contact_numbers / len(residue_atoms)
 
                     residue_contact_data[residue] = {
-                        'contact_numbers': contact_numbers,
-                        'normalized': normalized_contacts,
-                        'n_atoms': len(residue_atoms),
-                        'n_pairs': len(atom_pairs)
+                        "contact_numbers": contact_numbers,
+                        "normalized": normalized_contacts,
+                        "n_atoms": len(residue_atoms),
+                        "n_pairs": len(atom_pairs),
                     }
 
-                    logger.info(f"{residue}: {len(residue_atoms)} atoms, avg contacts={np.mean(contact_numbers):.1f}, normalized={np.mean(normalized_contacts):.2f}")
+                    logger.info(
+                        f"{residue}: {len(residue_atoms)} atoms, avg contacts={np.mean(contact_numbers):.1f}, normalized={np.mean(normalized_contacts):.2f}"
+                    )
 
                 except Exception as e:
                     logger.warning(f"Error analyzing residue {residue}: {e}")
@@ -662,8 +723,17 @@ class ContactAnalyzer:
 
             # Default key residues
             if key_residues is None:
-                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
-                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+                key_residues = [
+                    "ASP618",
+                    "ASP623",
+                    "ASP760",
+                    "ASN691",
+                    "SER759",
+                    "THR680",
+                    "LYS551",
+                    "ARG553",
+                    "ARG555",
+                ]
             else:
                 # Normalize residue names to 3-letter format for MDTraj compatibility
                 key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
@@ -684,7 +754,7 @@ class ContactAnalyzer:
                     residue_selections = [
                         f"resname {residue[:3]} and resid {residue[3:]}",
                         f"residue {residue[3:]}",
-                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                        f"resSeq {residue[3:]} and resname {residue[:3]}",
                     ]
 
                     residue_atoms = []
@@ -716,7 +786,9 @@ class ContactAnalyzer:
 
                     if len(min_distances_per_frame) > 0:
                         residue_distances[residue] = min_distances_per_frame
-                        logger.info(f"{residue}: {len(min_distances_per_frame)} frames, distance range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å")
+                        logger.info(
+                            f"{residue}: {len(min_distances_per_frame)} frames, distance range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å"
+                        )
 
                 except Exception as e:
                     logger.warning(f"Error analyzing distances for residue {residue}: {e}")
@@ -769,7 +841,7 @@ class ContactAnalyzer:
             if cache_file.exists():
                 logger.info(f"✓ Loading cached residue distance timeseries from {cache_file.name}")
                 print(f"  ✓ Using cached distance timeseries: {cache_file.name}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
             else:
                 logger.info(f"✗ Cache miss, will compute and save to: {cache_file.name}")
@@ -786,8 +858,17 @@ class ContactAnalyzer:
 
             # Default key residues
             if key_residues is None:
-                key_residues = ['ASP618', 'ASP623', 'ASP760', 'ASN691', 'SER759',
-                               'THR680', 'LYS551', 'ARG553', 'ARG555']
+                key_residues = [
+                    "ASP618",
+                    "ASP623",
+                    "ASP760",
+                    "ASN691",
+                    "SER759",
+                    "THR680",
+                    "LYS551",
+                    "ARG553",
+                    "ARG555",
+                ]
             else:
                 # Normalize residue names to 3-letter format for MDTraj compatibility
                 key_residues = [normalize_residue_to_3letter(res) for res in key_residues]
@@ -808,7 +889,7 @@ class ContactAnalyzer:
                     residue_selections = [
                         f"resname {residue[:3]} and resid {residue[3:]}",
                         f"residue {residue[3:]}",
-                        f"resSeq {residue[3:]} and resname {residue[:3]}"
+                        f"resSeq {residue[3:]} and resname {residue[:3]}",
                     ]
 
                     residue_atoms = []
@@ -839,7 +920,9 @@ class ContactAnalyzer:
                     min_distances_per_frame = np.min(distances, axis=1) * 10.0
 
                     residue_timeseries[residue] = min_distances_per_frame
-                    logger.info(f"{residue}: {len(min_distances_per_frame)} frames, range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å")
+                    logger.info(
+                        f"{residue}: {len(min_distances_per_frame)} frames, range {np.min(min_distances_per_frame):.1f}-{np.max(min_distances_per_frame):.1f} Å"
+                    )
 
                 except Exception as e:
                     logger.warning(f"Error analyzing timeseries for residue {residue}: {e}")
@@ -847,10 +930,10 @@ class ContactAnalyzer:
 
             # Add time array
             times = np.arange(traj.n_frames) * 0.5 * step
-            residue_timeseries['times'] = times
+            residue_timeseries["times"] = times
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(residue_timeseries, f)
             logger.info(f"Cached residue distance timeseries to {cache_file.name}")
 

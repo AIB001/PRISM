@@ -19,6 +19,7 @@ import sys
 import json
 import logging
 import traceback
+import importlib.util
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -86,7 +87,7 @@ def check_dependencies() -> str:
     - pdbfixer (protein structure preparation, recommended)
     - AmberTools / antechamber (for GAFF/GAFF2 ligand force fields)
     - OpenFF toolkit (for OpenFF ligand force field)
-    - PROPKA (for pKa-based histidine protonation prediction)
+    - PROPKA (for pKa-based protonation prediction of ionizable residues)
     - Gaussian g16 (for high-precision RESP charge calculation, optional)
     - MDTraj (for trajectory analysis)
     - RDKit (for chemical informatics)
@@ -99,7 +100,7 @@ def check_dependencies() -> str:
     try:
         with _StdoutToStderr():
             _ensure_prism_importable()
-            import subprocess, shutil
+            import shutil
 
             deps = {
                 "gromacs": False,
@@ -115,6 +116,7 @@ def check_dependencies() -> str:
             # GROMACS
             try:
                 from prism.utils.environment import GromacsEnvironment
+
                 GromacsEnvironment()
                 deps["gromacs"] = True
             except Exception:
@@ -127,35 +129,19 @@ def check_dependencies() -> str:
             deps["antechamber"] = shutil.which("antechamber") is not None
 
             # OpenFF
-            try:
-                import openff.toolkit
-                deps["openff"] = True
-            except ImportError:
-                pass
+            deps["openff"] = importlib.util.find_spec("openff.toolkit") is not None
 
             # PROPKA
-            try:
-                import propka
-                deps["propka"] = True
-            except ImportError:
-                pass
+            deps["propka"] = importlib.util.find_spec("propka") is not None
 
             # Gaussian g16
             deps["gaussian_g16"] = shutil.which("g16") is not None
 
             # MDTraj
-            try:
-                import mdtraj
-                deps["mdtraj"] = True
-            except ImportError:
-                pass
+            deps["mdtraj"] = importlib.util.find_spec("mdtraj") is not None
 
             # RDKit
-            try:
-                import rdkit
-                deps["rdkit"] = True
-            except ImportError:
-                pass
+            deps["rdkit"] = importlib.util.find_spec("rdkit") is not None
 
         logger.info(f"Dependencies: {deps}")
         return json.dumps(deps, indent=2)
@@ -195,6 +181,7 @@ def list_forcefields() -> str:
             protein_ffs = []
             try:
                 from prism.utils.environment import GromacsEnvironment
+
                 env = GromacsEnvironment()
                 protein_ffs = env.list_force_fields()
             except Exception:
@@ -287,7 +274,7 @@ def build_system(
         protonation: Protonation method. Default: "gromacs".
             "gromacs": Let pdb2gmx handle protonation states (default HIE).
             "propka": Use PROPKA pKa prediction for intelligent per-residue
-            histidine states (HID/HIE/HIP). Requires propka package.
+            ionizable residue states (HID/HIE/HIP, ASH/GLH, LYN/CYM/TYH). Requires propka package.
         temperature: Simulation temperature in Kelvin. Default: 310.
         ph: pH for protonation state assignment. Default: 7.0.
         production_ns: Production MD length in nanoseconds. Default: 500.
@@ -382,38 +369,44 @@ def build_system(
                 if os.path.exists(p):
                     files[name] = p
 
-        return json.dumps({
-            "success": True,
-            "output_dir": result_dir,
-            "gmx_dir": gmx_dir,
-            "message": (
-                f"System built successfully!\n"
-                f"To run the simulation:\n"
-                f"  cd {gmx_dir}\n"
-                f"  bash localrun.sh"
-            ),
-            "files": files,
-            "parameters": {
-                "protein_forcefield": forcefield,
-                "ligand_forcefield": ligand_forcefield,
-                "water_model": water_model,
-                "protonation": protonation,
-                "temperature_K": temperature,
-                "pH": ph,
-                "production_ns": production_ns,
-                "box_distance_nm": box_distance,
-                "salt_concentration_M": salt_concentration,
-                "gaussian_method": gaussian_method,
+        return json.dumps(
+            {
+                "success": True,
+                "output_dir": result_dir,
+                "gmx_dir": gmx_dir,
+                "message": (
+                    f"System built successfully!\n"
+                    f"To run the simulation:\n"
+                    f"  cd {gmx_dir}\n"
+                    f"  bash localrun.sh"
+                ),
+                "files": files,
+                "parameters": {
+                    "protein_forcefield": forcefield,
+                    "ligand_forcefield": ligand_forcefield,
+                    "water_model": water_model,
+                    "protonation": protonation,
+                    "temperature_K": temperature,
+                    "pH": ph,
+                    "production_ns": production_ns,
+                    "box_distance_nm": box_distance,
+                    "salt_concentration_M": salt_concentration,
+                    "gaussian_method": gaussian_method,
+                },
             },
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
         logger.error(f"build_system failed: {e}\n{traceback.format_exc()}")
-        return json.dumps({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            },
+            indent=2,
+        )
 
 
 # ==========================================================================
@@ -499,25 +492,28 @@ def build_pmf_system(
             result_dir = builder.run()
 
         pmf_dir = os.path.join(result_dir, "GMX_PROLIG_PMF")
-        return json.dumps({
-            "success": True,
-            "output_dir": result_dir,
-            "pmf_dir": pmf_dir,
-            "message": (
-                f"PMF system built successfully!\n"
-                f"To run the PMF workflow:\n"
-                f"  cd {pmf_dir}\n"
-                f"  bash smd_run.sh        # Step 1: Steered MD\n"
-                f"  bash umbrella_run.sh   # Step 2: Umbrella sampling + WHAM"
-            ),
-            "parameters": {
-                "protein_forcefield": forcefield,
-                "ligand_forcefield": ligand_forcefield,
-                "box_extension_z_nm": box_extension_z,
-                "umbrella_time_ns": umbrella_time_ns,
-                "umbrella_spacing_nm": umbrella_spacing,
+        return json.dumps(
+            {
+                "success": True,
+                "output_dir": result_dir,
+                "pmf_dir": pmf_dir,
+                "message": (
+                    f"PMF system built successfully!\n"
+                    f"To run the PMF workflow:\n"
+                    f"  cd {pmf_dir}\n"
+                    f"  bash smd_run.sh        # Step 1: Steered MD\n"
+                    f"  bash umbrella_run.sh   # Step 2: Umbrella sampling + WHAM"
+                ),
+                "parameters": {
+                    "protein_forcefield": forcefield,
+                    "ligand_forcefield": ligand_forcefield,
+                    "box_extension_z_nm": box_extension_z,
+                    "umbrella_time_ns": umbrella_time_ns,
+                    "umbrella_spacing_nm": umbrella_spacing,
+                },
             },
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
         logger.error(f"build_pmf_system failed: {e}\n{traceback.format_exc()}")
@@ -604,26 +600,29 @@ def build_rest2_system(
             result_dir = builder.run()
 
         rest2_dir = os.path.join(result_dir, "GMX_PROLIG_REST2")
-        return json.dumps({
-            "success": True,
-            "output_dir": result_dir,
-            "rest2_dir": rest2_dir,
-            "message": (
-                f"REST2 system built with {n_replicas} replicas "
-                f"(T: {t_ref}K - {t_max}K).\n"
-                f"To run:\n"
-                f"  cd {rest2_dir}\n"
-                f"  bash rest2_run.sh"
-            ),
-            "parameters": {
-                "protein_forcefield": forcefield,
-                "ligand_forcefield": ligand_forcefield,
-                "t_ref_K": t_ref,
-                "t_max_K": t_max,
-                "n_replicas": n_replicas,
-                "rest2_cutoff_nm": rest2_cutoff,
+        return json.dumps(
+            {
+                "success": True,
+                "output_dir": result_dir,
+                "rest2_dir": rest2_dir,
+                "message": (
+                    f"REST2 system built with {n_replicas} replicas "
+                    f"(T: {t_ref}K - {t_max}K).\n"
+                    f"To run:\n"
+                    f"  cd {rest2_dir}\n"
+                    f"  bash rest2_run.sh"
+                ),
+                "parameters": {
+                    "protein_forcefield": forcefield,
+                    "ligand_forcefield": ligand_forcefield,
+                    "t_ref_K": t_ref,
+                    "t_max_K": t_max,
+                    "n_replicas": n_replicas,
+                    "rest2_cutoff_nm": rest2_cutoff,
+                },
             },
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
         logger.error(f"build_rest2_system failed: {e}\n{traceback.format_exc()}")
@@ -704,25 +703,25 @@ def build_mmpbsa_system(
 
         mode = "trajectory" if mmpbsa_traj_ns else "single-frame"
         mmpbsa_dir = os.path.join(result_dir, "GMX_PROLIG_MMPBSA")
-        return json.dumps({
-            "success": True,
-            "output_dir": result_dir,
-            "mmpbsa_dir": mmpbsa_dir,
-            "mode": mode,
-            "message": (
-                f"MM/PBSA system built ({mode} mode).\n"
-                f"To run:\n"
-                f"  cd {mmpbsa_dir}\n"
-                f"  bash mmpbsa_run.sh"
-            ),
-            "parameters": {
-                "protein_forcefield": forcefield,
-                "ligand_forcefield": ligand_forcefield,
+        return json.dumps(
+            {
+                "success": True,
+                "output_dir": result_dir,
+                "mmpbsa_dir": mmpbsa_dir,
                 "mode": mode,
-                "mmpbsa_traj_ns": mmpbsa_traj_ns,
-                "gmx2amber": gmx2amber,
+                "message": (
+                    f"MM/PBSA system built ({mode} mode).\n" f"To run:\n" f"  cd {mmpbsa_dir}\n" f"  bash mmpbsa_run.sh"
+                ),
+                "parameters": {
+                    "protein_forcefield": forcefield,
+                    "ligand_forcefield": ligand_forcefield,
+                    "mode": mode,
+                    "mmpbsa_traj_ns": mmpbsa_traj_ns,
+                    "gmx2amber": gmx2amber,
+                },
             },
-        }, indent=2)
+            indent=2,
+        )
 
     except Exception as e:
         logger.error(f"build_mmpbsa_system failed: {e}\n{traceback.format_exc()}")
@@ -739,9 +738,7 @@ def get_default_config() -> str:
     This shows all configurable parameters with their default values.
     Users can export this to a file with: prism --export-config my_config.yaml
     """
-    config_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "configs", "default_config.yaml"
-    )
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "default_config.yaml")
     if os.path.exists(config_path):
         with open(config_path, "r") as f:
             return f.read()
@@ -797,12 +794,37 @@ def validate_input_files(protein_path: str, ligand_path: str) -> str:
 
         # Standard amino acids
         standard_aa = {
-            "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY",
-            "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER",
-            "THR", "TRP", "TYR", "VAL",
+            "ALA",
+            "ARG",
+            "ASN",
+            "ASP",
+            "CYS",
+            "GLN",
+            "GLU",
+            "GLY",
+            "HIS",
+            "ILE",
+            "LEU",
+            "LYS",
+            "MET",
+            "PHE",
+            "PRO",
+            "SER",
+            "THR",
+            "TRP",
+            "TYR",
+            "VAL",
             # Common protonation variants
-            "HID", "HIE", "HIP", "HSD", "HSE", "HSP",
-            "CYX", "ASH", "GLH", "LYN",
+            "HID",
+            "HIE",
+            "HIP",
+            "HSD",
+            "HSE",
+            "HSP",
+            "CYX",
+            "ASH",
+            "GLH",
+            "LYN",
         }
 
         with open(protein_path, "r") as f:
@@ -826,8 +848,7 @@ def validate_input_files(protein_path: str, ligand_path: str) -> str:
             prot["valid"] = True
 
         # Count unique HIS residues (not atoms)
-        his_residues = {(c, s) for c, s, r in residue_ids
-                        if r in ("HIS", "HID", "HIE", "HIP", "HSD", "HSE", "HSP")}
+        his_residues = {(c, s) for c, s, r in residue_ids if r in ("HIS", "HID", "HIE", "HIP", "HSD", "HSE", "HSP")}
 
         # Flag non-standard residues (exclude water and common ions)
         ignore_res = {"HOH", "WAT", "SOL", "NA", "CL", "K", "MG", "CA", "ZN"}
@@ -907,18 +928,14 @@ def _validate_ligand(ligand_path: str) -> dict:
                 lig["warnings"].append("Missing $$$$ end marker in SDF file")
 
         elif ext == ".pdb":
-            atom_count = sum(1 for line in content.splitlines()
-                             if line.startswith(("ATOM", "HETATM")))
+            atom_count = sum(1 for line in content.splitlines() if line.startswith(("ATOM", "HETATM")))
             lig["atoms"] = atom_count
             lig["valid"] = atom_count > 0
             if atom_count == 0:
                 lig["warnings"].append("No ATOM/HETATM records in ligand PDB")
 
         else:
-            lig["warnings"].append(
-                f"Unrecognized ligand format: '{ext}'. "
-                f"Supported: .mol2, .sdf, .pdb"
-            )
+            lig["warnings"].append(f"Unrecognized ligand format: '{ext}'. " f"Supported: .mol2, .sdf, .pdb")
 
     except Exception as e:
         lig["warnings"].append(f"Error reading ligand file: {e}")
@@ -992,9 +1009,7 @@ def validate_build_output(output_dir: str, build_mode: str = "md") -> str:
             "topol.top": "GMX_PROLIG_MMPBSA/topol.top",
         }
     else:
-        result["warnings"].append(
-            f"Unknown build_mode '{build_mode}'. Options: md, pmf, rest2, mmpbsa"
-        )
+        result["warnings"].append(f"Unknown build_mode '{build_mode}'. Options: md, pmf, rest2, mmpbsa")
         return json.dumps(result, indent=2)
 
     # --- Check each expected file ---
@@ -1009,10 +1024,7 @@ def validate_build_output(output_dir: str, build_mode: str = "md") -> str:
     if build_mode == "rest2":
         rest2_dir = os.path.join(output_dir, "GMX_PROLIG_REST2")
         if os.path.isdir(rest2_dir):
-            replica_tops = sorted(
-                f for f in os.listdir(rest2_dir)
-                if re.match(r"topol_r\d+\.top", f)
-            )
+            replica_tops = sorted(f for f in os.listdir(rest2_dir) if re.match(r"topol_r\d+\.top", f))
             if replica_tops:
                 result["files_found"].append(f"replica_topologies ({len(replica_tops)} files)")
             else:
@@ -1073,7 +1085,7 @@ def _parse_topology_molecules(topol_path: str) -> list:
                 # Detect section headers
                 if stripped.startswith("["):
                     section = stripped.strip("[] \t").lower()
-                    in_molecules = (section == "molecules")
+                    in_molecules = section == "molecules"
                     continue
                 if in_molecules:
                     # Skip #include or preprocessor directives
@@ -1082,10 +1094,12 @@ def _parse_topology_molecules(topol_path: str) -> list:
                     parts = stripped.split()
                     if len(parts) >= 2:
                         try:
-                            molecules.append({
-                                "name": parts[0],
-                                "count": int(parts[1]),
-                            })
+                            molecules.append(
+                                {
+                                    "name": parts[0],
+                                    "count": int(parts[1]),
+                                }
+                            )
                         except ValueError:
                             pass
     except Exception:
@@ -1190,10 +1204,28 @@ def check_topology(topology_path: str) -> str:
         if not any(n in mol_names for n in ("NA", "CL", "K", "Na+", "Cl-", "SOD", "CLA")):
             result["warnings"].append("System has no ions (no NA/CL entry in [ molecules ])")
 
-        if not any(n for n in mol_names if n not in
-                   ("Protein", "Protein_chain_A", "SOL", "HOH", "WAT",
-                    "NA", "CL", "K", "Na+", "Cl-", "SOD", "CLA", "TIP3", "SPC")
-                   and not n.startswith("Protein")):
+        if not any(
+            n
+            for n in mol_names
+            if n
+            not in (
+                "Protein",
+                "Protein_chain_A",
+                "SOL",
+                "HOH",
+                "WAT",
+                "NA",
+                "CL",
+                "K",
+                "Na+",
+                "Cl-",
+                "SOD",
+                "CLA",
+                "TIP3",
+                "SPC",
+            )
+            and not n.startswith("Protein")
+        ):
             result["warnings"].append("No ligand found in topology (no non-protein/solvent/ion molecule)")
 
     except Exception as e:
@@ -1207,10 +1239,7 @@ def check_topology(topology_path: str) -> str:
 # ==========================================================================
 def _load_agent_prompt() -> str:
     """Load the agent prompt markdown from disk."""
-    prompt_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "prompts", "agent_prompt.md"
-    )
+    prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "agent_prompt.md")
     with open(prompt_path, "r") as f:
         return f.read()
 

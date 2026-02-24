@@ -17,6 +17,7 @@ from .html_builder import HTMLBuilder
 from .data_processor import DataProcessor
 from .visualization_generator import VisualizationGenerator
 
+
 class HTMLGenerator:
     """Generate interactive HTML visualization from trajectory analysis"""
 
@@ -47,32 +48,32 @@ class HTMLGenerator:
         self.ligand_data = None
         self.contacts = None
         self.stats = None
-        
+
     def analyze(self):
         """
         Run the complete analysis
-        
+
         Returns
         -------
         dict
             Analysis results including contacts, ligand data, and statistics
         """
         print("=== Enhanced Contact Analysis ===")
-        
+
         # Load trajectory
         print(f"Loading trajectory: {Path(self.trajectory_file).name}")
         self.traj = md.load(self.trajectory_file, top=self.topology_file)
         print(f"Loaded {self.traj.n_frames} frames, {self.traj.n_atoms} atoms")
-        
+
         # Load and process ligand
         data_processor = DataProcessor()
         ligand_mol = data_processor.load_ligand_structure(self.ligand_file)
-        
+
         # Analyze contacts
         print("\nAnalyzing contacts...")
         analyzer = FastContactAnalyzer(self.traj)
         self.contact_results = analyzer.calculate_contact_proportions()
-        
+
         # Generate visualization data
         vis_generator = VisualizationGenerator()
         self.ligand_data = vis_generator.generate_ligand_data(self.contact_results, ligand_mol)
@@ -80,31 +81,31 @@ class HTMLGenerator:
             self.contact_results,
             self.ligand_data,
             max_contacts=self.max_contacts,
-            allow_duplicate_residues=self.allow_duplicate_residues
+            allow_duplicate_residues=self.allow_duplicate_residues,
         )
-        
+
         # Calculate statistics
         self.stats = data_processor.calculate_statistics(self.contacts)
-        
+
         print(f"Found {self.stats['total_contacts']} significant contacts")
-        
+
         return {
-            'contact_results': self.contact_results,
-            'ligand_data': self.ligand_data,
-            'contacts': self.contacts,
-            'stats': self.stats,
-            'traj': self.traj
+            "contact_results": self.contact_results,
+            "ligand_data": self.ligand_data,
+            "contacts": self.contacts,
+            "stats": self.stats,
+            "traj": self.traj,
         }
-    
+
     def generate(self, output_file="contact_analysis.html"):
         """
         Generate HTML file
-        
+
         Parameters
         ----------
         output_file : str
             Path for output HTML file
-            
+
         Returns
         -------
         str
@@ -112,30 +113,35 @@ class HTMLGenerator:
         """
         if self.contact_results is None:
             self.analyze()
-        
+
         print("\nGenerating interactive HTML...")
         html_builder = HTMLBuilder()
         html_content = html_builder.generate_html(
             trajectory_file=Path(self.trajectory_file).name,
             topology_file=Path(self.topology_file).name,
             ligand_file=Path(self.ligand_file).name,
-            ligand_name=self.contact_results['ligand_residue'].name if self.contact_results['ligand_residue'] else 'UNK',
-            total_frames=self.contact_results['total_frames'],
+            ligand_name=self.contact_results["ligand_residue"].name
+            if self.contact_results["ligand_residue"]
+            else "UNK",
+            total_frames=self.contact_results["total_frames"],
             ligand_data=self.ligand_data,
             contacts=self.contacts,
-            stats=self.stats
+            stats=self.stats,
         )
-        
+
         # Write output
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(html_content)
-        
+
         print(f"Interactive HTML generated: {output_file}")
         print(f"Open the file in a web browser to view and adjust the layout")
-        
+
         return output_file
 
-def generate_html(trajectory, topology, ligand, output="contact_analysis.html", allow_duplicate_residues=False, max_contacts=None):
+
+def generate_html(
+    trajectory, topology, ligand, output="contact_analysis.html", allow_duplicate_residues=False, max_contacts=None
+):
     """
     Convenience function to generate HTML visualization
 
@@ -162,6 +168,7 @@ def generate_html(trajectory, topology, ligand, output="contact_analysis.html", 
     generator = HTMLGenerator(trajectory, topology, ligand, allow_duplicate_residues, max_contacts)
     return generator.generate(output)
 
+
 def main():
     """Command line interface"""
     parser = argparse.ArgumentParser(description="Enhanced trajectory analysis to interactive HTML")
@@ -169,23 +176,37 @@ def main():
     parser.add_argument("topology", help="Topology file (.pdb, .gro, etc.)")
     parser.add_argument("ligand", help="Ligand file (.sdf, .mol, .mol2)")
     parser.add_argument("-o", "--output", default="contact_analysis.html", help="Output HTML file")
-    parser.add_argument("--allow-duplicates", action="store_true",
-                        help="Allow same residue to appear multiple times with different ligand atoms")
-    parser.add_argument("--max-contacts", type=int, default=None,
-                        help="Maximum number of contacts to display (default: 20 for unique mode, 25 for duplicate mode)")
+    parser.add_argument(
+        "--allow-duplicates",
+        action="store_true",
+        help="Allow same residue to appear multiple times with different ligand atoms",
+    )
+    parser.add_argument(
+        "--max-contacts",
+        type=int,
+        default=None,
+        help="Maximum number of contacts to display (default: 20 for unique mode, 25 for duplicate mode)",
+    )
 
     args = parser.parse_args()
 
     try:
-        generate_html(args.trajectory, args.topology, args.ligand, args.output,
-                     allow_duplicate_residues=args.allow_duplicates,
-                     max_contacts=args.max_contacts)
+        generate_html(
+            args.trajectory,
+            args.topology,
+            args.ligand,
+            args.output,
+            allow_duplicate_residues=args.allow_duplicates,
+            max_contacts=args.max_contacts,
+        )
         print(f"\n=== Complete! ===")
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

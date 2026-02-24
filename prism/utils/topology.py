@@ -8,7 +8,7 @@ and other molecular components.
 """
 
 import logging
-from typing import Dict, Set, List, Optional, Union, Tuple
+from typing import Dict, Optional
 import MDAnalysis as mda
 
 logger = logging.getLogger(__name__)
@@ -43,18 +43,18 @@ def detect_protein_chains(universe: mda.Universe) -> Dict[str, str]:
         for atom in protein_atoms:
             try:
                 # Try different chain identifier attributes
-                if hasattr(atom, 'chainid') and atom.chainid is not None:
+                if hasattr(atom, "chainid") and atom.chainid is not None:
                     unique_chainids.add(str(atom.chainid))
-                elif hasattr(atom, 'segid') and atom.segid is not None and atom.segid != '':
+                elif hasattr(atom, "segid") and atom.segid is not None and atom.segid != "":
                     unique_chainids.add(str(atom.segid))
-                elif hasattr(atom.residue, 'chainid') and atom.residue.chainid is not None:
+                elif hasattr(atom.residue, "chainid") and atom.residue.chainid is not None:
                     unique_chainids.add(str(atom.residue.chainid))
             except (AttributeError, TypeError):
                 continue
 
         # Create CA selections for each detected protein chain
         for chainid in sorted(unique_chainids):
-            if chainid and chainid != 'None':
+            if chainid and chainid != "None":
                 # Try chainid first, then segid as fallback
                 selection_chainid = f"protein and chainid {chainid} and name CA"
                 selection_segid = f"protein and segid {chainid} and name CA"
@@ -100,8 +100,26 @@ def detect_nucleic_chains(universe: mda.Universe) -> Dict[str, str]:
         nucleic_chains = {}
 
         # Common nucleic acid residue names
-        nucleic_residues = {'ADE', 'GUA', 'CYT', 'URA', 'THY', 'A', 'G', 'C', 'U', 'T',
-                           'DA', 'DG', 'DC', 'DT', 'rA', 'rG', 'rC', 'rU'}
+        nucleic_residues = {
+            "ADE",
+            "GUA",
+            "CYT",
+            "URA",
+            "THY",
+            "A",
+            "G",
+            "C",
+            "U",
+            "T",
+            "DA",
+            "DG",
+            "DC",
+            "DT",
+            "rA",
+            "rG",
+            "rC",
+            "rU",
+        }
 
         # Create fallback selection string
         resname_selection = " or ".join([f"resname {res}" for res in nucleic_residues])
@@ -125,24 +143,24 @@ def detect_nucleic_chains(universe: mda.Universe) -> Dict[str, str]:
         unique_chainids = set()
         for atom in nucleic_atoms:
             try:
-                if hasattr(atom, 'chainid') and atom.chainid is not None:
+                if hasattr(atom, "chainid") and atom.chainid is not None:
                     unique_chainids.add(str(atom.chainid))
-                elif hasattr(atom, 'segid') and atom.segid is not None and atom.segid != '':
+                elif hasattr(atom, "segid") and atom.segid is not None and atom.segid != "":
                     unique_chainids.add(str(atom.segid))
-                elif hasattr(atom.residue, 'chainid') and atom.residue.chainid is not None:
+                elif hasattr(atom.residue, "chainid") and atom.residue.chainid is not None:
                     unique_chainids.add(str(atom.residue.chainid))
             except (AttributeError, TypeError):
                 continue
 
         # Create P selections for each detected nucleic chain
         for chainid in sorted(unique_chainids):
-            if chainid and chainid != 'None':
+            if chainid and chainid != "None":
                 # Try different selection strategies
                 selections_to_try = [
                     f"nucleic and chainid {chainid} and name P",
                     f"nucleic and segid {chainid} and name P",
                     f"({resname_selection}) and chainid {chainid} and name P",
-                    f"({resname_selection}) and segid {chainid} and name P"
+                    f"({resname_selection}) and segid {chainid} and name P",
                 ]
 
                 for selection in selections_to_try:
@@ -181,10 +199,7 @@ def detect_all_chains(universe: mda.Universe) -> Dict[str, Dict[str, str]]:
             "nucleic": {"Nucleic Chain R": "nucleic and chainid R and name P", ...}
         }
     """
-    all_chains = {
-        "protein": detect_protein_chains(universe),
-        "nucleic": detect_nucleic_chains(universe)
-    }
+    all_chains = {"protein": detect_protein_chains(universe), "nucleic": detect_nucleic_chains(universe)}
 
     total_protein = len(all_chains["protein"])
     total_nucleic = len(all_chains["nucleic"])

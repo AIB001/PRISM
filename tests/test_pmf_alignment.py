@@ -15,28 +15,28 @@ class TestIsHeavy:
     """Test heavy atom detection."""
 
     def test_carbon_is_heavy(self):
-        assert _is_heavy('C') is True
+        assert _is_heavy("C") is True
 
     def test_nitrogen_is_heavy(self):
-        assert _is_heavy('N') is True
+        assert _is_heavy("N") is True
 
     def test_oxygen_is_heavy(self):
-        assert _is_heavy('O') is True
+        assert _is_heavy("O") is True
 
     def test_hydrogen_not_heavy(self):
-        assert _is_heavy('H') is False
+        assert _is_heavy("H") is False
 
     def test_deuterium_not_heavy(self):
-        assert _is_heavy('D') is False
+        assert _is_heavy("D") is False
 
     def test_lowercase_hydrogen(self):
-        assert _is_heavy('h') is False
+        assert _is_heavy("h") is False
 
     def test_sulfur_is_heavy(self):
-        assert _is_heavy('S') is True
+        assert _is_heavy("S") is True
 
     def test_zinc_is_heavy(self):
-        assert _is_heavy('Zn') is True
+        assert _is_heavy("Zn") is True
 
 
 class TestSphericalCartesianConversion:

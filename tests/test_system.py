@@ -4,7 +4,6 @@ Only tests methods that do NOT require GROMACS (file parsing, text processing).
 """
 
 import pytest
-from pathlib import Path
 from prism.utils.system import SystemBuilder
 
 
@@ -34,11 +33,10 @@ def _hetatm_line(serial, name, resname, chain, resseq, x=0.0, y=0.0, z=0.0):
 def builder(tmp_path):
     """SystemBuilder with minimal config, model_dir = tmp_path/GMX_PROLIG_MD."""
     config = {
-        'general': {'gmx_command': 'gmx'},
-        'simulation': {'pH': 7.0},
-        'box': {'distance': 1.5, 'shape': 'cubic', 'center': True},
-        'ions': {'neutral': True, 'concentration': 0.15,
-                 'positive_ion': 'NA', 'negative_ion': 'CL'},
+        "general": {"gmx_command": "gmx"},
+        "simulation": {"pH": 7.0},
+        "box": {"distance": 1.5, "shape": "cubic", "center": True},
+        "ions": {"neutral": True, "concentration": 0.15, "positive_ion": "NA", "negative_ion": "CL"},
     }
     sb = SystemBuilder(config, str(tmp_path), overwrite=True)
     return sb
@@ -48,7 +46,6 @@ def builder(tmp_path):
 # TestCountHistidines
 # ===========================================================================
 class TestCountHistidines:
-
     def test_counts_his_residues(self, builder, tmp_path):
         pdb = tmp_path / "test.pdb"
         pdb.write_text(
@@ -83,20 +80,13 @@ class TestCountHistidines:
 
     def test_no_histidines(self, builder, tmp_path):
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _atom_line(1, "N", "ALA", "A", 1)
-            + _atom_line(2, "N", "GLY", "A", 2)
-            + "END\n"
-        )
+        pdb.write_text(_atom_line(1, "N", "ALA", "A", 1) + _atom_line(2, "N", "GLY", "A", 2) + "END\n")
         assert builder._count_histidines(str(pdb)) == 0
 
     def test_ignores_hetatm(self, builder, tmp_path):
         """_count_histidines only checks ATOM records, not HETATM."""
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _hetatm_line(1, "N", "HIS", "A", 10)
-            + "END\n"
-        )
+        pdb.write_text(_hetatm_line(1, "N", "HIS", "A", 10) + "END\n")
         assert builder._count_histidines(str(pdb)) == 0
 
     def test_multi_chain(self, builder, tmp_path):
@@ -114,7 +104,6 @@ class TestCountHistidines:
 # TestRenameHisForCmap
 # ===========================================================================
 class TestRenameHisForCmap:
-
     def test_renames_when_cmap_exists(self, builder, tmp_path):
         """HIS → HIE when force field has cmap.itp."""
         ff_dir = tmp_path / "amber19sb.ff"
@@ -122,11 +111,7 @@ class TestRenameHisForCmap:
         (ff_dir / "cmap.itp").write_text("; cmap data\n")
 
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _atom_line(1, "N", "HIS", "A", 10)
-            + _atom_line(2, "CA", "HIS", "A", 10)
-            + "END\n"
-        )
+        pdb.write_text(_atom_line(1, "N", "HIS", "A", 10) + _atom_line(2, "CA", "HIS", "A", 10) + "END\n")
 
         ff_info = {"path": str(ff_dir)}
         result = builder._rename_his_for_cmap(str(pdb), ff_info)
@@ -167,11 +152,7 @@ class TestRenameHisForCmap:
         (ff_dir / "cmap.itp").write_text("; cmap\n")
 
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _atom_line(1, "N", "HIE", "A", 10)
-            + _atom_line(2, "N", "HIP", "A", 20)
-            + "END\n"
-        )
+        pdb.write_text(_atom_line(1, "N", "HIE", "A", 10) + _atom_line(2, "N", "HIP", "A", 20) + "END\n")
 
         ff_info = {"path": str(ff_dir)}
         result = builder._rename_his_for_cmap(str(pdb), ff_info)
@@ -186,7 +167,7 @@ class TestRenameHisForCmap:
 
         pdb = tmp_path / "test.pdb"
         pdb.write_text(
-            _atom_line(1, "N", "HIP", "A", 10)   # PROPKA-renamed, skip
+            _atom_line(1, "N", "HIP", "A", 10)  # PROPKA-renamed, skip
             + _atom_line(2, "N", "HIS", "A", 20)  # remaining, should rename
             + "END\n"
         )
@@ -205,21 +186,17 @@ class TestRenameHisForCmap:
 # TestFixImproperFromGromppErrors
 # ===========================================================================
 class TestFixImproperFromGromppErrors:
-
     def test_parses_single_error(self, builder):
         """Single error line → 1 line commented out."""
         topol = builder.model_dir / "topol.top"
         topol.write_text(
-            "; header\n"                       # line 1
-            "[ dihedrals ]\n"                  # line 2
-            "   1    2    3    4     4\n"       # line 3 — this should be removed
-            "[ bonds ]\n"                      # line 4
+            "; header\n"  # line 1
+            "[ dihedrals ]\n"  # line 2
+            "   1    2    3    4     4\n"  # line 3 — this should be removed
+            "[ bonds ]\n"  # line 4
         )
 
-        stderr = (
-            'ERROR 1 [file topol.top, line 3]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr = "ERROR 1 [file topol.top, line 3]:\n" "  No default Per. Imp. Dih. types\n"
         fixed = builder._fix_improper_from_grompp_errors(stderr)
 
         assert fixed == 1
@@ -236,35 +213,32 @@ class TestFixImproperFromGromppErrors:
         topol.write_text(
             "line1\n"
             "line2\n"
-            "   1    2    3    4     4\n"   # line 3
-            "   5    6    7    8     4\n"   # line 4
+            "   1    2    3    4     4\n"  # line 3
+            "   5    6    7    8     4\n"  # line 4
             "   9   10   11   12     4\n"  # line 5
             "line6\n"
         )
 
         stderr = (
-            'ERROR 1 [file topol.top, line 3]:\n'
-            '  No default Per. Imp. Dih. types\n'
-            'ERROR 2 [file topol.top, line 5]:\n'
-            '  No default Per. Imp. Dih. types\n'
+            "ERROR 1 [file topol.top, line 3]:\n"
+            "  No default Per. Imp. Dih. types\n"
+            "ERROR 2 [file topol.top, line 5]:\n"
+            "  No default Per. Imp. Dih. types\n"
         )
         fixed = builder._fix_improper_from_grompp_errors(stderr)
 
         assert fixed == 2
         lines = topol.read_text().splitlines()
-        assert lines[2].startswith("; REMOVED")   # line 3
+        assert lines[2].startswith("; REMOVED")  # line 3
         assert not lines[3].startswith("; REMOVED")  # line 4 untouched
-        assert lines[4].startswith("; REMOVED")   # line 5
+        assert lines[4].startswith("; REMOVED")  # line 5
 
     def test_parses_itp_file_errors(self, builder):
         """Errors referencing an .itp file (not topol.top)."""
         itp = builder.model_dir / "topol_Protein_chain_A.itp"
         itp.write_text("line1\nline2\nline3\n")
 
-        stderr = (
-            'ERROR 1 [file topol_Protein_chain_A.itp, line 2]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr = "ERROR 1 [file topol_Protein_chain_A.itp, line 2]:\n" "  No default Per. Imp. Dih. types\n"
         fixed = builder._fix_improper_from_grompp_errors(stderr)
 
         assert fixed == 1
@@ -282,10 +256,7 @@ class TestFixImproperFromGromppErrors:
         topol = builder.model_dir / "topol.top"
         topol.write_text("line1\nline2\nline3\n")
 
-        stderr = (
-            'ERROR 1 [file topol.top, line 2]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr = "ERROR 1 [file topol.top, line 2]:\n" "  No default Per. Imp. Dih. types\n"
         builder._fix_improper_from_grompp_errors(stderr)
 
         backup = builder.model_dir / "topol.top.backup"
@@ -297,17 +268,11 @@ class TestFixImproperFromGromppErrors:
         topol = builder.model_dir / "topol.top"
         topol.write_text("original_line1\noriginal_line2\noriginal_line3\n")
 
-        stderr1 = (
-            'ERROR 1 [file topol.top, line 2]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr1 = "ERROR 1 [file topol.top, line 2]:\n" "  No default Per. Imp. Dih. types\n"
         builder._fix_improper_from_grompp_errors(stderr1)
 
         # Now topol.top is modified; run a second fix pass
-        stderr2 = (
-            'ERROR 1 [file topol.top, line 3]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr2 = "ERROR 1 [file topol.top, line 3]:\n" "  No default Per. Imp. Dih. types\n"
         builder._fix_improper_from_grompp_errors(stderr2)
 
         # Backup should still contain the ORIGINAL content
@@ -317,10 +282,7 @@ class TestFixImproperFromGromppErrors:
 
     def test_skips_missing_file(self, builder):
         """Error referencing a non-existent file → skip, return 0."""
-        stderr = (
-            'ERROR 1 [file nonexistent.itp, line 5]:\n'
-            '  No default Per. Imp. Dih. types\n'
-        )
+        stderr = "ERROR 1 [file nonexistent.itp, line 5]:\n" "  No default Per. Imp. Dih. types\n"
         assert builder._fix_improper_from_grompp_errors(stderr) == 0
 
 
@@ -328,13 +290,10 @@ class TestFixImproperFromGromppErrors:
 # TestExtractMetalsFromPdb
 # ===========================================================================
 class TestExtractMetalsFromPdb:
-
     def test_extracts_zinc(self, builder, tmp_path):
         pdb = tmp_path / "test.pdb"
         pdb.write_text(
-            _atom_line(1, "N", "ALA", "A", 1)
-            + _hetatm_line(100, "ZN", "ZN", "A", 50, x=10.0, y=20.0, z=30.0)
-            + "END\n"
+            _atom_line(1, "N", "ALA", "A", 1) + _hetatm_line(100, "ZN", "ZN", "A", 50, x=10.0, y=20.0, z=30.0) + "END\n"
         )
         metals = builder._extract_metals_from_pdb(str(pdb))
 
@@ -345,10 +304,7 @@ class TestExtractMetalsFromPdb:
     def test_extracts_atom_record_metal(self, builder, tmp_path):
         """Metals converted from HETATM to ATOM by cleaner should still be found."""
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _atom_line(1, "ZN", "ZN", "M", 1, x=5.0, y=6.0, z=7.0)
-            + "END\n"
-        )
+        pdb.write_text(_atom_line(1, "ZN", "ZN", "M", 1, x=5.0, y=6.0, z=7.0) + "END\n")
         metals = builder._extract_metals_from_pdb(str(pdb))
         assert len(metals) == 1
 
@@ -390,9 +346,5 @@ class TestExtractMetalsFromPdb:
 
     def test_no_metals(self, builder, tmp_path):
         pdb = tmp_path / "test.pdb"
-        pdb.write_text(
-            _atom_line(1, "N", "ALA", "A", 1)
-            + _atom_line(2, "CA", "ALA", "A", 1)
-            + "END\n"
-        )
+        pdb.write_text(_atom_line(1, "N", "ALA", "A", 1) + _atom_line(2, "CA", "ALA", "A", 1) + "END\n")
         assert builder._extract_metals_from_pdb(str(pdb)) == []

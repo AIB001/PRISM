@@ -15,7 +15,9 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 - **Smart File Processing**: Handles various input formats with automatic conversion
 - **Position Restraints**: Automatic generation for equilibration protocols
 - **Complete MDP Files**: Pre-configured protocols for minimization, equilibration, and production
-- **Metal Ion Support**: Automatic recognition and handling of metal ions (Zn, Ca, Mg, Fe, etc.)
+- **Metal Ion Support**: Intelligent recognition and handling of metal ions (Zn, Ca, Mg, Fe, etc.) with distance-based filtering
+- **Advanced Protein Cleaning**: Smart removal of heteroatoms and crystallization artifacts while preserving structural metals
+- **Protonation State Prediction**: Optional pKa-based protonation for ionizable residues with PROPKA (HIS/ASP/GLU/LYS/CYS/TYR)
 - **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
 
 ## Installation
@@ -72,6 +74,20 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    conda install -c conda-forge pdbfixer numpy scipy
    pip install pyyaml
    ```
+
+### Optional Dependencies
+
+#### For Protonation State Prediction (optional):
+
+```bash
+# PROPKA for pKa-based protonation prediction (optional)
+conda install -c conda-forge propka
+# or
+pip install propka>=3.4.0
+
+# Or install with PRISM protonation extras
+pip install -e .[protonation]
+```
 
 ### Force Field Specific Dependencies
 
@@ -225,6 +241,32 @@ python /path/to/PRISM/prism/builder.py
    prism protein.pdb ligand.mol2 -o output_dir --forcefield amber14sb --water tip4p
    ```
 
+9. **With advanced protein cleaning**:
+
+   ```bash
+   # Keep all metal ions
+   prism protein.pdb ligand.mol2 -o output_dir --ion-mode keep_all
+
+   # Remove all metal ions
+   prism protein.pdb ligand.mol2 -o output_dir --ion-mode remove_all
+
+   # Custom distance cutoff for metals
+   prism protein.pdb ligand.mol2 -o output_dir --distance-cutoff 8.0
+
+   # Keep crystal water molecules
+   prism protein.pdb ligand.mol2 -o output_dir --keep-crystal-water
+   ```
+
+10. **With protonation prediction (PROPKA)**:
+
+   ```bash
+   # Use PROPKA at pH 7.0
+   prism protein.pdb ligand.mol2 -o output_dir --protonation propka
+
+   # Custom pH (7.4)
+   prism protein.pdb ligand.mol2 -o output_dir --protonation propka --pH 7.4
+   ```
+
 ### Running MD Simulations
 
 After PRISM completes, you can run the simulations:
@@ -331,6 +373,14 @@ PRISM provides convenient shortcuts for frequently used parameters, allowing you
 - `-pion, --positive-ion`: Positive ion type (default: NA)
 - `-nion, --negative-ion`: Negative ion type (default: CL)
 
+**Protein Preparation Parameters**
+- `-im, --ion-mode`: Ion handling mode (smart, keep_all, remove_all; default: smart)
+- `-dc, --distance-cutoff`: Distance cutoff for metal ions in Å (default: 5.0)
+- `-kcw, --keep-crystal-water`: Preserve crystal water molecules (default: false)
+- `-nra, --no-remove-artifacts`: Keep crystallization artifacts (default: false)
+- `-proton, --protonation`: Protonation method (`gromacs` or `propka`; default: gromacs)
+- `--pH`: Target pH for protonation prediction (default: 7.0)
+
 **MM/PBSA Analysis**
 - `-pbsa, --mmpbsa`: Run MM/PBSA binding energy calculation
 - `-m, --mode`: MM/PBSA mode (single-frame or trajectory)
@@ -401,6 +451,75 @@ All shortcuts are designed to be intuitive while maintaining backward compatibil
 - **Protonation States**: Support for CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH
 - **Halogen Handling**: CGenFF lone pairs (LP) automatically removed and charges transferred
 
+## Protein Preparation
+
+PRISM provides advanced protein preparation with intelligent cleaning and optional protonation state optimization to ensure your protein structure is properly prepared for molecular dynamics simulations.
+
+### Protein Cleaning
+
+The `ProteinCleaner` class automatically processes protein PDB files with intelligent handling of metal ions and crystallization artifacts.
+
+#### Ion Handling Modes
+
+PRISM offers three modes for handling metal ions and heteroatoms:
+
+- **`smart` (default)**: Keeps structural metals (Zn, Mg, Ca, Fe, Cu, Mn, etc.) while removing non-structural ions (Na, Cl, K, etc.)
+- **`keep_all`**: Preserves all metal ions and heteroatoms (except water unless specified)
+- **`remove_all`**: Removes all metal ions and heteroatoms
+
+**Structural metals preserved in smart mode**: ZN, MG, CA, FE, CU, MN, CO, NI, CD, HG<br>
+**Non-structural ions removed in smart mode**: NA, CL, K, BR, I, F, SO4, PO4, NO3, CO3
+
+#### Distance-Based Filtering
+
+Metals are only kept if they are within a specified distance from the protein:
+- **Default cutoff**: 5.0 Å
+- **Configurable**: Adjust via `--distance-cutoff` parameter
+- **Purpose**: Removes distant, non-coordinating metals that may be crystallization artifacts
+
+#### Crystallization Artifact Removal
+
+Common crystallization additives are automatically removed:
+- **Polyols**: Glycerol (GOL), ethylene glycol (EDO), MPD
+- **PEG oligomers**: PEG, PGE, 1PE, P6G, etc.
+- **Sugars**: NAG, NDG, BMA (unless covalently linked to protein)
+- **Detergents**: DMS, BOG, LMT, etc.
+- **Other additives**: ACT, ACE, FMT, TRS, etc.
+
+#### GROMACS Compatibility
+
+The cleaner automatically handles GROMACS requirements:
+- **HETATM → ATOM conversion**: Metal ions are converted from HETATM to ATOM records
+- **Chain reassignment**: Proteins and metals are placed in separate chains for pdb2gmx compatibility
+- **Terminal atom fixing**: Automatic correction of C-terminal oxygen atoms
+
+### Protonation State Prediction (PROPKA)
+
+PRISM can optionally use PROPKA to predict pKa values and assign protonation states for ionizable residues (HIS/ASP/GLU/LYS/CYS/TYR) at a target pH. It renames residues in the PDB, and GROMACS `pdb2gmx -ignh` regenerates hydrogens based on those states.
+
+#### Features
+
+- **PROPKA integration**: pKa-based ionizable residue prediction
+- **pH-based control**: Choose target pH for prediction
+- **GROMACS-ready**: Residue renaming for `pdb2gmx` (e.g., HID/HIE/HIP, ASH/GLH, LYN/CYM/TYH)
+
+#### Requirements
+
+```bash
+# Install PROPKA (required for protonation prediction)
+conda install -c conda-forge propka
+# or
+pip install propka>=3.4.0
+
+# Or install with PRISM protonation extras
+pip install -e .[protonation]
+```
+
+#### Protonation Control
+
+- **Method**: Choose `gromacs` (default) or `propka`
+- **Target pH**: Configurable pH for PROPKA prediction (default: 7.0)
+
 ## Configuration
 
 PRISM uses YAML configuration files for customization. Key parameters include:
@@ -410,6 +529,28 @@ PRISM uses YAML configuration files for customization. Key parameters include:
 - **Simulation parameters**: Temperature, pressure, time, etc.
 - **Box settings**: Size, shape, solvation
 - **Output controls**: Trajectory frequency, compression
+- **Protein preparation**: Advanced cleaning and ion handling options
+- **Protonation**: Optional pKa-based protonation for ionizable residues with PROPKA
+
+### Protein Preparation Configuration
+
+```yaml
+# Protein preparation settings
+protein_preparation:
+  ion_handling_mode: smart      # keep_all, smart, remove_all
+  distance_cutoff: 5.0        # Distance cutoff for metals (Å)
+  keep_crystal_water: false    # Preserve crystal water
+  remove_artifacts: true      # Remove crystallization artifacts
+```
+
+### Protonation Configuration
+
+```yaml
+# Protonation state prediction
+protonation:
+  method: gromacs  # 'gromacs' (default) or 'propka'
+  ph: 7.0          # Target pH for PROPKA pKa prediction
+```
 
 See `configs/default.yaml` for a complete example.
 
@@ -515,7 +656,30 @@ PRISM generates a complete set of files ready for MD simulation:
    - Ensure residues use standard names (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
    - GROMACS pdb2gmx should handle these automatically
 
-7. **Memory errors**: Large systems may require more RAM, especially during parameterization
+7. **Protein Preparation Issues**:
+
+   **PROPKA Not Available**:
+   - **Error**: "PROPKA not found" or similar
+   - **Solution**: Install with `conda install -c conda-forge propka` or `pip install propka>=3.4.0` (or `pip install -e .[protonation]`)
+   - **Note**: If you do not want PROPKA, keep `protonation.method: gromacs` (default)
+
+   **Metal Ions Removed by Distance**:
+   - **Message**: "Removed ZN at distance 6.2 Å from protein"
+   - **Solution**: Increase distance cutoff if metal is important: `--distance-cutoff 8.0`
+
+   **Unknown Metal/Ion Warnings**:
+   - **Message**: "Warning: Unknown metal/ion MO, keeping by default"
+   - **Solution**: Add custom metal to keep list in configuration or use `--ion-mode keep_all`
+
+   **PROPKA Renaming Summary**:
+   - **Message**: "PROPKA: Renamed X residue(s)"
+   - **Note**: This is expected when `--protonation propka` is enabled
+
+   **Terminal Atom Issues**:
+   - **Message**: "Fixed C-terminal residues with misplaced oxygen atoms"
+   - **Note**: This is normal behavior. PRISM automatically fixes terminal atom naming for GROMACS compatibility
+
+8. **Memory errors**: Large systems may require more RAM, especially during parameterization
 
 ### Getting Help
 

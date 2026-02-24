@@ -12,10 +12,10 @@ from .visualization_generator import VisualizationGenerator
 from .html_builder import HTMLBuilder
 
 __all__ = [
-    'generate_html',
-    'HTMLGenerator',
-    'FastContactAnalyzer',
-    'DataProcessor',
-    'VisualizationGenerator',
-    'HTMLBuilder'
+    "generate_html",
+    "HTMLGenerator",
+    "FastContactAnalyzer",
+    "DataProcessor",
+    "VisualizationGenerator",
+    "HTMLBuilder",
 ]

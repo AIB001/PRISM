@@ -27,18 +27,32 @@ except ImportError:
         from prism.utils.colors import print_success, print_info, print_warning, success, path, number
     except ImportError:
         # Fallback if colors not available
-        def print_success(x, **kwargs): print(f"✓ {x}")
-        def print_info(x, **kwargs): print(f"ℹ {x}")
-        def print_warning(x, **kwargs): print(f"⚠ {x}")
-        def success(x): return f"✓ {x}"
-        def path(x): return x
-        def number(x): return x
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}✓ {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}ℹ {x}")
+
+        def print_warning(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}⚠ {x}")
+
+        def success(x):
+            return f"✓ {x}"
+
+        def path(x):
+            return x
+
+        def number(x):
+            return x
 
 
 class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
     """GAFF2 force field generator wrapper - extends GAFF with gaff2 atom types"""
 
-    def __init__(self, ligand_path, output_dir, overwrite=False, charge_mode='bcc'):
+    def __init__(self, ligand_path, output_dir, overwrite=False, charge_mode="bcc"):
         """
         Initialize GAFF2 force field generator.
 
@@ -133,19 +147,27 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
 
         # Copy input file to working directory to avoid path issues
         import shutil
+
         input_mol2 = os.path.join(ff_dir, f"input_{self.ligand_name}.mol2")
         shutil.copy2(self.ligand_path, input_mol2)
 
         print(f"Generating charges using {self.charge_mode.upper()} method with GAFF2 atom types...")
         cmd = [
             "antechamber",
-            "-i", os.path.basename(input_mol2),
-            "-fi", "mol2",
-            "-o", os.path.basename(amber_mol2),
-            "-fo", "mol2",
-            "-c", self.charge_mode,  # Use configured charge mode
-            "-s", "2",
-            "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+            "-i",
+            os.path.basename(input_mol2),
+            "-fi",
+            "mol2",
+            "-o",
+            os.path.basename(amber_mol2),
+            "-fo",
+            "mol2",
+            "-c",
+            self.charge_mode,  # Use configured charge mode
+            "-s",
+            "2",
+            "-at",
+            self._get_atom_type_flag(),  # Use GAFF2 atom types
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
@@ -153,18 +175,25 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         try:
             self.run_command(cmd, cwd=ff_dir)
         except Exception as e:
-            if self.charge_mode == 'bcc':
+            if self.charge_mode == "bcc":
                 print(f"\nAM1-BCC charge generation failed. Attempting fallback with gas phase charges...")
                 # Try with simpler gas phase charges as fallback
                 cmd_fallback = [
                     "antechamber",
-                    "-i", os.path.basename(input_mol2),
-                    "-fi", "mol2",
-                    "-o", os.path.basename(amber_mol2),
-                    "-fo", "mol2",
-                    "-c", "gas",
-                    "-s", "2",
-                    "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+                    "-i",
+                    os.path.basename(input_mol2),
+                    "-fi",
+                    "mol2",
+                    "-o",
+                    os.path.basename(amber_mol2),
+                    "-fo",
+                    "mol2",
+                    "-c",
+                    "gas",
+                    "-s",
+                    "2",
+                    "-at",
+                    self._get_atom_type_flag(),  # Use GAFF2 atom types
                 ]
                 if self.net_charge != 0:
                     cmd_fallback.extend(["-nc", str(self.net_charge)])
@@ -176,11 +205,16 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         # Generate prep file from the charged mol2 file
         cmd = [
             "antechamber",
-            "-i", os.path.basename(amber_mol2),
-            "-fi", "mol2",
-            "-o", os.path.basename(prep_file),
-            "-fo", "prepi",
-            "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+            "-i",
+            os.path.basename(amber_mol2),
+            "-fi",
+            "mol2",
+            "-o",
+            os.path.basename(prep_file),
+            "-fo",
+            "prepi",
+            "-at",
+            self._get_atom_type_flag(),  # Use GAFF2 atom types
         ]
         # Add net charge if specified
         if self.net_charge != 0:
@@ -193,26 +227,40 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             # Alternative: explicitly tell antechamber to read charges from mol2
             cmd_alt = [
                 "antechamber",
-                "-i", os.path.basename(amber_mol2),
-                "-fi", "mol2",
-                "-o", os.path.basename(prep_file),
-                "-fo", "prepi",
-                "-c", "rc",  # Read charges from input file
-                "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+                "-i",
+                os.path.basename(amber_mol2),
+                "-fi",
+                "mol2",
+                "-o",
+                os.path.basename(prep_file),
+                "-fo",
+                "prepi",
+                "-c",
+                "rc",  # Read charges from input file
+                "-at",
+                self._get_atom_type_flag(),  # Use GAFF2 atom types
             ]
             if self.net_charge != 0:
                 cmd_alt.extend(["-nc", str(self.net_charge)])
             self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating GAFF2 force field parameters...")
-        self.run_command([
-            "parmchk2",
-            "-i", os.path.basename(prep_file),
-            "-f", "prepi",
-            "-o", os.path.basename(frcmod_file),
-            "-a", "Y",  # Print all force field parameters
-            "-s", "2"   # GAFF2 parameter set
-        ], cwd=ff_dir)
+        self.run_command(
+            [
+                "parmchk2",
+                "-i",
+                os.path.basename(prep_file),
+                "-f",
+                "prepi",
+                "-o",
+                os.path.basename(frcmod_file),
+                "-a",
+                "Y",  # Print all force field parameters
+                "-s",
+                "2",  # GAFF2 parameter set
+            ],
+            cwd=ff_dir,
+        )
 
         print("Creating AMBER topology with GAFF2...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)
@@ -228,7 +276,7 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         ff_dir = os.path.dirname(amber_mol2)
         tleap_input = os.path.join(ff_dir, f"tleap_{self.ligand_name}.in")
 
-        with open(tleap_input, 'w') as f:
+        with open(tleap_input, "w") as f:
             f.write(f"""source leaprc.protein.ff14SB
 source {self._get_leaprc()}
 
@@ -250,13 +298,20 @@ quit
 
         cmd = [
             "antechamber",
-            "-i", self.ligand_path,
-            "-fi", "sdf",
-            "-o", amber_mol2,
-            "-fo", "mol2",
-            "-c", self.charge_mode,  # Use configured charge mode
-            "-s", "2",
-            "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+            "-i",
+            self.ligand_path,
+            "-fi",
+            "sdf",
+            "-o",
+            amber_mol2,
+            "-fo",
+            "mol2",
+            "-c",
+            self.charge_mode,  # Use configured charge mode
+            "-s",
+            "2",
+            "-at",
+            self._get_atom_type_flag(),  # Use GAFF2 atom types
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
@@ -265,7 +320,9 @@ quit
         # Continue with prep file generation
         self._process_mol2_intermediate(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
 
-    def _process_mol2_intermediate(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, charge_method=None):
+    def _process_mol2_intermediate(
+        self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, charge_method=None
+    ):
         """Process intermediate MOL2 file with GAFF2
 
         Note: When processing MOL2 from SDF (already has BCC charges), we don't specify
@@ -273,6 +330,8 @@ quit
         the behavior of _process_mol2_format() which also omits the -c flag.
         """
         print("Generating prep file from charged MOL2 with GAFF2...")
+        if charge_method:
+            print_warning(f"Ignoring charge_method='{charge_method}' for GAFF2 MOL2 processing (charges already set).")
 
         ff_dir = os.path.dirname(amber_mol2)
 
@@ -283,11 +342,16 @@ quit
         # Build command WITHOUT -c flag (let antechamber handle charges)
         cmd = [
             "antechamber",
-            "-i", os.path.basename(amber_mol2),
-            "-fi", "mol2",
-            "-o", os.path.basename(prep_file),
-            "-fo", "prepi",
-            "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+            "-i",
+            os.path.basename(amber_mol2),
+            "-fi",
+            "mol2",
+            "-o",
+            os.path.basename(prep_file),
+            "-fo",
+            "prepi",
+            "-at",
+            self._get_atom_type_flag(),  # Use GAFF2 atom types
         ]
 
         # Add net charge if specified
@@ -303,25 +367,38 @@ quit
             # Fallback: explicitly tell antechamber to read charges from mol2
             cmd_alt = [
                 "antechamber",
-                "-i", os.path.basename(amber_mol2),
-                "-fi", "mol2",
-                "-o", os.path.basename(prep_file),
-                "-fo", "prepi",
-                "-c", "rc",  # Read charges from input file
-                "-at", self._get_atom_type_flag()  # Use GAFF2 atom types
+                "-i",
+                os.path.basename(amber_mol2),
+                "-fi",
+                "mol2",
+                "-o",
+                os.path.basename(prep_file),
+                "-fo",
+                "prepi",
+                "-c",
+                "rc",  # Read charges from input file
+                "-at",
+                self._get_atom_type_flag(),  # Use GAFF2 atom types
             ]
             if self.net_charge != 0:
                 cmd_alt.extend(["-nc", str(self.net_charge)])
             self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating GAFF2 force field parameters...")
-        self.run_command([
-            "parmchk2",
-            "-i", os.path.basename(prep_file),
-            "-f", "prepi",
-            "-o", os.path.basename(frcmod_file),
-            "-s", "2"  # GAFF2 parameter set
-        ], cwd=ff_dir)
+        self.run_command(
+            [
+                "parmchk2",
+                "-i",
+                os.path.basename(prep_file),
+                "-f",
+                "prepi",
+                "-o",
+                os.path.basename(frcmod_file),
+                "-s",
+                "2",  # GAFF2 parameter set
+            ],
+            cwd=ff_dir,
+        )
 
         print("Creating AMBER topology with GAFF2...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)

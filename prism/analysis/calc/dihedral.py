@@ -8,16 +8,13 @@ Includes backbone dihedrals (phi, psi, chi), custom dihedrals, and Ramachandran 
 
 import numpy as np
 import MDAnalysis as mda
-from typing import List, Union, Optional, Tuple, Dict
+from typing import List, Union, Optional, Dict
 import logging
 from pathlib import Path
 import pickle
+import importlib.util
 
-try:
-    from MDAnalysis.analysis.dihedrals import Dihedral
-    DIHEDRAL_AVAILABLE = True
-except ImportError:
-    DIHEDRAL_AVAILABLE = False
+DIHEDRAL_AVAILABLE = importlib.util.find_spec("MDAnalysis.analysis.dihedrals") is not None
 
 from ..core.config import AnalysisConfig
 
@@ -33,17 +30,18 @@ class DihedralAnalyzer:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         if not DIHEDRAL_AVAILABLE:
-            logger.warning("MDAnalysis dihedral module not available. "
-                         "Some functionality may be limited.")
+            logger.warning("MDAnalysis dihedral module not available. " "Some functionality may be limited.")
 
-    def calculate_backbone_dihedrals(self,
-                                   universe: Union[mda.Universe, str],
-                                   trajectory: Optional[Union[str, List[str]]] = None,
-                                   selection: str = "protein",
-                                   start_frame: int = 0,
-                                   end_frame: Optional[int] = None,
-                                   step: int = 1,
-                                   cache_name: Optional[str] = None) -> Dict[str, np.ndarray]:
+    def calculate_backbone_dihedrals(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Dict[str, np.ndarray]:
         """
         Calculate backbone dihedral angles (phi, psi) for protein residues.
 
@@ -92,7 +90,7 @@ class DihedralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached backbone dihedral results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get protein atoms
@@ -141,15 +139,13 @@ class DihedralAnalyzer:
                     for ts in universe.trajectory[start_frame:end_frame:step]:
                         # Calculate phi dihedral
                         phi = self._calculate_dihedral(
-                            c_prev.position, n_curr.position,
-                            ca_curr.position, c_curr.position
+                            c_prev.position, n_curr.position, ca_curr.position, c_curr.position
                         )
                         phi_values.append(phi)
 
                         # Calculate psi dihedral
                         psi = self._calculate_dihedral(
-                            n_curr.position, ca_curr.position,
-                            c_curr.position, n_next.position
+                            n_curr.position, ca_curr.position, c_curr.position, n_next.position
                         )
                         psi_values.append(psi)
 
@@ -166,14 +162,10 @@ class DihedralAnalyzer:
             psi_angles = np.array(psi_angles).T
             residue_ids = np.array(residue_ids)
 
-            results = {
-                'phi': phi_angles,
-                'psi': psi_angles,
-                'residue_ids': residue_ids
-            }
+            results = {"phi": phi_angles, "psi": psi_angles, "residue_ids": residue_ids}
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info(f"Backbone dihedral calculation completed for {len(residue_ids)} residues")
@@ -183,14 +175,16 @@ class DihedralAnalyzer:
             logger.error(f"Error calculating backbone dihedrals: {e}")
             raise
 
-    def calculate_custom_dihedral(self,
-                                 universe: Union[mda.Universe, str],
-                                 atom_indices: List[int],
-                                 trajectory: Optional[Union[str, List[str]]] = None,
-                                 start_frame: int = 0,
-                                 end_frame: Optional[int] = None,
-                                 step: int = 1,
-                                 cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_custom_dihedral(
+        self,
+        universe: Union[mda.Universe, str],
+        atom_indices: List[int],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate a custom dihedral angle defined by four atom indices.
 
@@ -241,7 +235,7 @@ class DihedralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached custom dihedral results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get atoms
@@ -257,25 +251,26 @@ class DihedralAnalyzer:
             dihedral_values = np.array(dihedral_values)
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(dihedral_values, f)
 
-            logger.info(f"Custom dihedral calculation completed. "
-                       f"Mean: {np.mean(dihedral_values):.2f}°")
+            logger.info(f"Custom dihedral calculation completed. " f"Mean: {np.mean(dihedral_values):.2f}°")
             return dihedral_values
 
         except Exception as e:
             logger.error(f"Error calculating custom dihedral: {e}")
             raise
 
-    def calculate_chi_angles(self,
-                           universe: Union[mda.Universe, str],
-                           trajectory: Optional[Union[str, List[str]]] = None,
-                           selection: str = "protein",
-                           start_frame: int = 0,
-                           end_frame: Optional[int] = None,
-                           step: int = 1,
-                           cache_name: Optional[str] = None) -> Dict[str, np.ndarray]:
+    def calculate_chi_angles(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Dict[str, np.ndarray]:
         """
         Calculate chi1 dihedral angles for protein side chains.
 
@@ -324,7 +319,7 @@ class DihedralAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached chi1 results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get protein atoms
@@ -358,8 +353,7 @@ class DihedralAnalyzer:
                     chi1_values = []
                     for ts in universe.trajectory[start_frame:end_frame:step]:
                         chi1 = self._calculate_dihedral(
-                            n_atom.position, ca_atom.position,
-                            cb_atom.position, cg_atom.position
+                            n_atom.position, ca_atom.position, cb_atom.position, cg_atom.position
                         )
                         chi1_values.append(chi1)
 
@@ -374,13 +368,10 @@ class DihedralAnalyzer:
             chi1_angles = np.array(chi1_angles).T  # Shape: (n_frames, n_residues)
             residue_ids = np.array(residue_ids)
 
-            results = {
-                'chi1': chi1_angles,
-                'residue_ids': residue_ids
-            }
+            results = {"chi1": chi1_angles, "residue_ids": residue_ids}
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info(f"Chi1 calculation completed for {len(residue_ids)} residues")
@@ -390,8 +381,7 @@ class DihedralAnalyzer:
             logger.error(f"Error calculating chi1 angles: {e}")
             raise
 
-    def _calculate_dihedral(self, pos1: np.ndarray, pos2: np.ndarray,
-                           pos3: np.ndarray, pos4: np.ndarray) -> float:
+    def _calculate_dihedral(self, pos1: np.ndarray, pos2: np.ndarray, pos3: np.ndarray, pos4: np.ndarray) -> float:
         """
         Calculate dihedral angle between four positions.
 
@@ -434,14 +424,16 @@ class DihedralAnalyzer:
         # Convert to degrees
         return np.degrees(angle)
 
-    def ramachandran_analysis(self,
-                            universe: Union[mda.Universe, str],
-                            trajectory: Optional[Union[str, List[str]]] = None,
-                            selection: str = "protein",
-                            start_frame: int = 0,
-                            end_frame: Optional[int] = None,
-                            step: int = 1,
-                            cache_name: Optional[str] = None) -> Dict[str, np.ndarray]:
+    def ramachandran_analysis(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Dict[str, np.ndarray]:
         """
         Perform Ramachandran plot analysis (phi vs psi angles).
 
@@ -470,13 +462,12 @@ class DihedralAnalyzer:
         try:
             # Calculate backbone dihedrals
             backbone_results = self.calculate_backbone_dihedrals(
-                universe, trajectory, selection,
-                start_frame, end_frame, step, cache_name
+                universe, trajectory, selection, start_frame, end_frame, step, cache_name
             )
 
-            phi_angles = backbone_results['phi']
-            psi_angles = backbone_results['psi']
-            residue_ids = backbone_results['residue_ids']
+            phi_angles = backbone_results["phi"]
+            psi_angles = backbone_results["psi"]
+            residue_ids = backbone_results["residue_ids"]
 
             # Flatten arrays for Ramachandran plot
             phi_flat = phi_angles.flatten()
@@ -489,22 +480,24 @@ class DihedralAnalyzer:
             psi_std = np.std(psi_flat)
 
             results = {
-                'phi': phi_angles,
-                'psi': psi_angles,
-                'phi_flat': phi_flat,
-                'psi_flat': psi_flat,
-                'residue_ids': residue_ids,
-                'phi_mean': phi_mean,
-                'phi_std': phi_std,
-                'psi_mean': psi_mean,
-                'psi_std': psi_std,
-                'n_frames': phi_angles.shape[0],
-                'n_residues': phi_angles.shape[1]
+                "phi": phi_angles,
+                "psi": psi_angles,
+                "phi_flat": phi_flat,
+                "psi_flat": psi_flat,
+                "residue_ids": residue_ids,
+                "phi_mean": phi_mean,
+                "phi_std": phi_std,
+                "psi_mean": psi_mean,
+                "psi_std": psi_std,
+                "n_frames": phi_angles.shape[0],
+                "n_residues": phi_angles.shape[1],
             }
 
-            logger.info(f"Ramachandran analysis completed. "
-                       f"Phi: {phi_mean:.1f}° ± {phi_std:.1f}°, "
-                       f"Psi: {psi_mean:.1f}° ± {psi_std:.1f}°")
+            logger.info(
+                f"Ramachandran analysis completed. "
+                f"Phi: {phi_mean:.1f}° ± {phi_std:.1f}°, "
+                f"Psi: {psi_mean:.1f}° ± {psi_std:.1f}°"
+            )
 
             return results
 

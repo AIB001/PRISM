@@ -15,6 +15,7 @@ import pickle
 
 try:
     from MDAnalysis.analysis.sasa import SASAAnalysis
+
     SASA_AVAILABLE = True
 except ImportError:
     SASA_AVAILABLE = False
@@ -33,18 +34,19 @@ class SASAAnalyzer:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         if not SASA_AVAILABLE:
-            logger.warning("MDAnalysis SASA module not available. "
-                         "Some functionality may be limited.")
+            logger.warning("MDAnalysis SASA module not available. " "Some functionality may be limited.")
 
-    def calculate_sasa(self,
-                      universe: Union[mda.Universe, str],
-                      trajectory: Optional[Union[str, List[str]]] = None,
-                      selection: str = "protein",
-                      probe_radius: float = 1.4,
-                      start_frame: int = 0,
-                      end_frame: Optional[int] = None,
-                      step: int = 1,
-                      cache_name: Optional[str] = None) -> np.ndarray:
+    def calculate_sasa(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        probe_radius: float = 1.4,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Calculate total SASA for a selection over trajectory.
 
@@ -73,8 +75,9 @@ class SASAAnalyzer:
             Total SASA values for each frame in Angstroms^2.
         """
         if not SASA_AVAILABLE:
-            raise ImportError("MDAnalysis SASA module not available. "
-                            "Please update MDAnalysis or use alternative method.")
+            raise ImportError(
+                "MDAnalysis SASA module not available. " "Please update MDAnalysis or use alternative method."
+            )
 
         try:
             # Handle universe input
@@ -99,7 +102,7 @@ class SASAAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached SASA results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get atoms selection
@@ -115,7 +118,7 @@ class SASAAnalyzer:
             sasa_values = sasa_analysis.results.sasa
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(sasa_values, f)
 
             logger.info(f"SASA calculation completed. Mean: {np.mean(sasa_values):.2f} Å²")
@@ -125,15 +128,17 @@ class SASAAnalyzer:
             logger.error(f"Error calculating SASA: {e}")
             raise
 
-    def calculate_sasa_per_residue(self,
-                                  universe: Union[mda.Universe, str],
-                                  trajectory: Optional[Union[str, List[str]]] = None,
-                                  selection: str = "protein",
-                                  probe_radius: float = 1.4,
-                                  start_frame: int = 0,
-                                  end_frame: Optional[int] = None,
-                                  step: int = 1,
-                                  cache_name: Optional[str] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def calculate_sasa_per_residue(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        probe_radius: float = 1.4,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate SASA per residue over trajectory.
 
@@ -187,7 +192,7 @@ class SASAAnalyzer:
             # Check cache
             if cache_file.exists():
                 logger.info(f"Loading cached per-residue SASA results from {cache_file}")
-                with open(cache_file, 'rb') as f:
+                with open(cache_file, "rb") as f:
                     return pickle.load(f)
 
             # Get atoms selection
@@ -212,7 +217,7 @@ class SASAAnalyzer:
             results = (sasa_per_residue, np.array(residue_ids))
 
             # Cache results
-            with open(cache_file, 'wb') as f:
+            with open(cache_file, "wb") as f:
                 pickle.dump(results, f)
 
             logger.info(f"Per-residue SASA calculation completed for {len(residues)} residues")
@@ -222,16 +227,18 @@ class SASAAnalyzer:
             logger.error(f"Error calculating per-residue SASA: {e}")
             raise
 
-    def calculate_sasa_difference(self,
-                                 universe1: Union[mda.Universe, str],
-                                 universe2: Union[mda.Universe, str],
-                                 trajectory1: Optional[Union[str, List[str]]] = None,
-                                 trajectory2: Optional[Union[str, List[str]]] = None,
-                                 selection: str = "protein",
-                                 probe_radius: float = 1.4,
-                                 start_frame: int = 0,
-                                 end_frame: Optional[int] = None,
-                                 step: int = 1) -> Dict[str, np.ndarray]:
+    def calculate_sasa_difference(
+        self,
+        universe1: Union[mda.Universe, str],
+        universe2: Union[mda.Universe, str],
+        trajectory1: Optional[Union[str, List[str]]] = None,
+        trajectory2: Optional[Union[str, List[str]]] = None,
+        selection: str = "protein",
+        probe_radius: float = 1.4,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+    ) -> Dict[str, np.ndarray]:
         """
         Calculate SASA difference between two systems (e.g., apo vs holo).
 
@@ -264,15 +271,25 @@ class SASAAnalyzer:
         try:
             # Calculate SASA for both systems
             sasa1 = self.calculate_sasa(
-                universe1, trajectory1, selection, probe_radius,
-                start_frame, end_frame, step,
-                cache_name=f"sasa_sys1_{hash(str(universe1))}"
+                universe1,
+                trajectory1,
+                selection,
+                probe_radius,
+                start_frame,
+                end_frame,
+                step,
+                cache_name=f"sasa_sys1_{hash(str(universe1))}",
             )
 
             sasa2 = self.calculate_sasa(
-                universe2, trajectory2, selection, probe_radius,
-                start_frame, end_frame, step,
-                cache_name=f"sasa_sys2_{hash(str(universe2))}"
+                universe2,
+                trajectory2,
+                selection,
+                probe_radius,
+                start_frame,
+                end_frame,
+                step,
+                cache_name=f"sasa_sys2_{hash(str(universe2))}",
             )
 
             # Calculate difference
@@ -282,16 +299,18 @@ class SASAAnalyzer:
             difference = sasa2_trimmed - sasa1_trimmed
 
             results = {
-                'system1': sasa1_trimmed,
-                'system2': sasa2_trimmed,
-                'difference': difference,
-                'mean_difference': np.mean(difference),
-                'std_difference': np.std(difference)
+                "system1": sasa1_trimmed,
+                "system2": sasa2_trimmed,
+                "difference": difference,
+                "mean_difference": np.mean(difference),
+                "std_difference": np.std(difference),
             }
 
-            logger.info(f"SASA difference calculation completed. "
-                       f"Mean difference: {results['mean_difference']:.2f} ± "
-                       f"{results['std_difference']:.2f} Å²")
+            logger.info(
+                f"SASA difference calculation completed. "
+                f"Mean difference: {results['mean_difference']:.2f} ± "
+                f"{results['std_difference']:.2f} Å²"
+            )
 
             return results
 
@@ -299,16 +318,18 @@ class SASAAnalyzer:
             logger.error(f"Error calculating SASA difference: {e}")
             raise
 
-    def calculate_buried_surface_area(self,
-                                     universe: Union[mda.Universe, str],
-                                     trajectory: Optional[Union[str, List[str]]] = None,
-                                     selection1: str = "protein",
-                                     selection2: str = "resname LIG",
-                                     probe_radius: float = 1.4,
-                                     start_frame: int = 0,
-                                     end_frame: Optional[int] = None,
-                                     step: int = 1,
-                                     cache_name: Optional[str] = None) -> Dict[str, np.ndarray]:
+    def calculate_buried_surface_area(
+        self,
+        universe: Union[mda.Universe, str],
+        trajectory: Optional[Union[str, List[str]]] = None,
+        selection1: str = "protein",
+        selection2: str = "resname LIG",
+        probe_radius: float = 1.4,
+        start_frame: int = 0,
+        end_frame: Optional[int] = None,
+        step: int = 1,
+        cache_name: Optional[str] = None,
+    ) -> Dict[str, np.ndarray]:
         """
         Calculate buried surface area between two selections (e.g., protein-ligand).
 
@@ -341,23 +362,38 @@ class SASAAnalyzer:
         try:
             # Calculate SASA for individual components
             sasa1 = self.calculate_sasa(
-                universe, trajectory, selection1, probe_radius,
-                start_frame, end_frame, step,
-                cache_name=f"bsa_comp1_{cache_name}" if cache_name else None
+                universe,
+                trajectory,
+                selection1,
+                probe_radius,
+                start_frame,
+                end_frame,
+                step,
+                cache_name=f"bsa_comp1_{cache_name}" if cache_name else None,
             )
 
             sasa2 = self.calculate_sasa(
-                universe, trajectory, selection2, probe_radius,
-                start_frame, end_frame, step,
-                cache_name=f"bsa_comp2_{cache_name}" if cache_name else None
+                universe,
+                trajectory,
+                selection2,
+                probe_radius,
+                start_frame,
+                end_frame,
+                step,
+                cache_name=f"bsa_comp2_{cache_name}" if cache_name else None,
             )
 
             # Calculate SASA for the complex
             complex_selection = f"({selection1}) or ({selection2})"
             sasa_complex = self.calculate_sasa(
-                universe, trajectory, complex_selection, probe_radius,
-                start_frame, end_frame, step,
-                cache_name=f"bsa_complex_{cache_name}" if cache_name else None
+                universe,
+                trajectory,
+                complex_selection,
+                probe_radius,
+                start_frame,
+                end_frame,
+                step,
+                cache_name=f"bsa_complex_{cache_name}" if cache_name else None,
             )
 
             # Calculate buried surface area
@@ -366,17 +402,19 @@ class SASAAnalyzer:
             bsa = (sasa1[:min_length] + sasa2[:min_length] - sasa_complex[:min_length]) / 2
 
             results = {
-                'sasa_component1': sasa1[:min_length],
-                'sasa_component2': sasa2[:min_length],
-                'sasa_complex': sasa_complex[:min_length],
-                'buried_surface_area': bsa,
-                'mean_bsa': np.mean(bsa),
-                'std_bsa': np.std(bsa)
+                "sasa_component1": sasa1[:min_length],
+                "sasa_component2": sasa2[:min_length],
+                "sasa_complex": sasa_complex[:min_length],
+                "buried_surface_area": bsa,
+                "mean_bsa": np.mean(bsa),
+                "std_bsa": np.std(bsa),
             }
 
-            logger.info(f"Buried surface area calculation completed. "
-                       f"Mean BSA: {results['mean_bsa']:.2f} ± "
-                       f"{results['std_bsa']:.2f} Å²")
+            logger.info(
+                f"Buried surface area calculation completed. "
+                f"Mean BSA: {results['mean_bsa']:.2f} ± "
+                f"{results['std_bsa']:.2f} Å²"
+            )
 
             return results
 

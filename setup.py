@@ -6,7 +6,6 @@ Setup script for PRISM
 """
 
 from setuptools import setup, find_packages
-import os
 
 # Read the README file
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -18,9 +17,9 @@ install_requires = [
     "pyyaml>=5.0",
     "MDAnalysis>=2.0.0",  # Required for analysis
     "matplotlib>=3.0.0",  # Required for plotting
-    "seaborn>=0.11.0",    # Required for advanced plotting
-    "pandas>=1.0.0",      # Required for data processing
-    "scikit-learn>=1.0.0", # Required for clustering analysis
+    "seaborn>=0.11.0",  # Required for advanced plotting
+    "pandas>=1.0.0",  # Required for data processing
+    "scikit-learn>=1.0.0",  # Required for clustering analysis
 ]
 
 # Optional requirements for different force fields and advanced features
@@ -38,14 +37,14 @@ extras_require = {
         "rdkit>=2021.0",  # Optional for coordinate alignment
     ],
     "swissparam": [
-        "mechanize>=0.4.0",
+        # SwissParam now uses command-line API via curl (no Python dependencies)
     ],
     "protonation": [
         "propka>=3.4.0",  # For pKa-based protonation state prediction
     ],
     "analysis": [
-        "mdtraj>=1.9.0",      # Optional for enhanced trajectory analysis
-        "scipy>=1.6.0",       # For statistical analysis
+        "mdtraj>=1.9.0",  # Optional for enhanced trajectory analysis
+        "scipy>=1.6.0",  # For statistical analysis
     ],
     "all": [
         "acpype>=2021.0",
@@ -53,7 +52,7 @@ extras_require = {
         "openff-interchange>=0.2.0",
         "rdkit>=2021.0",
         "requests>=2.25.0",
-        "mechanize>=0.4.0",
+        # SwissParam uses curl (no Python dependencies)
         "propka>=3.4.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
@@ -99,9 +98,9 @@ setup(
 )
 
 print("Setup complete!")
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("PRISM INSTALLATION GUIDE")
-print("="*60)
+print("=" * 60)
 print("\nRECOMMENDED INSTALLATION (2025):")
 print("  # 1. Install force field dependencies first (using mamba/conda)")
 print("  mamba install -c conda-forge openff-toolkit ambertools")
@@ -135,7 +134,7 @@ print("  conda activate prism-env")
 print("  pip install -e .")
 
 print("\n  # Check installation:")
-print("  python -c \"import prism as pm; print(pm.check_dependencies())\"")
+print('  python -c "import prism as pm; print(pm.check_dependencies())"')
 
 print("\nBASIC USAGE:")
 print("  import prism as pm")

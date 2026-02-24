@@ -15,11 +15,23 @@ except ImportError:
         from prism.utils.colors import print_success, print_info, print_subheader, path, number
     except ImportError:
         # Fallback if colors not available
-        def print_success(x, **kwargs): print(f"✓ {x}")
-        def print_info(x, **kwargs): print(f"ℹ {x}")
-        def print_subheader(x, **kwargs): print(f"\n=== {x} ===")
-        def path(x): return x
-        def number(x): return x
+        def print_success(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}✓ {x}")
+
+        def print_info(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}ℹ {x}")
+
+        def print_subheader(x, **kwargs):
+            prefix = kwargs.get("prefix", "")
+            print(f"{prefix}\n=== {x} ===")
+
+        def path(x):
+            return x
+
+        def number(x):
+            return x
 
 
 class MDPGenerator:
@@ -45,9 +57,9 @@ class MDPGenerator:
 
     def _generate_ions_mdp(self):
         """Generate ions.mdp file"""
-        em_config = self.config['energy_minimization']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
+        em_config = self.config["energy_minimization"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
 
         content = f"""; ions.mdp - Parameters for adding ions
 integrator  = {em_config['integrator']}
@@ -86,17 +98,17 @@ constraint-algorithm    = {self.config['constraints']['algorithm']}
 """
 
         mdp_path = os.path.join(self.mdp_dir, "ions.mdp")
-        with open(mdp_path, 'w') as f:
+        with open(mdp_path, "w") as f:
             f.write(content)
 
     def _generate_em_mdp(self):
         """Generate energy minimization MDP"""
-        em_config = self.config['energy_minimization']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
+        em_config = self.config["energy_minimization"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
 
         em_mdp = os.path.join(self.mdp_dir, "em.mdp")
-        with open(em_mdp, 'w') as f:
+        with open(em_mdp, "w") as f:
             f.write(f"""; em.mdp - Energy minimization
 title           = Energy minimization
 define          = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
@@ -120,23 +132,23 @@ pbc             = xyz
 
     def _generate_nvt_mdp(self):
         """Generate NVT equilibration MDP"""
-        sim_config = self.config['simulation']
-        const_config = self.config['constraints']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
-        tc_config = self.config['temperature_coupling']
-        output_config = self.config['output']
+        sim_config = self.config["simulation"]
+        const_config = self.config["constraints"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
+        tc_config = self.config["temperature_coupling"]
+        output_config = self.config["output"]
 
-        nvt_steps = int(sim_config['equilibration_nvt_time_ps'] / sim_config['dt'])
-        energy_interval = int(output_config['energy_interval_ps'] / sim_config['dt'])
-        log_interval = int(output_config['log_interval_ps'] / sim_config['dt'])
+        nvt_steps = int(sim_config["equilibration_nvt_time_ps"] / sim_config["dt"])
+        energy_interval = int(output_config["energy_interval_ps"] / sim_config["dt"])
+        log_interval = int(output_config["log_interval_ps"] / sim_config["dt"])
 
-        tc_grps = ' '.join(tc_config['tc_grps'])
-        tau_t = '     '.join(map(str, tc_config['tau_t']))
-        ref_t = '     '.join([str(sim_config['temperature'])] * len(tc_config['tc_grps']))
+        tc_grps = " ".join(tc_config["tc_grps"])
+        tau_t = "     ".join(map(str, tc_config["tau_t"]))
+        ref_t = "     ".join([str(sim_config["temperature"])] * len(tc_config["tc_grps"]))
 
         nvt_mdp = os.path.join(self.mdp_dir, "nvt.mdp")
-        with open(nvt_mdp, 'w') as f:
+        with open(nvt_mdp, "w") as f:
             f.write(f"""; nvt.mdp - NVT equilibration
 title               = NVT equilibration with the complex restrained
 define              = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
@@ -183,24 +195,24 @@ comm-grps               = {tc_grps}
 
     def _generate_npt_mdp(self):
         """Generate NPT equilibration MDP"""
-        sim_config = self.config['simulation']
-        const_config = self.config['constraints']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
-        tc_config = self.config['temperature_coupling']
-        pc_config = self.config['pressure_coupling']
-        output_config = self.config['output']
+        sim_config = self.config["simulation"]
+        const_config = self.config["constraints"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
+        tc_config = self.config["temperature_coupling"]
+        pc_config = self.config["pressure_coupling"]
+        output_config = self.config["output"]
 
-        npt_steps = int(sim_config['equilibration_npt_time_ps'] / sim_config['dt'])
-        energy_interval = int(output_config['energy_interval_ps'] / sim_config['dt'])
-        log_interval = int(output_config['log_interval_ps'] / sim_config['dt'])
+        npt_steps = int(sim_config["equilibration_npt_time_ps"] / sim_config["dt"])
+        energy_interval = int(output_config["energy_interval_ps"] / sim_config["dt"])
+        log_interval = int(output_config["log_interval_ps"] / sim_config["dt"])
 
-        tc_grps = ' '.join(tc_config['tc_grps'])
-        tau_t = '     '.join(map(str, tc_config['tau_t']))
-        ref_t = '     '.join([str(sim_config['temperature'])] * len(tc_config['tc_grps']))
+        tc_grps = " ".join(tc_config["tc_grps"])
+        tau_t = "     ".join(map(str, tc_config["tau_t"]))
+        ref_t = "     ".join([str(sim_config["temperature"])] * len(tc_config["tc_grps"]))
 
         npt_mdp = os.path.join(self.mdp_dir, "npt.mdp")
-        with open(npt_mdp, 'w') as f:
+        with open(npt_mdp, "w") as f:
             f.write(f"""; npt.mdp - NPT equilibration
 title               = NPT equilibration with protein restrained
 define              = -DPOSRES -DPOSRES_FC_BB=400.0 -DPOSRES_FC_SC=40.0
@@ -249,26 +261,26 @@ comm-grps               = {tc_grps}
 
     def _generate_production_mdp(self):
         """Generate production MD MDP"""
-        sim_config = self.config['simulation']
-        const_config = self.config['constraints']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
-        tc_config = self.config['temperature_coupling']
-        pc_config = self.config['pressure_coupling']
-        output_config = self.config['output']
+        sim_config = self.config["simulation"]
+        const_config = self.config["constraints"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
+        tc_config = self.config["temperature_coupling"]
+        pc_config = self.config["pressure_coupling"]
+        output_config = self.config["output"]
 
-        prod_steps = int(sim_config['production_time_ns'] * 1000 / sim_config['dt'])
-        log_interval = int(output_config['log_interval_ps'] / sim_config['dt'])
-        traj_interval = int(output_config['trajectory_interval_ps'] / sim_config['dt'])
+        prod_steps = int(sim_config["production_time_ns"] * 1000 / sim_config["dt"])
+        log_interval = int(output_config["log_interval_ps"] / sim_config["dt"])
+        traj_interval = int(output_config["trajectory_interval_ps"] / sim_config["dt"])
 
-        tc_grps = ' '.join(tc_config['tc_grps'])
-        tau_t = '     '.join(map(str, tc_config['tau_t']))
-        ref_t = '     '.join([str(sim_config['temperature'])] * len(tc_config['tc_grps']))
+        tc_grps = " ".join(tc_config["tc_grps"])
+        tau_t = "     ".join(map(str, tc_config["tau_t"]))
+        ref_t = "     ".join([str(sim_config["temperature"])] * len(tc_config["tc_grps"]))
 
-        output_line = "nstxtcout" if output_config['compressed_trajectory'] else "nstxout"
+        output_line = "nstxtcout" if output_config["compressed_trajectory"] else "nstxout"
 
         md_mdp = os.path.join(self.mdp_dir, "md.mdp")
-        with open(md_mdp, 'w') as f:
+        with open(md_mdp, "w") as f:
             f.write(f"""; md.mdp - Production MD
 title               = Production run ({sim_config['production_time_ns']} ns)
 integrator          = md
@@ -314,9 +326,16 @@ comm-mode               = Linear
 comm-grps               = {tc_grps}
 """)
 
-    def generate_smd_mdp(self, pull_rate=0.01, pull_k=1000.0, pull_distance=3.6,
-                         ref_group='Protein', pull_group='LIG',
-                         pbcatom=None, freeze_group=None):
+    def generate_smd_mdp(
+        self,
+        pull_rate=0.01,
+        pull_k=1000.0,
+        pull_distance=3.6,
+        ref_group="Protein",
+        pull_group="LIG",
+        pbcatom=None,
+        freeze_group=None,
+    ):
         """
         Generate SMD (Steered Molecular Dynamics) MDP file for pulling simulations.
 
@@ -337,27 +356,27 @@ comm-grps               = {tc_grps}
         freeze_group : str or None
             Name of the group to freeze during SMD (e.g. 'CA_freeze')
         """
-        sim_config = self.config['simulation']
-        const_config = self.config['constraints']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
-        tc_config = self.config['temperature_coupling']
-        pc_config = self.config['pressure_coupling']
-        output_config = self.config['output']
+        sim_config = self.config["simulation"]
+        const_config = self.config["constraints"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
+        tc_config = self.config["temperature_coupling"]
+        pc_config = self.config["pressure_coupling"]
+        output_config = self.config["output"]
 
         # Calculate SMD simulation time based on pull distance and rate
         # Time = distance / rate
         smd_time_ps = pull_distance / pull_rate  # in ps
-        smd_steps = int(smd_time_ps / sim_config['dt'])
+        smd_steps = int(smd_time_ps / sim_config["dt"])
 
         # Output settings - more frequent for pulling
-        traj_interval = int(10.0 / sim_config['dt'])  # Every 10 ps
-        energy_interval = int(1.0 / sim_config['dt'])  # Every 1 ps for pull force
-        log_interval = int(10.0 / sim_config['dt'])
+        traj_interval = int(10.0 / sim_config["dt"])  # Every 10 ps
+        energy_interval = int(1.0 / sim_config["dt"])  # Every 1 ps for pull force
+        log_interval = int(10.0 / sim_config["dt"])
 
-        tc_grps = ' '.join(tc_config['tc_grps'])
-        tau_t = '     '.join(map(str, tc_config['tau_t']))
-        ref_t = '     '.join([str(sim_config['temperature'])] * len(tc_config['tc_grps']))
+        tc_grps = " ".join(tc_config["tc_grps"])
+        tau_t = "     ".join(map(str, tc_config["tau_t"]))
+        ref_t = "     ".join([str(sim_config["temperature"])] * len(tc_config["tc_grps"]))
 
         # Build conditional sections
         if freeze_group:
@@ -370,13 +389,15 @@ comm-grps               = {tc_grps}
                 "freezedim               = Y Y Y\n"
             )
         else:
-            comm_section = f"; COM motion removal\ncomm-mode               = Linear\ncomm-grps               = {tc_grps}"
+            comm_section = (
+                f"; COM motion removal\ncomm-mode               = Linear\ncomm-grps               = {tc_grps}"
+            )
             freeze_section = ""
 
         pbcatom_line = f"pull-group1-pbcatom     = {pbcatom}" if pbcatom else "; pull-group1-pbcatom auto-selected"
 
         smd_mdp = os.path.join(self.mdp_dir, "smd.mdp")
-        with open(smd_mdp, 'w') as f:
+        with open(smd_mdp, "w") as f:
             f.write(f"""; smd.mdp - Steered Molecular Dynamics (SMD) for PMF calculation
 title               = SMD pulling simulation along Z-axis
 integrator          = md
@@ -466,9 +487,15 @@ pull-nstfout            = 500
 
         return smd_mdp
 
-    def generate_umbrella_mdp(self, umbrella_time_ns=10.0, pull_k=1000.0,
-                              ref_group='Protein_near_LIG', pull_group='LIG',
-                              pbcatom=None, freeze_group=None):
+    def generate_umbrella_mdp(
+        self,
+        umbrella_time_ns=10.0,
+        pull_k=1000.0,
+        ref_group="Protein_near_LIG",
+        pull_group="LIG",
+        pbcatom=None,
+        freeze_group=None,
+    ):
         """
         Generate umbrella sampling MDP file for PMF calculations.
 
@@ -487,24 +514,24 @@ pull-nstfout            = 500
         freeze_group : str or None
             Name of the group to freeze (e.g. 'CA_freeze')
         """
-        sim_config = self.config['simulation']
-        const_config = self.config['constraints']
-        elec_config = self.config['electrostatics']
-        vdw_config = self.config['vdw']
-        tc_config = self.config['temperature_coupling']
-        pc_config = self.config['pressure_coupling']
+        sim_config = self.config["simulation"]
+        const_config = self.config["constraints"]
+        elec_config = self.config["electrostatics"]
+        vdw_config = self.config["vdw"]
+        tc_config = self.config["temperature_coupling"]
+        pc_config = self.config["pressure_coupling"]
 
         # Calculate umbrella simulation steps (ns -> ps -> steps)
-        umbrella_steps = int(umbrella_time_ns * 1000 / sim_config['dt'])
+        umbrella_steps = int(umbrella_time_ns * 1000 / sim_config["dt"])
 
         # Output settings - same as SMD
-        traj_interval = int(10.0 / sim_config['dt'])  # Every 10 ps
-        energy_interval = int(1.0 / sim_config['dt'])  # Every 1 ps for pull data
-        log_interval = int(10.0 / sim_config['dt'])
+        traj_interval = int(10.0 / sim_config["dt"])  # Every 10 ps
+        energy_interval = int(1.0 / sim_config["dt"])  # Every 1 ps for pull data
+        log_interval = int(10.0 / sim_config["dt"])
 
-        tc_grps = ' '.join(tc_config['tc_grps'])
-        tau_t = '     '.join(map(str, tc_config['tau_t']))
-        ref_t = '     '.join([str(sim_config['temperature'])] * len(tc_config['tc_grps']))
+        tc_grps = " ".join(tc_config["tc_grps"])
+        tau_t = "     ".join(map(str, tc_config["tau_t"]))
+        ref_t = "     ".join([str(sim_config["temperature"])] * len(tc_config["tc_grps"]))
 
         # Build conditional sections (same logic as SMD)
         if freeze_group:
@@ -517,13 +544,15 @@ pull-nstfout            = 500
                 "freezedim               = Y Y Y\n"
             )
         else:
-            comm_section = f"; COM motion removal\ncomm-mode               = Linear\ncomm-grps               = {tc_grps}"
+            comm_section = (
+                f"; COM motion removal\ncomm-mode               = Linear\ncomm-grps               = {tc_grps}"
+            )
             freeze_section = ""
 
         pbcatom_line = f"pull-group1-pbcatom     = {pbcatom}" if pbcatom else "; pull-group1-pbcatom auto-selected"
 
         umbrella_mdp = os.path.join(self.mdp_dir, "umbrella.mdp")
-        with open(umbrella_mdp, 'w') as f:
+        with open(umbrella_mdp, "w") as f:
             f.write(f"""; umbrella.mdp - Umbrella sampling window for PMF calculation
 title               = Umbrella sampling window ({umbrella_time_ns} ns)
 integrator          = md
@@ -613,8 +642,8 @@ pull-nstfout            = 500
 
     def _print_summary(self):
         """Print summary of generated MDP files"""
-        sim_config = self.config['simulation']
-        em_config = self.config['energy_minimization']
+        sim_config = self.config["simulation"]
+        em_config = self.config["energy_minimization"]
 
         print_info("Simulation parameters:")
         print(f"  - Energy minimization: {number(em_config['nsteps'])} steps")

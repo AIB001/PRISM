@@ -14,44 +14,44 @@ def cleaner():
 @pytest.fixture
 def cleaner_keep_all():
     """Create a ProteinCleaner in keep_all mode."""
-    return ProteinCleaner(ion_mode='keep_all', verbose=False)
+    return ProteinCleaner(ion_mode="keep_all", verbose=False)
 
 
 @pytest.fixture
 def cleaner_remove_all():
     """Create a ProteinCleaner in remove_all mode."""
-    return ProteinCleaner(ion_mode='remove_all', verbose=False)
+    return ProteinCleaner(ion_mode="remove_all", verbose=False)
 
 
 class TestIsMetalOrIon:
     """Test metal/ion identification."""
 
     def test_zinc_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('ZN', 'ZN') is True
+        assert cleaner._is_metal_or_ion("ZN", "ZN") is True
 
     def test_magnesium_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('MG', 'MG') is True
+        assert cleaner._is_metal_or_ion("MG", "MG") is True
 
     def test_calcium_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('CA', 'CA') is True
+        assert cleaner._is_metal_or_ion("CA", "CA") is True
 
     def test_iron_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('FE', 'FE') is True
+        assert cleaner._is_metal_or_ion("FE", "FE") is True
 
     def test_sodium_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('NA', 'NA') is True
+        assert cleaner._is_metal_or_ion("NA", "NA") is True
 
     def test_chloride_detected(self, cleaner):
-        assert cleaner._is_metal_or_ion('CL', 'CL') is True
+        assert cleaner._is_metal_or_ion("CL", "CL") is True
 
     def test_regular_residue_not_metal(self, cleaner):
         """Normal amino acid atoms (not CA/ambiguous) should not be metal."""
-        assert cleaner._is_metal_or_ion('ALA', 'N') is False
-        assert cleaner._is_metal_or_ion('ALA', 'C') is False
-        assert cleaner._is_metal_or_ion('ALA', 'O') is False
+        assert cleaner._is_metal_or_ion("ALA", "N") is False
+        assert cleaner._is_metal_or_ion("ALA", "C") is False
+        assert cleaner._is_metal_or_ion("ALA", "O") is False
 
     def test_water_not_metal(self, cleaner):
-        assert cleaner._is_metal_or_ion('HOH', 'O') is False
+        assert cleaner._is_metal_or_ion("HOH", "O") is False
 
 
 class TestShouldKeepMetalSmart:
@@ -59,60 +59,60 @@ class TestShouldKeepMetalSmart:
 
     def test_keep_structural_zinc(self, cleaner):
         """Zinc is structural and should be kept."""
-        assert cleaner._should_keep_metal_smart('ZN', 'ZN') is True
+        assert cleaner._should_keep_metal_smart("ZN", "ZN") is True
 
     def test_keep_structural_magnesium(self, cleaner):
         """Magnesium is structural and should be kept."""
-        assert cleaner._should_keep_metal_smart('MG', 'MG') is True
+        assert cleaner._should_keep_metal_smart("MG", "MG") is True
 
     def test_keep_structural_calcium(self, cleaner):
         """Calcium is structural and should be kept."""
-        assert cleaner._should_keep_metal_smart('CA', 'CA') is True
+        assert cleaner._should_keep_metal_smart("CA", "CA") is True
 
     def test_remove_sodium(self, cleaner):
         """Sodium is non-structural and should be removed."""
-        assert cleaner._should_keep_metal_smart('NA', 'NA') is False
+        assert cleaner._should_keep_metal_smart("NA", "NA") is False
 
     def test_remove_chloride(self, cleaner):
         """Chloride is non-structural and should be removed."""
-        assert cleaner._should_keep_metal_smart('CL', 'CL') is False
+        assert cleaner._should_keep_metal_smart("CL", "CL") is False
 
     def test_remove_potassium(self, cleaner):
         """Potassium is non-structural and should be removed."""
-        assert cleaner._should_keep_metal_smart('K', 'K') is False
+        assert cleaner._should_keep_metal_smart("K", "K") is False
 
 
 class TestCrystallizationArtifacts:
     """Test crystallization artifact identification."""
 
     def test_glycerol_is_artifact(self):
-        assert 'GOL' in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "GOL" in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
 
     def test_ethylene_glycol_is_artifact(self):
-        assert 'EDO' in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "EDO" in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
 
     def test_peg_is_artifact(self):
-        assert 'PEG' in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "PEG" in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
 
     def test_nag_is_artifact(self):
-        assert 'NAG' in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "NAG" in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
 
     def test_standard_residue_not_artifact(self):
-        assert 'ALA' not in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
-        assert 'GLY' not in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "ALA" not in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
+        assert "GLY" not in ProteinCleaner.CRYSTALLIZATION_ARTIFACTS
 
 
 class TestWaterIdentification:
     """Test water residue identification."""
 
     def test_hoh_is_water(self):
-        assert 'HOH' in ProteinCleaner.WATER_NAMES
+        assert "HOH" in ProteinCleaner.WATER_NAMES
 
     def test_wat_is_water(self):
-        assert 'WAT' in ProteinCleaner.WATER_NAMES
+        assert "WAT" in ProteinCleaner.WATER_NAMES
 
     def test_sol_is_water(self):
-        assert 'SOL' in ProteinCleaner.WATER_NAMES
+        assert "SOL" in ProteinCleaner.WATER_NAMES
 
 
 class TestMinDistance:

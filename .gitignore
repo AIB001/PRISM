@@ -96,9 +96,16 @@ cache/
 
 # Project specific
 test/*
+tests/*
+.playwright-mcp/*
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
 # mypy
 .mypy_cache/
+.ruff_cache
+.qoder
+.playwright*
+
+

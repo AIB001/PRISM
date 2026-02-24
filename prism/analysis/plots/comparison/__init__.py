@@ -8,12 +8,12 @@ from .comparison_plots import (
     plot_multi_system_comparison,
     plot_correlation_matrix,
     plot_statistical_comparison,
-    plot_difference_analysis
+    plot_difference_analysis,
 )
 
 __all__ = [
-    'plot_multi_system_comparison',
-    'plot_correlation_matrix',
-    'plot_statistical_comparison',
-    'plot_difference_analysis'
+    "plot_multi_system_comparison",
+    "plot_correlation_matrix",
+    "plot_statistical_comparison",
+    "plot_difference_analysis",
 ]

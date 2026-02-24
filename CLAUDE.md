@@ -84,3 +84,37 @@ output_dir = system.build()
 ## Testing
 
 Test data in `test/4xb4/` contains complete protein-ligand example. MDP templates generated dynamically based on configuration.
+
+Git commit message format: `[module] description;xxx`. Don't be too long!
+
+## FEbuilder Ligand Conversion (AMBER → CHARMM)
+
+### Quick Start
+```bash
+# Environment setup
+conda activate /home/gxf1212/.conda/envs/prism
+pip install -e .  # Enables prism package imports system-wide
+
+# Batch convert all ligands to CHARMM/NAMD format
+python test/modeling/FEbuilder_FF/AMBER/generate_charmm_ff.py
+```
+
+### Process & Implementation
+
+**Conversion Pipeline**: `mol2` → `GAFF` (via antechamber/tleap) → `CHARMM RTF/PRM` (via `AmberToCharmmConverter`)
+
+1. **GAFFForceFieldGenerator** populates `test/modeling/FEbuilder_FF/AMBER/_build/<name>/LIG.amb2gmx/` with GROMACS-format files
+2. **AmberToCharmmConverter** converts GAFF parameters to CHARMM topology (RTF) and parameters (PRM) files
+3. Output: `<name>.rtf`, `<name>.prm`, `<name>.pdb`, `<name>_3D.mol2` in the AMBER directory
+
+### Important: Atom Type Naming for FEP
+
+When converting multiple ligands for FEP (free energy perturbation) calculations, **each molecule gets a unique residue-name prefix** to avoid VMD psfgen type conflicts:
+- Molecule `38.mol2` → types like `38_ca`, `38_c3`, `38_sy` (residue name "38")
+- Molecule `42.mol2` → types like `42_ca`, `42_c3`, `42_sy` (residue name "42")
+
+This prevents "duplicate type key" warnings when loading multiple force field topologies simultaneously in VMD.
+
+**Customization**:
+- Single molecule with custom residue name: `python generate_charmm_ff.py --resname XXX path/to/ligand.mol2`
+- Force regeneration: add `--overwrite` flag (requires AmberTools installed)

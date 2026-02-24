@@ -13,45 +13,45 @@ class Colors:
     """ANSI color codes for terminal output"""
 
     # Basic colors
-    BLACK = '\033[30m'
-    RED = '\033[31m'
-    GREEN = '\033[32m'
-    YELLOW = '\033[33m'
-    BLUE = '\033[34m'
-    MAGENTA = '\033[35m'
-    CYAN = '\033[36m'
-    WHITE = '\033[37m'
+    BLACK = "\033[30m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
 
     # Bright/Bold colors
-    BRIGHT_BLACK = '\033[90m'
-    BRIGHT_RED = '\033[91m'
-    BRIGHT_GREEN = '\033[92m'
-    BRIGHT_YELLOW = '\033[93m'
-    BRIGHT_BLUE = '\033[94m'
-    BRIGHT_MAGENTA = '\033[95m'
-    BRIGHT_CYAN = '\033[96m'
-    BRIGHT_WHITE = '\033[97m'
+    BRIGHT_BLACK = "\033[90m"
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
+    BRIGHT_WHITE = "\033[97m"
 
     # Styles
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
-    ITALIC = '\033[3m'
-    UNDERLINE = '\033[4m'
-    BLINK = '\033[5m'
-    REVERSE = '\033[7m'
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    ITALIC = "\033[3m"
+    UNDERLINE = "\033[4m"
+    BLINK = "\033[5m"
+    REVERSE = "\033[7m"
 
     # Reset
-    RESET = '\033[0m'
+    RESET = "\033[0m"
 
     # Backgrounds
-    BG_BLACK = '\033[40m'
-    BG_RED = '\033[41m'
-    BG_GREEN = '\033[42m'
-    BG_YELLOW = '\033[43m'
-    BG_BLUE = '\033[44m'
-    BG_MAGENTA = '\033[45m'
-    BG_CYAN = '\033[46m'
-    BG_WHITE = '\033[47m'
+    BG_BLACK = "\033[40m"
+    BG_RED = "\033[41m"
+    BG_GREEN = "\033[42m"
+    BG_YELLOW = "\033[43m"
+    BG_BLUE = "\033[44m"
+    BG_MAGENTA = "\033[45m"
+    BG_CYAN = "\033[46m"
+    BG_WHITE = "\033[47m"
 
     @staticmethod
     def is_color_supported():
@@ -62,28 +62,29 @@ class Colors:
             bool: True if colors are supported
         """
         # Check for NO_COLOR environment variable
-        if os.getenv('NO_COLOR'):
+        if os.getenv("NO_COLOR"):
             return False
 
         # Check for FORCE_COLOR environment variable
-        if os.getenv('FORCE_COLOR'):
+        if os.getenv("FORCE_COLOR"):
             return True
 
         # Check if output is a terminal
-        if not hasattr(sys.stdout, 'isatty'):
+        if not hasattr(sys.stdout, "isatty"):
             return False
 
         if not sys.stdout.isatty():
             return False
 
         # Check platform
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             # Windows 10+ supports ANSI colors
             try:
                 import platform
+
                 version = platform.version()
                 # Windows 10 build 10586 and later support ANSI
-                if 'Windows-10' in version:
+                if "Windows-10" in version:
                     return True
             except:
                 pass
@@ -91,6 +92,7 @@ class Colors:
             # Try to enable ANSI on Windows
             try:
                 import ctypes
+
                 kernel32 = ctypes.windll.kernel32
                 kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
                 return True
@@ -121,7 +123,7 @@ class ColorPrinter:
         if not self.use_colors:
             return text
 
-        color_str = ''.join(color_codes)
+        color_str = "".join(color_codes)
         return f"{color_str}{text}{Colors.RESET}"
 
     # Semantic color methods
@@ -218,6 +220,7 @@ class ColorPrinter:
 # Global color printer instance
 _color_printer = None
 
+
 def get_color_printer():
     """Get the global color printer instance"""
     global _color_printer
@@ -237,37 +240,46 @@ def success(text):
     """Return success-colored text"""
     return get_color_printer().success(text)
 
+
 def error(text):
     """Return error-colored text"""
     return get_color_printer().error(text)
+
 
 def warning(text):
     """Return warning-colored text"""
     return get_color_printer().warning(text)
 
+
 def info(text):
     """Return info-colored text"""
     return get_color_printer().info(text)
+
 
 def header(text):
     """Return header-colored text"""
     return get_color_printer().header(text)
 
+
 def subheader(text):
     """Return subheader-colored text"""
     return get_color_printer().subheader(text)
+
 
 def dim(text):
     """Return dimmed text"""
     return get_color_printer().dim(text)
 
+
 def highlight(text):
     """Return highlighted text"""
     return get_color_printer().highlight(text)
 
+
 def path(text):
     """Return path-colored text"""
     return get_color_printer().path(text)
+
 
 def number(text):
     """Return number-colored text"""
@@ -279,32 +291,38 @@ def print_success(text, prefix="✓"):
     """Print success message"""
     get_color_printer().print_success(text, prefix)
 
+
 def print_error(text, prefix="✗"):
     """Print error message"""
     get_color_printer().print_error(text, prefix)
+
 
 def print_warning(text, prefix="⚠"):
     """Print warning message"""
     get_color_printer().print_warning(text, prefix)
 
+
 def print_info(text, prefix="ℹ"):
     """Print info message"""
     get_color_printer().print_info(text, prefix)
+
 
 def print_header(text, char="=", width=80):
     """Print header with separator"""
     get_color_printer().print_header(text, char, width)
 
+
 def print_subheader(text, prefix="==="):
     """Print subheader"""
     get_color_printer().print_subheader(text, prefix)
+
 
 def print_step(step_num, total_steps, description):
     """Print workflow step"""
     get_color_printer().print_step(step_num, total_steps, description)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Simple test
     cp = ColorPrinter()
     print("\nPRISM Color Module")

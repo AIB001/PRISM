@@ -1,6 +1,5 @@
 """Tests for prism.utils.residue amino acid code conversion."""
 
-import pytest
 from prism.utils.residue import (
     convert_residue_to_1letter,
     convert_residue_to_3letter,

@@ -9,21 +9,22 @@ from .base import SimulationModel
 from .gmxsim import GMXSimulator
 from .openmmsim import OpenMMSimulator
 
+
 # High-level API function
 def model(gmx_dir):
     """
     Create a simulation model from a GROMACS directory.
-    
+
     Parameters:
     -----------
     gmx_dir : str
         Path to the GMX_PROLIG_MD directory
-        
+
     Returns:
     --------
     SimulationModel
         A simulation model object ready to run MD
-        
+
     Examples:
     ---------
     >>> import prism as pm
@@ -32,9 +33,5 @@ def model(gmx_dir):
     """
     return SimulationModel(gmx_dir)
 
-__all__ = [
-    "SimulationModel",
-    "GMXSimulator", 
-    "OpenMMSimulator",
-    "model"
-]
+
+__all__ = ["SimulationModel", "GMXSimulator", "OpenMMSimulator", "model"]

@@ -31,6 +31,10 @@ ions:
   positive_ion: NA  # Positive ion type
   negative_ion: CL  # Negative ion type
 
+# Protein preparation settings
+protein_preparation:
+  nterm_met: keep  # keep, drop, or auto (drop for CHARMM36*)
+
 # Constraint settings
 constraints:
   algorithm: lincs  # Constraint algorithm

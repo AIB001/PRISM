@@ -13,52 +13,92 @@ from pathlib import Path
 from ..core.publication_utils import apply_publication_style, PUBLICATION_FONTS, get_standard_figsize
 
 
-def plot_rmsd_simple_timeseries(rmsd_results: Dict,
-                               output_path: str,
-                               title: str = "") -> bool:
+def plot_rmsd_simple_timeseries(
+    rmsd_results: Dict,
+    output_path: str = None,
+    title: str = "",
+    ax: Optional[plt.Axes] = None,
+    time_per_frame_ns: float = 0.5,
+    ylabel: str = "Ligand RMSD (Å)",
+    **kwargs,
+):
     """
     Create simple RMSD time series plot matching the example format.
+
+    Supports both standalone and panel modes for multi-panel figures.
 
     Parameters
     ----------
     rmsd_results : dict
         Dictionary with trajectory names as keys and RMSD data as values
-    output_path : str
-        Path to save the plot
+    output_path : str, optional
+        Path to save the plot. Required if ax is None (standalone mode).
     title : str
         Plot title (empty by default for publication style)
+    ax : matplotlib.axes.Axes, optional
+        If provided, plot on this axis (panel mode).
+        If None, create new figure (standalone mode).
+    time_per_frame_ns : float
+        Time interval per frame in nanoseconds (default: 0.5)
+    ylabel : str
+        Y-axis label (default: "Ligand RMSD (Å)")
+    **kwargs : dict
+        Additional styling parameters (e.g., colors, linewidth)
 
     Returns
     -------
-    bool
-        True if successful, False otherwise
+    bool or matplotlib.axes.Axes
+        If standalone mode (ax=None): returns True/False for success
+        If panel mode (ax provided): returns the axis object
+
+    Examples
+    --------
+    # Standalone mode (backward compatible - original usage)
+    >>> plot_rmsd_simple_timeseries(rmsd_data, "output.png")
+
+    # Panel mode (new functionality for multi-panel figures)
+    >>> fig, axes = plt.subplots(2, 2)
+    >>> plot_rmsd_simple_timeseries(rmsd_data, ax=axes[0, 0])
     """
     try:
         print("📈 RMSD timeseries analysis showing structural stability over simulation time")
-        apply_publication_style()
 
-        # Create single panel figure (matching example)
-        fig, ax = plt.subplots(figsize=get_standard_figsize('single'))
+        # Determine mode: standalone (ax=None) or panel (ax provided)
+        if ax is None:
+            # Standalone mode - create new figure (original behavior)
+            if output_path is None:
+                raise ValueError("output_path is required when ax is None (standalone mode)")
+
+            apply_publication_style()
+            fig, ax = plt.subplots(figsize=get_standard_figsize("single"))
+            own_figure = True
+        else:
+            # Panel mode - use provided axis
+            own_figure = False
+
+        # ========== Core plotting logic (shared by both modes) ==========
 
         # Use different colors for each trajectory
-        colors = ['#4472C4', '#ED7D31', '#70AD47', '#FFC000', '#5B9BD5', '#C55A11']
+        colors = kwargs.get("colors", ["#4472C4", "#ED7D31", "#70AD47", "#FFC000", "#5B9BD5", "#C55A11"])
+        linewidth = kwargs.get("linewidth", 1.5)
+        alpha = kwargs.get("alpha", 0.85)
 
         # Plot all trajectories with different colors
         for i, (traj_name, rmsd_data) in enumerate(rmsd_results.items()):
-            if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
-                protein_rmsd = rmsd_data['protein']
+            if isinstance(rmsd_data, dict) and "protein" in rmsd_data:
+                protein_rmsd = rmsd_data["protein"]
             else:
                 protein_rmsd = rmsd_data
 
             if len(protein_rmsd) > 0:
-                time = np.arange(len(protein_rmsd)) * 0.5  # 0.5 ns intervals
+                time = np.arange(len(protein_rmsd)) * time_per_frame_ns
                 color = colors[i % len(colors)]
-                ax.plot(time, protein_rmsd, color=color, linewidth=1.5, alpha=0.85, label=traj_name)
+                ax.plot(time, protein_rmsd, color=color, linewidth=linewidth, alpha=alpha, label=traj_name)
 
         # Format exactly like the example
-        ax.set_xlabel('Time (ns)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-        ax.set_ylabel('Ligand RMSD (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')  # Match example label
-        ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+        ax.set_xlabel("Time (ns)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+        ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
         # Remove grid and titles for clean look
         ax.grid(False)
@@ -66,8 +106,8 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
         # Set clean axis limits
         all_rmsd = []
         for rmsd_data in rmsd_results.values():
-            if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
-                all_rmsd.extend(rmsd_data['protein'])
+            if isinstance(rmsd_data, dict) and "protein" in rmsd_data:
+                all_rmsd.extend(rmsd_data["protein"])
             else:
                 all_rmsd.extend(rmsd_data)
 
@@ -76,25 +116,33 @@ def plot_rmsd_simple_timeseries(rmsd_results: Dict,
 
         # Add legend if multiple trajectories
         if len(rmsd_results) > 1:
-            ax.legend(loc='best', fontsize=PUBLICATION_FONTS['legend'], framealpha=0.9)
+            ax.legend(loc="best", fontsize=PUBLICATION_FONTS["legend"], framealpha=0.9)
 
         # Only add title if provided
+        if title:
+            ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold")
 
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
-        plt.close()
+        # ========== Mode-specific post-processing ==========
 
-        return True
+        if own_figure:
+            # Standalone mode: save and close figure
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
+            plt.close()
+            return True
+        else:
+            # Panel mode: return axis, caller handles saving
+            return ax
 
     except Exception as e:
         print(f"Error in RMSD plotting: {e}")
-        return False
+        if own_figure:
+            return False
+        else:
+            raise  # Panel mode: raise exception for caller to handle
 
 
-def plot_rmsd_analysis(rmsd_results: Dict,
-                      output_path: str,
-                      title: str = "") -> bool:
+def plot_rmsd_analysis(rmsd_results: Dict, output_path: str, title: str = "") -> bool:
     """
     Plot RMSD analysis results for multiple trajectories.
 
@@ -116,24 +164,25 @@ def plot_rmsd_analysis(rmsd_results: Dict,
         print("📈 RMSD 4-panel analysis: timeseries, distribution, averages, and ligand comparison")
         apply_publication_style()
 
-        fig, axes = plt.subplots(2, 2, figsize=get_standard_figsize('quad'))
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+        fig, axes = plt.subplots(2, 2, figsize=get_standard_figsize("quad"))
+        if title:
+            fig.suptitle(title, fontsize=16, fontweight="bold")
+        colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
 
         # Plot 1: RMSD time series
         ax1 = axes[0, 0]
         for i, (traj_name, rmsd_data) in enumerate(rmsd_results.items()):
-            if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
-                protein_rmsd = rmsd_data['protein']
+            if isinstance(rmsd_data, dict) and "protein" in rmsd_data:
+                protein_rmsd = rmsd_data["protein"]
             else:
                 protein_rmsd = rmsd_data
 
             if len(protein_rmsd) > 0:
                 time = np.arange(len(protein_rmsd)) * 0.5  # Assume 0.5ns interval
-                ax1.plot(time, protein_rmsd, color=colors[i % 3],
-                        label=traj_name, linewidth=2, alpha=0.8)
+                ax1.plot(time, protein_rmsd, color=colors[i % 3], label=traj_name, linewidth=2, alpha=0.8)
 
-        ax1.set_xlabel('Time (ns)', fontfamily='Times New Roman')
-        ax1.set_ylabel('RMSD (Å)', fontfamily='Times New Roman')
+        ax1.set_xlabel("Time (ns)", fontfamily="Times New Roman")
+        ax1.set_ylabel("RMSD (Å)", fontfamily="Times New Roman")
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
@@ -141,17 +190,17 @@ def plot_rmsd_analysis(rmsd_results: Dict,
         ax2 = axes[0, 1]
         all_rmsd = []
         for rmsd_data in rmsd_results.values():
-            if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
-                protein_rmsd = rmsd_data['protein']
+            if isinstance(rmsd_data, dict) and "protein" in rmsd_data:
+                protein_rmsd = rmsd_data["protein"]
             else:
                 protein_rmsd = rmsd_data
             if len(protein_rmsd) > 0:
                 all_rmsd.extend(protein_rmsd)
 
         if all_rmsd:
-            ax2.hist(all_rmsd, bins=30, alpha=0.7, color='skyblue', edgecolor='black')
-            ax2.set_xlabel('RMSD (Å)', fontfamily='Times New Roman')
-            ax2.set_ylabel('Frequency', fontfamily='Times New Roman')
+            ax2.hist(all_rmsd, bins=30, alpha=0.7, color="skyblue", edgecolor="black")
+            ax2.set_xlabel("RMSD (Å)", fontfamily="Times New Roman")
+            ax2.set_ylabel("Frequency", fontfamily="Times New Roman")
             ax2.grid(True, alpha=0.3)
 
         # Plot 3: Average RMSD per trajectory
@@ -161,8 +210,8 @@ def plot_rmsd_analysis(rmsd_results: Dict,
         std_rmsd = []
 
         for traj_name, rmsd_data in rmsd_results.items():
-            if isinstance(rmsd_data, dict) and 'protein' in rmsd_data:
-                protein_rmsd = rmsd_data['protein']
+            if isinstance(rmsd_data, dict) and "protein" in rmsd_data:
+                protein_rmsd = rmsd_data["protein"]
             else:
                 protein_rmsd = rmsd_data
 
@@ -172,37 +221,43 @@ def plot_rmsd_analysis(rmsd_results: Dict,
                 std_rmsd.append(np.std(protein_rmsd))
 
         if traj_names:
-            bars = ax3.bar(traj_names, avg_rmsd, yerr=std_rmsd,
-                          color=colors[:len(traj_names)], alpha=0.7, capsize=5)
-            ax3.set_ylabel('Average RMSD (Å)', fontfamily='Times New Roman')
-            ax3.grid(True, alpha=0.3, axis='y')
+            bars = ax3.bar(traj_names, avg_rmsd, yerr=std_rmsd, color=colors[: len(traj_names)], alpha=0.7, capsize=5)
+            ax3.set_ylabel("Average RMSD (Å)", fontfamily="Times New Roman")
+            ax3.grid(True, alpha=0.3, axis="y")
 
         # Plot 4: Ligand RMSD (if available)
         ax4 = axes[1, 1]
         has_ligand = False
 
         for i, (traj_name, rmsd_data) in enumerate(rmsd_results.items()):
-            if isinstance(rmsd_data, dict) and 'ligand' in rmsd_data:
-                ligand_rmsd = rmsd_data['ligand']
+            if isinstance(rmsd_data, dict) and "ligand" in rmsd_data:
+                ligand_rmsd = rmsd_data["ligand"]
                 if len(ligand_rmsd) > 0:
                     time = np.arange(len(ligand_rmsd)) * 0.5
-                    ax4.plot(time, ligand_rmsd, color=colors[i % 3],
-                            label=traj_name, linewidth=2, alpha=0.8)
+                    ax4.plot(time, ligand_rmsd, color=colors[i % 3], label=traj_name, linewidth=2, alpha=0.8)
                     has_ligand = True
 
         if has_ligand:
-            ax4.set_xlabel('Time (ns)', fontfamily='Times New Roman')
-            ax4.set_ylabel('Ligand RMSD (Å)', fontfamily='Times New Roman')
+            ax4.set_xlabel("Time (ns)", fontfamily="Times New Roman")
+            ax4.set_ylabel("Ligand RMSD (Å)", fontfamily="Times New Roman")
             ax4.legend()
             ax4.grid(True, alpha=0.3)
         else:
-            ax4.text(0.5, 0.5, 'No Ligand Data', ha='center', va='center',
-                    transform=ax4.transAxes, fontsize=16, fontfamily='Times New Roman')
+            ax4.text(
+                0.5,
+                0.5,
+                "No Ligand Data",
+                ha="center",
+                va="center",
+                transform=ax4.transAxes,
+                fontsize=16,
+                fontfamily="Times New Roman",
+            )
             ax4.set_xticks([])
             ax4.set_yticks([])
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close()
 
         return True
@@ -212,91 +267,164 @@ def plot_rmsd_analysis(rmsd_results: Dict,
         return False
 
 
-def plot_rmsf_analysis(rmsf_results: Dict,
-                      output_path: str,
-                      title: str = "") -> bool:
+def plot_rmsf_analysis(
+    rmsf_results: Dict, output_path: str = None, title: str = "", ax: Optional[plt.Axes] = None, **kwargs
+) -> bool:
     """
     Plot RMSF analysis results.
+
+    Supports both standalone and panel modes. For panel mode with single axis,
+    plots only the per-residue RMSF (not the distribution).
 
     Parameters
     ----------
     rmsf_results : dict
         Dictionary with trajectory names as keys and RMSF data as values
-    output_path : str
-        Path to save the plot
+    output_path : str, optional
+        Path to save the plot. Required if ax is None (standalone mode).
     title : str
         Plot title
+    ax : matplotlib.axes.Axes, optional
+        If provided, plot on this single axis (panel mode - per-residue only).
+        If None, create 2-panel figure (standalone mode).
+    **kwargs : dict
+        Additional styling parameters
 
     Returns
     -------
-    bool
-        True if successful, False otherwise
+    bool or matplotlib.axes.Axes
+        If standalone mode (ax=None): returns True/False for success
+        If panel mode (ax provided): returns the axis object
+
+    Examples
+    --------
+    # Standalone mode (backward compatible - creates 2-panel figure)
+    >>> plot_rmsf_analysis(rmsf_data, "output.png")
+
+    # Panel mode (new - single panel with per-residue RMSF)
+    >>> fig, axes = plt.subplots(2, 2)
+    >>> plot_rmsf_analysis(rmsf_data, ax=axes[0, 0])
     """
     try:
-        print("📈 RMSF 2-panel analysis: per-residue fluctuations and distribution comparison")
-        apply_publication_style()
+        print("📈 RMSF analysis: per-residue fluctuations" + (" and distribution" if ax is None else ""))
 
-        fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize('horizontal'))
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+        # Determine mode
+        if ax is None:
+            # Standalone mode - create 2-panel figure (original behavior)
+            if output_path is None:
+                raise ValueError("output_path is required when ax is None (standalone mode)")
 
-        # Plot 1: RMSF per residue
-        ax1 = axes[0]
+            apply_publication_style()
+            fig, axes = plt.subplots(1, 2, figsize=get_standard_figsize("horizontal"))
+            ax1 = axes[0]
+            ax2 = axes[1]
+            own_figure = True
+        else:
+            # Panel mode - use single provided axis (per-residue RMSF only)
+            ax1 = ax
+            ax2 = None
+            own_figure = False
+
+        # ========== Core plotting logic ==========
+
+        colors = kwargs.get("colors", ["#1f77b4", "#ff7f0e", "#2ca02c"])
+        linewidth = kwargs.get("linewidth", 2)
+        alpha = kwargs.get("alpha", 0.8)
+
+        # Plot 1: RMSF per residue (always plotted)
         for i, (traj_name, rmsf_data) in enumerate(rmsf_results.items()):
             if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
                 residue_indices, rmsf_values = rmsf_data[:2]
-            elif isinstance(rmsf_data, dict) and 'rmsf' in rmsf_data:
-                rmsf_values = rmsf_data['rmsf']
+            elif isinstance(rmsf_data, dict) and "rmsf" in rmsf_data:
+                rmsf_values = rmsf_data["rmsf"]
                 residue_indices = np.arange(len(rmsf_values))
             else:
                 continue
 
             if len(rmsf_values) > 0:
-                ax1.plot(residue_indices, rmsf_values, color=colors[i % 3],
-                        label=traj_name, linewidth=2, alpha=0.8)
+                ax1.plot(
+                    residue_indices,
+                    rmsf_values,
+                    color=colors[i % len(colors)],
+                    label=traj_name,
+                    linewidth=linewidth,
+                    alpha=alpha,
+                )
 
-        ax1.set_xlabel('Residue Index', fontfamily='Times New Roman')
-        ax1.set_ylabel('RMSF (Å)', fontfamily='Times New Roman')
-        ax1.legend()
+        ax1.set_xlabel(
+            "Residue Index", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily="Times New Roman"
+        )
+        ax1.set_ylabel(
+            "RMSF (Å)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily="Times New Roman"
+        )
+        ax1.legend(fontsize=PUBLICATION_FONTS["legend"])
         ax1.grid(True, alpha=0.3)
+        ax1.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
-        # Plot 2: RMSF distribution
-        ax2 = axes[1]
-        all_rmsf = []
-        for rmsf_data in rmsf_results.values():
-            if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
-                rmsf_values = rmsf_data[1]
-            elif isinstance(rmsf_data, dict) and 'rmsf' in rmsf_data:
-                rmsf_values = rmsf_data['rmsf']
-            else:
-                continue
+        # Plot 2: RMSF distribution (only in standalone mode)
+        if ax2 is not None:
+            all_rmsf = []
+            for rmsf_data in rmsf_results.values():
+                if isinstance(rmsf_data, tuple) and len(rmsf_data) >= 2:
+                    rmsf_values = rmsf_data[1]
+                elif isinstance(rmsf_data, dict) and "rmsf" in rmsf_data:
+                    rmsf_values = rmsf_data["rmsf"]
+                else:
+                    continue
 
-            if len(rmsf_values) > 0:
-                all_rmsf.extend(rmsf_values)
+                if len(rmsf_values) > 0:
+                    all_rmsf.extend(rmsf_values)
 
-        if all_rmsf:
-            ax2.hist(all_rmsf, bins=30, alpha=0.7, color='lightcoral', edgecolor='black')
-            ax2.set_xlabel('RMSF (Å)', fontfamily='Times New Roman')
-            ax2.set_ylabel('Frequency', fontfamily='Times New Roman')
-            ax2.grid(True, alpha=0.3)
+            if all_rmsf:
+                ax2.hist(all_rmsf, bins=30, alpha=0.7, color="lightcoral", edgecolor="black")
+                ax2.set_xlabel(
+                    "RMSF (Å)",
+                    fontsize=PUBLICATION_FONTS["axis_label"],
+                    fontweight="bold",
+                    fontfamily="Times New Roman",
+                )
+                ax2.set_ylabel(
+                    "Frequency",
+                    fontsize=PUBLICATION_FONTS["axis_label"],
+                    fontweight="bold",
+                    fontfamily="Times New Roman",
+                )
+                ax2.grid(True, alpha=0.3)
+                ax2.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
+        # ========== Mode-specific post-processing ==========
 
-        return True
+        if own_figure:
+            # Standalone mode: save and close
+            if title:
+                fig.suptitle(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold")
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+            return True
+        else:
+            # Panel mode: return axis
+            if title:
+                ax1.set_title(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold")
+            return ax1
 
     except Exception as e:
         print(f"Error in RMSF plotting: {e}")
-        return False
+        if own_figure:
+            return False
+        else:
+            raise
 
 
-def plot_rmsf_with_auto_chains(rmsf_results: Dict[str, Tuple[np.ndarray, np.ndarray]],
-                                output_path: str,
-                                title: str = "",
-                                plot_type: str = "multi_panel",
-                                figsize: Optional[Tuple[float, float]] = None,
-                                save_path: Optional[str] = None,
-                                max_chains_per_row: int = 2) -> bool:
+def plot_rmsf_with_auto_chains(
+    rmsf_results: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    output_path: str,
+    title: str = "",
+    plot_type: str = "multi_panel",
+    figsize: Optional[Tuple[float, float]] = None,
+    save_path: Optional[str] = None,
+    max_chains_per_row: int = 2,
+) -> bool:
     """
     Create RMSF plots with automatic chain detection and flexible layout.
 
@@ -359,11 +487,13 @@ def plot_rmsf_with_auto_chains(rmsf_results: Dict[str, Tuple[np.ndarray, np.ndar
         return False
 
 
-def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
-                           output_path: str,
-                           title: str,
-                           figsize: Optional[Tuple[float, float]],
-                           max_chains_per_row: int) -> bool:
+def _plot_rmsf_multi_panel(
+    sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
+    output_path: str,
+    title: str,
+    figsize: Optional[Tuple[float, float]],
+    max_chains_per_row: int,
+) -> bool:
     """Create multi-panel RMSF plot with automatic chain type detection."""
     try:
         n_chains = len(sorted_chains)
@@ -386,18 +516,24 @@ def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.n
             axes = axes.flatten()
 
         # Enhanced chain type detection and colors
-        protein_chains = [(name, data) for name, data in sorted_chains if 'Protein' in name or ('Chain' in name and 'Nucleic' not in name)]
-        nucleic_chains = [(name, data) for name, data in sorted_chains if 'Nucleic' in name or 'RNA' in name or 'DNA' in name]
+        protein_chains = [
+            (name, data)
+            for name, data in sorted_chains
+            if "Protein" in name or ("Chain" in name and "Nucleic" not in name)
+        ]
+        nucleic_chains = [
+            (name, data) for name, data in sorted_chains if "Nucleic" in name or "RNA" in name or "DNA" in name
+        ]
 
         # Standard colors for publication
-        protein_color = '#4472C4'  # Professional blue
-        nucleic_color = '#E15759'  # Professional red/coral
+        protein_color = "#4472C4"  # Professional blue
+        nucleic_color = "#E15759"  # Professional red/coral
 
         for i, (chain_name, (rmsf_values, residue_ids)) in enumerate(sorted_chains):
             ax = axes[i]
 
             # Determine chain type and appropriate labeling
-            is_nucleic = any(keyword in chain_name.lower() for keyword in ['nucleic', 'rna', 'dna'])
+            is_nucleic = any(keyword in chain_name.lower() for keyword in ["nucleic", "rna", "dna"])
 
             if is_nucleic:
                 color = nucleic_color
@@ -423,13 +559,13 @@ def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.n
 
             # Add panel title (matching the original figure style)
             panel_title = display_name.replace("Protein ", "").replace("Nucleic ", "Nucleic ")
-            ax.set_title(panel_title, fontsize=PUBLICATION_FONTS['title'], fontweight='bold', pad=10)
+            ax.set_title(panel_title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold", pad=10)
 
             # Formatting with appropriate x-axis label
-            ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-            ax.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+            ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+            ax.set_ylabel("RMSF (Å)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
             ax.grid(True, alpha=0.3)
-            ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+            ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
             # Set y-axis to start from 0 for better comparison
             ax.set_ylim(bottom=0)
@@ -440,11 +576,10 @@ def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.n
 
         # Add main title if provided (but keep minimal per publication style)
         if title:
-            fig.suptitle(title, fontsize=PUBLICATION_FONTS['title'] + 2, fontweight='bold', y=0.95)
+            fig.suptitle(title, fontsize=PUBLICATION_FONTS["title"] + 2, fontweight="bold", y=0.95)
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
         plt.close()
 
         print(f"✅ Multi-panel RMSF plot saved: {output_path}")
@@ -455,10 +590,12 @@ def _plot_rmsf_multi_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.n
         return False
 
 
-def _plot_rmsf_single_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
-                             output_path: str,
-                             title: str,
-                             figsize: Optional[Tuple[float, float]]) -> bool:
+def _plot_rmsf_single_panel(
+    sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
+    output_path: str,
+    title: str,
+    figsize: Optional[Tuple[float, float]],
+) -> bool:
     """Create single-panel RMSF plot with all chains."""
     try:
         # Auto-calculate figure size if not provided
@@ -475,19 +612,19 @@ def _plot_rmsf_single_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.
             color = colors[i]
 
             # Plot RMSF
-            ax.plot(residue_ids, rmsf_values, color=color, linewidth=2,
-                    alpha=0.8, label=chain_name)
+            ax.plot(residue_ids, rmsf_values, color=color, linewidth=2, alpha=0.8, label=chain_name)
 
         # Formatting
-        ax.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-        ax.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+        ax.set_xlabel("Residue Number", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+        ax.set_ylabel("RMSF (Å)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+        if title:
+            ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold")
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=PUBLICATION_FONTS['legend'])
-        ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+        ax.legend(fontsize=PUBLICATION_FONTS["legend"])
+        ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
         plt.close()
 
         print(f"✅ Single-panel RMSF plot saved: {output_path}")
@@ -498,10 +635,12 @@ def _plot_rmsf_single_panel(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.
         return False
 
 
-def _plot_rmsf_separate_files(sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
-                               output_path: str,
-                               title: str,
-                               figsize: Optional[Tuple[float, float]]) -> bool:
+def _plot_rmsf_separate_files(
+    sorted_chains: List[Tuple[str, Tuple[np.ndarray, np.ndarray]]],
+    output_path: str,
+    title: str,
+    figsize: Optional[Tuple[float, float]],
+) -> bool:
     """Create separate RMSF plots for each chain."""
     try:
         output_base = Path(output_path)
@@ -516,10 +655,10 @@ def _plot_rmsf_separate_files(sorted_chains: List[Tuple[str, Tuple[np.ndarray, n
                 fig, ax = plt.subplots(figsize=figsize)
 
                 # Determine color based on chain type
-                if 'Nucleic' in chain_name:
-                    color = 'red'
+                if "Nucleic" in chain_name:
+                    color = "red"
                 else:
-                    color = 'blue'
+                    color = "blue"
 
                 # Plot RMSF
                 ax.plot(residue_ids, rmsf_values, color=color, linewidth=2, alpha=0.8)
@@ -532,16 +671,20 @@ def _plot_rmsf_separate_files(sorted_chains: List[Tuple[str, Tuple[np.ndarray, n
                 print(f"  📊 {chain_name} RMSF: Mean = {mean_rmsf:.2f} ± {std_rmsf:.2f} Å")
 
                 # Formatting
-                ax.set_xlabel('Residue Number', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-                ax.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+                ax.set_xlabel("Residue Number", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+                ax.set_ylabel("RMSF (Å)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+                if title:
+                    ax.set_title(f"{title} - {chain_name}", fontsize=PUBLICATION_FONTS["title"], fontweight="bold")
                 ax.grid(True, alpha=0.3)
-                ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+                ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
 
                 # Save individual file
-                chain_output = output_base.parent / f"{output_base.stem}_{chain_name.lower().replace(' ', '_')}{output_base.suffix}"
+                chain_output = (
+                    output_base.parent
+                    / f"{output_base.stem}_{chain_name.lower().replace(' ', '_')}{output_base.suffix}"
+                )
                 plt.tight_layout()
-                plt.savefig(chain_output, dpi=300, bbox_inches='tight',
-                           facecolor='white', edgecolor='none')
+                plt.savefig(chain_output, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
                 plt.close()
 
                 print(f"✅ Individual RMSF plot saved: {chain_output}")
@@ -559,12 +702,14 @@ def _plot_rmsf_separate_files(sorted_chains: List[Tuple[str, Tuple[np.ndarray, n
         return False
 
 
-def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
-                                           output_path: str,
-                                           title: str = "",
-                                           figsize: Optional[Tuple[float, float]] = None,
-                                           plot_individual_trajectories: bool = True,
-                                           save_data: bool = True) -> bool:
+def plot_multi_trajectory_rmsf_comprehensive(
+    multi_traj_data: Dict[str, Dict],
+    output_path: str,
+    title: str = "",
+    figsize: Optional[Tuple[float, float]] = None,
+    plot_individual_trajectories: bool = True,
+    save_data: bool = True,
+) -> bool:
     """
     Create comprehensive multi-trajectory RMSF plot showing all chains and trajectories.
 
@@ -623,8 +768,8 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
             axes = axes.flatten()
 
         # Colors for different molecule types
-        protein_color = '#4472C4'  # Professional blue
-        nucleic_color = '#E15759'  # Professional red/coral
+        protein_color = "#4472C4"  # Professional blue
+        nucleic_color = "#E15759"  # Professional red/coral
         individual_alpha = 0.3
         mean_alpha = 0.9
 
@@ -637,7 +782,7 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
             chain_data = multi_traj_data[chain_name]
 
             # Determine chain type and colors
-            is_nucleic = any(keyword in chain_name.lower() for keyword in ['nucleic', 'rna', 'dna'])
+            is_nucleic = any(keyword in chain_name.lower() for keyword in ["nucleic", "rna", "dna"])
 
             if is_nucleic:
                 main_color = nucleic_color
@@ -662,17 +807,34 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
 
                     # Ensure residue IDs match (they should if everything is working correctly)
                     if len(traj_rmsf) == len(residue_ids):
-                        ax.plot(residue_ids, traj_rmsf,
-                               color=main_color, alpha=individual_alpha,
-                               linewidth=1, label=f"Trajectory {j+1}" if i == 0 else None)
+                        ax.plot(
+                            residue_ids,
+                            traj_rmsf,
+                            color=main_color,
+                            alpha=individual_alpha,
+                            linewidth=1,
+                            label=f"Trajectory {j+1}" if i == 0 else None,
+                        )
 
             # Plot mean with error bars/band
-            ax.plot(residue_ids, mean_rmsf, color=main_color, linewidth=3,
-                   alpha=mean_alpha, label="Mean" if i == 0 else None)
+            ax.plot(
+                residue_ids,
+                mean_rmsf,
+                color=main_color,
+                linewidth=3,
+                alpha=mean_alpha,
+                label="Mean" if i == 0 else None,
+            )
 
             # Add standard deviation as filled area
-            ax.fill_between(residue_ids, mean_rmsf - std_rmsf, mean_rmsf + std_rmsf,
-                           alpha=0.3, color=main_color, label="±1 SD" if i == 0 else None)
+            ax.fill_between(
+                residue_ids,
+                mean_rmsf - std_rmsf,
+                mean_rmsf + std_rmsf,
+                alpha=0.3,
+                color=main_color,
+                label="±1 SD" if i == 0 else None,
+            )
 
             # Add statistics
             stats = chain_data["statistics"]
@@ -681,23 +843,24 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
             n_trajectories = stats["n_trajectories"]
 
             # Print statistics (removed from plot to avoid hiding content)
-            print(f"  📊 {chain_name} RMSF: Mean = {overall_mean:.1f} ± {overall_std:.2f} Å ({n_trajectories} trajectories)")
+            print(
+                f"  📊 {chain_name} RMSF: Mean = {overall_mean:.1f} ± {overall_std:.2f} Å ({n_trajectories} trajectories)"
+            )
 
             # Panel title
             clean_chain_name = chain_name.replace("Protein ", "").replace("Nucleic ", "Nucleic ")
-            ax.set_title(clean_chain_name, fontsize=PUBLICATION_FONTS['title'],
-                        fontweight='bold', pad=10)
+            ax.set_title(clean_chain_name, fontsize=PUBLICATION_FONTS["title"], fontweight="bold", pad=10)
 
             # Formatting
-            ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
-            ax.set_ylabel('RMSF (Å)', fontsize=PUBLICATION_FONTS['axis_label'], fontweight='bold')
+            ax.set_xlabel(x_label, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
+            ax.set_ylabel("RMSF (Å)", fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold")
             ax.grid(True, alpha=0.3)
-            ax.tick_params(axis='both', labelsize=PUBLICATION_FONTS['tick_label'])
+            ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
             ax.set_ylim(bottom=0)
 
             # Add legend only to first subplot
             if i == 0 and plot_individual_trajectories:
-                ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
+                ax.legend(loc="upper right", fontsize=10, framealpha=0.9)
 
         # Hide unused subplots if any
         for i in range(n_chains, len(axes)):
@@ -705,14 +868,12 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
 
         # Add main title if provided
         if title:
-            fig.suptitle(title, fontsize=PUBLICATION_FONTS['title'] + 2,
-                        fontweight='bold', y=0.95)
+            fig.suptitle(title, fontsize=PUBLICATION_FONTS["title"] + 2, fontweight="bold", y=0.95)
 
         plt.tight_layout()
 
         # Save plot
-        plt.savefig(output_path, dpi=300, bbox_inches='tight',
-                   facecolor='white', edgecolor='none')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
         plt.close()
 
         print(f"✅ Comprehensive multi-trajectory RMSF plot saved: {output_path}")
@@ -720,7 +881,7 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
         # Save data to CSV if requested
         if save_data:
             output_path_obj = Path(output_path)
-            csv_path = output_path_obj.with_suffix('.csv')
+            csv_path = output_path_obj.with_suffix(".csv")
 
             # Create comprehensive data table
             all_data = []
@@ -728,19 +889,21 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
                 combined_data = chain_data["combined"]
                 stats = chain_data["statistics"]
 
-                for i, (rmsf_val, res_id) in enumerate(zip(combined_data["mean_rmsf"],
-                                                         combined_data["residue_ids"])):
-                    all_data.append({
-                        'Chain': chain_name,
-                        'Residue_ID': res_id,
-                        'Mean_RMSF': rmsf_val,
-                        'Std_RMSF': combined_data["std_rmsf"][i],
-                        'Overall_Mean': stats["overall_mean"],
-                        'Overall_Std': stats["overall_std"],
-                        'N_Trajectories': stats["n_trajectories"]
-                    })
+                for i, (rmsf_val, res_id) in enumerate(zip(combined_data["mean_rmsf"], combined_data["residue_ids"])):
+                    all_data.append(
+                        {
+                            "Chain": chain_name,
+                            "Residue_ID": res_id,
+                            "Mean_RMSF": rmsf_val,
+                            "Std_RMSF": combined_data["std_rmsf"][i],
+                            "Overall_Mean": stats["overall_mean"],
+                            "Overall_Std": stats["overall_std"],
+                            "N_Trajectories": stats["n_trajectories"],
+                        }
+                    )
 
             import pandas as pd
+
             df = pd.DataFrame(all_data)
             df.to_csv(csv_path, index=False)
             print(f"✅ RMSF data saved to CSV: {csv_path}")
@@ -750,5 +913,6 @@ def plot_multi_trajectory_rmsf_comprehensive(multi_traj_data: Dict[str, Dict],
     except Exception as e:
         print(f"Error creating comprehensive multi-trajectory RMSF plot: {e}")
         import traceback
+
         traceback.print_exc()
         return False
