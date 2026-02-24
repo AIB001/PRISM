@@ -283,6 +283,15 @@ Example usage:
         "Default: pocket centroid -> ligand centroid (4A cutoff)",
     )
     pmf_group.add_argument(
+        "--pull-mode",
+        type=str,
+        default="pocket",
+        choices=["pocket", "whole_protein"],
+        help="Pull direction optimization mode. "
+        "'pocket': maximize clearance from binding pocket (default). "
+        "'whole_protein': minimize cumulative collisions with all protein atoms along exit path.",
+    )
+    pmf_group.add_argument(
         "--box-extension",
         "-boxext",
         type=float,
@@ -617,6 +626,7 @@ pressure_coupling:
         gaussian_mem=args.mem,  # Gaussian memory
         pmf_mode=args.pmf,  # PMF mode flag
         pullvec=tuple(args.pull_vector) if args.pull_vector else None,  # Pull vector atom indices
+        pull_mode=args.pull_mode,  # Pull direction optimization mode (pocket/whole_protein)
         box_extension=tuple(args.box_extension) if args.box_extension else None,  # Box extension (X,Y,Z)
         rest2_mode=args.rest2,  # REST2 mode flag
         t_ref=args.t_ref,  # REST2 reference temperature

@@ -54,6 +54,8 @@ def _compute_energy(lig_coords: np.ndarray, pocket_coords: np.ndarray, direction
     For each pocket atom, take min over all ligand lines, then sum.
     Negative so lower energy = more clearance = better direction.
     """
+    if pocket_coords.shape[0] == 0:
+        return 0.0
     # diff: (N_pocket, N_lig, 3)
     diff = pocket_coords[:, np.newaxis, :] - lig_coords[np.newaxis, :, :]
     # cross product with direction: (N_pocket, N_lig, 3)
@@ -62,6 +64,75 @@ def _compute_energy(lig_coords: np.ndarray, pocket_coords: np.ndarray, direction
     dist = np.linalg.norm(cross, axis=2)
     # min distance per pocket atom, then sum, negate
     return -np.sum(np.min(dist, axis=1))
+
+
+def _fibonacci_sphere(n: int = 500, full_sphere: bool = False) -> np.ndarray:
+    """
+    Generate n approximately evenly-distributed unit vectors on the sphere.
+
+    Uses the Fibonacci / golden-spiral method.
+
+    Parameters:
+    -----------
+    n : int
+        Total number of points to generate on the full sphere.
+    full_sphere : bool
+        If True, return all n directions (full sphere).
+        If False (default), return only upper hemisphere (z >= 0) for
+        backward compatibility with pocket mode.
+
+    Returns: array of shape (m, 3).
+    """
+    golden_ratio = (1 + np.sqrt(5)) / 2
+    indices = np.arange(n)
+    theta = np.arccos(1 - 2.0 * (indices + 0.5) / n)
+    phi = 2 * np.pi * indices / golden_ratio
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+    dirs = np.column_stack([x, y, z])
+    if full_sphere:
+        return dirs
+    # Upper hemisphere only (pocket mode uses polarity fix downstream)
+    return dirs[dirs[:, 2] >= 0]
+
+
+def _cone_directions(center: np.ndarray, half_angle_deg: float, n: int = 200) -> np.ndarray:
+    """
+    Generate n uniformly distributed unit vectors inside a cone around center.
+
+    Parameters:
+    -----------
+    center : unit vector, the cone axis
+    half_angle_deg : half-opening angle in degrees
+    n : number of directions to generate
+
+    Returns: array of shape (n, 3)
+    """
+    half_angle = np.radians(half_angle_deg)
+
+    # Build local frame: center = z', find orthogonal x', y'
+    c = center / np.linalg.norm(center)
+    # Pick a non-parallel vector for cross product
+    ref = np.array([1.0, 0.0, 0.0]) if abs(c[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    x_axis = np.cross(c, ref)
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(c, x_axis)
+
+    # Uniform sampling on spherical cap: cos(theta) in [cos(half_angle), 1]
+    cos_min = np.cos(half_angle)
+    cos_theta = np.random.uniform(cos_min, 1.0, size=n)
+    sin_theta = np.sqrt(1.0 - cos_theta ** 2)
+    phi = np.random.uniform(0, 2 * np.pi, size=n)
+
+    # Convert to Cartesian in local frame, then to global
+    dirs = (sin_theta * np.cos(phi))[:, None] * x_axis[None, :] + \
+           (sin_theta * np.sin(phi))[:, None] * y_axis[None, :] + \
+           cos_theta[:, None] * c[None, :]
+
+    # Normalize (should be unit already, but clamp FP noise)
+    norms = np.linalg.norm(dirs, axis=1, keepdims=True)
+    return dirs / norms
 
 
 def _spherical_to_cartesian(theta: float, phi: float) -> np.ndarray:
@@ -76,9 +147,67 @@ def _cartesian_to_spherical(v: np.ndarray) -> Tuple[float, float]:
     return theta, phi
 
 
+def _compute_collision_energy_whole_protein(
+    lig_heavy_coords: np.ndarray,
+    prot_heavy_coords: np.ndarray,
+    direction: np.ndarray,
+    step_size: float = 0.5,
+    collision_cutoff: float = 1.5,
+    max_steps: int = 300,
+) -> float:
+    """
+    Count cumulative collisions when pulling ligand along direction.
+
+    Uses analytical geometry instead of stepping: for each (ligand_atom,
+    protein_atom) pair, decomposes the displacement into parallel and
+    perpendicular components relative to the pull direction.
+
+    - If perpendicular distance >= collision_cutoff: pair never collides.
+    - Otherwise: analytically solve for the range of steps [s_lo, s_hi]
+      where distance < collision_cutoff, and count integer steps in range.
+
+    Complexity: O(N_lig x N_prot) per call — independent of step count.
+
+    Returns total collision count (positive).  MH minimizes this directly:
+    lower value = fewer collisions = better exit direction.
+    """
+    cutoff_sq = collision_cutoff ** 2
+
+    # diff[i, j] = protein[j] - ligand[i],  shape (N_lig, N_prot, 3)
+    diff = prot_heavy_coords[np.newaxis, :, :] - lig_heavy_coords[:, np.newaxis, :]
+
+    # Projection of diff onto pull direction:  (N_lig, N_prot)
+    proj = np.sum(diff * direction, axis=2)
+
+    # Perpendicular distance squared:  (N_lig, N_prot)
+    dist_sq = np.sum(diff ** 2, axis=2)
+    perp_sq = np.maximum(dist_sq - proj ** 2, 0.0)  # clamp FP noise
+
+    # Only pairs with perpendicular distance < cutoff can ever collide
+    can_collide = perp_sq < cutoff_sq
+    if not np.any(can_collide):
+        return 0
+
+    # Collision radius along pull axis for each pair
+    r = np.sqrt(np.where(can_collide, cutoff_sq - perp_sq, 0.0))
+
+    # Step range where distance < cutoff  (strict inequality via epsilon)
+    eps = 1e-9
+    s_lo = np.ceil((proj - r) / step_size + eps)
+    s_hi = np.floor((proj + r) / step_size - eps)
+
+    # Clamp to valid step range [0, max_steps - 1]
+    s_lo = np.maximum(s_lo, 0.0)
+    s_hi = np.minimum(s_hi, max_steps - 1.0)
+
+    # Count colliding steps per pair (0 if empty range)
+    n_colliding = np.maximum(s_hi - s_lo + 1.0, 0.0)
+
+    return int(np.sum(n_colliding * can_collide))
+
+
 def _metropolis_hastings(
-    lig_coords: np.ndarray,
-    pocket_coords: np.ndarray,
+    energy_fn,
     init_direction: np.ndarray,
     n_iterations: int = 100000,
     initial_temp: float = 2.0,
@@ -91,7 +220,15 @@ def _metropolis_hastings(
     """
     Minimize energy via Metropolis-Hastings on the unit sphere.
 
-    Energy is negative; lower (more negative) = better clearance.
+    Parameters:
+    -----------
+    energy_fn : callable
+        Function mapping a unit direction vector (np.ndarray of shape (3,))
+        to a scalar energy value.  Lower energy = better direction.
+    init_direction : np.ndarray
+        Initial search direction (will be normalised internally).
+
+    Energy is negative; lower (more negative) = better direction.
     Accept lower energy always; accept higher energy with prob exp(-dE/T).
 
     Returns:
@@ -99,7 +236,7 @@ def _metropolis_hastings(
     """
     theta, phi = _cartesian_to_spherical(init_direction)
     current_dir = _spherical_to_cartesian(theta, phi)
-    current_energy = _compute_energy(lig_coords, pocket_coords, current_dir)
+    current_energy = energy_fn(current_dir)
 
     best_dir = current_dir.copy()
     best_energy = current_energy
@@ -122,7 +259,7 @@ def _metropolis_hastings(
         new_phi = new_phi % (2 * np.pi)
 
         new_dir = _spherical_to_cartesian(new_theta, new_phi)
-        new_energy = _compute_energy(lig_coords, pocket_coords, new_dir)
+        new_energy = energy_fn(new_dir)
 
         # Standard Metropolis-Hastings (minimizing energy)
         delta_e = new_energy - current_energy
@@ -185,7 +322,14 @@ class PMFAligner:
     so this optimized direction aligns with the Z-axis.
     """
 
-    def __init__(self, pocket_cutoff: float = 4.0, verbose: bool = True):
+    def __init__(
+        self,
+        pocket_cutoff: float = 4.00,
+        verbose: bool = True,
+        pull_mode: str = "pocket",
+        collision_cutoff: float = 1.5,
+        pull_step_size: float = 0.5,
+    ):
         """
         Initialize PMF Aligner.
 
@@ -193,12 +337,28 @@ class PMFAligner:
         -----------
         pocket_cutoff : float
             Distance cutoff (Angstroms) for defining pocket residues around ligand.
-            Default: 4.0 A
+            Default: 4.00 A.  Used only in 'pocket' pull_mode.
         verbose : bool
             Whether to print detailed output
+        pull_mode : str
+            Optimization mode for automatic pull direction search.
+            - "pocket": (default) Maximize clearance from binding pocket atoms.
+            - "whole_protein": Minimize cumulative collisions (distance < collision_cutoff)
+              between ligand heavy atoms and ALL protein heavy atoms along the exit path.
+        collision_cutoff : float
+            Distance threshold (Angstroms) for counting a collision in 'whole_protein' mode.
+            Default: 1.5 A
+        pull_step_size : float
+            Step size (Angstroms) for virtual pulling in 'whole_protein' mode.
+            Default: 0.5 A
         """
+        if pull_mode not in ("pocket", "whole_protein"):
+            raise ValueError(f"pull_mode must be 'pocket' or 'whole_protein', got '{pull_mode}'")
         self.pocket_cutoff = pocket_cutoff
         self.verbose = verbose
+        self.pull_mode = pull_mode
+        self.collision_cutoff = collision_cutoff
+        self.pull_step_size = pull_step_size
 
     def align_for_pmf(
         self, protein_pdb: str, ligand_file: str, output_dir: str, pullvec: Optional[Tuple[int, int]] = None
@@ -257,33 +417,121 @@ class PMFAligner:
                 print(f"    Protein atom {prot_atom_idx} -> Ligand atom {lig_atom_idx}")
         else:
             # Auto mode: MH-optimized direction
-            # Extract coordinates for heavy atoms
-            lig_coords = np.array([[a["x"], a["y"], a["z"]] for a in ligand_atoms])
-
-            # Find pocket residues (vectorized: any heavy atom within cutoff of any ligand atom)
-            pocket_atom_list, pocket_reskeys = self._find_pocket_residues(protein_atoms, lig_coords)
-            pocket_coords = np.array([[a["x"], a["y"], a["z"]] for a in pocket_atom_list])
-            pocket_centroid = np.mean(pocket_coords, axis=0) if len(pocket_coords) > 0 else np.zeros(3)
-
-            if self.verbose:
-                print(f"  Pocket residues: {len(pocket_reskeys)}")
-                print(f"  Pocket heavy atoms: {len(pocket_atom_list)}")
-                # List pocket residues
-                sorted_keys = sorted(pocket_reskeys, key=lambda x: (x[0], x[1]))
-                res_labels = []
-                for chain, resid in sorted_keys:
-                    resname = next(
-                        a["resname"] for a in protein_atoms if a.get("chain", "") == chain and a["resid"] == resid
-                    )
-                    res_labels.append(f"{resname}{resid}:{chain}")
-                print(f"  Residues: {', '.join(res_labels)}")
-
-            # Initial direction: protein heavy-atom COM -> ligand COM
+            # Common: extract protein heavy atoms and compute initial direction
             protein_heavy = [a for a in protein_atoms if _is_heavy(_get_element_from_atom(a))]
             protein_heavy_coords = np.array([[a["x"], a["y"], a["z"]] for a in protein_heavy])
             protein_com = np.mean(protein_heavy_coords, axis=0)
-            lig_com = np.mean(lig_coords, axis=0)
 
+            if self.pull_mode == "whole_protein":
+                # ── Whole-protein collision mode ──
+                if self.verbose:
+                    print(f"  Mode: whole_protein (collision-based optimization)")
+                    print(f"  Collision cutoff: {self.collision_cutoff} Å, step size: {self.pull_step_size} Å")
+
+                # Ligand heavy atoms only
+                lig_heavy = [a for a in ligand_atoms if _is_heavy(_get_element_from_atom(a))]
+                lig_heavy_coords = np.array([[a["x"], a["y"], a["z"]] for a in lig_heavy])
+                lig_com = np.mean(lig_heavy_coords, axis=0)
+
+                if self.verbose:
+                    print(f"  Ligand heavy atoms: {len(lig_heavy)}")
+                    print(f"  Protein heavy atoms: {len(protein_heavy)}")
+
+                # Prefilter: tight radius based on actual protein extent
+                lig_center = np.mean(lig_heavy_coords, axis=0)
+                lig_radius = float(np.max(np.linalg.norm(lig_heavy_coords - lig_center, axis=1)))
+                max_prot_dist = float(np.max(np.linalg.norm(protein_heavy_coords - lig_center, axis=1)))
+                max_reach = max_prot_dist + lig_radius + self.collision_cutoff
+                max_steps_actual = int(max_reach / self.pull_step_size) + 1
+
+                prot_dists = np.linalg.norm(protein_heavy_coords - lig_center, axis=1)
+                reachable_mask = prot_dists < max_reach
+                prot_filtered = protein_heavy_coords[reachable_mask]
+
+                if self.verbose:
+                    print(f"  Reachable protein atoms: {len(prot_filtered)} (within {max_reach:.1f} Å)")
+                    print(f"  Max pull steps: {max_steps_actual}")
+
+                pocket_centroid = protein_com  # no pocket concept in whole_protein mode
+                pocket_reskeys = set()  # empty for PyMOL script
+
+                # ── Precompute direction-independent quantities for MH hot path ──
+                # Pairwise distance squared (N_lig, N_prot) — computed once
+                _cross = lig_heavy_coords @ prot_filtered.T           # (N_lig, N_prot)
+                _prot_sq = np.sum(prot_filtered ** 2, axis=1)         # (N_prot,)
+                _lig_sq = np.sum(lig_heavy_coords ** 2, axis=1)      # (N_lig,)
+                _dist_sq = _prot_sq[np.newaxis, :] - 2.0 * _cross + _lig_sq[:, np.newaxis]
+                _dist_sq = np.maximum(_dist_sq, 0.0)  # clamp FP noise
+
+                _cutoff_sq = self.collision_cutoff ** 2
+                _h = self.pull_step_size
+                _max_s = float(max_steps_actual - 1)
+                _eps = 1e-9
+
+                def energy_fn(d,
+                              _lig=lig_heavy_coords, _prot=prot_filtered,
+                              _ds=_dist_sq, _cs=_cutoff_sq,
+                              _step=_h, _ms=_max_s, _e=_eps):
+                    proj = _prot @ d
+                    proj = proj[np.newaxis, :] - (_lig @ d)[:, np.newaxis]
+
+                    perp_sq = np.maximum(_ds - proj * proj, 0.0)
+                    can = perp_sq < _cs
+                    if not np.any(can):
+                        return 0
+
+                    r = np.sqrt(np.where(can, _cs - perp_sq, 0.0))
+                    s_lo = np.maximum(np.ceil((proj - r) / _step + _e), 0.0)
+                    s_hi = np.minimum(np.floor((proj + r) / _step - _e), _ms)
+                    n = np.maximum(s_hi - s_lo + 1.0, 0.0)
+                    return int(np.sum(n * can))
+
+            else:
+                # ── Pocket clearance mode (default) ──
+                lig_coords = np.array([[a["x"], a["y"], a["z"]] for a in ligand_atoms])
+
+                pocket_atom_list, pocket_reskeys = self._find_pocket_residues(protein_atoms, lig_coords)
+
+                # Auto-expand cutoff if no pocket residues found
+                if not pocket_atom_list:
+                    saved_cutoff = self.pocket_cutoff
+                    for try_cutoff in [6.0, 8.0, 10.0, 15.0, 20.0]:
+                        if self.verbose:
+                            print(f"  Warning: 0 pocket residues at {saved_cutoff:.1f} Å, "
+                                  f"expanding to {try_cutoff:.1f} Å")
+                        self.pocket_cutoff = try_cutoff
+                        pocket_atom_list, pocket_reskeys = self._find_pocket_residues(
+                            protein_atoms, lig_coords)
+                        if pocket_atom_list:
+                            break
+                    self.pocket_cutoff = saved_cutoff
+                    if not pocket_atom_list:
+                        raise ValueError(
+                            "No pocket residues found even at 20 Å cutoff. "
+                            "Check that the ligand is positioned near the protein.")
+
+                pocket_coords = np.array([[a["x"], a["y"], a["z"]] for a in pocket_atom_list])
+                pocket_centroid = np.mean(pocket_coords, axis=0)
+
+                if self.verbose:
+                    print(f"  Mode: pocket (clearance-based optimization)")
+                    print(f"  Pocket residues: {len(pocket_reskeys)}")
+                    print(f"  Pocket heavy atoms: {len(pocket_atom_list)}")
+                    sorted_keys = sorted(pocket_reskeys, key=lambda x: (x[0], x[1]))
+                    res_labels = []
+                    for chain, resid in sorted_keys:
+                        resname = next(
+                            a["resname"] for a in protein_atoms if a.get("chain", "") == chain and a["resid"] == resid
+                        )
+                        res_labels.append(f"{resname}{resid}:{chain}")
+                    print(f"  Residues: {', '.join(res_labels)}")
+
+                lig_com = np.mean(lig_coords, axis=0)
+
+                def energy_fn(d, _lc=lig_coords, _pc=pocket_coords):
+                    return _compute_energy(_lc, _pc, d)
+
+            # ── Common: initial direction, MH optimization, post-processing ──
             init_vec = lig_com - protein_com
             init_dir = init_vec / np.linalg.norm(init_vec)
 
@@ -291,31 +539,115 @@ class PMFAligner:
                 print(f"\n  Initial direction (protein COM -> ligand COM):")
                 print(f"    ({init_dir[0]:.6f}, {init_dir[1]:.6f}, {init_dir[2]:.6f})")
 
-            init_energy = _compute_energy(lig_coords, pocket_coords, init_dir)
+            init_energy = energy_fn(init_dir)
             if self.verbose:
                 print(f"  Initial energy: {init_energy:.4f}")
+                if self.pull_mode == "whole_protein":
+                    print(f"  (= {int(init_energy)} cumulative collisions along initial direction)")
 
-            # Run MH optimization
-            if self.verbose:
-                print(f"\n  Running Metropolis-Hastings optimization ...\n")
+            if self.pull_mode == "whole_protein":
+                # ── Hierarchical grid search (full sphere) ──
+                # Phase 1: Coarse global scan
+                n_coarse = 2000
+                coarse_dirs = _fibonacci_sphere(n_coarse, full_sphere=True)
+                # Include init_dir
+                coarse_dirs = np.vstack([init_dir[np.newaxis, :], coarse_dirs])
+                if self.verbose:
+                    print(f"\n  Phase 1: Coarse scan ({len(coarse_dirs)} directions) ...")
+                coarse_energies = np.array([energy_fn(d) for d in coarse_dirs])
 
-            best_dir, best_energy, history = _metropolis_hastings(
-                lig_coords,
-                pocket_coords,
-                init_dir,
-                n_iterations=100000,
-                initial_temp=2.0,
-                cooling_rate=0.99995,
-                step_size=0.15,
-                conv_window=8000,
-                conv_threshold=5e-4,
-                verbose=self.verbose,
-            )
+                # Select top-K diverse candidates (angular separation > 20°)
+                top_k = 10
+                sorted_idx = np.argsort(coarse_energies)
+                candidates_idx = []
+                min_cos = np.cos(np.radians(20))
+                for idx in sorted_idx:
+                    d = coarse_dirs[idx]
+                    if all(abs(np.dot(d, coarse_dirs[ci])) < min_cos for ci in candidates_idx):
+                        candidates_idx.append(idx)
+                    if len(candidates_idx) >= top_k:
+                        break
+                # Fill remaining slots if diversity filter is too strict
+                for idx in sorted_idx:
+                    if len(candidates_idx) >= top_k:
+                        break
+                    if idx not in candidates_idx:
+                        candidates_idx.append(idx)
 
-            # Fix direction polarity: energy function is symmetric (||a x v|| == ||a x -v||),
-            # so MH may converge to the reverse direction. Ensure it points roughly
-            # from protein toward ligand (positive dot product with init_dir).
-            if np.dot(best_dir, init_dir) < 0:
+                if self.verbose:
+                    print(f"  Coarse best: {int(coarse_energies[sorted_idx[0]])} collisions "
+                          f"(init: {int(init_energy)})")
+                    print(f"  Selected {len(candidates_idx)} regions for refinement")
+
+                # Phase 2: Medium refinement (20° cone around each candidate)
+                if self.verbose:
+                    print(f"\n  Phase 2: Medium refinement (20° cone, 300 dirs each) ...")
+                medium_best_dirs = []
+                medium_best_es = []
+                for ci in candidates_idx:
+                    cone_dirs = _cone_directions(coarse_dirs[ci], 20.0, n=300)
+                    cone_es = np.array([energy_fn(d) for d in cone_dirs])
+                    best_i = int(np.argmin(cone_es))
+                    # Compare with the original candidate itself
+                    if cone_es[best_i] <= coarse_energies[ci]:
+                        medium_best_dirs.append(cone_dirs[best_i])
+                        medium_best_es.append(cone_es[best_i])
+                    else:
+                        medium_best_dirs.append(coarse_dirs[ci])
+                        medium_best_es.append(coarse_energies[ci])
+
+                # Keep top-5 from medium refinement
+                medium_sorted = np.argsort(medium_best_es)
+                top_medium = medium_sorted[:5]
+                if self.verbose:
+                    print(f"  Medium best: {int(medium_best_es[medium_sorted[0]])} collisions")
+
+                # Phase 3: Fine refinement (5° cone around top-5)
+                if self.verbose:
+                    print(f"\n  Phase 3: Fine refinement (5° cone, 300 dirs each) ...")
+                best_dir = medium_best_dirs[medium_sorted[0]]
+                best_energy = medium_best_es[medium_sorted[0]]
+                for mi in top_medium:
+                    cone_dirs = _cone_directions(medium_best_dirs[mi], 5.0, n=300)
+                    cone_es = np.array([energy_fn(d) for d in cone_dirs])
+                    best_i = int(np.argmin(cone_es))
+                    if cone_es[best_i] < best_energy:
+                        best_energy = cone_es[best_i]
+                        best_dir = cone_dirs[best_i]
+
+                history = []
+                if self.verbose:
+                    print(f"  Fine best: {int(best_energy)} collisions")
+
+            else:
+                # ── Pocket clearance mode (default MH) ──
+                mh_temp = 2.0
+                mh_iters = 100000
+                mh_cooling = 0.99995
+                mh_conv_window = 8000
+
+                if self.verbose:
+                    print(f"\n  Running Metropolis-Hastings optimization ...\n")
+
+                best_dir, best_energy, history = _metropolis_hastings(
+                    energy_fn,
+                    init_dir,
+                    n_iterations=mh_iters,
+                    initial_temp=mh_temp,
+                    cooling_rate=mh_cooling,
+                    step_size=0.15,
+                    conv_window=mh_conv_window,
+                    conv_threshold=5e-4,
+                    verbose=self.verbose,
+                )
+
+            # Fix direction polarity for pocket mode only.
+            # Pocket energy is symmetric (point-to-line distance), so we
+            # enforce the direction to point away from protein.
+            # Whole_protein collision energy is NOT symmetric (d vs -d give
+            # completely different paths), so the minimum-collision direction
+            # is already the correct exit direction — no flip needed.
+            if self.pull_mode != "whole_protein" and np.dot(best_dir, init_dir) < 0:
                 best_dir = -best_dir
 
             improvement = (best_energy - init_energy) / abs(init_energy) * 100 if abs(init_energy) > 1e-10 else 0.0
@@ -323,6 +655,8 @@ class PMFAligner:
             if self.verbose:
                 print(f"\n  Optimized direction: ({best_dir[0]:.6f}, {best_dir[1]:.6f}, {best_dir[2]:.6f})")
                 print(f"  Energy: {init_energy:.4f} -> {best_energy:.4f} ({improvement:+.2f}%)")
+                if self.pull_mode == "whole_protein":
+                    print(f"  Collisions: {int(init_energy)} -> {int(best_energy)}")
 
             pull_vector_normalized = best_dir
 
@@ -331,9 +665,16 @@ class PMFAligner:
                 "initial_energy": float(init_energy),
                 "optimized_energy": float(best_energy),
                 "improvement_pct": float(improvement),
-                "pocket_residues": len(pocket_reskeys),
-                "pocket_atoms": len(pocket_atom_list),
+                "pull_mode": self.pull_mode,
             }
+            if self.pull_mode == "pocket":
+                optimization_info["pocket_residues"] = len(pocket_reskeys)
+                optimization_info["pocket_atoms"] = len(pocket_atom_list)
+            else:
+                optimization_info["protein_heavy_atoms"] = len(protein_heavy)
+                optimization_info["collision_cutoff"] = self.collision_cutoff
+                optimization_info["initial_collisions"] = int(init_energy)
+                optimization_info["optimized_collisions"] = int(best_energy)
 
             # Generate PyMOL visualization script (before rotation, in original coordinates)
             pml_path = output_dir / f"visualize_{Path(protein_pdb).stem}.pml"
@@ -939,7 +1280,10 @@ def align_complex_for_pmf(
     ligand_file: str,
     output_dir: str,
     pullvec: Optional[Tuple[int, int]] = None,
-    pocket_cutoff: float = 4.0,
+    pocket_cutoff: float = 4.00,
+    pull_mode: str = "pocket",
+    collision_cutoff: float = 1.5,
+    pull_step_size: float = 0.5,
 ) -> Dict:
     """
     Convenience function to align a protein-ligand complex for PMF calculations.
@@ -955,11 +1299,22 @@ def align_complex_for_pmf(
     pullvec : tuple of (int, int), optional
         User-defined pull vector as (protein_atom_index, ligand_atom_index)
     pocket_cutoff : float
-        Distance cutoff (Angstroms) for defining pocket
+        Distance cutoff (Angstroms) for defining pocket (pocket mode only)
+    pull_mode : str
+        "pocket" (default) or "whole_protein"
+    collision_cutoff : float
+        Collision distance threshold in Angstroms (whole_protein mode only)
+    pull_step_size : float
+        Step size in Angstroms for virtual pulling (whole_protein mode only)
 
     Returns:
     --------
     Dict : Alignment results
     """
-    aligner = PMFAligner(pocket_cutoff=pocket_cutoff)
+    aligner = PMFAligner(
+        pocket_cutoff=pocket_cutoff,
+        pull_mode=pull_mode,
+        collision_cutoff=collision_cutoff,
+        pull_step_size=pull_step_size,
+    )
     return aligner.align_for_pmf(protein_pdb, ligand_file, output_dir, pullvec)

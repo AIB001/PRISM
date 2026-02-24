@@ -170,7 +170,7 @@ class PMFBuilderMixin:
         os.makedirs(align_dir, exist_ok=True)
 
         # Initialize aligner
-        aligner = PMFAligner(pocket_cutoff=4.0, verbose=True)
+        aligner = PMFAligner(pocket_cutoff=4.0, verbose=True, pull_mode=self.pull_mode)
 
         # Align protein and first ligand
         # For multiple ligands, we align based on the first one

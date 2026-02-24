@@ -65,6 +65,7 @@ class PRISMBuilder(PMFBuilderMixin):
         gaussian_mem="4GB",
         pmf_mode=False,
         pullvec=None,
+        pull_mode="pocket",
         box_extension=None,
         rest2_mode=False,
         t_ref=310.0,
@@ -189,6 +190,7 @@ class PRISMBuilder(PMFBuilderMixin):
         # PMF mode options
         self.pmf_mode = pmf_mode
         self.pullvec = pullvec  # (protein_atom_idx, ligand_atom_idx) or None
+        self.pull_mode = pull_mode  # "pocket" or "whole_protein"
         self.box_extension = box_extension if box_extension else (0.0, 0.0, 2.0)
 
         # REST2 mode options
@@ -290,7 +292,8 @@ class PRISMBuilder(PMFBuilderMixin):
             if self.pullvec:
                 print(f"  Pull vector: Protein atom {self.pullvec[0]} -> Ligand atom {self.pullvec[1]}")
             else:
-                print(f"  Pull vector: Auto (pocket centroid -> ligand centroid)")
+                mode_desc = "collision-based, whole protein" if self.pull_mode == "whole_protein" else "pocket clearance"
+                print(f"  Pull vector: Auto ({mode_desc})")
 
         # Show REST2 mode if enabled
         if self.rest2_mode:
