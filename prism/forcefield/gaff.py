@@ -474,6 +474,9 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         print("Generating prep file...")
         # Generate prep file from the charged mol2 file
         # Important: We don't need to recalculate charges, just convert format
+        # Use -dr no to skip acdoctor validation, because the first antechamber
+        # call may convert double bonds to single bonds in the intermediate mol2,
+        # causing false "Weird atomic valence" errors for sp2 atoms (e.g. carboxylate)
         cmd = [
             "antechamber",
             "-i",
@@ -484,6 +487,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             os.path.basename(prep_file),
             "-fo",
             "prepi",
+            "-dr",
+            "no",
             "-at",
             "gaff",
         ]
@@ -506,6 +511,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
                 os.path.basename(prep_file),
                 "-fo",
                 "prepi",
+                "-dr",
+                "no",
                 "-c",
                 "rc",  # Read charges from input file
                 "-at",
