@@ -422,6 +422,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         shutil.copy2(self.ligand_path, input_mol2)
 
         print(f"Generating charges using {self.charge_mode.upper()} method...")
+        # Use -dr no to skip acdoctor validation, because mol2 files with mixed
+        # aromatic + double bond types can cause false "Weird atomic valence" errors
         cmd = [
             "antechamber",
             "-i",
@@ -438,6 +440,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             "2",
             "-at",
             "gaff",  # Explicitly specify GAFF atom types
+            "-dr",
+            "no",
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
@@ -464,6 +468,8 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
                     "2",
                     "-at",
                     "gaff",
+                    "-dr",
+                    "no",
                 ]
                 if self.net_charge != 0:
                     cmd_fallback.extend(["-nc", str(self.net_charge)])

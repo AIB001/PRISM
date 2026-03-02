@@ -152,6 +152,8 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
         shutil.copy2(self.ligand_path, input_mol2)
 
         print(f"Generating charges using {self.charge_mode.upper()} method with GAFF2 atom types...")
+        # Use -dr no to skip acdoctor validation, because mol2 files with mixed
+        # aromatic + double bond types can cause false "Weird atomic valence" errors
         cmd = [
             "antechamber",
             "-i",
@@ -168,6 +170,8 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             "2",
             "-at",
             self._get_atom_type_flag(),  # Use GAFF2 atom types
+            "-dr",
+            "no",
         ]
         if self.net_charge != 0:
             cmd.extend(["-nc", str(self.net_charge)])
@@ -194,6 +198,8 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
                     "2",
                     "-at",
                     self._get_atom_type_flag(),  # Use GAFF2 atom types
+                    "-dr",
+                    "no",
                 ]
                 if self.net_charge != 0:
                     cmd_fallback.extend(["-nc", str(self.net_charge)])
@@ -203,6 +209,7 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
 
         print("Generating prep file with GAFF2...")
         # Generate prep file from the charged mol2 file
+        # Use -dr no to skip acdoctor validation (same reason as above)
         cmd = [
             "antechamber",
             "-i",
@@ -213,6 +220,8 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             os.path.basename(prep_file),
             "-fo",
             "prepi",
+            "-dr",
+            "no",
             "-at",
             self._get_atom_type_flag(),  # Use GAFF2 atom types
         ]
@@ -235,6 +244,8 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
                 os.path.basename(prep_file),
                 "-fo",
                 "prepi",
+                "-dr",
+                "no",
                 "-c",
                 "rc",  # Read charges from input file
                 "-at",
