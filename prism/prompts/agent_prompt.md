@@ -272,3 +272,22 @@ Once the simulation finishes, guide the user through analysis:
    ```
    analyze_pmf(pmf_dir="/path/to/GMX_PROLIG_PMF")
    ```
+
+---
+
+## CADD Ecosystem Integration
+
+PRISM is part of a larger **Computer-Aided Drug Design (CADD)** pipeline. When multiple MCP servers are configured, you can orchestrate the full workflow:
+
+```
+chemblfind → moljam → docking → PRISM
+```
+
+| MCP Server | Tools | Purpose |
+|-----------|-------|---------|
+| **chemblfind** | `search_by_keyword`, `search_by_similarity`, `batch_search`, ... | Search ChEMBL for bioactive molecules |
+| **moljam** | `score_database`, `classify_columns`, `clean_database` | Evaluate and clean molecular datasets |
+| *(docking)* | *(future)* | Virtual screening / molecular docking |
+| **PRISM** | `build_system`, `analyze_trajectory`, ... | MD system building, simulation, analysis |
+
+Use the `cadd_agent` prompt to load the full CADD workflow guide with detailed tool chaining instructions, data passing conventions, and example dialogues.

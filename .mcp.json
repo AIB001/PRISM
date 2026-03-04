@@ -1,7 +1,18 @@
 {
   "mcpServers": {
+    "chemblfind": {
+      "type": "stdio",
+      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/chemblfind-mcp",
+      "args": []
+    },
+    "moljam": {
+      "type": "stdio",
+      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/moljam-mcp",
+      "args": []
+    },
     "prism": {
-      "command": "python",
+      "type": "stdio",
+      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/python",
       "args": ["prism/mcp_server.py"]
     }
   }
