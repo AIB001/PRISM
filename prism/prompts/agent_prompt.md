@@ -140,6 +140,29 @@ Step 6: Guide user to run simulation   → cd GMX_PROLIG_MD && bash localrun.sh
 
 If a build fails, use `check_topology()` to diagnose topology issues, and `validate_input_files()` to verify inputs are correct.
 
+## Post-Simulation Analysis
+
+After the simulation completes, use these tools to analyze results:
+
+```
+Step 1: process_trajectory(...)        → Fix PBC artifacts, center protein-ligand complex
+Step 2: analyze_trajectory(...)        → Comprehensive analysis (contacts + H-bonds + distances)
+   — OR use individual tools for targeted analysis:
+   • analyze_contacts(...)             → Protein-ligand contact proportions
+   • analyze_rmsd(...)                 → RMSD time series and statistics
+   • analyze_hbonds(...)               → Hydrogen bond frequencies
+Step 3: analyze_pmf(...)               → PMF-specific analysis (after PMF simulations)
+```
+
+### Analysis Tool Details
+
+- **`process_trajectory`**: Run this first on raw simulation output to fix periodic boundary condition artifacts. Produces a clean `.xtc` file suitable for analysis.
+- **`analyze_trajectory`**: One-stop comprehensive analysis. Generates contact proportions, hydrogen bonds, distance statistics, and a text report in the output directory.
+- **`analyze_contacts`**: Lightweight contact-only analysis. Returns top contacting residues ranked by proportion of frames in contact.
+- **`analyze_rmsd`**: Computes RMSD over the trajectory for a given atom selection (default: protein CA atoms). Useful for checking system stability.
+- **`analyze_hbonds`**: Identifies protein-ligand hydrogen bonds with frequency, distance, and angle statistics.
+- **`analyze_pmf`**: Comprehensive PMF analysis — SMD rupture force/work, umbrella window validation, histogram overlap quality, PMF profile (binding energy, barriers), and convergence assessment. Use after `smd_run.sh` and `umbrella_run.sh` complete.
+
 ## Force Field Recommendations
 
 ### Default (recommended for most users)
@@ -226,3 +249,26 @@ Once the build completes and `validate_build_output()` confirms all files are pr
 4. **MM/PBSA**: `cd <output_dir>/GMX_PROLIG_MMPBSA && bash mmpbsa_run.sh`
 
 The run scripts are pre-configured for GPU acceleration when available. For HPC clusters, the user may need to adapt the scripts to their job scheduler (SLURM, PBS, etc.).
+
+## After Simulation — Analysis Workflow
+
+Once the simulation finishes, guide the user through analysis:
+
+1. **Process the trajectory** (fix PBC artifacts):
+   ```
+   process_trajectory(input_trajectory="/path/to/md.xtc",
+                      output_trajectory="/path/to/md_processed.xtc",
+                      topology_file="/path/to/md.tpr")
+   ```
+
+2. **Run comprehensive analysis**:
+   ```
+   analyze_trajectory(topology="/path/to/solv_ions.gro",
+                      trajectory="/path/to/md_processed.xtc",
+                      output_dir="/path/to/analysis_results")
+   ```
+
+3. **For PMF simulations**, after both `smd_run.sh` and `umbrella_run.sh` complete:
+   ```
+   analyze_pmf(pmf_dir="/path/to/GMX_PROLIG_PMF")
+   ```
