@@ -280,14 +280,16 @@ Once the simulation finishes, guide the user through analysis:
 PRISM is part of a larger **Computer-Aided Drug Design (CADD)** pipeline. When multiple MCP servers are configured, you can orchestrate the full workflow:
 
 ```
-chemblfind → moljam → docking → PRISM
+chemblfind → MolScope → autodock → PRISM
 ```
 
-| MCP Server | Tools | Purpose |
-|-----------|-------|---------|
-| **chemblfind** | `search_by_keyword`, `search_by_similarity`, `batch_search`, ... | Search ChEMBL for bioactive molecules |
-| **moljam** | `score_database`, `classify_columns`, `clean_database` | Evaluate and clean molecular datasets |
-| *(docking)* | *(future)* | Virtual screening / molecular docking |
+| MCP Server | Key Tools | Purpose |
+|-----------|-----------|---------|
+| **chemblfind** | `search_by_keyword`, `search_by_similarity`, `batch_search` | Search ChEMBL for bioactive molecules |
+| **MolScope** | `select_representative_molecules`, `visualize_chemical_space` | Select representative molecules covering chemical space |
+| **autodock** | `blind_dock_tool`, `prepare_ligand`, `prepare_receptor` | Molecular docking (AutoDock Vina) |
 | **PRISM** | `build_system`, `analyze_trajectory`, ... | MD system building, simulation, analysis |
+
+Data flow: chemblfind saves Excel (with SMILES, MW, ALogP) → MolScope reads Excel directly (column names are compatible) → Agent reads selected SMILES and calls autodock per molecule → autodock outputs protein.pdb + ligand.mol2 → PRISM builds MD system from those files.
 
 Use the `cadd_agent` prompt to load the full CADD workflow guide with detailed tool chaining instructions, data passing conventions, and example dialogues.

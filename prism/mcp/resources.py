@@ -41,7 +41,7 @@ def register(mcp):
     def get_cadd_workflow() -> str:
         """CADD-Agent workflow guide for multi-software drug design pipeline.
 
-        Describes how to chain chemblfind → moljam → docking → PRISM tools
+        Describes how to chain chemblfind → MolScope → autodock → PRISM tools
         for a complete computer-aided drug design workflow.
         """
         return _load_prompt("skills/cadd_workflow.md")
@@ -65,8 +65,8 @@ def register(mcp):
         """CADD-Agent system prompt for full drug design pipeline.
 
         Injects the CADD workflow guide that orchestrates multiple MCP servers:
-        chemblfind (ChEMBL search) → moljam (data quality) → docking →
-        PRISM (MD simulation & analysis). Use this when the user wants to run
-        the complete computer-aided drug design pipeline.
+        chemblfind (ChEMBL search) → MolScope (chemical space selection) →
+        autodock (molecular docking) → PRISM (MD simulation & analysis).
+        Use this when the user wants to run the complete CADD pipeline.
         """
         return _load_prompt("agent_prompt.md") + "\n\n" + _load_prompt("skills/cadd_workflow.md")

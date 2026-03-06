@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "chemblfind": {
+      "type": "stdio",
+      "command": "chemblfind-mcp",
+      "args": [],
+      "timeout": 300
+    },
+    "molscope": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/path/to/MolScope/molscope/server.py"],
+      "timeout": 120
+    },
+    "autodock": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "autodock_mcp.mcp_server"],
+      "timeout": 600
+    },
+    "prism": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/path/to/PRISM/prism/mcp_server.py"],
+      "timeout": 600
+    }
+  }
+}

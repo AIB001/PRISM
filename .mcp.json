@@ -3,17 +3,26 @@
     "chemblfind": {
       "type": "stdio",
       "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/chemblfind-mcp",
-      "args": []
+      "args": [],
+      "timeout": 300
     },
-    "moljam": {
+    "molscope": {
       "type": "stdio",
-      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/moljam-mcp",
-      "args": []
+      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/python",
+      "args": ["/mnt/e/My_Project/MolScope/molscope/server.py"],
+      "timeout": 120
+    },
+    "autodock": {
+      "type": "stdio",
+      "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/python",
+      "args": ["-m", "autodock_mcp.mcp_server"],
+      "timeout": 600
     },
     "prism": {
       "type": "stdio",
       "command": "/home/shizq/anaconda3/envs/AmberTools23/bin/python",
-      "args": ["prism/mcp_server.py"]
+      "args": ["prism/mcp_server.py"],
+      "timeout": 600
     }
   }
 }
