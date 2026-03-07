@@ -19,6 +19,9 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 - **Advanced Protein Cleaning**: Smart removal of heteroatoms and crystallization artifacts while preserving structural metals
 - **Protonation State Prediction**: Optional pKa-based protonation for ionizable residues with PROPKA (HIS/ASP/GLU/LYS/CYS/TYR)
 - **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
+- CADD-Agent
+
+![cadd-agent](prism/prompts/resources/cadd-agent.png)
 
 ## Installation
 
@@ -622,10 +625,10 @@ PRISM generates a complete set of files ready for MD simulation:
    ```bash
    # Check GROMACS
    gmx --version
-
+   
    # Check AmberTools (for GAFF/GAFF2)
    antechamber -h
-
+   
    # Check Python packages
    python -c "import openff.toolkit"  # For OpenFF
    python -c "import requests"         # For OPLS-AA
@@ -688,6 +691,87 @@ PRISM generates a complete set of files ready for MD simulation:
 - Verify all dependencies are correctly installed
 - Check PRISM configuration in `prism_config.yaml`
 - For internet-based force fields, verify network connectivity
+
+## CADD-Agent: AI-Driven Drug Screening Pipeline
+
+PRISM includes **CADD-Agent**, an AI agent workflow that orchestrates a complete computer-aided drug design pipeline through [Claude Code](https://claude.ai/code) and MCP (Model Context Protocol).
+
+### Pipeline
+
+```
+chemblfind (1000) -> MolScope (100) -> AutoDock Vina (top 10) -> PRISM (10 MD systems)
+```
+
+| Stage | Tool | Function |
+|-------|------|----------|
+| 1. Target search | [ChEMBLFind](https://github.com/AIB001/ChEMBLFind) | Search ChEMBL for bioactive molecules |
+| 2. Chemical space selection | [MolScope](https://github.com/AIB001/MolScope) | Select representative molecules covering chemical space |
+| 3. Molecular docking | [AutoDock Vina MCP](https://github.com/AIB001/AutodockVina_MCP) | Blind docking with AutoDock Vina |
+| 4. MD system building | PRISM | Build GROMACS-ready MD systems |
+| 5. Stability analysis | PRISM | RMSD, contacts, trajectory analysis |
+
+### Prerequisites
+
+Install all 4 MCP server packages:
+
+```bash
+# 1. ChEMBLFind - ChEMBL molecule search
+pip install git+https://github.com/AIB001/ChEMBLFind
+
+# 2. MolScope - Chemical space coverage selection
+pip install git+https://github.com/AIB001/MolScope
+
+# 3. AutoDock Vina MCP - Molecular docking
+pip install git+https://github.com/AIB001/AutodockVina_MCP
+
+# 4. PRISM (this package)
+pip install -e .
+
+# 5. Claude Code (requires Node.js)
+npm install -g @anthropic-ai/claude-code
+```
+
+### One-Command Setup
+
+After installing all packages, run:
+
+```bash
+prism --add-cadd-agent
+```
+
+This will:
+1. **Auto-detect** all installed MCP server paths (Python interpreter, server scripts)
+2. **Configure** `~/.claude/settings.json` with the 4 MCP servers (global, works in any directory)
+3. **Create** `~/.claude/CLAUDE.md` with CADD workflow trigger rules
+4. **Copy** `.mcp.json` and `CLAUDE.md` templates to the current directory
+
+### Usage
+
+After setup, start Claude Code in any directory containing a protein PDB file:
+
+```bash
+mkdir my_project && cd my_project
+cp /path/to/protein.pdb .
+claude
+```
+
+Then simply tell the agent what you want:
+
+> "I want to screen inhibitors for Riboflavin Synthase"
+
+The agent will guide you through the full pipeline, confirming parameters at each step.
+
+### Manual Setup (Alternative)
+
+If you prefer manual configuration, copy the template files from `prism/prompts/resources/`:
+
+```bash
+cp prism/prompts/resources/CLAUDE.md ~/.claude/CLAUDE.md
+# Then edit ~/.claude/settings.json to add MCP server paths
+# (see prism/prompts/resources/.mcp.json for the template)
+```
+
+---
 
 ## Citation
 
