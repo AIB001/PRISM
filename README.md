@@ -19,6 +19,9 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
 - **Advanced Protein Cleaning**: Smart removal of heteroatoms and crystallization artifacts while preserving structural metals
 - **Protonation State Prediction**: Optional pKa-based protonation for ionizable residues with PROPKA (HIS/ASP/GLU/LYS/CYS/TYR)
 - **Protonation States**: Support for special residue protonation states (CYM, HID, HIE, HIP, CYX, LYN, ASH, GLH)
+- CADD-Agent
+
+![cadd-agent](prism/prompts/resources/cadd-agent.png)
 
 ## Installation
 
@@ -622,10 +625,10 @@ PRISM generates a complete set of files ready for MD simulation:
    ```bash
    # Check GROMACS
    gmx --version
-
+   
    # Check AmberTools (for GAFF/GAFF2)
    antechamber -h
-
+   
    # Check Python packages
    python -c "import openff.toolkit"  # For OpenFF
    python -c "import requests"         # For OPLS-AA
