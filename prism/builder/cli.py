@@ -239,11 +239,11 @@ Example usage:
         "--gmx-command", default=None, help="GROMACS command to use (auto-detected if not specified)"
     )
     util_group.add_argument(
-        "--add-cadd-agent",
-        action="store_true",
-        help="Set up CADD-Agent: auto-detect MCP servers (chemblfind, MolScope, autodock, PRISM), "
-        "configure ~/.claude/settings.json and ~/.claude/CLAUDE.md, "
-        "and copy resource templates to current directory. Run once per machine.",
+        "--add",
+        metavar="MODULE",
+        help="Add a module to PRISM. Use 'prism --add cadd-agent' to set up the CADD-Agent pipeline: "
+        "auto-detect MCP servers (chemblfind, MolScope, autodock, PRISM), "
+        "configure ~/.claude/settings.json and ~/.claude/CLAUDE.md.",
     )
 
     # MM/PBSA options
@@ -447,11 +447,14 @@ pressure_coupling:
             traceback.print_exc()
         sys.exit(0)
 
-    # Handle --add-cadd-agent option
-    if args.add_cadd_agent:
-        from ..cadd_setup import setup_cadd_agent
+    # Handle --add option
+    if args.add:
+        if args.add == "cadd-agent":
+            from ..cadd_setup import setup_cadd_agent
 
-        setup_cadd_agent()
+            setup_cadd_agent()
+        else:
+            print("Unknown module: '{}'. Available modules: cadd-agent".format(args.add))
         sys.exit(0)
 
     # Handle --list-forcefields option

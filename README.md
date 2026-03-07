@@ -733,17 +733,18 @@ npm install -g @anthropic-ai/claude-code
 
 ### One-Command Setup
 
-After installing all packages, run:
+Run (packages do not need to be fully installed first — missing ones will be reported):
 
 ```bash
-prism --add-cadd-agent
+prism --add cadd-agent
 ```
 
 This will:
-1. **Auto-detect** all installed MCP server paths (Python interpreter, server scripts)
-2. **Configure** `~/.claude/settings.json` with the 4 MCP servers (global, works in any directory)
+1. **Auto-detect** installed MCP server paths (Python interpreter, server scripts)
+2. **Configure** `~/.claude/settings.json` with found MCP servers (global, works in any directory)
 3. **Create** `~/.claude/CLAUDE.md` with CADD workflow trigger rules
 4. **Copy** `.mcp.json` and `CLAUDE.md` templates to the current directory
+5. **Report** any missing packages with install commands
 
 ### Usage
 
