@@ -238,6 +238,13 @@ Example usage:
     util_group.add_argument(
         "--gmx-command", default=None, help="GROMACS command to use (auto-detected if not specified)"
     )
+    util_group.add_argument(
+        "--add-cadd-agent",
+        action="store_true",
+        help="Set up CADD-Agent: auto-detect MCP servers (chemblfind, MolScope, autodock, PRISM), "
+        "configure ~/.claude/settings.json and ~/.claude/CLAUDE.md, "
+        "and copy resource templates to current directory. Run once per machine.",
+    )
 
     # MM/PBSA options
     mmpbsa_group = parser.add_argument_group("MM/PBSA options")
@@ -438,6 +445,13 @@ pressure_coupling:
             import traceback
 
             traceback.print_exc()
+        sys.exit(0)
+
+    # Handle --add-cadd-agent option
+    if args.add_cadd_agent:
+        from ..cadd_setup import setup_cadd_agent
+
+        setup_cadd_agent()
         sys.exit(0)
 
     # Handle --list-forcefields option
