@@ -712,7 +712,19 @@ chemblfind (1000) -> MolScope (100) -> AutoDock Vina (top 10) -> PRISM (10 MD sy
 
 ### Prerequisites
 
-Install all 4 MCP server packages:
+**Python >= 3.10 required** (MCP server libraries `mcp` and `fastmcp` do not support Python 3.9).
+
+```bash
+# Create conda environment with Python 3.10+
+conda create -n cadd python=3.12
+conda activate cadd
+
+# Install computational dependencies
+conda install -c conda-forge ambertools openbabel
+pip install vina rdkit
+```
+
+Install the 4 MCP server packages:
 
 ```bash
 # 1. ChEMBLFind - ChEMBL molecule search
