@@ -97,6 +97,7 @@ cache/
 # Project specific
 test/*
 tests/*
+!tests/gxf/FEP/plan/*.md
 .playwright-mcp/*
 
 # Jupyter Notebook checkpoints

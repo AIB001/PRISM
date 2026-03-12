@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Molecule processing utilities for FEP visualization.
+
+Handles conversion from PDB files to RDKit Mol objects with proper
+atom labeling, bond order correction, and charge annotation.
+"""
+
+from typing import List
+from pathlib import Path
+
+
+def pdb_to_mol(pdb_file: str, remove_hs: bool = False) -> "Chem.Mol":
+    """
+    Convert PDB file to RDKit Mol object with proper labeling.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to PDB file
+    remove_hs : bool, optional
+        Whether to remove hydrogens (default: False)
+
+    Returns
+    -------
+    Chem.Mol
+        RDKit Mol object with:
+        - Atom name labels from PDB
+        - Inferred bond orders and aromaticity
+        - 2D coordinates for depiction
+
+    Examples
+    --------
+    >>> mol = pdb_to_mol('ligand.pdb')
+    >>> from rdkit import Chem
+    >>> Chem.MolToSmiles(mol)  # Get SMILES
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+    except ImportError as e:
+        raise ImportError(
+            "RDKit is required for FEP visualization. " "Install with: conda install -c conda-forge rdkit"
+        ) from e
+
+    if not Path(pdb_file).exists():
+        raise FileNotFoundError(f"PDB file not found: {pdb_file}")
+
+    # Read PDB file
+    mol = Chem.MolFromPDBFile(pdb_file, removeHs=remove_hs)
+    if mol is None:
+        raise ValueError(f"Failed to read PDB file: {pdb_file}")
+
+    # Add hydrogens if not removing them
+    if not remove_hs:
+        mol = Chem.AddHs(mol)
+
+    # Sanitize: infer bond orders, aromaticity, hybridization
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception:
+        # If sanitization fails, try kekulization only
+        try:
+            Chem.Kekulize(mol, clearAromaticFlags=True)
+        except Exception:
+            pass  # Proceed with unsanitized mol
+
+    # Add atom name labels from PDB
+    for atom in mol.GetAtoms():
+        pdb_info = atom.GetPDBResidueInfo()
+        if pdb_info:
+            name = pdb_info.GetName().strip()
+            atom.SetProp("atomLabel", name)
+            atom.SetProp("name", name)
+
+    # Generate 2D coordinates for depiction
+    try:
+        AllChem.Compute2DCoords(mol)
+    except Exception:
+        # If 2D coord generation fails, keep 3D coords
+        pass
+
+    return mol
+
+
+def assign_bond_orders_from_mol2(
+    pdb_file: str,
+    mol2_file: str,
+) -> "Chem.Mol":
+    """
+    Assign bond orders to PDB molecule using mol2 file as template.
+
+    Uses RDKit's MolFromMol2File to read correct bond orders from mol2,
+    then assigns those bond orders to the PDB structure.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to PDB file with coordinates
+    mol2_file : str
+        Path to mol2 file with correct bond orders
+
+    Returns
+    -------
+    Chem.Mol
+        RDKit Mol object with corrected bond orders and stereochemistry
+
+    Examples
+    --------
+    >>> mol = assign_bond_orders_from_mol2('ligand.pdb', 'ligand.mol2')
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import rdmolops
+        from rdkit.Chem.AllChem import AssignBondOrdersFromTemplate
+    except ImportError as e:
+        raise ImportError("RDKit is required. Install with: conda install -c conda-forge rdkit") from e
+
+    if not Path(mol2_file).exists():
+        raise FileNotFoundError(f"Mol2 file not found: {mol2_file}")
+    if not Path(pdb_file).exists():
+        raise FileNotFoundError(f"PDB file not found: {pdb_file}")
+
+    # Read mol2 file to get bond order template
+    try:
+        mol2_template = Chem.MolFromMol2File(mol2_file, sanitize=True, removeHs=False)
+    except Exception as e:
+        raise ValueError(f"Failed to read mol2 file {mol2_file}: {e}")
+
+    # Read PDB file with coordinates
+    pdb_mol = Chem.MolFromPDBFile(pdb_file, removeHs=False)
+    if pdb_mol is None:
+        raise ValueError(f"Failed to read PDB file: {pdb_file}")
+
+    # Assign bond orders from mol2 template to PDB structure
+    try:
+        pdb_mol = AssignBondOrdersFromTemplate(mol2_template, pdb_mol)
+    except Exception as e:
+        raise ValueError(f"Failed to assign bond orders from template: {e}")
+
+    # Assign stereochemistry from 3D coordinates
+    try:
+        rdmolops.AssignStereochemistryFrom3D(pdb_mol)
+    except Exception:
+        pass  # Stereochemistry assignment may fail, continue
+
+    return pdb_mol
+
+
+def prepare_mol_with_charges_and_labels(
+    pdb_file: str,
+    mol2_file: str,
+    atoms: List,  # List of Atom objects from prism.fep.core.mapping
+) -> "Chem.Mol":
+    """
+    Prepare RDKit Mol object with correct bond orders, atom names and charge labels.
+
+    Replicates FEbuilder's get_highlight method:
+    1. Correct bond orders from mol2 file
+    2. Convert to SMILES and back (FEbuilder style)
+    3. Add atom name labels
+    4. Add charge notes for all atoms (including hydrogens)
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to PDB file
+    mol2_file : str
+        Path to mol2 file with correct bond orders
+    atoms : List[Atom]
+        List of Atom objects with name and charge properties
+
+    Returns
+    -------
+    Chem.Mol
+        RDKit Mol object with atom labels and charge notes
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+    except ImportError as e:
+        raise ImportError("RDKit is required. Install with: conda install -c conda-forge rdkit") from e
+
+    # Step 1: Correct bond orders from mol2 file
+    mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+
+    # Step 2: Convert to SMILES and back (FEbuilder style)
+    try:
+        newmol = Chem.MolFromSmiles(Chem.MolToSmiles(mol))
+        if newmol is None:
+            raise ValueError("Failed to generate SMILES from molecule")
+        newmol = Chem.AddHs(newmol)
+    except Exception as e:
+        raise ValueError(f"Failed to process molecule: {e}")
+
+    # Step 3: Build atom name to index mapping from original mol
+    atom_names = {}
+    for atom in mol.GetAtoms():
+        pdb_info = atom.GetPDBResidueInfo()
+        if pdb_info:
+            name = pdb_info.GetName().strip()
+            atom_names[name] = atom.GetIdx()
+
+    # Step 4: Build mapping between original mol and newmol
+    try:
+        mapping = newmol.GetSubstructMatches(mol)[0]
+    except IndexError:
+        raise ValueError("Failed to map atoms between molecules")
+
+    # Step 5: Build charge lookup from Atom list
+    charge_dict = {atom.name: atom.charge for atom in atoms}
+
+    # Step 6: Add atom labels and charge notes to newmol
+    for atom in newmol.GetAtoms():
+        try:
+            # Get original atom name via mapping
+            orig_idx = mapping.index(atom.GetIdx())
+            orig_atom = mol.GetAtomWithIdx(orig_idx)
+            pdb_info = orig_atom.GetPDBResidueInfo()
+            if pdb_info:
+                name = pdb_info.GetName().strip()
+                atom.SetProp("atomLabel", name)
+                atom.SetProp("name", name)
+
+                # Add charge as note (including hydrogens)
+                if name in charge_dict:
+                    charge = charge_dict[name]
+                    # Format: +0.1500, -0.3000, etc. (4 decimal places for precision)
+                    atom.SetProp("atomNote", f"{charge:+.4f}")
+        except (ValueError, IndexError):
+            # Skip atoms that can't be mapped
+            pass
+
+    # Step 7: Generate 2D coordinates
+    try:
+        AllChem.Compute2DCoords(newmol)
+    except Exception:
+        pass  # Keep 3D coords if 2D generation fails
+
+    return newmol

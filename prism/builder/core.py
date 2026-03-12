@@ -75,6 +75,12 @@ class PRISMBuilder(PMFBuilderMixin):
         mmpbsa_mode=False,
         mmpbsa_traj_ns=None,
         gmx2amber=False,
+        fep_mode=False,
+        mutant_ligand=None,
+        fep_config=None,
+        distance_cutoff=0.6,
+        charge_strategy="mean",
+        lambda_windows=11,
     ):
         """
         Initialize PRISM Builder with configuration support
@@ -139,6 +145,19 @@ class PRISMBuilder(PMFBuilderMixin):
         gmx2amber : bool, optional
             If True, use parmed + AMBER MMPBSA.py instead of gmx_MMPBSA (default: False).
             Requires AmberTools with parmed. Only used when mmpbsa_mode=True.
+        fep_mode : bool, optional
+            If True, enable FEP mode for relative binding free energy calculations (default: False).
+            Requires mutant_ligand to be specified.
+        mutant_ligand : str, optional
+            Path to mutant ligand file for FEP calculations (required when fep_mode=True).
+        fep_config : str, optional
+            Path to FEP configuration YAML file.
+        distance_cutoff : float, optional
+            Distance cutoff for atom mapping in Angstroms (default: 0.6).
+        charge_strategy : str, optional
+            Charge strategy for common atoms: 'ref', 'mut', or 'mean' (default: 'mean').
+        lambda_windows : int, optional
+            Number of lambda windows for FEP calculations (default: 11).
         """
         self.protein_path = os.path.abspath(protein_path)
 
@@ -204,6 +223,14 @@ class PRISMBuilder(PMFBuilderMixin):
         self.mmpbsa_mode = mmpbsa_mode
         self.mmpbsa_traj_ns = mmpbsa_traj_ns
         self.gmx2amber = gmx2amber
+
+        # FEP mode options
+        self.fep_mode = fep_mode
+        self.mutant_ligand = mutant_ligand
+        self.fep_config = fep_config
+        self.distance_cutoff = distance_cutoff
+        self.charge_strategy = charge_strategy
+        self.lambda_windows = lambda_windows
 
         # Handle resp_files - normalize to list or None
         if resp_files is None:
@@ -292,7 +319,9 @@ class PRISMBuilder(PMFBuilderMixin):
             if self.pullvec:
                 print(f"  Pull vector: Protein atom {self.pullvec[0]} -> Ligand atom {self.pullvec[1]}")
             else:
-                mode_desc = "collision-based, whole protein" if self.pull_mode == "whole_protein" else "pocket clearance"
+                mode_desc = (
+                    "collision-based, whole protein" if self.pull_mode == "whole_protein" else "pocket clearance"
+                )
                 print(f"  Pull vector: Auto ({mode_desc})")
 
         # Show REST2 mode if enabled
