@@ -271,6 +271,13 @@ def _generate_canvas_html(
             margin: 0;
             padding: 20px;
             background: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+        .container {{
+            width: 90%;
+            max-width: 1600px;
         }}
         .header {{
             text-align: center;
@@ -383,23 +390,17 @@ def _generate_canvas_html(
             display: flex;
             gap: 30px;
             align-items: flex-start;
-            flex-wrap: wrap;
         }}
         .legend-left {{
-            flex: 1;
-            min-width: 300px;
+            flex: 0 0 30%;
+            min-width: 250px;
         }}
         .legend-right {{
+            flex: 0 0 70%;
             min-width: 200px;
-            flex-shrink: 0;
         }}
-        @media (max-width: 768px) {{
-            .legend-content {{
-                flex-direction: column;
-            }}
-            .legend-right {{
-                width: 100%;
-            }}
+        .legend-right .legend-items {{
+            max-width: none;
         }}
         .legend-section {{
             margin-bottom: 15px;
@@ -606,6 +607,7 @@ def _generate_canvas_html(
     </style>
 </head>
 <body>
+<div class="container">
     <div class="header">
         <h1>{title}</h1>
     </div>
@@ -620,6 +622,9 @@ def _generate_canvas_html(
             <label><input type="checkbox" id="toggle-charges"> Show Charges</label>
             <label><input type="checkbox" id="toggle-labels" checked> Show Labels</label>
         </div>
+    </div>
+
+    <div class="toolbar" style="justify-content: center;">
         <div class="toolbar-group">
             <button onclick="resetView()">Reset View</button>
             <button onclick="exportPNG()">Export PNG</button>
@@ -1314,5 +1319,6 @@ def _generate_canvas_html(
         console.log('  - Drag on left/right side to pan that molecule');
         console.log('  - Scroll on left/right side to zoom that molecule');
     </script>
+</div>
 </body>
 </html>"""
