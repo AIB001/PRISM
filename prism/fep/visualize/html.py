@@ -271,6 +271,13 @@ def _generate_canvas_html(
             margin: 0;
             padding: 20px;
             background: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+        .container {{
+            width: 80%;
+            max-width: 1400px;
         }}
         .header {{
             text-align: center;
@@ -606,6 +613,7 @@ def _generate_canvas_html(
     </style>
 </head>
 <body>
+<div class="container">
     <div class="header">
         <h1>{title}</h1>
     </div>
@@ -1314,5 +1322,6 @@ def _generate_canvas_html(
         console.log('  - Drag on left/right side to pan that molecule');
         console.log('  - Scroll on left/right side to zoom that molecule');
     </script>
+</div>
 </body>
 </html>"""
