@@ -253,12 +253,9 @@ class DistanceAtomMapper:
                 common.remove((atom_a, atom_b))
                 surrounding_a.append(atom_a)
                 surrounding_b.append(atom_b)
-            elif self.charge_common != "mean" and abs(atom_a.charge - atom_b.charge) > 0:
-                # Apply charge_common strategy (ref or mut)
-                if self.charge_common == "ref":
-                    atom_b.charge = atom_a.charge
-                elif self.charge_common == "mut":
-                    atom_a.charge = atom_b.charge
+
+        # Note: charge_common strategy is applied by HybridTopologyBuilder, not here
+        # DistanceAtomMapper only classifies atoms into common/transformed/surrounding
 
         # Step 4: Handle hydrogen atoms connected to transformed/surrounding
         # For OpenFF/GAFF: use distance-based proximity to transformed/surrounding

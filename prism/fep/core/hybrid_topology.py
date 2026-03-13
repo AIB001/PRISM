@@ -242,32 +242,21 @@ class HybridTopologyBuilder:
             for atom in modify_atoms:
                 atom.state_b_charge += ave_b
 
-        # Distribute charge evenly
-        if modify_atoms_a and abs(calibration_a) > 1e-10:
-            ave_a = calibration_a / len(modify_atoms_a)
-            for atom in modify_atoms_a:
-                atom.state_a_charge += ave_a
-
-        if modify_atoms_b and abs(calibration_b) > 1e-10:
-            ave_b = calibration_b / len(modify_atoms_b)
-            for atom in modify_atoms_b:
-                atom.state_b_charge += ave_b
-
     def _get_modify_list(self, mapping: AtomMapping) -> List[HybridAtom]:
         """
         Get list of atoms to modify for charge redistribution
 
         Following FEbuilder's logic:
         - Common atoms are EXCLUDED from redistribution (they stay the same)
-        - Only surrounding atoms participate in redistribution
-        - Transformed atoms are excluded
+        - Which atoms participate depends on charge_reception:
+          * 'pert' (default): transformed + surrounding atoms (all uncommon)
+          * 'unique': only non-hydrogen transformed atoms
+          * 'surround': only surrounding atoms
 
         Parameters
         ----------
         mapping : AtomMapping
             Atom mapping classification
-        state : str
-            'A' or 'B' state
 
         Returns
         -------
@@ -282,12 +271,30 @@ class HybridTopologyBuilder:
         n_transformed_b = len(mapping.transformed_b)
         n_surrounding = len(mapping.surrounding_a)
 
-        # Only surrounding atoms participate in redistribution
-        # (Common atoms are excluded, following FEbuilder's logic)
-        start_idx = n_common + n_transformed_a + n_transformed_b
-        end_idx = start_idx + n_surrounding
+        if self.charge_reception == "surround":
+            # Only surrounding atoms participate
+            start_idx = n_common + n_transformed_a + n_transformed_b
+            end_idx = start_idx + n_surrounding
+            atom_indices = range(start_idx, end_idx)
 
-        for atom in self.hybrid_atoms[start_idx:end_idx]:
+        elif self.charge_reception == "unique":
+            # Only non-hydrogen transformed atoms participate
+            # transformed atoms are at indices [n_common, n_common + n_transformed_a + n_transformed_b)
+            start_idx = n_common
+            end_idx = n_common + n_transformed_a + n_transformed_b
+            for idx in range(start_idx, end_idx):
+                atom = self.hybrid_atoms[idx]
+                if atom.element != "H":
+                    modify_atoms.append(atom)
+            return modify_atoms  # Early return
+
+        else:  # 'pert' (default)
+            # All uncommon atoms participate (transformed + surrounding)
+            start_idx = n_common
+            end_idx = n_common + n_transformed_a + n_transformed_b + n_surrounding
+            atom_indices = range(start_idx, end_idx)
+
+        for atom in [self.hybrid_atoms[i] for i in atom_indices]:
             # Apply recharge_hydrogen filter
             if atom.element != "H" or self.recharge_hydrogen:
                 modify_atoms.append(atom)
