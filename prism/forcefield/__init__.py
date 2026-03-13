@@ -9,6 +9,8 @@ Available force field generators:
 - GAFF2ForceFieldGenerator: GAFF2 force field using AmberTools (improved version)
 - OpenFFForceFieldGenerator: OpenFF force field
 - CGenFFForceFieldGenerator: CGenFF (CHARMM General Force Field) from web server
+- CHARMMGUIForceFieldGenerator: CHARMM-GUI output converter
+- RTFForceFieldGenerator: RTF+PRM force field converter (CGenFF files)
 - OPLSAAForceFieldGenerator: OPLS-AA force field using LigParGen
 - MMFFForceFieldGenerator: MMFF-based force field using SwissParam
 - MATCHForceFieldGenerator: MATCH force field using SwissParam
@@ -55,6 +57,22 @@ try:
     from .cgenff import CGenFFForceFieldGenerator
 
     __all__.append("CGenFFForceFieldGenerator")
+except ImportError:
+    pass
+
+# CHARMM-GUI force field
+try:
+    from .charmm_gui import CHARMMGUIForceFieldGenerator
+
+    __all__.append("CHARMMGUIForceFieldGenerator")
+except ImportError:
+    pass
+
+# RTF force field
+try:
+    from .rtf import RTFForceFieldGenerator
+
+    __all__.append("RTFForceFieldGenerator")
 except ImportError:
     pass
 
@@ -156,6 +174,22 @@ def get_generator_info():
             "description": "CGenFF (CHARMM General Force Field) - requires web-downloaded files",
             "output_dir": "LIG.cgenff2gmx",
             "dependencies": ["Web download from https://cgenff.com/"],
+        }
+
+    if "CHARMMGUIForceFieldGenerator" in __all__:
+        info["CHARMM-GUI"] = {
+            "class": "CHARMMGUIForceFieldGenerator",
+            "description": "CHARMM-GUI output converter - processes gromacs/ directory",
+            "output_dir": "LIG.charmm2gmx",
+            "dependencies": ["CHARMM-GUI web server (http://charmm-gui.org)"],
+        }
+
+    if "RTFForceFieldGenerator" in __all__:
+        info["RTF"] = {
+            "class": "RTFForceFieldGenerator",
+            "description": "RTF+PRM force field converter - processes CGenFF RTF/PRM files",
+            "output_dir": "LIG.rtf2gmx",
+            "dependencies": ["RTF and PRM files from CGenFF"],
         }
 
     if "OPLSAAForceFieldGenerator" in __all__:

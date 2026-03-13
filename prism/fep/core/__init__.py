@@ -8,12 +8,12 @@ Core algorithms for FEP calculations including atom mapping and dual topology co
 """
 
 from .mapping import Atom, AtomMapping, DistanceAtomMapper
-from .dual_topology import HybridAtom, DualTopologyBuilder
+from .hybrid_topology import HybridAtom, HybridTopologyBuilder
 
 __all__ = [
     "Atom",
     "AtomMapping",
     "DistanceAtomMapper",
     "HybridAtom",
-    "DualTopologyBuilder",
+    "HybridTopologyBuilder",
 ]

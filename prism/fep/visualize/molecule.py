@@ -8,7 +8,7 @@ Handles conversion from PDB files to RDKit Mol objects with proper
 atom labeling, bond order correction, and charge annotation.
 """
 
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 
 
@@ -151,24 +151,23 @@ def assign_bond_orders_from_mol2(
 
 def prepare_mol_with_charges_and_labels(
     pdb_file: str,
-    mol2_file: str,
+    mol2_file: Optional[str],
     atoms: List,  # List of Atom objects from prism.fep.core.mapping
 ) -> "Chem.Mol":
     """
     Prepare RDKit Mol object with correct bond orders, atom names and charge labels.
 
-    Replicates FEbuilder's get_highlight method:
-    1. Correct bond orders from mol2 file
-    2. Convert to SMILES and back (FEbuilder style)
-    3. Add atom name labels
-    4. Add charge notes for all atoms (including hydrogens)
+    Strategy:
+    - For OpenFF/GAFF: Use MOL2/SDF as primary coordinate source (user input)
+    - For CGenFF: Use PDB (from CHARMM-GUI) with MOL2 for bond orders if needed
+    - Avoid SMILES round-trip to prevent atom reordering
 
     Parameters
     ----------
     pdb_file : str
-        Path to PDB file
-    mol2_file : str
-        Path to mol2 file with correct bond orders
+        Path to PDB file (used for CGenFF or as fallback)
+    mol2_file : str, optional
+        Path to mol2 file with correct bond orders (PRIMARY for OpenFF/GAFF)
     atoms : List[Atom]
         List of Atom objects with name and charge properties
 
@@ -183,10 +182,97 @@ def prepare_mol_with_charges_and_labels(
     except ImportError as e:
         raise ImportError("RDKit is required. Install with: conda install -c conda-forge rdkit") from e
 
-    # Step 1: Correct bond orders from mol2 file
-    mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+    # Step 1: Read molecule from best available source
+    if mol2_file is not None and Path(mol2_file).exists():
+        # For OpenFF/GAFF: read MOL2 directly (has coords + bonds)
+        # This avoids atom reordering issues
+        try:
+            mol = Chem.MolFromMol2File(mol2_file, removeHs=False, sanitize=False)
+            if mol is None:
+                raise ValueError(f"Failed to read MOL2 file: {mol2_file}")
 
-    # Step 2: Convert to SMILES and back (FEbuilder style)
+            # IMPORTANT: Match atoms BEFORE computing 2D coords
+            # because atoms have 3D coordinates, and 2D coords will change positions
+            charge_dict = {atom.name: atom.charge for atom in atoms}
+
+            # Build coordinate lookup from atoms parameter
+            # atoms have coordinates in Angstroms from GRO (converted from nm)
+            atom_coords = {i: atom.coord for i, atom in enumerate(atoms)}
+
+            # Get RDKit mol conformer coordinates (3D, in Angstroms)
+            conf = mol.GetConformer()
+            mol_coords = []
+            for i in range(mol.GetNumAtoms()):
+                pos = conf.GetAtomPosition(i)
+                mol_coords.append([pos.x, pos.y, pos.z])
+
+            # Match by closest coordinates
+            used_atom_indices = set()
+            for mol_idx in range(mol.GetNumAtoms()):
+                mol_coord = mol_coords[mol_idx]
+
+                # Find closest atom in atoms list
+                min_dist = float("inf")
+                best_atom_idx = None
+
+                for atom_idx, atom_coord in atom_coords.items():
+                    if atom_idx in used_atom_indices:
+                        continue
+
+                    # Calculate Euclidean distance
+                    dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coord)) ** 0.5
+
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_atom_idx = atom_idx
+
+                # If match found within reasonable tolerance (0.5 Å)
+                if best_atom_idx is not None and min_dist < 0.5:
+                    name = atoms[best_atom_idx].name
+                    rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                    rdkit_atom.SetProp("atomLabel", name)
+                    rdkit_atom.SetProp("name", name)
+
+                    # Add charge as note
+                    if name in charge_dict:
+                        charge = charge_dict[name]
+                        rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+
+                    used_atom_indices.add(best_atom_idx)
+                else:
+                    print(
+                        f"Warning: Could not match RDKit atom {mol_idx} to any atom in list (min_dist={min_dist:.3f})"
+                    )
+
+            # Try to sanitize for proper bond orders (after matching)
+            try:
+                Chem.SanitizeMol(mol)
+            except Exception:
+                # If sanitization fails, try kekulization only
+                try:
+                    Chem.Kekulize(mol, clearAromaticFlags=True)
+                except Exception:
+                    pass  # Proceed with unsanitized mol
+
+            # Generate 2D coordinates for depiction (after matching!)
+            try:
+                AllChem.Compute2DCoords(mol)
+            except Exception:
+                pass  # Keep 3D coords if 2D generation fails
+
+            return mol
+
+        except Exception as e:
+            print(f"Warning: Failed to read MOL2, falling back to PDB: {e}")
+            # Fall through to PDB-based approach
+
+    # Fallback: Use PDB + MOL2 for bond orders (original CGenFF workflow)
+    if mol2_file is not None:
+        mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+    else:
+        mol = pdb_to_mol(pdb_file)
+
+    # Convert to SMILES and back (FEbuilder style - may reorder atoms)
     try:
         newmol = Chem.MolFromSmiles(Chem.MolToSmiles(mol))
         if newmol is None:
@@ -195,45 +281,37 @@ def prepare_mol_with_charges_and_labels(
     except Exception as e:
         raise ValueError(f"Failed to process molecule: {e}")
 
-    # Step 3: Build atom name to index mapping from original mol
-    atom_names = {}
-    for atom in mol.GetAtoms():
-        pdb_info = atom.GetPDBResidueInfo()
-        if pdb_info:
-            name = pdb_info.GetName().strip()
-            atom_names[name] = atom.GetIdx()
-
-    # Step 4: Build mapping between original mol and newmol
+    # Build mapping between original mol and newmol
     try:
         mapping = newmol.GetSubstructMatches(mol)[0]
     except IndexError:
         raise ValueError("Failed to map atoms between molecules")
 
-    # Step 5: Build charge lookup from Atom list
+    # Build charge lookup from Atom list
     charge_dict = {atom.name: atom.charge for atom in atoms}
 
-    # Step 6: Add atom labels and charge notes to newmol
+    # Add atom labels and charge notes to newmol
     for atom in newmol.GetAtoms():
         try:
             # Get original atom name via mapping
             orig_idx = mapping.index(atom.GetIdx())
-            orig_atom = mol.GetAtomWithIdx(orig_idx)
-            pdb_info = orig_atom.GetPDBResidueInfo()
-            if pdb_info:
-                name = pdb_info.GetName().strip()
-                atom.SetProp("atomLabel", name)
-                atom.SetProp("name", name)
 
-                # Add charge as note (including hydrogens)
-                if name in charge_dict:
-                    charge = charge_dict[name]
-                    # Format: +0.1500, -0.3000, etc. (4 decimal places for precision)
-                    atom.SetProp("atomNote", f"{charge:+.4f}")
+            # Use atom name from atoms parameter (from force field files)
+            # This ensures consistency across different force fields (OpenFF, CGenFF, etc.)
+            name = atoms[orig_idx].name
+            atom.SetProp("atomLabel", name)
+            atom.SetProp("name", name)
+
+            # Add charge as note (including hydrogens)
+            if name in charge_dict:
+                charge = charge_dict[name]
+                # Format: +0.1500, -0.3000, etc. (4 decimal places for precision)
+                atom.SetProp("atomNote", f"{charge:+.4f}")
         except (ValueError, IndexError):
             # Skip atoms that can't be mapped
             pass
 
-    # Step 7: Generate 2D coordinates
+    # Generate 2D coordinates
     try:
         AllChem.Compute2DCoords(newmol)
     except Exception:

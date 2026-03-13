@@ -44,8 +44,8 @@ def visualize_mapping_png(
     mapping: AtomMapping,
     pdb_a: str,
     pdb_b: str,
-    mol2_a: str,
-    mol2_b: str,
+    mol2_a: Optional[str],
+    mol2_b: Optional[str],
     output_path: Optional[str] = None,
     edge: int = 600,
     legends: Tuple[str, str] = ("Reference", "Mutant"),
@@ -77,10 +77,10 @@ def visualize_mapping_png(
     Examples
     --------
     >>> from prism.fep.core.mapping import DistanceAtomMapper
-    >>> from prism.fep.io import read_cgenff_system
+    >>> from prism.fep.io import read_rtf_for_fep
     >>> from prism.fep.visualize import visualize_mapping_png
-    >>> lig_a = read_cgenff_system('25.rtf', '25.pdb')
-    >>> lig_b = read_cgenff_system('36.rtf', '36.pdb')
+    >>> lig_a = read_rtf_for_fep('25.rtf', '25.pdb')
+    >>> lig_b = read_rtf_for_fep('36.rtf', '36.pdb')
     >>> mapper = DistanceAtomMapper()
     >>> mapping = mapper.map(lig_a, lig_b)
     >>> visualize_mapping_png(mapping, '25.pdb', '36.pdb', '25_3D.mol2', '36_3D.mol2', '25-36_mapping.png')

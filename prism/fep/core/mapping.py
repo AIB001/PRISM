@@ -41,6 +41,25 @@ class Atom:
     atom_type: str
     index: int
 
+    def __eq__(self, other):
+        """Custom equality comparison for Atom objects"""
+        if not isinstance(other, Atom):
+            return False
+        return (
+            self.name == other.name
+            and self.element == other.element
+            and np.allclose(self.coord, other.coord, atol=1e-6)
+            and abs(self.charge - other.charge) < 1e-6
+            and self.atom_type == other.atom_type
+            and self.index == other.index
+        )
+
+    def __hash__(self):
+        """Custom hash for Atom objects"""
+        # Use tuple of hashable components
+        coord_tuple = tuple(self.coord.round(6))  # Round to avoid floating point issues
+        return hash((self.name, self.element, coord_tuple, round(self.charge, 6), self.atom_type, self.index))
+
 
 @dataclass
 class AtomMapping:
@@ -141,6 +160,10 @@ class DistanceAtomMapper:
         3. Identify surrounding atoms - matched atoms with divergent parameters
         4. Apply charge_common strategy to common atoms
 
+        Note: For OpenFF/GAFF force fields, atom_type check is disabled since
+        these force fields use generic types (output_0, output_1, ...) that don't
+        encode positional information like CGenFF (CA, CB, CG, etc.).
+
         Parameters
         ----------
         ligand_a : List[Atom]
@@ -157,7 +180,16 @@ class DistanceAtomMapper:
         ligand_a = [Atom(a.name, a.element, a.coord.copy(), a.charge, a.atom_type, a.index) for a in ligand_a]
         ligand_b = [Atom(b.name, b.element, b.coord.copy(), b.charge, b.atom_type, b.index) for b in ligand_b]
 
-        # Step 1: Distance-based matching
+        # Detect if using OpenFF/GAFF (generic atom types)
+        # OpenFF types are like: output_0, output_1, ...
+        # CGenFF types are like: CA, CB, CG, HA, HB, etc.
+        uses_generic_types = self._uses_generic_atom_types(ligand_a, ligand_b)
+
+        if uses_generic_types:
+            # For OpenFF/GAFF: skip atom type check, only use distance + element + charge
+            pass
+
+        # Step 1: Distance-based matching (greedy, like FEbuilder)
         common = []
         matched_b_indices = set()
 
@@ -172,9 +204,17 @@ class DistanceAtomMapper:
                 if dist > self.dist_cutoff:
                     continue
 
-                # Check element type
+                # Check element
                 if atom_a.element != atom_b.element:
                     continue
+
+                # Check atom type (skip only for truly generic types like OpenFF's output_X)
+                # GAFF: ca, c3, ha, hc, ... (position-specific, should check)
+                # CGenFF: CA, CB, CG, HA, HB, ... (position-specific, should check)
+                # OpenFF: output_0, output_1, ... (generic, skip check)
+                if not uses_generic_types:
+                    if atom_a.atom_type != atom_b.atom_type:
+                        continue
 
                 # Found a match
                 common.append((atom_a, atom_b))
@@ -199,8 +239,11 @@ class DistanceAtomMapper:
 
         # Make a copy to iterate safely
         for atom_a, atom_b in common[:]:
-            # Check if types differ
-            type_differs = atom_a.atom_type != atom_b.atom_type
+            # Check if types differ (only for CGenFF, not OpenFF/GAFF)
+            if not uses_generic_types:
+                type_differs = atom_a.atom_type != atom_b.atom_type
+            else:
+                type_differs = False  # Skip type check for OpenFF/GAFF
 
             # Check if charges differ significantly
             charge_differs = abs(atom_a.charge - atom_b.charge) > self.charge_cutoff
@@ -218,16 +261,16 @@ class DistanceAtomMapper:
                     atom_a.charge = atom_b.charge
 
         # Step 4: Handle hydrogen atoms connected to transformed/surrounding
-        # Remove hydrogens from common and add to transformed/surrounding
-        common_to_remove = []
-        for atom_a, atom_b in common:
-            # Check if hydrogen connected to transformed/surrounding atoms
-            if atom_a.name.startswith("H") or atom_b.name.startswith("H"):
-                # For simplicity, move all hydrogens to transformed if not recharge_hydrogen
-                if not self.recharge_hydrogen:
-                    # Keep in common only if not connected to transformed/surrounding
-                    # This is a simplified version - FEbuilder has more complex logic
-                    pass
+        # For OpenFF/GAFF: use distance-based proximity to transformed/surrounding
+        if uses_generic_types:
+            # Remove hydrogens that are close to transformed/surrounding atoms
+            common = self._filter_hydrogens_for_generic_types(
+                common, transformed_a, transformed_b, surrounding_a, surrounding_b
+            )
+        else:
+            # CGenFF: use bond connectivity (simplified version)
+            # TODO: implement full bond-based logic like FEbuilder
+            pass
 
         return AtomMapping(
             common=common,
@@ -236,3 +279,86 @@ class DistanceAtomMapper:
             surrounding_a=surrounding_a,
             surrounding_b=surrounding_b,
         )
+
+    def _uses_generic_atom_types(self, ligand_a: List[Atom], ligand_b: List[Atom]) -> bool:
+        """
+        Detect if force field uses generic/sequential atom types that should skip type checking.
+
+        Generic/Sequential types (skip atom type check):
+        - OpenFF: output_0, output_1, ... (generic, not position-specific)
+        - OPLS-AA: opls_800, opls_801, ... (sequential numbering, not chemical environment)
+
+        Position-specific types (use atom type check):
+        - CGenFF: CA, CB, CG, CD, HA, HB, ... (encode position in molecule)
+        - GAFF: ca, c3, ha, hc, ... (encode chemical environment)
+
+        Returns
+        -------
+        bool
+            True if using generic/sequential types (OpenFF/OPLS), False if position-specific (CGenFF/GAFF)
+        """
+        # Check first few atoms
+        for atom in ligand_a[:5]:
+            if atom.atom_type.startswith("output_"):
+                return True
+            if atom.atom_type.startswith("opls_"):
+                return True
+
+        for atom in ligand_b[:5]:
+            if atom.atom_type.startswith("output_"):
+                return True
+            if atom.atom_type.startswith("opls_"):
+                return True
+
+        return False
+
+    def _filter_hydrogens_for_generic_types(
+        self,
+        common: List[Tuple[Atom, Atom]],
+        transformed_a: List[Atom],
+        transformed_b: List[Atom],
+        surrounding_a: List[Atom],
+        surrounding_b: List[Atom],
+    ) -> List[Tuple[Atom, Atom]]:
+        """
+        For OpenFF/GAFF: remove hydrogens from common if they're close to transformed/surrounding.
+
+        This approximates FEbuilder's bond-based logic using distance.
+        """
+        # Collect all uncommon atoms
+        uncommon_a = transformed_a + surrounding_a
+        uncommon_b = transformed_b + surrounding_b
+
+        # Hydrogens to keep in common (not close to uncommon atoms)
+        common_to_keep = []
+
+        for atom_a, atom_b in common:
+            # Check if this is a hydrogen pair
+            if not (atom_a.name.startswith("H") or atom_b.name.startswith("H")):
+                # Non-hydrogen: always keep
+                common_to_keep.append((atom_a, atom_b))
+                continue
+
+            # For hydrogens: check if close to any uncommon atom
+            # If close to uncommon, should be in transformed/surrounding, not common
+            close_to_uncommon = False
+
+            for uncommon_atom in uncommon_a:
+                dist = np.linalg.norm(atom_a.coord - uncommon_atom.coord)
+                if dist < 1.5:  # Typical C-H bond length
+                    close_to_uncommon = True
+                    break
+
+            if not close_to_uncommon:
+                # Also check the B side
+                for uncommon_atom in uncommon_b:
+                    dist = np.linalg.norm(atom_b.coord - uncommon_atom.coord)
+                    if dist < 1.5:
+                        close_to_uncommon = True
+                        break
+
+            if not close_to_uncommon:
+                # Hydrogen is not close to any uncommon atom, keep in common
+                common_to_keep.append((atom_a, atom_b))
+
+        return common_to_keep

@@ -332,7 +332,7 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
         return interchange
 
     def _write_gromacs_files(self, interchange):
-        """Write GROMACS format files"""
+        """Write GROMACS format files with original atom names"""
         output_prefix = os.path.join(self.lig_ff_dir, "LIG")
 
         # Write GRO file
@@ -341,10 +341,115 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
         # Write TOP file
         interchange.to_top(f"{output_prefix}.top")
 
-        # Process the topology files
-        self._process_topology_files(output_prefix)
+        # Restore original atom names via coordinate matching
+        atom_mapping = None
+        if self.ligand_path.endswith(".mol2"):
+            try:
+                mol2_atoms = self._read_mol2_atoms(self.ligand_path)
+                atom_mapping = self._match_atoms_by_coordinates(f"{output_prefix}.gro", mol2_atoms)
+                self._apply_atom_names_to_gro(f"{output_prefix}.gro", atom_mapping)
+                print_success(f"Restored {len(atom_mapping)} atom names from MOL2", prefix="  ")
+            except Exception as e:
+                print_warning(f"Could not restore atom names: {e}", prefix="  ")
 
-    def _process_topology_files(self, output_prefix):
+        # Process the topology files
+        self._process_topology_files(output_prefix, atom_mapping)
+
+    def _read_mol2_atoms(self, mol2_file):
+        """
+        Read atom names and coordinates from MOL2 file
+
+        Returns:
+            list of dict: [{'name': 'CG', 'coord': [x, y, z]}, ...]
+        """
+        atoms = []
+        in_atom_section = False
+
+        with open(mol2_file, "r") as f:
+            for line in f:
+                if "@<TRIPOS>ATOM" in line:
+                    in_atom_section = True
+                    continue
+                elif "@<TRIPOS>BOND" in line:
+                    break
+                elif in_atom_section and line.strip():
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        atoms.append(
+                            {
+                                "name": parts[1],  # Atom name
+                                "coord": [float(parts[2]), float(parts[3]), float(parts[4])],  # Å
+                            }
+                        )
+
+        return atoms
+
+    def _match_atoms_by_coordinates(self, gro_file, mol2_atoms):
+        """
+        Match GRO atoms to MOL2 atoms by 3D coordinates
+
+        Returns:
+            dict: {gro_index: mol2_atom_name}
+        """
+        # Read GRO coordinates (in nm)
+        gro_coords = []
+        with open(gro_file, "r") as f:
+            lines = f.readlines()
+            for i in range(2, len(lines) - 1):  # Skip header and box
+                # GRO format: columns 20-28, 28-36, 36-44 (nm)
+                x = float(lines[i][20:28])
+                y = float(lines[i][28:36])
+                z = float(lines[i][36:44])
+                gro_coords.append([x * 10, y * 10, z * 10])  # Convert nm → Å
+
+        # Match each GRO atom to closest MOL2 atom
+        mapping = {}
+        used_mol2_indices = set()
+
+        for gro_idx, gro_coord in enumerate(gro_coords):
+            min_dist = float("inf")
+            best_match_idx = None
+
+            for mol2_idx, mol2_atom in enumerate(mol2_atoms):
+                if mol2_idx in used_mol2_indices:
+                    continue
+
+                mol2_coord = mol2_atom["coord"]
+                dist = sum((a - b) ** 2 for a, b in zip(gro_coord, mol2_coord)) ** 0.5
+
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match_idx = mol2_idx
+
+            if min_dist < 0.1:  # 0.1 Å tolerance
+                mapping[gro_idx] = mol2_atoms[best_match_idx]["name"]
+                used_mol2_indices.add(best_match_idx)
+            else:
+                print_warning(f"GRO atom {gro_idx} has no close match (min_dist={min_dist:.3f} Å)", prefix="    ")
+
+        return mapping
+
+    def _apply_atom_names_to_gro(self, gro_file, atom_mapping):
+        """Replace generic atom names in GRO file"""
+        with open(gro_file, "r") as f:
+            lines = f.readlines()
+
+        modified_lines = []
+        for i, line in enumerate(lines):
+            if i == 0 or i == 1 or i == len(lines) - 1:
+                modified_lines.append(line)
+            else:
+                atom_idx = i - 2
+                if atom_idx in atom_mapping:
+                    # GRO atom name: columns 10-15 (5 chars)
+                    new_name = atom_mapping[atom_idx][:5].ljust(5)
+                    line = line[:10] + new_name + line[15:]
+                modified_lines.append(line)
+
+        with open(gro_file, "w") as f:
+            f.writelines(modified_lines)
+
+    def _process_topology_files(self, output_prefix, atom_mapping=None):
         """Process and split topology files"""
         top_file = f"{output_prefix}.top"
 
@@ -357,6 +462,10 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
         # Modify ITP content to use LIG as resname
         modified_itp_content = self._modify_resname_to_lig(itp_content)
+
+        # Apply atom names to ITP if mapping provided
+        if atom_mapping:
+            modified_itp_content = self._apply_atom_names_to_itp(modified_itp_content, atom_mapping)
 
         # Count atoms for position restraints
         atom_count = self._count_atoms_in_itp(modified_itp_content)
@@ -465,6 +574,56 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
             else:
                 # For all other sections (bonds, angles, dihedrals, etc.), keep the line as is
                 # This is crucial - no modifications should be made to other sections
+                modified_lines.append(line)
+
+        return "\n".join(modified_lines)
+
+    def _apply_atom_names_to_itp(self, itp_content, atom_mapping):
+        """
+        Replace generic atom names in ITP [ atoms ] section
+
+        Parameters:
+            itp_content: ITP file content as string
+            atom_mapping: dict mapping {gro_index: atom_name}
+
+        Returns:
+            Modified ITP content with original atom names
+        """
+        lines = itp_content.split("\n")
+        modified_lines = []
+        in_atoms_section = False
+        atom_idx = 0
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Detect atoms section
+            if stripped.startswith("[") and "atoms" in stripped:
+                in_atoms_section = True
+                modified_lines.append(line)
+                continue
+            elif stripped.startswith("["):
+                in_atoms_section = False
+                modified_lines.append(line)
+                continue
+
+            # Process atom lines
+            if in_atoms_section and stripped and not stripped.startswith(";"):
+                parts = line.split()
+                if len(parts) >= 5 and atom_idx in atom_mapping:
+                    # Replace atom name (5th column, index 4)
+                    parts[4] = atom_mapping[atom_idx]
+                    # Reconstruct line with proper formatting
+                    line = f"{parts[0]:>6} {parts[1]:<15} {parts[2]:>4} {parts[3]:<7} {parts[4]:<10}"
+                    if len(parts) > 5:
+                        line += f" {parts[5]:>4}"
+                    if len(parts) > 6:
+                        line += f" {parts[6]:>17}"
+                    if len(parts) > 7:
+                        line += f" {parts[7]:>17}"
+                atom_idx += 1
+                modified_lines.append(line)
+            else:
                 modified_lines.append(line)
 
         return "\n".join(modified_lines)

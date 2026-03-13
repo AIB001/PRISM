@@ -4,12 +4,81 @@
 """
 Configuration file parser for PRISM-FEP
 
-Supports FEbuilder-compatible config.conf files.
+Supports both:
+- Legacy FEbuilder-compatible config.conf files
+- New YAML-based config.yaml + fep.yaml architecture
 """
 
 import configparser
 from pathlib import Path
 from typing import Dict, Any
+import yaml
+
+
+class FEPConfig:
+    """
+    Unified FEP configuration manager
+
+    Loads configuration from:
+    - config.yaml: General PRISM parameters (force field, temperature, etc.)
+    - fep.yaml: FEP-specific parameters (mapping cutoffs, charge strategies)
+    """
+
+    def __init__(self, work_dir: str):
+        """
+        Initialize FEP configuration from work directory
+
+        Parameters
+        ----------
+        work_dir : str
+            Working directory containing config.yaml and fep.yaml
+        """
+        self.work_dir = Path(work_dir)
+        self.config_yaml = self.work_dir / "config.yaml"
+        self.fep_yaml = self.work_dir / "fep.yaml"
+
+        # Load configurations
+        self.general_config = self._load_yaml(self.config_yaml)
+        self.fep_config = self._load_yaml(self.fep_yaml)
+
+    def _load_yaml(self, yaml_file: Path) -> Dict[str, Any]:
+        """Load YAML file"""
+        if yaml_file.exists():
+            with open(yaml_file) as f:
+                return yaml.safe_load(f) or {}
+        return {}
+
+    def get_forcefield_type(self) -> str:
+        """Get force field type from config.yaml"""
+        return self.general_config.get("forcefield", {}).get("type", "gaff")
+
+    def get_forcefield_params(self) -> Dict[str, Any]:
+        """Get force field parameters from config.yaml"""
+        return self.general_config.get("forcefield", {}).get("params", {})
+
+    def get_mapping_params(self) -> Dict[str, Any]:
+        """
+        Get mapping parameters from fep.yaml
+
+        Returns dict with keys: dist_cutoff, charge_cutoff, charge_common, charge_reception
+        """
+        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "pert"}
+        mapping_config = self.fep_config.get("mapping", {})
+        # Merge with defaults
+        return {**defaults, **mapping_config}
+
+    def get_html_config(self) -> Dict[str, Any]:
+        """Get configuration for HTML visualization"""
+        return {
+            "forcefield": {"type": self.get_forcefield_type(), "params": self.get_forcefield_params()},
+            "fep": {"mapping": self.get_mapping_params()},
+        }
+
+    def __repr__(self):
+        return f"FEPConfig(work_dir={self.work_dir})"
+
+
+# Legacy functions for backward compatibility
 
 
 def read_fep_config(config_file: str) -> Dict[str, Any]:

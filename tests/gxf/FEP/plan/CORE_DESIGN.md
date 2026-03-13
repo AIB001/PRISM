@@ -87,11 +87,21 @@ prism/fep/visualize/
 │   ├── _align_mols_2d()                # MCS 对齐
 │   ├── visualize_mapping_png()         # 主函数
 │   └── 使用 MolDrawOptions (FEbuilder 风格)
-└── html.py                  # HTML 可视化
-    ├── 基础 HTML 模板                   # ✅ 已完成
-    ├── Hover 交互功能                   # ⏳ 待实现
-    ├── 电荷标签开关                     # ⏳ 待实现
-    └── 导出 PNG 功能                    # ⏳ 待实现
+├── html.py                  # HTML 可视化 (528 行) ✅ 2026-03-13 优化
+│   ├── 基础 HTML 模板                   # ✅ 已完成
+│   ├── Canvas 绘制引擎                 # ✅ 已完成
+│   ├── 独立缩放/平移控制                # ✅ 已完成
+│   ├── Hover 交互功能                   # ✅ 已完成
+│   ├── 电荷标签开关                     # ✅ 已完成
+│   ├── FEP 分类/元素着色模式切换        # ✅ 已完成
+│   ├── 对应原子跨分子高亮              # ✅ 已完成
+│   ├── 导出 PNG 功能                    # ✅ 已完成
+│   ├── Legend/Statistics 全宽度布局    # ✅ 已完成
+│   └── 模板文件重构 (CSS/JS 分离)       # ✅ 2026-03-13 新增
+└── templates/               # ✅ 2026-03-13 新增模板目录
+    ├── styles.css                       # CSS 样式 (12K)
+    ├── script.js                        # JavaScript 代码 (20K)
+    └── body.html                        # HTML body 模板 (7.6K)
 ```
 
 ### 0.4 模块依赖关系
@@ -138,7 +148,7 @@ tests/gxf/FEP/
 ```
 
 **测试配置要求**：
-- ✅ 每个测试案例包含 `case.yaml` 和 `config.conf`
+- ✅ 每个测试案例包含 `fep.yaml` 和 `config.conf`
 - ✅ 基础参数（charge_common, charge_reception, distance）必须一致
 - ✅ `unit_test/` 案例额外包含 `test_requirements` 部分
 - ✅ 使用 `prism.fep.io` 模块读取文件（统一接口）
@@ -259,169 +269,16 @@ prism visualize-mapping --case 25-36 --output mapping.html --interactive
 
 ---
 
-## 6. 可视化模块设计 (`fep/visualize/`)
+## 6. 可视化模块设计 (`fep/visualize/`) ✅ 已完成
 
-### 6.1 模块功能
+**核心模块**: `molecule.py`, `highlight.py`, `mapping.py` (PNG), `html.py` (交互式)
 
-| 模块 | 功能 | 状态 |
-|------|------|------|
-| `molecule.py` | PDB → RDKit Mol 对象转换 | ✅ |
-| | 从 mol2 校正键级（RDKit） | ✅ |
-| | 添加电荷和标签信息 | ✅ |
-| `highlight.py` | 定义三种原子类型的高亮颜色 | ✅ |
-| `mapping.py` | PNG 可视化（FEbuilder 风格） | ✅ |
-| | MCS 对齐（rdFMCS） | ✅ |
-| | 电荷标注（包括氢原子） | ✅ |
-| `html.py` | 基础 HTML 模板 | ✅ |
-| | 交互功能实现 | ⏳ |
+**主要功能**:
+- PNG 可视化：MCS 对齐、键级校正、电荷标注、FEbuilder 风格
+- HTML 可视化：Canvas 绘制、独立缩放/平移、Hover tooltip、对应原子高亮
+- 模板分离：CSS/JS/HTML 模板独立文件，提高可维护性
 
-### 6.2 PNG 可视化（已实现）
-
-**核心特性**：
-```python
-def visualize_mapping_png(
-    mapping: AtomMapping,
-    pdb_a: str,
-    pdb_b: str,
-    mol2_a: str,          # 用于键级校正
-    mol2_b: str,
-    output_path: str,
-    edge: float = 0.15,   # 边距
-    legends: tuple = ('Reference', 'Mutant')
-) -> None:
-    """
-    生成 FEbuilder 风格的 PNG 映射图
-
-    特性:
-    - MCS 对齐（rdFMCS）
-    - 键级校正（从 mol2 读取）
-    - 电荷标注（包括氢原子）
-    - FEbuilder 颜色方案
-    """
-```
-
-**实现细节**：
-1. **MCS 对齐**：使用 RDKit `rdFMCS` 计算最大公共子结构
-2. **键级校正**：`AssignBondOrdersFromTemplate(mol, mol_from_mol2)`
-3. **电荷标注**：通过 `atomNote` 属性添加电荷信息
-4. **绘制选项**：使用与 FEbuilder 相同的 `MolDrawOptions`
-
-### 6.3 HTML 可视化（待实现）
-
-**交互功能需求**：
-
-| 功能 | 描述 | 优先级 | 技术方案 |
-|------|------|--------|----------|
-| **Hover Tooltip** | 显示原子电荷、类型、分类 | 高 | JavaScript + CSS |
-| **对应原子高亮** | 跨分子显示对应原子 | 高 | 索引映射 + CSS class |
-| **电荷标签开关** | 切换显示电荷标签 | 中 | Checkbox + CSS |
-| **导出 PNG** | 导出当前视图 | 中 | Canvas API |
-| **交互模式开关** | CLI 控制交互/静态 | 高 | Python 参数 |
-
-**Hover Tooltip 内容**：
-```
-┌─────────────────────────┐
-│ 原子: C1                │
-│ 电荷: +0.286            │
-│ 类型: CG2R66            │
-│ 分类: Surrounding (A)   │
-│ 对应: C9 (B, +0.123)    │
-└─────────────────────────┘
-```
-
-**HTML 结构设计**：
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        /* Tooltip 样式 */
-        .atom-tooltip {
-            position: absolute;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            pointer-events: none;
-        }
-
-        /* 高亮样式 */
-        .atom-highlight {
-            stroke: yellow;
-            stroke-width: 3px;
-        }
-
-        .corresponding-atom {
-            stroke: orange;
-            stroke-width: 3px;
-        }
-
-        /* 电荷标签 */
-        .charge-label {
-            font-size: 10px;
-            fill: #333;
-        }
-    </style>
-</head>
-<body>
-    <!-- 工具栏 -->
-    <div class="toolbar">
-        <label>
-            <input type="checkbox" id="show-charges">
-            显示电荷标签
-        </label>
-        <button id="export-png">导出 PNG</button>
-    </div>
-
-    <!-- 分子图像 -->
-    <div class="molecule-container">
-        <svg id="molecule-a"></svg>
-        <svg id="molecule-b"></svg>
-    </div>
-
-    <!-- 图例 -->
-    <div class="legend">...</div>
-
-    <script>
-        // JavaScript 实现交互功能
-    </script>
-</body>
-</html>
-```
-
-**电荷标签显示策略**：
-- **默认关闭**：保持图像整洁
-- **开启时**：
-  - 小分子（<30 原子）：显示所有电荷
-  - 大分子（≥30 原子）：只显示差异原子（Surrounding、Transformed）
-
-### 6.4 CLI 接口
-
-```bash
-# PNG 可视化（默认）
-prism visualize-mapping --case 25-36 --output mapping.png
-
-# 交互式 HTML
-prism visualize-mapping --case 25-36 --output mapping.html --interactive
-
-# 显示电荷标签
-prism visualize-mapping --case 25-36 --show-charges
-
-# 自定义选项
-prism visualize-mapping --case 25-36 \
-  --legends "Reference" "Mutant" \
-  --edge 0.2 \
-  --dpi 300
-```
-
-### 6.5 输出文件
-
-| 类型 | 格式 | 用途 | 位置 |
-|------|------|------|------|
-| 静态 | PNG | 报告、论文 | `output/mapping.png` |
-| 交互式 | HTML | 分析、演示 | `output/mapping.html` |
-| 数据 | JSON | 数据交换 | `output/mapping.json` |
+**详细文档**: 见 `tests/gxf/FEP/plan/PROGRESS.md` 可视化模块部分
 
 ---
 

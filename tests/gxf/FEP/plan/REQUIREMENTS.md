@@ -46,6 +46,8 @@
 | `OUTPUT_FORMAT.md` | ITP 格式、MDP 模板、dummy 原子处理 |
 | `ANALYSIS.md` | XVG 解析、BAR/MBAR 方法、自由能计算 |
 
+- TODO：集成MATCH程序到本地？
+
 ---
 
 ## 2. 模块结构
@@ -87,6 +89,129 @@ prism/
 
 ---
 
+## 2.1 统一工作流程
+
+### 核心设计理念
+
+PRISM-FEP 实现了完全统一的力场处理流程：**无论使用哪种力场，FEP 模块都只读取统一的 PRISM 格式文件（ITP+GRO）**。
+
+```
+原始文件 (多种格式)
+    ↓ ForceFieldGenerator (各力场转换器)
+PRISM 标准格式 (LIG.{ff}2gmx/LIG.itp + LIG.gro)
+    ↓ read_ligand_from_prism() (唯一读取接口)
+Atom 列表
+    ↓ DistanceAtomMapper (原子映射)
+AtomMapping
+    ↓ visualize_mapping_*() (可视化)
+PNG + HTML 可视化
+```
+
+### 支持的力场
+
+| 力场 | 输入文件 | PRISM 输出 | 测试状态 | 说明 |
+|------|---------|-----------|---------|------|
+| **CHARMM-GUI** | `gromacs/LIG.itp` + `ligand.pdb` | `LIG.charmm2gmx/` | ✅ 已测试 | 主要测试案例 (39-8) |
+| CGenFF (程序) | `*_gmx.pdb` + `*_gmx.top` | `LIG.cgenff2gmx/` | ⏳ 暂缓 | 需要整合 CGenFF 程序 |
+| RTF+PRM (MATCH) | `ligand.rtf` + `ligand.prm` | `LIG.rtf2gmx/` | ⏳ 暂缓 | 需要完整 CGenFF 参数库 |
+| SwissParam | SWISSPARAM 文件 | - | ⏳ 暂缓 | 需要参数转换逻辑 |
+| GAFF/GAFF2 | `ligand.mol2` | `LIG.amb2gmx/` | ⏳ 暂缓 | |
+| OpenFF | `ligand.sdf` 或 `ligand.mol2` | `LIG.openff2gmx/` | ⏳ 暂缓 | |
+
+**当前测试策略**：
+- ✅ **优先完成 CHARMM-GUI**：使用 39-8 系统验证完整工作流
+- ⏳ **其他力场暂缓**：RTF/MATCH/SwissParam 等需要额外工作（见下方说明）
+
+### RTF/MATCH/SwissParam 力场的当前限制
+
+#### 问题分析
+
+**RTF+PRM 文件的特点**：
+- RTF 文件定义配体的残渣拓扑（原子、电荷、连接性）
+- PRM 文件**只包含配体特有的 bonded 参数**（BONDS, ANGLES, DIHEDRALS）
+- **缺少 NONBONDED (LJ) 参数**：需要在官方 CGenFF 力场中查询
+
+**GROMACS 官方 CHARMM36 力场的限制**：
+- `charmm36-jul2022.ff` 缺少大量 CGenFF 原子类型（实测 15/21 缺失）
+- 对于药物分子常见的原子类型（如 `CG2RC0`, `CG3C51`, `NG1T1` 等）完全缺失
+- **无法仅通过 `#include "charmm36.ff/forcefield.itp"` 获得完整参数**
+
+**实测案例 (42-38 系统，使用 CHARMM-GUI)**：
+```
+✅ 测试通过：Common=29, Transformed=1+1, Surrounding=8+8
+原子数完全匹配，映射验证通过
+```
+
+#### 解决方案
+
+**方案 1：整合原始 CGenFF 文件**
+```python
+class RTFForceFieldGenerator:
+    def __init__(self, rtf_file, prm_file, pdb_file, output_dir,
+                 cgenff_path):  # 必需：toppar_c36_feb26/toppar/
+        """
+        cgenff_path: 原始 CGenFF toppar 目录
+        - top_all36_cgenff.rtf (完整原子类型定义)
+        - par_all36_cgenff.prm (完整参数库)
+        """
+```
+
+**方案 2：复用现有转换工具**
+- `cgenff_charmm2gmx.py`：可能已有 RTF→GROMACS 转换逻辑
+- `tests/gxf/FEP/unit_test/39-8/8/gromacs/psf2itp_ligrm.py`：PSF/ITP 转换脚本
+- **需要后续评估和集成**
+
+#### 当前决策
+
+**暂时不实现 RTF/MATCH/SwissParam 支持**，原因：
+1. ✅ **CHARMM-GUI 已经可用**：39-8 系统验证了完整工作流
+2. ⚠️ **RTF 需要额外依赖**：必须整合原始 CGenFF 文件（~50MB）
+3. ⏳ **现有工具待评估**：`cgenff_charmm2gmx.py` 等可能已有解决方案
+4. 📋 **优先级考虑**：先完善核心 FEP 功能（双拓扑构建、MDP 生成）
+
+**后续工作**（待规划）：
+- [ ] 评估 `cgenff_charmm2gmx.py` 和 `psf2itp_ligrm.py` 的转换逻辑
+- [ ] 设计 CGenFF 参数库的整合方案
+- [ ] 实现 RTFForceFieldGenerator 的完整参数查询
+- [ ] 测试 RTF 工作流（需要 CGenFF 参数库整合后）
+
+### 测试方法
+
+所有力场遵循相同的 4 步测试流程：
+
+```python
+# 1. 力场生成
+generator = ForceFieldGenerator(ligand_path, output_dir)
+lig_dir = generator.run()  # → LIG.{ff}2gmx/LIG.itp + LIG.gro
+
+# 2. 读取 PRISM 格式
+lig = read_ligand_from_prism(
+    itp_file=f"{lig_dir}/LIG.itp",
+    gro_file=f"{lig_dir}/LIG.gro"
+)
+
+# 3. 原子映射
+mapper = DistanceAtomMapper.from_config(config)
+mapping = mapper.map(lig_a, lig_b)
+
+# 4. 可视化
+visualize_mapping_png(mapping, pdb_a, pdb_b, ...)
+visualize_mapping_html(mapping, pdb_a, pdb_b, ...)
+```
+
+**运行测试**:
+```bash
+# CHARMM-GUI (已测试)
+pytest tests/gxf/FEP/unit_test/test_charmm_gui_generator.py -v
+
+# CGenFF
+pytest tests/gxf/FEP/unit_test/test_cgenff_mapping.py -v
+
+# 其他力场需要准备测试数据和测试文件
+```
+
+---
+
 ## 3. 测试系统要求 (2024-03-12更新)
 
 ### 3.1 测试目录结构
@@ -100,7 +225,7 @@ tests/gxf/FEP/
 │   ├── verify_cli_integration.py  # CLI集成验证
 │   ├── test_charge_cutoff_experiments.py  # 参数实验
 │   ├── verify_config_consistency.py       # 配置一致性验证
-│   ├── 25-36/                     # 测试案例1
+│   ├── 42-38/                     # 测试案例1 (CHARMM-GUI)
 │   │   ├── case.yaml              # 测试配置（含test_requirements）
 │   │   ├── config.conf            # FEbuilder兼容配置
 │   │   ├── 25.rtf/25.pdb          # CGenFF文件
@@ -123,8 +248,8 @@ tests/gxf/FEP/
 ```yaml
 case:
   group: hif2a
-  name: 25-36
-  path: hif2a/25-36
+  name: 42-38
+  path: hif2a/42-38
 
 fundamental:
   ref: 25
@@ -200,7 +325,7 @@ charge_cutoff = 0.05
 
 #### Pytest Markers
 ```python
-@pytest.mark.slow  # 标记慢速测试（如25-36, 39-8）
+@pytest.mark.slow  # 标记慢速测试（如42-38, 39-8）
 @pytest.mark.integration  # 标记集成测试
 ```
 
@@ -219,19 +344,38 @@ pytest tests/gxf/FEP/unit_test/test_cgenff_mapping.py::test_cgenff_mapping_with_
 pytest tests/gxf/FEP/unit_test/test_charge_cutoff_experiments.py -v
 ```
 
-### 3.5 当前测试状态 (2025-03-12)
+### 3.5 当前测试状态 (2026-03-13)
 
-#### ✅ 已验证案例 (完全匹配 FEbuilder)
-| 案例 | Common | Surrounding (总和) | Transformed | charge_cutoff | 配置来源 |
-|------|--------|-------------------|-------------|---------------|----------|
-| 25-36 | 33 | 6 (lig25: C9,C10,H7 / lig36: C9,F1,H5) | 1 (N1) | 0.2 | case.yaml |
-| 39-8 | 31 | 14 (lig39: 7个 / lig8: 7个) | 0 | 0.05 | case.yaml |
+#### ✅ 已验证案例 (CHARMM-GUI 力场)
+
+| 案例 | Common | Surrounding (总和) | Transformed | charge_cutoff | 力场来源 | 状态 |
+|------|--------|-------------------|-------------|---------------|----------|------|
+| **39-8** | 31 | 14 (lig39: 7个 / lig8: 7个) | 0 | 0.05 | CHARMM-GUI | ✅ 主要测试系统 |
 
 **验证方法**：
 ```bash
-pytest tests/gxf/FEP/unit_test/validate_vs_febuilder.py -v -s -m slow
-# 结果：两个系统完全匹配 FEbuilder 的 hybrid.pdb 标记
+# 使用 CHARMM-GUI 生成的文件测试
+pytest tests/gxf/FEP/unit_test/test_charmm_gui_workflow.py::test_charmm_gui_39_8 -v
 ```
+
+**测试重点**：
+- ✅ CHARMM-GUI 文件读取（`gromacs/LIG.itp` + `ligand.pdb`）
+- ✅ 原子映射正确性（与 FEbuilder 结果对比）
+- ✅ 可视化生成（PNG + HTML）
+- ✅ 完整工作流验证
+
+#### ⏳ 暂缓测试案例 (RTF/MATCH/SwissParam)
+
+| 案例 | 力场格式 | 状态 | 说明 |
+|------|---------|------|------|
+| **42-38** | CHARMM-GUI | ✅ 已测试 | Common=29, Transformed=1+1 |
+| **oMeEtPh-EtPh** | RTF+PRM (MATCH) | ⏳ 暂缓 | 需要 CGenFF 参数库整合 |
+
+**暂缓原因**：
+- RTF+PRM 文件需要整合原始 CGenFF 力场（`toppar_c36_feb26`）
+- GROMACS 官方 `charmm36-jul2022.ff` 缺少大量药物分子原子类型
+- 当前优先完成 CHARMM-GUI 工作流验证
+- 详见：[RTF/MATCH/SwissParam 力场的当前限制](#rtfmatchswissparam-力场的当前限制)
 
 **配置架构**：
 - `case.yaml` → `fep.mapping` → `ConfigurationManager` → `DistanceAtomMapper.from_config()`
@@ -248,7 +392,7 @@ pytest tests/gxf/FEP/unit_test/validate_vs_febuilder.py -v -s -m slow
 **charge_cutoff 参数建议**：
 - 默认值：保持 **0.05**（不修改）
 - 大多数情况：0.05 足够（如39-8）
-- 特殊情况：可调整到 0.2（如25-36）
+- 特殊情况：可调整到 0.2（如某些特殊体系）
 - 配置方式：通过 `case.yaml` 的 `test_requirements.mapping.charge_cutoff_alt` 指定
 
 **重要结论**：
@@ -329,7 +473,7 @@ class AtomMapping:
     surrounding_b: List[Atom]                  # Surrounding in B (need typeB/chargeB)
 ```
 
-### 4.5 25-36系统实例分析
+### 4.5 42-38系统实例分析
 
 **Surrounding原子 (Ligand 36)**:
 | 原子 | 36.rtf类型 | 电荷 | 说明 |
@@ -543,7 +687,7 @@ prism report --output-dir fep_system --report-type html
 |------|------|---------------|------|
 | FEP+T4 | Indole-FuPh 等 5 组 | `params=match`, `distance=8`, `temperature=302.15`, `concentration=0.05`, `disoff=1` | 配体含 `.rtf/.prm`，偏 CGenFF/CHARMM |
 | RdRp | 1p-cn-cch | `recpsf` + `ff_path=toppar`, `no_solvate=True`, `charge_mode=mode2` | CHARMM/PSF 拓扑路径 |
-| hif2a | 42-38, 39-8, 25-36 | `charge_mode=mode2`, `distance=12`, `no_solvate` 变化 | CGenFF/CHARMM，小分子配体 |
+| hif2a | 42-38, 39-8 | `charge_mode=mode2`, `distance=12`, `no_solvate` 变化 | CGenFF/CHARMM，小分子配体 |
 | P38 | 13-12 等 5 组 | `add_pdb=crw.pdb`, `distance=8`, `repeats=6` | 额外蛋白片段输入 |
 
 **非自动化参考数据（仅供对照）**：
@@ -655,229 +799,51 @@ prism --config "$TEST_DIR/case.yaml"
 
 ---
 
+---
+
 ## 7. 原子映射可视化 (已完成)
 
-### 7.1 模块架构
+**模块位置**: `prism/fep/visualize/`
 
-**已完成的可视化模块**：
-```
-prism/fep/visualize/
-├── __init__.py              # 导出 visualize_mapping_png, visualize_mapping_html
-├── molecule.py              # 分子处理工具
-│   ├── pdb_to_mol()                    # PDB → RDKit Mol 对象
-│   ├── assign_bond_orders_from_mol2()  # 从 mol2 校正键级（RDKit）
-│   └── prepare_mol_with_charges_and_labels()  # 添加电荷和标签
-├── highlight.py             # 高亮颜色定义（FEbuilder 风格）
-│   ├── COMMON_COLOR      = rgb(204, 229, 77)  # 绿色
-│   ├── TRANSFORMED_COLOR = rgb(255, 77, 77)   # 红色
-│   └── SURROUNDING_COLOR = rgb(77, 153, 255)  # 蓝色
-├── mapping.py               # PNG 可视化（FEbuilder 风格）
-│   └── visualize_mapping_png()  # MCS 对齐、键级校正、电荷标注
-└── html.py                  # HTML 交互式可视化
-    └── visualize_mapping_html()  # 独立 HTML 页面
-```
+**核心功能**:
+- ✅ PNG 可视化 (FEbuilder 风格，MCS 对齐，键级校正，电荷标注)
+- ✅ HTML 交互式可视化 (独立缩放/平移，hover 显示，配置面板)
+- ✅ 模板文件重构 (CSS/JS 分离到 templates/ 目录)
 
-### 7.2 PNG 可视化功能
-
-**核心特性**：
-| 特性 | 实现方式 | 状态 |
-|------|----------|------|
-| **MCS 对齐** | RDKit `rdFMCS` 最大公共子结构对齐 | ✅ |
-| **键级校正** | 从 mol2 读取正确键级，使用 `AssignBondOrdersFromTemplate` | ✅ |
-| **电荷标注** | 显示所有原子电荷（包括氢原子） | ✅ |
-| **FEbuilder 风格** | 使用相同的 `MolDrawOptions` 和颜色方案 | ✅ |
-| **高亮分类** | Common=绿, Transformed=红, Surrounding=蓝 | ✅ |
-| **图例说明** | 显示各类型原子数量和处理方式 | ✅ |
-
-**使用示例**：
+**使用示例**:
 ```python
-from prism.fep.visualize import visualize_mapping_png
+from prism.fep.visualize import visualize_mapping_png, visualize_mapping_html
 
-visualize_mapping_png(
-    mapping,                    # AtomMapping 对象
-    pdb_a='25.pdb',             # 参考 PDB
-    pdb_b='36.pdb',             # 突变 PDB
-    mol2_a='25.mol2',           # 参考 mol2（键级校正）
-    mol2_b='36.mol2',           # 突变 mol2
-    output_path='25-36_mapping.png',
-    edge=0.15,                  # 图像边距
-    legends=('Ligand 25', 'Ligand 36')
-)
+# PNG 可视化
+visualize_mapping_png(mapping, pdb_a, pdb_b, mol2_a, mol2_b, output_path)
+
+# HTML 可视化
+visualize_mapping_html(mapping, pdb_a, pdb_b, mol2_a, mol2_b, output_path, config=cfg.config)
 ```
 
-### 7.3 HTML 交互式可视化（设计阶段）
+**验证状态**:
+- ✅ 39-8 系统 (CHARMM-GUI): Common=31, Surrounding=14, Transformed=0
+- ⏳ 25-36 系统 (RTF): 暂缓，需要 CGenFF 参数库整合
+- ⏳ oMeEtPh-EtPh 系统 (RTF): 暂缓，需要 CGenFF 参数库整合
+- ✅ 完全匹配 FEbuilder 结果 (CHARMM-GUI 案例)
 
-**交互功能需求**：
-
-| 功能 | 描述 | 优先级 | 实现建议 |
-|------|------|--------|----------|
-| **Hover 显示电荷** | 鼠标悬停显示原子电荷、类型、分类 | 高 | JavaScript + CSS tooltip |
-| **对应原子高亮** | Hover 时高亮对面分子的对应原子 | 高 | 跨分子索引映射 |
-| **电荷标签开关** | 切换是否在图像上直接显示电荷标签 | 中 | Checkbox 控制显示 |
-| **导出图片** | 导出当前视图为 PNG（300 DPI） | 中 | Canvas API 转换 |
-| **交互模式开关** | 配置项控制生成交互式 HTML 或静态 PNG | 高 | CLI 参数 `--interactive` |
-
-**设计建议**：
-
-1. **Hover Tooltip 内容**：
-   ```
-   原子: C1
-   电荷: +0.286
-   类型: CG2R66
-   分类: Surrounding (lig25)
-   对应: C9 (lig36, charge: +0.123)
-   ```
-
-2. **电荷标签显示策略**：
-   - **默认关闭**：保持图像整洁
-   - **开启时**：
-     - 小分子（<30 原子）：显示所有电荷
-     - 大分子（≥30 原子）：只显示差异原子（Surrounding、Transformed）
-
-3. **HTML 独有功能**：
-   | 功能 | 优势 |
-   |------|------|
-   动态筛选 | 点击图例显示/隐藏特定原子类型 |
-   原子列表 | 侧边栏显示所有原子详细信息表 |
-   搜索定位 | 搜索原子名称快速定位并高亮 |
-   对比模式 | 并排显示参考和突变的详细信息 |
-   数据导出 | 导出映射数据为 CSV/JSON 格式 |
-   响应式设计 | 自适应屏幕尺寸，移动端友好 |
-
-### 7.4 CLI 接口
-
-```bash
-# 生成 PNG 可视化（默认，FEbuilder 风格）
-prism visualize-mapping --case 25-36 --output mapping.png
-
-# 生成交互式 HTML
-prism visualize-mapping --case 25-36 --output mapping.html --interactive
-
-# 在 HTML 中显示电荷标签
-prism visualize-mapping --case 25-36 --output mapping.html --show-charges
-
-# 自定义图例
-prism visualize-mapping --case 25-36 --legends "Reference" "Mutant"
-
-# 调整图像边距
-prism visualize-mapping --case 25-36 --edge 0.2
-```
-
-### 7.5 输出文件
-
-| 输出类型 | 文件格式 | 用途 | 位置 |
-|---------|---------|------|------|
-| 静态图像 | PNG | 报告、论文、快速查看 | `output/mapping.png` |
-| 交互式 | HTML | 深入分析、调试、演示 | `output/mapping.html` |
-| 映射数据 | JSON | 数据交换、二次分析 | `output/mapping.json` |
-
-### 7.6 验证状态
-
-**已验证系统**：
-| 系统 | Common | Surrounding | Transformed | 验证状态 |
-|------|--------|-------------|-------------|----------|
-| 25-36 | 33 | 6 (3+3) | 1 (N1) | ✅ 完全匹配 FEbuilder |
-| 39-8 | 31 | 14 (7+7) | 0 | ✅ 完全匹配 FEbuilder |
-
-**可视化验证**：
-- ✅ PNG 输出与 FEbuilder 风格一致
-- ✅ 键级校正正确（从 mol2 读取）
-- ✅ 电荷显示完整（包括氢原子）
-- ✅ 颜色高亮分类正确
-- ⏳ HTML 交互功能（待实现）
+详细信息见 `PROGRESS.md`。
 
 ---
 
 ## 8. FEP 结果分析报告（待实现）
 
-### 8.1 功能需求
+**模块**: `prism/fep/analysis/report.py`
 
-**模块**：`prism/fep/analysis/report.py`
+**功能需求**:
+- [ ] XVG 文件解析
+- [ ] BAR/MBAR 自由能计算
+- [ ] 完整 HTML 报告生成 (ΔG 曲线、能量分布、收敛性分析)
 
-生成完整的 FEP 计算报告，包含：
-| 内容 | 说明 |
-|------|------|
-| 计算信息 | 案例与元数据 |
-| 原子映射 | 嵌入 PNG/HTML 可视化 |
-| ΔG 曲线 | ΔG vs λ |
-| 能量分布 | λ 窗口直方图 |
-| 误差评估 | 置信区间 |
-| 收敛性分析 | HAMADA 统计量 |
-
-### 8.2 设计思路
-
-| 步骤 | 说明 |
-|------|------|
-| Plotly | 交互式图表（ΔG 曲线、能量分布） |
-| RDKit | 2D 分子结构图（原子映射） |
-| HTML | 统一报告模板 |
-| 多窗口 | λ 窗口对比分析 |
-
-### 8.3 CLI 接口
-
+**CLI 接口**:
 ```bash
-# 生成完整 HTML 报告
 prism report --output-dir fep_system --report-type html
-
-# 分析 FEP 结果
 prism analyze --xvg dhdl.xvg --method bar
-
-# 生成对比报告
-prism report --compare system1 system2 --output comparison.html
-```
-
-### 8.4 可视化元素
-
-| 可视化元素 | 说明 |
-|------------|------|
-| 自由能变化曲线 | λ (0→1) vs ΔG，标注误差 |
-| 原子映射图 | RDKit 2D，高亮 transformed/surrounding/common |
-| 能量分布 | 各 λ 窗口 dH/dλ 直方图 |
-| λ 窗口对比 | 多子图展示收敛与异常 |
-
-### 8.5 输出文件
-
-| 输出 | 说明 |
-|------|------|
-| `fep_report.html` | 主报告文件 |
-| `plots/` | 图表数据目录 |
-| `structures/` | 分子结构图 |
-
-### 8.6 数据收集
-
-**收集的数据**：
-1. 系统信息：配体名称、力场、参数
-2. 计算结果：ΔG、误差、收敛性
-3. 原子映射：common/transformed/surrounding 列表
-4. 能量数据：各 λ 窗口的 dH/dλ 值
-5. 验证结果：grompp 输出、警告信息
-
-**数据格式**：
-```python
-{
-    "system": {
-        "reference": "ligand_A",
-        "mutant": "ligand_B",
-        "force_field": "gaff",
-        "lambda_points": 11
-    },
-    "results": {
-        "delta_g": -5.23,
-        "error": 0.45,
-        "converged": true
-    },
-    "mapping": {
-        "common": 25,
-        "transformed_a": 5,
-        "transformed_b": 7,
-        "surrounding": 3
-    },
-    "energy_data": {
-        "lambdas": [0.0, 0.1, ..., 1.0],
-        "dhdl": [10.2, 9.8, ..., -2.1],
-        "errors": [0.5, 0.4, ..., 0.3]
-    }
-}
 ```
 
 ---

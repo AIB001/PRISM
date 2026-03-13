@@ -86,16 +86,30 @@ def read_ligand_from_prism(itp_file: str, gro_file: str) -> List[Atom]:
 
         for line in lines[2:-1]:  # Skip title and box line
             parts = line.split()
+
+            # Handle two GRO formats:
+            # Format 1: resid resname atomname atomid x y z (7 fields) - manual generation
+            # Format 2: residresname atomname atomid x y z (6 fields) - PRISM generation
+
             if len(parts) >= 7:
-                try:
-                    atom_id = int(parts[2])
-                    # GRO coordinates are in nm, convert to Angstroms (×10)
-                    x = float(parts[3]) * 10.0
-                    y = float(parts[4]) * 10.0
-                    z = float(parts[5]) * 10.0
-                    coords[atom_id] = np.array([x, y, z])
-                except (ValueError, IndexError):
-                    continue
+                # Format 1: separate resid and resname
+                atom_id = int(parts[3])
+                x = float(parts[4]) * 10.0  # nm to Å
+                y = float(parts[5]) * 10.0
+                z = float(parts[6]) * 10.0
+            elif len(parts) >= 6:
+                # Format 2: combined residue field
+                atom_id = int(parts[2])
+                x = float(parts[3]) * 10.0  # nm to Å
+                y = float(parts[4]) * 10.0
+                z = float(parts[5]) * 10.0
+            else:
+                continue
+
+            try:
+                coords[atom_id] = np.array([x, y, z])
+            except (ValueError, IndexError):
+                continue
 
     # Step 3: Merge data into Atom objects
     atoms = []
@@ -127,12 +141,12 @@ def _extract_element(atom_name: str) -> str:
     Parameters
     ----------
     atom_name : str
-        Atom name (e.g., 'C1', 'H2', 'N3', 'CA', 'HB1')
+        Atom name (e.g., 'C1', 'H2', 'N3', 'CA', 'HB1', 'FE', 'Cl')
 
     Returns
     -------
     str
-        Element symbol (e.g., 'C', 'H', 'N')
+        Element symbol (e.g., 'C', 'H', 'N', 'Fe', 'Cl')
 
     Examples
     --------
@@ -142,16 +156,38 @@ def _extract_element(atom_name: str) -> str:
     'H'
     >>> _extract_element('CA')
     'C'
+    >>> _extract_element('FE')
+    'Fe'
+    >>> _extract_element('Cl')
+    'Cl'
     """
     # Remove digits, keep only letters
-    element = "".join(c for c in atom_name if c.isalpha())
+    letters = "".join(c for c in atom_name if c.isalpha())
 
-    # Normalize element symbol (first uppercase, rest lowercase)
-    if element:
-        return normalize_element_symbol(element)
+    if not letters:
+        return "C"  # Default to carbon
 
-    # Default to carbon if cannot determine
-    return "C"
+    # For biomolecular atom names (PDB/GROMACS style):
+    # - Atom names are typically 1-4 characters
+    # - Element is ALWAYS the first letter
+    # - Second letter (if present) is typically:
+    #   - Uppercase: position code (CA, CB, CG, CD, CE, CZ = carbons)
+    #   - Lowercase: part of two-letter element ONLY for rare elements (Fe, Cl, Br, etc.)
+
+    # Common two-letter elements in drug-like molecules that use lowercase
+    # These are the ONLY cases where the second letter matters
+    organic_two_letter_elements = {"Cl", "Br", "Fe", "Mg", "Ca", "Zn", "Cu", "Mn", "Se", "Si"}
+
+    # Check if this could be a two-letter element
+    if len(letters) >= 2:
+        # Check case pattern: two-letter elements are like "Cl", "Fe" (upper + lower)
+        if letters[0].isupper() and letters[1].islower():
+            candidate = letters[0] + letters[1]
+            if candidate in organic_two_letter_elements:
+                return candidate
+
+    # Default: use first letter only (C, H, N, O, S, P, F, etc.)
+    return letters[0].upper()
 
 
 def read_mol2_atoms(mol2_file: str) -> List[Atom]:
@@ -221,17 +257,18 @@ def read_mol2_atoms(mol2_file: str) -> List[Atom]:
     return atoms
 
 
-def read_cgenff_system(rtf_file: str, pdb_file: str) -> List[Atom]:
+def read_rtf_for_fep(rtf_file: str, pdb_file: str) -> List[Atom]:
     """
-    Read ligand with CGenFF parameters from RTF and coordinates from PDB
+    Read ligand from RTF (atom types/charges) and PDB (coordinates) for FEP mapping
 
-    This is the preferred method for FEP calculations as it uses
-    force field-specific atom types and charges.
+    This function is specifically designed for FEP calculations, reading
+    RTF files (from CGenFF, MATCH, SwissParam, etc.) and combining with
+    PDB coordinates to create Atom objects for mapping.
 
     Parameters
     ----------
     rtf_file : str
-        CGenFF RTF file path (atom types and charges)
+        RTF file path (atom types and charges)
     pdb_file : str
         PDB file path (aligned coordinates)
 
@@ -242,7 +279,7 @@ def read_cgenff_system(rtf_file: str, pdb_file: str) -> List[Atom]:
 
     Examples
     --------
-    >>> atoms = read_cgenff_system('ligand.rtf', 'ligand.pdb')
+    >>> atoms = read_rtf_for_fep('ligand.rtf', 'ligand.pdb')
     >>> mapper = DistanceAtomMapper()
     >>> mapping = mapper.map(atoms, other_atoms)
     """
