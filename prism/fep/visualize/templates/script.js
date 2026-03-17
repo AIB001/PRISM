@@ -356,6 +356,7 @@
         document.querySelectorAll('input[name="colorMode"]').forEach(radio => {
             radio.addEventListener('change', (e) => {
                 colorMode = e.target.value;
+                switchLegendTab(colorMode);  // Auto-switch legend to match coloring mode
                 draw();
             });
         });
@@ -496,6 +497,18 @@
             const atomList = document.getElementById('atom-list');
             if (atomList) {
                 atomList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        function switchLegendTab(tabName) {
+            // Hide all tab contents
+            const contents = document.querySelectorAll('.legend-tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+
+            // Show selected tab content
+            const selectedContent = document.getElementById('legend-' + tabName);
+            if (selectedContent) {
+                selectedContent.classList.add('active');
             }
         }
 

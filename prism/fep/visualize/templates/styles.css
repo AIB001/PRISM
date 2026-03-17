@@ -442,3 +442,46 @@
         .atom-item:hover {
             background: #f0f0f0;
         }
+
+        /* Toggle Button Styles */
+        .toggle-buttons {
+            display: inline-flex;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0 10px;
+        }
+        .toggle-buttons input[type="radio"] {
+            display: none;
+        }
+        .toggle-btn {
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            border-right: 1px solid #ddd;
+        }
+        .toggle-btn:last-child {
+            border-right: none;
+        }
+        .toggle-btn:hover {
+            background: #e9ecef;
+        }
+        .toggle-buttons input[type="radio"]:checked + .toggle-btn {
+            background: #007bff;
+            color: white;
+        }
+
+        /* Legend Content Styles */
+        .legend-content-inline {
+            display: inline-block;
+            margin-left: 10px;
+        }
+        .legend-tab-content {
+            display: none;
+        }
+        .legend-tab-content.active {
+            display: inline-block;
+        }

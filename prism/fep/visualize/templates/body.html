@@ -10,10 +10,87 @@
             <div class="toolbar-left">
                 <div class="toolbar-row">
                     <strong>Coloring Mode:</strong>
-                    <label><input type="radio" name="colorMode" value="fep" checked> FEP Classification</label>
-                    <label><input type="radio" name="colorMode" value="element"> Element</label>
+                    <div class="toggle-buttons">
+                        <input type="radio" name="colorMode" value="fep" id="mode-fep" checked>
+                        <label for="mode-fep" class="toggle-btn">FEP Classification</label>
+                        <input type="radio" name="colorMode" value="element" id="mode-element">
+                        <label for="mode-element" class="toggle-btn">Element</label>
+                    </div>
                     <label><input type="checkbox" id="toggle-charges"> Show Charges</label>
                     <label><input type="checkbox" id="toggle-labels" checked> Show Labels</label>
+                </div>
+                <div class="toolbar-row">
+                    <strong>Legend:</strong>
+                    <div class="legend-content-inline">
+                        <div class="legend-tab-content active" id="legend-fep">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="color-box common"></div>
+                                    <span><strong>Common:</strong> {common_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed A:</strong> {transformed_a_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed B:</strong> {transformed_b_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding A:</strong> {surrounding_a_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding B:</strong> {surrounding_b_count}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="legend-tab-content" id="legend-element">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #909090; border-color: #666;">C</div>
+                                    <span>Carbon</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #3050F8; border-color: #1030D0;">N</div>
+                                    <span>Nitrogen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #FF0D0D; border-color: #CC0000;">O</div>
+                                    <span>Oxygen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FFC832; border-color: #CC9900; color: #333;">S</div>
+                                    <span>Sulfur</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FF8000; border-color: #CC6600; color: #333;">P</div>
+                                    <span>Phosphorus</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #90E050; border-color: #60B020; color: #333;">F</div>
+                                    <span>Fluorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #1FF01F; border-color: #00C000; color: #333;">Cl</div>
+                                    <span>Chlorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #A62929; border-color: #801010;">Br</div>
+                                    <span>Bromine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #940094; border-color: #600060;">I</div>
+                                    <span>Iodine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #E8E8E8; border-color: #999; color: #333;">H</div>
+                                    <span>Hydrogen</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="toolbar-row">
                     <strong>Controls:</strong> Drag to pan | Scroll to zoom (independent control for each molecule) | Hover for atom info
@@ -25,86 +102,6 @@
                     <button onclick="exportPNG()">Export PNG</button>
                     <button class="secondary" onclick="scrollToAtomDetails()">View Atom Details</button>
                     <button class="secondary" onclick="window.print()">Print</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="legend">
-        <h3>Legend</h3>
-        <div class="legend-content">
-            <div class="legend-left">
-                <div class="legend-section">
-                    <h4>FEP Classification</h4>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="color-box common"></div>
-                            <span><strong>Common:</strong> {common_count}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box transformed"></div>
-                            <span><strong>Transformed A:</strong> {transformed_a_count}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box transformed"></div>
-                            <span><strong>Transformed B:</strong> {transformed_b_count}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box surrounding"></div>
-                            <span><strong>Surrounding A:</strong> {surrounding_a_count}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box surrounding"></div>
-                            <span><strong>Surrounding B:</strong> {surrounding_b_count}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="legend-right">
-                <div class="legend-section">
-                    <h4>Element Colors</h4>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #909090; border-color: #666;">C</div>
-                            <span>Carbon</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #3050F8; border-color: #1030D0;">N</div>
-                            <span>Nitrogen</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #FF0D0D; border-color: #CC0000;">O</div>
-                            <span>Oxygen</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #FFC832; border-color: #CC9900; color: #333;">S</div>
-                            <span>Sulfur</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #FF8000; border-color: #CC6600; color: #333;">P</div>
-                            <span>Phosphorus</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #90E050; border-color: #60B020; color: #333;">F</div>
-                            <span>Fluorine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #1FF01F; border-color: #00C000; color: #333;">Cl</div>
-                            <span>Chlorine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #A62929; border-color: #801010;">Br</div>
-                            <span>Bromine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #940094; border-color: #600060;">I</div>
-                            <span>Iodine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #E8E8E8; border-color: #999; color: #333;">H</div>
-                            <span>Hydrogen</span>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

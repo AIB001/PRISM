@@ -10,7 +10,7 @@ GROMACS uses single-topology approach with typeB/chargeB encoding.
 
 from dataclasses import dataclass
 from typing import List, Dict, Optional
-from .mapping import AtomMapping
+from .mapping import AtomMapping, normalize_charge_reception
 
 
 @dataclass
@@ -67,18 +67,36 @@ class HybridTopologyBuilder:
         - 'mean': Use average of reference and mutant charges
         - 'ref': Use reference ligand charges
         - 'mut': Use mutant ligand charges
+        - 'none': Keep original charges (no modification)
+
+    charge_reception : str, optional
+        Strategy for charge redistribution (default: 'surround')
+        - 'surround': Only surrounding atoms receive redistributed charge
+        - 'unique': Surrounding + transformed atoms (state-specific)
+        - 'none': No charge redistribution
+
+    recharge_hydrogen : bool, optional
+        Whether to include hydrogen atoms in charge redistribution (default: False)
 
     Notes
     -----
     GROMACS uses single-topology approach: one topology with typeB/chargeB
     columns to encode both states. This is different from NAMD's dual-topology
     approach which requires two separate topologies.
+
+    Charge redistribution is necessary after applying charge_strategy to common atoms
+    to maintain system neutrality. The redistribution is state-specific:
+    - State A: Only affects atoms that exist in state A (excludes transformed B)
+    - State B: Only affects atoms that exist in state B (excludes transformed A)
     """
 
-    def __init__(self, charge_strategy: str = "mean", charge_reception: str = "pert", recharge_hydrogen: bool = False):
-        if charge_strategy not in ["ref", "mut", "mean"]:
+    def __init__(
+        self, charge_strategy: str = "mean", charge_reception: str = "surround", recharge_hydrogen: bool = False
+    ):
+        if charge_strategy not in ["ref", "mut", "mean", "none"]:
             raise ValueError(f"Invalid charge_strategy: {charge_strategy}")
-        if charge_reception not in ["pert", "unique", "surround", "none"]:
+        charge_reception = normalize_charge_reception(charge_reception)
+        if charge_reception not in ["unique", "surround", "surround_ext", "none"]:
             raise ValueError(f"Invalid charge_reception: {charge_reception}")
         self.charge_strategy = charge_strategy
         self.charge_reception = charge_reception
@@ -119,21 +137,38 @@ class HybridTopologyBuilder:
 
         # 1. Common atoms (shared structure, same or similar charges)
         for atom_a, atom_b in mapping.common:
-            charge = self._resolve_charge(atom_a.charge, atom_b.charge)
-
-            # Common atoms: typeA = typeB, chargeA = chargeB (after averaging)
-            self.hybrid_atoms.append(
-                HybridAtom(
-                    name=atom_a.name,
-                    index=index,
-                    state_a_type=atom_a.atom_type,
-                    state_a_charge=charge,
-                    state_b_type=atom_a.atom_type,  # Same type
-                    state_b_charge=charge,  # Same charge
-                    element=atom_a.element,
-                    mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+            if self.charge_strategy == "none":
+                # Keep original charges (different for A/B)
+                # MUST have typeB/chargeB because charges are different
+                self.hybrid_atoms.append(
+                    HybridAtom(
+                        name=atom_a.name,
+                        index=index,
+                        state_a_type=atom_a.atom_type,
+                        state_a_charge=atom_a.charge,  # Original A charge
+                        state_b_type=atom_b.atom_type,  # MUST have typeB
+                        state_b_charge=atom_b.charge,  # Original B charge (different!)
+                        element=atom_a.element,
+                        mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    )
                 )
-            )
+            else:
+                # Use resolved charge (same for A/B)
+                charge = self._resolve_charge(atom_a.charge, atom_b.charge)
+
+                # Common atoms: typeA = typeB, chargeA = chargeB (after averaging)
+                self.hybrid_atoms.append(
+                    HybridAtom(
+                        name=atom_a.name,
+                        index=index,
+                        state_a_type=atom_a.atom_type,
+                        state_a_charge=charge,
+                        state_b_type=atom_a.atom_type,  # Same type
+                        state_b_charge=charge,  # Same charge
+                        element=atom_a.element,
+                        mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    )
+                )
             index += 1
 
         # 2. Transformed A atoms (disappear: A -> dummy)
@@ -190,8 +225,9 @@ class HybridTopologyBuilder:
             )
             index += 1
 
-        # . Apply charge redistribution to maintain neutrality
-        if self.charge_reception != "none":
+        # Apply charge redistribution to maintain neutrality
+        # Skip for 'none' mode
+        if self.charge_strategy != "none" and self.charge_reception != "none":
             self._redistribute_charges(mapping, atoms_a, atoms_b)
 
         return self.hybrid_atoms
@@ -203,6 +239,12 @@ class HybridTopologyBuilder:
         After applying charge_strategy to common atoms, the total system charge
         changes. This method redistributes the charge difference to selected atoms
         according to charge_reception strategy.
+
+        CRITICAL: For GROMACS single-topology FEP:
+        - State A (lambda=0): Uses state_a_charge for all atoms (transformed B atoms are dummy, charge=0)
+        - State B (lambda=1): Uses state_b_charge for all atoms (transformed A atoms are dummy, charge=0)
+        - So state A should match ligand A's total charge
+        - And state B should match ligand B's total charge
 
         Parameters
         ----------
@@ -218,7 +260,11 @@ class HybridTopologyBuilder:
         original_charge_b = sum(atom.charge for atom in atoms_b)
 
         # Calculate current total charges from hybrid atoms
+        # State A: sum of all state_a_charge (transformed B atoms contribute 0)
         current_charge_a = sum(atom.state_a_charge for atom in self.hybrid_atoms)
+
+        # State B: sum of state_b_charge (or state_a_charge if state_b is None)
+        # For transformed A atoms, state_b_charge should be 0 (dummy)
         current_charge_b = sum(
             atom.state_b_charge if atom.state_b_charge is not None else atom.state_a_charge
             for atom in self.hybrid_atoms
@@ -228,40 +274,65 @@ class HybridTopologyBuilder:
         calibration_a = original_charge_a - current_charge_a
         calibration_b = original_charge_b - current_charge_b
 
-        # Get atoms to modify based on charge_reception strategy
-        modify_atoms = self._get_modify_list(mapping)
+        # Get separate lists for state A and state B redistribution
+        # State A: transformed A atoms can participate (they exist in state A)
+        # State B: transformed B atoms can participate (they exist in state B)
+        modify_atoms_a = self._get_modify_list_for_state(mapping, "A")
+        modify_atoms_b = self._get_modify_list_for_state(mapping, "B")
 
-        # Distribute charge evenly to both states
-        if modify_atoms and abs(calibration_a) > 1e-10:
-            ave_a = calibration_a / len(modify_atoms)
-            for atom in modify_atoms:
+        # Distribute charge to state A
+        if modify_atoms_a and abs(calibration_a) > 1e-10:
+            ave_a = calibration_a / len(modify_atoms_a)
+
+            # surround_ext: if charge per atom > 0.02, extend to common atoms
+            if self.charge_reception == "surround_ext" and abs(ave_a) >= 0.02:
+                # Add common atoms to modify list
+                common_atoms = self.hybrid_atoms[: len(mapping.common)]
+                modify_atoms_a.extend(common_atoms)
+                ave_a = calibration_a / len(modify_atoms_a)
+
+            for atom in modify_atoms_a:
                 atom.state_a_charge += ave_a
 
-        if modify_atoms and abs(calibration_b) > 1e-10:
-            ave_b = calibration_b / len(modify_atoms)
-            for atom in modify_atoms:
-                atom.state_b_charge += ave_b
+        # Distribute charge to state B
+        if modify_atoms_b and abs(calibration_b) > 1e-10:
+            ave_b = calibration_b / len(modify_atoms_b)
 
-    def _get_modify_list(self, mapping: AtomMapping) -> List[HybridAtom]:
+            # surround_ext: if charge per atom > 0.02, extend to common atoms
+            if self.charge_reception == "surround_ext" and abs(ave_b) >= 0.02:
+                # Add common atoms to modify list
+                common_atoms = self.hybrid_atoms[: len(mapping.common)]
+                modify_atoms_b.extend(common_atoms)
+                ave_b = calibration_b / len(modify_atoms_b)
+
+            for atom in modify_atoms_b:
+                if atom.state_b_charge is not None:
+                    atom.state_b_charge += ave_b
+
+    def _get_modify_list_for_state(self, mapping: AtomMapping, state: str) -> List[HybridAtom]:
         """
-        Get list of atoms to modify for charge redistribution
+        Get list of atoms to modify for charge redistribution (state-specific)
 
-        Following FEbuilder's logic:
-        - Common atoms are EXCLUDED from redistribution (they stay the same)
-        - Which atoms participate depends on charge_reception:
-          * 'pert' (default): transformed + surrounding atoms (all uncommon)
-          * 'unique': only non-hydrogen transformed atoms
-          * 'surround': only surrounding atoms
+        For GROMACS single-topology FEP, we need to handle state A and state B separately:
+        - State A: transformed A atoms exist, transformed B atoms are dummy (exclude)
+        - State B: transformed B atoms exist, transformed A atoms are dummy (exclude)
+        - Common atoms: EXCLUDED from redistribution (already handled by charge_strategy)
+        - Surrounding atoms: always participate when available
+
+        CRITICAL: If no surrounding atoms exist, fallback to transformed atoms (non-dummy state only).
+        If still empty after applying recharge_hydrogen filter, ignore the filter and use all available atoms.
 
         Parameters
         ----------
         mapping : AtomMapping
             Atom mapping classification
+        state : str
+            Either 'A' or 'B', specifies which state to redistribute
 
         Returns
         -------
         List[HybridAtom]
-            List of atoms that should receive redistributed charge
+            List of atoms that should receive redistributed charge for this state
         """
         modify_atoms = []
 
@@ -271,32 +342,55 @@ class HybridTopologyBuilder:
         n_transformed_b = len(mapping.transformed_b)
         n_surrounding = len(mapping.surrounding_a)
 
-        if self.charge_reception == "surround":
-            # Only surrounding atoms participate
-            start_idx = n_common + n_transformed_a + n_transformed_b
-            end_idx = start_idx + n_surrounding
-            atom_indices = range(start_idx, end_idx)
+        # Indices for different atom categories in hybrid_atoms list
+        # Order: common, transformed_a, transformed_b, surrounding
+        common_end = n_common
+        transformed_a_end = n_common + n_transformed_a
+        transformed_b_end = transformed_a_end + n_transformed_b
+        surrounding_end = transformed_b_end + n_surrounding
+
+        if self.charge_reception == "none":
+            return []
+
+        # Build atom indices list based on charge_reception mode
+        atom_indices = []
+
+        if self.charge_reception in ["surround", "surround_ext"]:
+            # Only surrounding atoms participate (initially)
+            # surround_ext will extend to common atoms if needed (in _redistribute_charges)
+            # If no surrounding atoms, fallback to transformed atoms (non-dummy state)
+            if n_surrounding > 0:
+                atom_indices = range(transformed_b_end, surrounding_end)
+            else:
+                # Fallback: use transformed atoms (state-specific)
+                if state == "A":
+                    atom_indices = range(common_end, transformed_a_end)  # transformed A
+                else:  # state == 'B'
+                    atom_indices = range(transformed_a_end, transformed_b_end)  # transformed B
 
         elif self.charge_reception == "unique":
-            # Only non-hydrogen transformed atoms participate
-            # transformed atoms are at indices [n_common, n_common + n_transformed_a + n_transformed_b)
-            start_idx = n_common
-            end_idx = n_common + n_transformed_a + n_transformed_b
-            for idx in range(start_idx, end_idx):
-                atom = self.hybrid_atoms[idx]
-                if atom.element != "H":
-                    modify_atoms.append(atom)
-            return modify_atoms  # Early return
+            # Surrounding + transformed atoms (state-specific)
+            if state == "A":
+                # Surrounding + transformed A (exclude transformed B because they're dummy in state A)
+                atom_indices = list(range(common_end, transformed_a_end))
+                atom_indices.extend(range(transformed_b_end, surrounding_end))
+            else:  # state == 'B'
+                # Surrounding + transformed B (exclude transformed A because they're dummy in state B)
+                atom_indices = list(range(transformed_a_end, transformed_b_end))
+                atom_indices.extend(range(transformed_b_end, surrounding_end))
 
-        else:  # 'pert' (default)
-            # All uncommon atoms participate (transformed + surrounding)
-            start_idx = n_common
-            end_idx = n_common + n_transformed_a + n_transformed_b + n_surrounding
-            atom_indices = range(start_idx, end_idx)
+        else:
+            raise ValueError(f"Invalid charge_reception: {self.charge_reception}")
 
         for atom in [self.hybrid_atoms[i] for i in atom_indices]:
             # Apply recharge_hydrogen filter
             if atom.element != "H" or self.recharge_hydrogen:
+                modify_atoms.append(atom)
+
+        # CRITICAL: If modify list is empty (e.g., all are H and recharge_hydrogen=False),
+        # fallback to include all atoms from atom_indices (ignore recharge_hydrogen)
+        if not modify_atoms and atom_indices:
+            for atom in [self.hybrid_atoms[i] for i in atom_indices]:
                 modify_atoms.append(atom)
 
         return modify_atoms

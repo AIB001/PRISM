@@ -15,6 +15,16 @@ from typing import Dict, Any
 import yaml
 
 
+def normalize_charge_reception(value: Any) -> str:
+    """Normalize legacy charge_reception labels to the current API."""
+    if value is None:
+        return "surround"
+    normalized = str(value).strip().lower()
+    if normalized == "pert":
+        return "surround"
+    return normalized
+
+
 class FEPConfig:
     """
     Unified FEP configuration manager
@@ -62,10 +72,12 @@ class FEPConfig:
 
         Returns dict with keys: dist_cutoff, charge_cutoff, charge_common, charge_reception
         """
-        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "pert"}
+        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "surround"}
         mapping_config = self.fep_config.get("mapping", {})
         # Merge with defaults
-        return {**defaults, **mapping_config}
+        params = {**defaults, **mapping_config}
+        params["charge_reception"] = normalize_charge_reception(params.get("charge_reception"))
+        return params
 
     def get_html_config(self) -> Dict[str, Any]:
         """Get configuration for HTML visualization"""
@@ -88,8 +100,8 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
     Supports FEbuilder-compatible config.conf format:
 
     [Model]
-    charge_common = ref|mut|mean
-    charge_reception = pert|unique|surround
+    charge_common = ref|mut|mean|none
+    charge_reception = unique|surround|surround_ext|none
     distance = 12
     recharge_hydrogen = False
 
@@ -128,7 +140,7 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
         "dist_cutoff": 0.6,
         "charge_cutoff": 0.05,
         "charge_common": "mean",
-        "charge_reception": "pert",
+        "charge_reception": "surround",
         "recharge_hydrogen": False,
         "distance": 10,  # Solvation distance
     }
@@ -139,7 +151,7 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
         if "charge_common" in model:
             params["charge_common"] = model["charge_common"]
         if "charge_reception" in model:
-            params["charge_reception"] = model["charge_reception"]
+            params["charge_reception"] = normalize_charge_reception(model["charge_reception"])
         if "distance" in model:
             params["distance"] = float(model["distance"])
 
@@ -153,6 +165,7 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
         if "recharge_hydrogen" in other:
             params["recharge_hydrogen"] = other["recharge_hydrogen"].lower() in ["true", "yes", "1"]
 
+    params["charge_reception"] = normalize_charge_reception(params.get("charge_reception"))
     return params
 
 

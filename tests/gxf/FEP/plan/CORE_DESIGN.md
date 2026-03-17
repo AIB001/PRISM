@@ -530,6 +530,13 @@ highlight_b = create_highlight_info(mol_b, common_names_b, ...)
 - **GROMACS**: 暂时不实现此机制，氢原子可独立处理
 - **实现**: 在 `DistanceAtomMapper` 中可通过 `recharge_hydrogen` 参数控制
 
+  🎯 验证结果
+
+  - ✓ REF模式：总电荷守恒，配对原子一致
+  - ✓ MUT模式：总电荷守恒，配对原子一致
+  - ✓ MEAN模式：总电荷守恒，配对原子一致
+  - ✓ NONE模式：总电荷守恒
+
 ---
 
 ## 2. 双拓扑构建模块 (`fep/core/dual_topology.py`)

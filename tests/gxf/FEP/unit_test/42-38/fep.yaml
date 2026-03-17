@@ -1,0 +1,14 @@
+# FEP-specific configuration for 42-38 system
+# General PRISM parameters (temperature, salt concentration, etc.) are in config.conf
+
+forcefield:
+  # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+  type: cgenff
+  # Force field specific parameters
+  params: {}  # CGenFF uses pre-generated files
+
+mapping:
+  dist_cutoff: 0.6
+  charge_cutoff: 0.05
+  charge_common: mean
+  charge_reception: surround

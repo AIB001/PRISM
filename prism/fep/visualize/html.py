@@ -54,16 +54,37 @@ def visualize_mapping_html(
     mol_a = prepare_mol_with_charges_and_labels(pdb_a, mol2_a, atoms_a)
     mol_b = prepare_mol_with_charges_and_labels(pdb_b, mol2_b, atoms_b)
 
+    # Align 2D depictions to match maximum common structure (better visual comparison)
+    try:
+        from prism.fep.visualize.mapping import _align_mols_2d
+
+        _align_mols_2d(mol_a, mol_b)
+    except Exception as e:
+        print(f"Warning: 2D alignment failed, continuing without alignment: {e}")
+
     # Prepare canvas data
     canvas_data_a = _prepare_canvas_data(mol_a, atoms_a, mapping, "a")
     canvas_data_b = _prepare_canvas_data(mol_b, atoms_b, mapping, "b")
+
+    # Calculate total charges
+    total_charge_a = sum(atom.charge for atom in atoms_a) if atoms_a else 0.0
+    total_charge_b = sum(atom.charge for atom in atoms_b) if atoms_b else 0.0
 
     # Build correspondence map
     correspondence = _build_correspondence_map(mapping, canvas_data_a, canvas_data_b)
 
     # Generate HTML
     html = _generate_canvas_html(
-        canvas_data_a, canvas_data_b, correspondence, mapping, title, ligand_a_name, ligand_b_name, config
+        canvas_data_a,
+        canvas_data_b,
+        correspondence,
+        mapping,
+        title,
+        ligand_a_name,
+        ligand_b_name,
+        config,
+        total_charge_a,
+        total_charge_b,
     )
 
     # Save HTML
@@ -265,6 +286,8 @@ def _generate_canvas_html(
     ligand_a_name: str,
     ligand_b_name: str,
     config: Optional[dict] = None,
+    total_charge_a: float = 0.0,
+    total_charge_b: float = 0.0,
 ) -> str:
     """Generate complete HTML with proper Canvas transforms."""
 
@@ -273,12 +296,12 @@ def _generate_canvas_html(
     if config:
         import os
 
-        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "pert"}
+        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "surround"}
         tooltips = {
             "dist_cutoff": "Maximum distance (Å) between atoms to be considered as common",
             "charge_cutoff": "Maximum charge difference for common atoms",
-            "charge_common": "Charge assignment for common atoms (ref/mut/mean)",
-            "charge_reception": "Charge reception mode (pert/unique/surround)",
+            "charge_common": "Charge assignment for common atoms (ref/mut/mean/none)",
+            "charge_reception": "Charge reception mode (unique/surround/surround_ext/none)",
             "working_dir": "Working directory for this FEP calculation",
         }
 
@@ -338,6 +361,8 @@ def _generate_canvas_html(
         if all_items:
             rows.append(f'<div class="config-row">{"".join(all_items)}</div>')
 
+        # Total charge info is now shown in molecule labels (below)
+
         if rows:
             config_panel_html = f"""
     <div class="config-panel">
@@ -384,10 +409,87 @@ def _generate_canvas_html(
             <div class="toolbar-left">
                 <div class="toolbar-row">
                     <strong>Coloring Mode:</strong>
-                    <label><input type="radio" name="colorMode" value="fep" checked> FEP Classification</label>
-                    <label><input type="radio" name="colorMode" value="element"> Element</label>
+                    <div class="toggle-buttons">
+                        <input type="radio" name="colorMode" value="fep" id="mode-fep" checked>
+                        <label for="mode-fep" class="toggle-btn">FEP Classification</label>
+                        <input type="radio" name="colorMode" value="element" id="mode-element">
+                        <label for="mode-element" class="toggle-btn">Element</label>
+                    </div>
                     <label><input type="checkbox" id="toggle-charges"> Show Charges</label>
                     <label><input type="checkbox" id="toggle-labels" checked> Show Labels</label>
+                </div>
+                <div class="toolbar-row">
+                    <strong>Legend:</strong>
+                    <div class="legend-content-inline">
+                        <div class="legend-tab-content active" id="legend-fep">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="color-box common"></div>
+                                    <span><strong>Common:</strong> {len(mapping.common)}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed A:</strong> {len(mapping.transformed_a)}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed B:</strong> {len(mapping.transformed_b)}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding A:</strong> {len(mapping.surrounding_a)}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding B:</strong> {len(mapping.surrounding_b)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="legend-tab-content" id="legend-element">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #909090; border-color: #666;">C</div>
+                                    <span>Carbon</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #3050F8; border-color: #1030D0;">N</div>
+                                    <span>Nitrogen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #FF0D0D; border-color: #CC0000;">O</div>
+                                    <span>Oxygen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FFC832; border-color: #CC9900; color: #333;">S</div>
+                                    <span>Sulfur</span>
+                    </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FF8000; border-color: #CC6600; color: #333;">P</div>
+                                    <span>Phosphorus</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #90E050; border-color: #60B020; color: #333;">F</div>
+                                    <span>Fluorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #1FF01F; border-color: #00C000; color: #333;">Cl</div>
+                                    <span>Chlorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #A62929; border-color: #801010;">Br</div>
+                                    <span>Bromine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #940094; border-color: #600060;">I</div>
+                                    <span>Iodine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #E8E8E8; border-color: #999; color: #333;">H</div>
+                                    <span>Hydrogen</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="toolbar-row">
                     <strong>Controls:</strong> Drag to pan | Scroll to zoom (independent control for each molecule) | Hover for atom info
@@ -404,91 +506,11 @@ def _generate_canvas_html(
         </div>
     </div>
 
-    <div class="legend">
-        <h3>Legend</h3>
-        <div class="legend-content">
-            <div class="legend-left">
-                <div class="legend-section">
-                    <h4>FEP Classification</h4>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="color-box common"></div>
-                            <span><strong>Common:</strong> {len(mapping.common)}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box transformed"></div>
-                            <span><strong>Transformed A:</strong> {len(mapping.transformed_a)}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box transformed"></div>
-                            <span><strong>Transformed B:</strong> {len(mapping.transformed_b)}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box surrounding"></div>
-                            <span><strong>Surrounding A:</strong> {len(mapping.surrounding_a)}</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="color-box surrounding"></div>
-                            <span><strong>Surrounding B:</strong> {len(mapping.surrounding_b)}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="legend-right">
-                <div class="legend-section">
-                    <h4>Element Colors</h4>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #909090; border-color: #666;">C</div>
-                            <span>Carbon</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #3050F8; border-color: #1030D0;">N</div>
-                            <span>Nitrogen</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #FF0D0D; border-color: #CC0000;">O</div>
-                            <span>Oxygen</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #FFC832; border-color: #CC9900; color: #333;">S</div>
-                            <span>Sulfur</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #FF8000; border-color: #CC6600; color: #333;">P</div>
-                            <span>Phosphorus</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #90E050; border-color: #60B020; color: #333;">F</div>
-                            <span>Fluorine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #1FF01F; border-color: #00C000; color: #333;">Cl</div>
-                            <span>Chlorine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #A62929; border-color: #801010;">Br</div>
-                            <span>Bromine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box dark-bg" style="background: #940094; border-color: #600060;">I</div>
-                            <span>Iodine</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="element-box light-bg" style="background: #E8E8E8; border-color: #999; color: #333;">H</div>
-                            <span>Hydrogen</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     {config_panel_html}
 
     <div class="canvas-container">
-        <div class="molecule-label molecule-label-a">{ligand_a_name}</div>
-        <div class="molecule-label molecule-label-b">{ligand_b_name}</div>
+        <div class="molecule-label molecule-label-a">{ligand_a_name} (Charge: {total_charge_a:.4f})</div>
+        <div class="molecule-label molecule-label-b">{ligand_b_name} (Charge: {total_charge_b:.4f})</div>
         <canvas id="canvas" width="1400" height="700"></canvas>
         <div class="tooltip" id="tooltip"></div>
     </div>

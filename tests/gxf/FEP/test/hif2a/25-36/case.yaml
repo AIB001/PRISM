@@ -1,0 +1,21 @@
+# Auto-generated from config.conf for PRISM-FEP test case
+case:
+  group: hif2a
+  name: 25-36
+  path: hif2a/25-36
+fundamental:
+  ref: 25
+  mut: 36
+  rec: receptor.pdb
+  ff_path: ../toppar
+system:
+model:
+  no_solvate: false
+  charge_common: ref
+  charge_reception: surround
+  distance: 12
+simulation:
+  numofsteps: 510000
+  repeats: 4
+other:
+  verbose: true

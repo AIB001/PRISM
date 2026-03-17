@@ -13,6 +13,16 @@ from typing import List, Tuple
 import numpy as np
 
 
+def normalize_charge_reception(value: str) -> str:
+    """Normalize legacy charge reception labels to the current API."""
+    if value is None:
+        return "surround"
+    normalized = str(value).strip().lower()
+    if normalized == "pert":
+        return "surround"
+    return normalized
+
+
 @dataclass
 class Atom:
     """
@@ -111,11 +121,13 @@ class DistanceAtomMapper:
         'ref': use reference ligand charges
         'mut': use mutant ligand charges
         'mean': use average of both charges
+        'none': keep original charges (no modification)
     charge_reception : str, optional
-        Strategy for distributing surplus charges (default: 'pert')
-        'pert': all uncommon atoms receive charge
+        Strategy for distributing surplus charges (default: 'surround')
         'unique': only unique (non-hydrogen) atoms receive charge
         'surround': only surrounding atoms receive charge
+        'surround_ext': auto-extend to common atoms if charge/atom > 0.02
+        'none': no charge redistribution
     recharge_hydrogen : bool, optional
         Whether to perturb hydrogen charges (default: False)
         If False, hydrogen charges are not modified
@@ -126,13 +138,17 @@ class DistanceAtomMapper:
         dist_cutoff: float = 0.6,
         charge_cutoff: float = 0.05,
         charge_common: str = "mean",
-        charge_reception: str = "pert",
+        charge_reception: str = "surround",
         recharge_hydrogen: bool = False,
     ):
+        if charge_common not in ["ref", "mut", "mean", "none"]:
+            raise ValueError(f"Invalid charge_common: {charge_common}")
         self.dist_cutoff = dist_cutoff
         self.charge_cutoff = charge_cutoff
         self.charge_common = charge_common
-        self.charge_reception = charge_reception
+        self.charge_reception = normalize_charge_reception(charge_reception)
+        if self.charge_reception not in ["unique", "surround", "none"]:
+            raise ValueError(f"Invalid charge_reception: {charge_reception}")
         self.recharge_hydrogen = recharge_hydrogen
 
     @classmethod
@@ -147,7 +163,17 @@ class DistanceAtomMapper:
         config : dict
             Config dict as returned by ``ConfigurationManager.config``.
         """
-        params = config.get("fep", {}).get("mapping", {})
+        params = dict(config.get("fep", {}).get("mapping", {}))
+        if not params:
+            model_cfg = config.get("model", {})
+            other_cfg = config.get("other", {})
+            params = {
+                "dist_cutoff": other_cfg.get("dist_cutoff", 0.6),
+                "charge_cutoff": other_cfg.get("charge_cutoff", 0.05),
+                "charge_common": model_cfg.get("charge_common", "mean"),
+                "charge_reception": model_cfg.get("charge_reception", "surround"),
+                "recharge_hydrogen": other_cfg.get("recharge_hydrogen", False),
+            }
         return cls(**params)
 
     def map(self, ligand_a: List[Atom], ligand_b: List[Atom]) -> AtomMapping:
@@ -176,9 +202,8 @@ class DistanceAtomMapper:
         AtomMapping
             Classification of atoms into common/transformed/surrounding
         """
-        # Create copies to avoid modifying original atoms
-        ligand_a = [Atom(a.name, a.element, a.coord.copy(), a.charge, a.atom_type, a.index) for a in ligand_a]
-        ligand_b = [Atom(b.name, b.element, b.coord.copy(), b.charge, b.atom_type, b.index) for b in ligand_b]
+        # Note: We modify the input atom objects in-place to apply charge_common strategy
+        # This ensures HTML visualization shows the correct charges
 
         # Detect if using OpenFF/GAFF (generic atom types)
         # OpenFF types are like: output_0, output_1, ...
@@ -245,8 +270,15 @@ class DistanceAtomMapper:
             else:
                 type_differs = False  # Skip type check for OpenFF/GAFF
 
-            # Check if charges differ significantly
-            charge_differs = abs(atom_a.charge - atom_b.charge) > self.charge_cutoff
+            # Check if charges differ
+            if self.charge_common == "none":
+                # In 'none' mode: any charge difference → surrounding
+                # (no threshold, because we're not adjusting charges anyway)
+                charge_differs = abs(atom_a.charge - atom_b.charge) > 1e-6
+            else:
+                # In ref/mut/mean modes: use charge_cutoff threshold
+                # Filters out atoms with charge differences too large to adjust
+                charge_differs = abs(atom_a.charge - atom_b.charge) > self.charge_cutoff
 
             if type_differs or charge_differs:
                 # Move from common to surrounding
@@ -254,8 +286,60 @@ class DistanceAtomMapper:
                 surrounding_a.append(atom_a)
                 surrounding_b.append(atom_b)
 
-        # Note: charge_common strategy is applied by HybridTopologyBuilder, not here
-        # DistanceAtomMapper only classifies atoms into common/transformed/surrounding
+        # Save original total charges before applying charge_common
+        original_charge_a = sum(a.charge for a in ligand_a)
+        original_charge_b = sum(b.charge for b in ligand_b)
+
+        # Step 3.5: Apply charge_common strategy to common atoms
+        # This modifies the atom objects in-place so HTML visualization shows correct charges
+        if self.charge_common == "ref":
+            for atom_a, atom_b in common:
+                atom_b.charge = atom_a.charge
+        elif self.charge_common == "mut":
+            for atom_a, atom_b in common:
+                atom_a.charge = atom_b.charge
+        elif self.charge_common == "mean":
+            for atom_a, atom_b in common:
+                ave = (atom_a.charge + atom_b.charge) / 2.0
+                atom_a.charge = ave
+                atom_b.charge = ave
+        elif self.charge_common == "none":
+            # Don't modify charges - keep original values
+            pass
+        else:
+            raise ValueError(f"Invalid charge_common: {self.charge_common}")
+
+        # Step 3.6: Charge redistribution to maintain total charge conservation
+        # After applying charge_common, the total charge may have changed
+        # We need to redistribute the charge difference to maintain neutrality
+        # CRITICAL: Only redistribute to non-common atoms to preserve pairing consistency
+        if self.charge_common != "none":
+            # Calculate current total charges (after charge_common)
+            current_charge_a = sum(a.charge for a in ligand_a)
+            current_charge_b = sum(b.charge for b in ligand_b)
+
+            # Calculate calibration needed
+            calibration_a = original_charge_a - current_charge_a
+            calibration_b = original_charge_b - current_charge_b
+
+            # Build modify_list: transformed + surrounding atoms (exclude common atoms)
+            # This preserves the charge consistency of paired common atoms
+            common_atoms_a = set(a for a, _ in common)
+            common_atoms_b = set(b for _, b in common)
+
+            modify_list_a = [a for a in ligand_a if a not in common_atoms_a]
+            modify_list_b = [b for b in ligand_b if b not in common_atoms_b]
+
+            # Redistribute charge
+            if modify_list_a and abs(calibration_a) > 1e-10:
+                ave_a = calibration_a / len(modify_list_a)
+                for atom in modify_list_a:
+                    atom.charge += ave_a
+
+            if modify_list_b and abs(calibration_b) > 1e-10:
+                ave_b = calibration_b / len(modify_list_b)
+                for atom in modify_list_b:
+                    atom.charge += ave_b
 
         # Step 4: Handle hydrogen atoms connected to transformed/surrounding
         # For OpenFF/GAFF: use distance-based proximity to transformed/surrounding
