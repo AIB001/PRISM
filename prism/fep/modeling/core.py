@@ -191,6 +191,8 @@ class FEPScaffoldBuilder:
         # Generate run scripts
         self._write_fep_run_script(layout.bound_dir, "bound")
         self._write_fep_run_script(layout.unbound_dir, "unbound")
+        self._write_fep_slurm_script(layout.bound_dir, "bound")
+        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
 
         self._write_root_scripts(layout)
         self._write_manifest(
@@ -347,6 +349,7 @@ class FEPScaffoldBuilder:
             leg_name="bound",
         )
         self._write_fep_run_script(layout.bound_dir, "bound")
+        self._write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg(self, layout: FEPScaffoldLayout, ligand_seed_pdb: Path) -> None:
         unbound_input = layout.unbound_dir / "input"
@@ -364,6 +367,7 @@ class FEPScaffoldBuilder:
             leg_name="unbound",
         )
         self._write_fep_run_script(layout.unbound_dir, "unbound")
+        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
 
     def _write_manifest(
         self,
@@ -452,6 +456,69 @@ echo "  - Check convergence and calculate ΔΔG"
         path = layout.root / "run_all.sh"
         path.write_text(script)
         path.chmod(0o755)
+
+        # Also generate SLURM submission script for submitting both legs
+        slurm_script = """#!/bin/bash
+#SBATCH -J fep-both-legs
+#SBATCH -p gpu
+#SBATCH --time=96:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:1
+
+echo "Start time: $(date)"
+echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
+echo "hostname: $(hostname)"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+
+# Load GROMACS module (adjust for your cluster)
+# module load gromacs/2023.2
+# source /path/to/gromacs/bin/GMXRC
+
+FEP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    PRISM-FEP Full Workflow (SLURM)                       ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Run bound leg
+echo "═══════════════════════════════════════════════════════════════════════════"
+echo "Running Bound Leg..."
+echo "═══════════════════════════════════════════════════════════════════════════"
+cd "${FEP_ROOT}/bound"
+bash localrun.sh
+if [ $? -ne 0 ]; then
+    echo "✗ Bound leg failed"
+    exit 1
+fi
+
+# Run unbound leg
+echo ""
+echo "═══════════════════════════════════════════════════════════════════════════"
+echo "Running Unbound Leg..."
+echo "═══════════════════════════════════════════════════════════════════════════"
+cd "${FEP_ROOT}/unbound"
+bash localrun.sh
+if [ $? -ne 0 ]; then
+    echo "✗ Unbound leg failed"
+    exit 1
+fi
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    ✓ FEP Workflow Complete                               ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Next steps:"
+echo "  - Analyze results with: gmx bar -f bound/build/prod_*.xvg unbound/build/prod_*.xvg"
+echo "  - Check convergence and calculate ΔΔG"
+echo "End time: $(date)"
+"""
+        slurm_path = layout.root / "submit_all.slurm.sh"
+        slurm_path.write_text(slurm_script)
+        slurm_path.chmod(0o755)
 
     def _write_unbound_topology(self, topol_path: Path) -> None:
         content = """; PRISM-FEP unbound topology template
@@ -909,6 +976,8 @@ Hybrid ligand package
         # Generate run scripts
         self._write_fep_run_script(layout.bound_dir, "bound")
         self._write_fep_run_script(layout.unbound_dir, "unbound")
+        self._write_fep_slurm_script(layout.bound_dir, "bound")
+        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
 
         return layout
 
@@ -951,6 +1020,12 @@ Hybrid ligand package
 
         # Copy and modify topology to use hybrid ligand
         self._copy_and_modify_topology(topol_top, leg_dir / "topol.top")
+
+        # Unbound leg topology from ligand-only builder may miss solvent/ion counts;
+        # rebuild [ molecules ] from generated coordinate file to keep topology consistent.
+        if leg_name == "unbound":
+            self._sync_unbound_molecules_with_conf(leg_dir / "topol.top", leg_dir / "input" / "conf.gro")
+
         print(f"  ✓ Copied and modified topol.top → {leg_name}/topol.top")
 
         # Generate position restraint file for protein
@@ -1193,6 +1268,7 @@ Hybrid ligand package
         Copy topology file and modify to use hybrid ligand.
 
         Replaces ligand ITP include with hybrid ligand ITP and renames LIG to HYB in molecules section.
+        Also adds hybrid atomtypes includes for unbound leg.
         """
         content = source_top.read_text()
 
@@ -1200,12 +1276,127 @@ Hybrid ligand package
         # Pattern: #include "path/to/LIG.itp" or similar
         import re
 
-        content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/hybrid.itp"', content)
+        # Check if we need to add hybrid atomtypes (for unbound leg)
+        # We only include atomtypes_hybrid.itp, not ff_hybrid.itp, to avoid duplicate [ defaults ]
+        hybrid_dir = target_top.parent.parent / "common" / "hybrid"
+        atomtypes_hybrid_path = hybrid_dir / self.hybrid_atomtypes_filename
 
-        # Replace LIG with HYB in molecules section
+        # Step 1: Add atomtypes_hybrid.itp after forcefield.itp if needed
+        if atomtypes_hybrid_path.exists() and "atomtypes_hybrid.itp" not in content:
+            # Look for forcefield.itp include and add atomtypes after it
+            ff_match = re.search(r'(#include\s+"[^"]*/forcefield\.itp")\s*\n?', content)
+            if ff_match:
+                # Insert atomtypes_hybrid.itp after forcefield.itp with proper newline
+                ff_include_end = ff_match.end()
+                insert_text = f'\n#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
+                content = content[:ff_include_end] + insert_text + content[ff_include_end:]
+
+                # Remove local [ atomtypes ] section to avoid duplicates
+                # Match from comment line before [ atomtypes ] to the end of the atomtypes section
+                # Stop at the next #include or [ section
+                atomtypes_section_pattern = (
+                    r"\n?; Include ligand atomtypes[^\n]*\n\[ atomtypes \][^\[]*?(?=\n#include|\n\[)"
+                )
+                content = re.sub(atomtypes_section_pattern, "", content, flags=re.DOTALL)
+
+        # Step 2: Remove ALL existing hybrid.itp includes (but NOT atomtypes_hybrid.itp)
+        # Use a more specific pattern to only match hybrid.itp, not atomtypes_hybrid.itp
+        # Match: #include "../common/hybrid/hybrid.itp" or similar
+        # But NOT: #include "../common/hybrid/atomtypes_hybrid.itp"
+        content = re.sub(r'#include\s+"[^"]*hybrid/hybrid\.itp"\s*\n?', "", content)
+        content = re.sub(r"#include\s+'[^']*hybrid/hybrid\.itp'\s*\n?", "", content)
+
+        # Step 3: Replace ligand ITP include with hybrid ligand
+        # Only replace the FIRST occurrence to avoid duplicates
+        ligand_itp_count = len(re.findall(r'#include\s+"[^"]*LIG\.itp"', content))
+        content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/hybrid.itp"', content, count=1)
+        # Remove any remaining LIG.itp includes (duplicates)
+        content = re.sub(r'#include\s+"[^"]*LIG\.itp"\s*\n?', "", content)
+
+        # Step 4: Add hybrid.itp ONLY if it's not already present AND LIG.itp was not found
+        # (If LIG.itp was found, step 3 already added hybrid.itp)
+        if "hybrid.itp" not in content and ligand_itp_count == 0:
+            # Add hybrid.itp after atomtypes_hybrid.itp if it exists
+            if "atomtypes_hybrid.itp" in content:
+                # Find the atomtypes_hybrid.itp include line and add hybrid.itp after it
+                atomtypes_match = re.search(r'(#[\s]*include\s+"[^"]*atomtypes_hybrid\.itp")\s*\n?', content)
+                if atomtypes_match:
+                    insert_pos = atomtypes_match.end()
+                    insert_text = '#include "../common/hybrid/hybrid.itp"\n'
+                    content = content[:insert_pos] + insert_text + content[insert_pos:]
+            else:
+                # Add after the last include (before [ system ])
+                last_include_match = list(re.finditer(r"^#include\s+", content, re.MULTILINE))
+                if last_include_match:
+                    # Find the end of the last include line
+                    last_include = last_include_match[-1]
+                    line_end = content.find("\n", last_include.end())
+                    if line_end != -1:
+                        insert_pos = line_end + 1
+                        content = (
+                            content[:insert_pos] + '#include "../common/hybrid/hybrid.itp"\n' + content[insert_pos:]
+                        )
+
+        # Step 5: Replace LIG with HYB in molecules section
         content = re.sub(r"^LIG\s+", "HYB                  ", content, flags=re.MULTILINE)
 
         target_top.write_text(content)
+
+    def _sync_unbound_molecules_with_conf(self, topol_path: Path, conf_gro_path: Path) -> None:
+        """Synchronize unbound topology [ molecules ] section with coordinate file."""
+        import re
+
+        if not topol_path.exists() or not conf_gro_path.exists():
+            return
+
+        lines = conf_gro_path.read_text().splitlines()
+        if len(lines) < 3:
+            return
+
+        try:
+            n_atoms = int(lines[1].strip())
+        except ValueError:
+            return
+
+        atom_lines = lines[2 : 2 + n_atoms]
+
+        # Count residues/molecules by unique (residue_number, residue_name)
+        molecule_counts: Dict[str, int] = {}
+        seen_residues = set()
+        for line in atom_lines:
+            if len(line) < 10:
+                continue
+            residue_number = line[0:5].strip()
+            residue_name = line[5:10].strip()
+            if not residue_number or not residue_name:
+                continue
+
+            key = (residue_number, residue_name)
+            if key in seen_residues:
+                continue
+            seen_residues.add(key)
+
+            mapped_name = "HYB" if residue_name == "LIG" else residue_name
+            molecule_counts[mapped_name] = molecule_counts.get(mapped_name, 0) + 1
+
+        # Build deterministic output order
+        preferred_order = ["HYB", "SOL", "NA", "CL", "K", "MG", "CA"]
+        ordered_names = [name for name in preferred_order if name in molecule_counts]
+        ordered_names.extend(sorted(name for name in molecule_counts if name not in preferred_order))
+
+        molecules_block = "[ molecules ]\n"
+        for name in ordered_names:
+            molecules_block += f"{name:20s} {molecule_counts[name]}\n"
+
+        content = topol_path.read_text()
+        if "[ molecules ]" in content:
+            content = re.sub(r"\[ molecules \][\s\S]*$", molecules_block.rstrip() + "\n", content)
+        else:
+            if not content.endswith("\n"):
+                content += "\n"
+            content += "\n" + molecules_block
+
+        topol_path.write_text(content)
 
     def _prepare_protein_for_system_builder(self, protein_path: Path, leg_dir: Path) -> Path:
         """Prepare protein PDB for system builder"""
@@ -1418,5 +1609,142 @@ echo "║                    {leg_name.upper()} LEG COMPLETE                    
 echo "╚═══════════════════════════════════════════════════════════════════════════╝"
 """
         path = leg_dir / "localrun.sh"
+        path.write_text(script)
+        path.chmod(0o755)
+
+    def _write_fep_slurm_script(
+        self,
+        leg_dir: Path,
+        leg_name: str,
+        job_name: str = "fep",
+        partition: str = "gpu",
+        time: str = "48:00:00",
+        nodes: int = 1,
+        ntasks: int = 1,
+        cpus_per_task: int = 16,
+        gpus: int = 1,
+    ) -> None:
+        """Generate SLURM submission script for FEP calculations"""
+        script = f"""#!/bin/bash
+#SBATCH -J {job_name}-{leg_name}
+#SBATCH -p {partition}
+#SBATCH --time={time}
+#SBATCH --nodes={nodes}
+#SBATCH --ntasks={ntasks}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --gres=gpu:{gpus}
+
+echo "Start time: $(date)"
+echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
+echo "hostname: $(hostname)"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+echo "Job directory: $(pwd)"
+
+# Load GROMACS module (adjust for your cluster)
+# module load gromacs/2023.2
+# source /path/to/gromacs/bin/GMXRC
+
+LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+MDP_DIR="${{LEG_DIR}}/mdps"
+INPUT_DIR="${{LEG_DIR}}/input"
+BUILD_DIR="${{LEG_DIR}}/build"
+MDRUN_NSTEPS_ARG=""
+if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
+    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
+fi
+
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    PRISM-FEP {leg_name.upper()} LEG (SLURM)                          ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+cd "${{LEG_DIR}}"
+
+# Set OpenMP threads
+export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
+
+# Energy minimization
+mkdir -p ${{BUILD_DIR}}
+
+if [ -f ${{BUILD_DIR}}/em.gro ]; then
+    echo "EM already completed, skipping..."
+elif [ -f ${{BUILD_DIR}}/em.tpr ]; then
+    echo "EM checkpoint found, resuming..."
+    gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -v
+else
+    echo "Running energy minimization..."
+    gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 2
+    gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -v
+fi
+
+# NVT equilibration
+if [ -f ${{BUILD_DIR}}/nvt.gro ]; then
+    echo "NVT already completed, skipping..."
+elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
+    echo "NVT checkpoint found, resuming..."
+    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -cpi ${{BUILD_DIR}}/nvt.cpt -v
+else
+    echo "Running NVT equilibration..."
+    gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 2
+    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
+fi
+
+# NPT equilibration
+if [ -f ${{BUILD_DIR}}/npt.gro ]; then
+    echo "NPT already completed, skipping..."
+elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
+    echo "NPT checkpoint found, resuming..."
+    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -cpi ${{BUILD_DIR}}/npt.cpt -v
+else
+    echo "Running NPT equilibration..."
+    gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 2
+    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
+fi
+
+# FEP production runs for each lambda window
+echo "Running FEP production for all lambda windows..."
+for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
+    lambda_name=$(basename ${{lambda_mdp}} .mdp)
+    lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
+    window_dir="window_${{lambda_idx}}"
+
+    mkdir -p "${{window_dir}}"
+
+    # Per-window NPT short equilibration
+    if [ -f "${{window_dir}}/npt_short.gro" ]; then
+        echo "  ${{lambda_name}}: NPT short already completed"
+    elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
+        echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v
+    else
+        echo "  ${{lambda_name}}: starting NPT short equilibration"
+        gmx grompp -f ${{MDP_DIR}}/npt_short.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
+    fi
+
+    # Production run
+    if [ -f "${{window_dir}}/prod.gro" ]; then
+        echo "  ${{lambda_name}}: production already completed"
+    elif [ -f "${{window_dir}}/prod.tpr" ]; then
+        echo "  ${{lambda_name}}: production resuming from checkpoint"
+        gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v
+    else
+        echo "  ${{lambda_name}}: starting production"
+        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2
+        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
+    fi
+done
+
+# Clean up intermediate step PDB files
+echo "Cleaning up intermediate PDB files..."
+rm -f step*.pdb 2>/dev/null || true
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    {leg_name.upper()} LEG COMPLETE                                   ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo "End time: $(date)"
+"""
+        path = leg_dir / "submit.slurm.sh"
         path.write_text(script)
         path.chmod(0o755)

@@ -1039,3 +1039,322 @@ PDB文件结果:
 - ✅ 验证映射结果正确
 - ✅ 所有测试通过
 
+---
+
+## 7. MDP生成系统（2026-03-18）
+
+### 7.1 设计目标
+
+- **一致性**: FEP和正常MD使用相同的基础参数
+- **可维护性**: 只需维护一套PRISM标准配置
+- **灵活性**: FEP配置可以覆盖任何参数
+- **向后兼容**: 现有fep.yaml文件无需修改即可工作
+
+### 7.2 MDP模板结构
+
+```
+prism/fep/gromacs/mdp_templates.py
+├── write_em_mdp()           # 能量最小化
+├── write_nvt_mdp()          # NVT平衡
+├── write_npt_mdp()          # NPT平衡
+├── write_npt_short_mdp()    # Per-window NPT (100 ps)
+└── write_fep_mdps()         # FEP生产运行
+    ├── _generate_lambda_schedule()  # Lambda schedule生成
+    └── _generate_distribution()     # 分布类型生成
+```
+
+### 7.3 PRISM标准参数集成
+
+MDP文件从PRISM的ConfigurationManager加载标准参数：
+
+```python
+from prism.utils.config import ConfigurationManager
+
+# 加载PRISM默认配置
+config_manager = ConfigurationManager()
+prism_config = config_manager.config
+
+# 使用PRISM的标准参数
+- 静电: coulombtype, pme_order, fourierspacing
+- 范德华: rvdw, DispCorr
+- 温度控制: tcoupl, tau_t
+- 压力控制: pcoupl, pcoupltype, tau_p, compressibility
+- 约束: constraints, constraint-algorithm
+```
+
+### 7.4 FEP特定参数
+
+**基础设置**（与PRISM标准MD相同）:
+- 静电: PME (pme_order=4, fourierspacing=0.16)
+- 温度控制: V-rescale (tau_t=0.5)
+- 压力控制: Parrinello-Rahman (tau_p=2.0)
+- 约束: h-bonds + LINCS
+- 色散校正: EnerPres
+
+**FEP特定参数**:
+- `free-energy = yes`
+- `init-lambda-state = N` (0-31)
+- `coul-lambdas` 和 `vdw-lambdas` 向量
+- 软核参数: `sc-alpha=0.5`, `sc-sigma=0.3`, `sc-coul=yes`
+- Bonded/MBAR lambdas
+
+### 7.5 Lambda Schedule生成
+
+#### 三种策略
+
+**Decoupled (默认)**:
+- Stage 1: Electrostatics (coul 0→1, vdw=0)
+- Stage 2: VDW (coul=1, vdw 0→1)
+- 默认: 32 windows (12 coul + 20 vdw)
+
+**Coupled**:
+- 所有lambdas一起变化
+- 更少的窗口 (11-20)
+- 更快但端点稳定性差
+
+**Custom**:
+- 用户定义的lambda数组
+- 完全灵活性
+
+#### 三种分布
+
+**Nonlinear (默认)**:
+- 端点密集 (0.0, 0.01, 0.02, 0.04, ...)
+- 捕获陡峭的自由能变化
+
+**Linear**:
+- 均匀分布 (0.0, 0.1, 0.2, ...)
+- 简单但可能遗漏端点细节
+
+**Quadratic**:
+- 端点更密集
+- 用于极具挑战性的转换
+
+### 7.6 生成的MDP文件
+
+#### EM (能量最小化)
+- 使用PRISM的能量最小化设置
+- 参数: integrator, emtol, emstep, nsteps
+- 静电和VDW设置与PRISM一致
+
+#### NVT (NVT平衡)
+- 使用PRISM的NVT平衡设置
+- 温度控制: V-rescale (tau_t = 0.1)
+- 位置限制: -DPOSRES
+
+#### NPT (NPT平衡)
+- 使用PRISM的NPT平衡设置
+- 温度控制: V-rescale (tau_t = 0.1)
+- 压力控制: C-rescale (tau_p = 1.0)
+- 位置限制: -DPOSRES
+
+#### NPT Short (Per-window NPT)
+- 基于NPT，但nsteps = 50000 (100 ps, dt=2fs)
+- 其他参数与NPT相同
+- 用于每个lambda窗口的短时平衡
+
+#### Production (FEP生产运行)
+- 基础设置: 与PRISM标准MD完全相同
+- FEP特定参数添加
+- 每个lambda窗口一个MDP文件
+
+### 7.7 配置示例
+
+```yaml
+# fep.yaml
+soft_core:
+  alpha: 0.5
+  sigma: 0.3
+
+lambda:
+  strategy: decoupled
+  distribution: nonlinear
+  windows: 32
+  coul_windows: 12
+  vdw_windows: 20
+
+simulation:
+  temperature: 310
+  pressure: 1.0
+  production_time_ns: 5.0
+  per_window_npt_time_ps: 100
+
+# 其他参数（静电、VDW、约束等）自动从PRISM默认配置加载
+```
+
+---
+
+## 8. 系统集成（2026-03-18）
+
+### 8.1 FEP工作流集成
+
+```
+prism/fep/modeling/
+├── __init__.py          # API导出
+├── core.py              # 核心逻辑 (FEPScaffoldBuilder)
+└── fep_builder.py       # FEP workflow编排
+```
+
+### 8.2 目录结构设计
+
+#### 优化前（旧结构）
+```
+bound/
+├── build/
+│   ├── em.gro, em.tpr
+│   ├── nvt.gro, nvt.tpr
+│   ├── npt.gro, npt.tpr
+│   ├── prod_00.gro, prod_00.tpr, prod_00.xvg
+│   ├── prod_01.gro, prod_01.tpr, prod_01.xvg
+│   └── ... (33个prod文件)
+├── mdps/
+└── localrun.sh
+```
+
+#### 优化后（新结构）
+```
+bound/
+├── build/                    # 公共equilibration
+│   ├── em.gro, em.tpr
+│   ├── nvt.gro, nvt.tpr
+│   └── npt.gro, npt.tpr
+├── window_00/                # Lambda window 0
+│   ├── npt_short.*           # Per-window NPT (100 ps)
+│   └── prod.*                # Production
+├── window_01/                # Lambda window 1
+│   ├── npt_short.*
+│   └── prod.*
+├── ...
+├── window_32/
+│   ├── npt_short.*
+│   └── prod.*
+├── mdps/
+│   ├── em.mdp, nvt.mdp, npt.mdp
+│   ├── npt_short.mdp
+│   └── prod_XX.mdp
+├── topol.top
+└── localrun.sh
+```
+
+### 8.3 运行脚本生成
+
+#### 关键改进
+
+1. **Per-window NPT equilibration**
+   ```bash
+   # 每个lambda窗口独立的NPT平衡
+   if [ ! -f "${window_dir}/npt_short.gro" ]; then
+       gmx grompp -f ${MDP_DIR}/npt_short.mdp -c ${BUILD_DIR}/npt.gro \
+           -o "${window_dir}/npt_short.tpr" -maxwarn 2
+       gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu
+   fi
+   ```
+
+2. **Window目录结构**
+   ```bash
+   # 为每个lambda窗口创建独立目录
+   for lambda_mdp in ${MDP_DIR}/prod_*.mdp; do
+       lambda_name=$(basename ${lambda_mdp} .mdp)
+       lambda_idx=$(echo ${lambda_name} | sed 's/prod_//')
+       window_dir="window_${lambda_idx}"
+       mkdir -p "${window_dir}"
+       # ... 运行NPT short和production
+   done
+   ```
+
+3. **Cleanup命令**
+   ```bash
+   # 清理中间文件
+   rm -f step*.pdb 2>/dev/null || true
+   ```
+
+### 8.4 完整工作流
+
+```python
+from prism.fep.modeling import FEPModelingWorkflow
+
+# 创建完整的FEP系统
+workflow = FEPModelingWorkflow(
+    work_dir="fep_project",
+    receptor_pdb="protein.pdb",
+    ligand_a_mol2="ligand_ref.mol2",
+    ligand_b_mol2="ligand_mut.mol2",
+    forcefield="gaff2"
+)
+
+# 自动完成：
+# 1. 生成两个配体的力场参数
+# 2. 原子映射和hybrid topology生成
+# 3. 构建bound leg（蛋白质+配体+溶剂+离子）
+# 4. 构建unbound leg（配体+溶剂+离子）
+# 5. 生成所有MDP文件（32 lambda窗口）
+# 6. 生成运行脚本（包含per-window NPT）
+workflow.build()
+```
+
+### 8.5 验证结果
+
+**目录结构**:
+- ✅ build/ + window_XX/ 结构正确
+- ✅ 每个window有独立的npt_short + prod
+- ✅ Per-window NPT配置正确 (100 ps)
+
+**FEP设置**:
+- ✅ free-energy=yes
+- ✅ Lambda schedules正确
+- ✅ Soft-core参数正确
+- ✅ Decoupled策略正确分阶段
+
+**运行脚本**:
+- ✅ Bound leg可运行
+- ✅ Unbound leg可运行
+- ✅ Cleanup命令正确
+
+---
+
+## 9. 包架构重构（2026-03-18）
+
+详见 `PACKAGE_REFACTORING.md`
+
+### 9.1 FEP模块重构
+
+**重构前**:
+```
+prism/fep/modeling.py (2000+ lines)
+```
+
+**重构后**:
+```
+prism/fep/modeling/
+├── __init__.py          # API导出
+├── core.py              # 核心逻辑 (FEPScaffoldBuilder)
+├── fep_builder.py       # FEP workflow编排
+└── gromacs/
+    ├── __init__.py
+    ├── itp_builder.py   # ITP生成
+    └── mdp_templates.py # MDP模板
+```
+
+**改进**:
+- 单一职责: 每个模块专注于特定功能
+- 清晰的API: `__init__.py`导出高层接口
+- 易于测试: 模块可独立测试
+
+### 9.2 其他模块重构
+
+- **Analysis模块**: trajectory/, rmsd/ 等子包
+- **Utils模块**: cleaner/, system/ 等子包
+- **可视化模块**: JavaScript代码分离到模板文件
+
+详见 `PACKAGE_REFACTORING.md` 完整记录。
+
+---
+
+## 10. 参考资料
+
+- `REQUIREMENTS.md` - 需求文档
+- `OUTPUT_FORMAT.md` - 输出格式
+- `ANALYSIS.md` - 分析工具
+- `FEP_PARAMETERS.md` - 参数配置
+- `PROGRESS.md` - 开发进度
+- `PACKAGE_REFACTORING.md` - 包重构记录

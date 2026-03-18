@@ -101,26 +101,15 @@ class ITPBuilder:
                 f.write(self._get_interaction_section("impropers", ";  ai    aj    ak    al funct"))
 
     def _get_atomtypes_section(self) -> str:
-        """Generate the ``[ atomtypes ]`` section for dummy atoms."""
-        dummy_types = {}
-        for atom in self.hybrid_atoms:
-            if atom.state_a_type.startswith("DUM_"):
-                dummy_types[atom.state_a_type] = atom.mass
-            if atom.state_b_type and atom.state_b_type.startswith("DUM_"):
-                mass_b = atom.mass_b if atom.mass_b is not None else atom.mass
-                dummy_types[atom.state_b_type] = mass_b
+        """
+        Generate the ``[ atomtypes ]`` section for dummy atoms.
 
-        if not dummy_types:
-            return ""
-
-        lines = [
-            "[ atomtypes ]",
-            "; name  at.num   mass     charge  ptype  sigma      epsilon",
-        ]
-        for dummy_type, mass in sorted(dummy_types.items()):
-            lines.append(f"{dummy_type:6s}    0   {mass:8.5f}   0.000     A   0.0001     0.0000")
-        lines.append("")
-        return "\n".join(lines) + "\n"
+        Note: This section is now skipped because atomtypes are included via
+        atomtypes_hybrid.itp in the main topology file to avoid duplicate
+        definitions and ordering issues.
+        """
+        # Return empty string - atomtypes are now handled by atomtypes_hybrid.itp
+        return ""
 
     def _get_atoms_section(self) -> str:
         """Generate the ``[ atoms ]`` section."""
