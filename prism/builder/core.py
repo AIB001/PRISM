@@ -1025,9 +1025,13 @@ fi
             raise ValueError("FEP mode requires --mutant ligand file")
 
         try:
+            # Create FEP output directory first
+            fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
+            os.makedirs(fep_output, exist_ok=True)
+
             # Phase 1: Build bound system with reference ligand
             print_step(1, 5, "Building bound system with reference ligand")
-            bound_output = os.path.join(self.output_dir, "bound_md")
+            bound_output = os.path.join(fep_output, "_build/bound_md")
 
             self._build_standard_system(bound_output, use_protein=True)
             bound_system_dir = os.path.join(bound_output, "GMX_PROLIG_MD")
@@ -1035,7 +1039,7 @@ fi
 
             # Phase 2: Build unbound system (ligand only) with same box size as bound
             print_step(2, 5, "Building unbound system (ligand in water)")
-            unbound_output = os.path.join(self.output_dir, "unbound_md")
+            unbound_output = os.path.join(fep_output, "_build/unbound_md")
 
             # Read bound system box size
             bound_conf = os.path.join(bound_system_dir, "solv_ions.gro")
@@ -1052,13 +1056,13 @@ fi
             ref_ligand = self.ligand_paths[0] if isinstance(self.ligand_paths, list) else self.ligand_paths
             ref_ff_dir = self.lig_ff_dirs[0] if isinstance(self.lig_ff_dirs, list) else self.lig_ff_dirs
 
-            # Generate mutant ligand FF
-            mut_ff_output = os.path.join(self.output_dir, "mutant_ligand_ff")
+            # Generate mutant ligand FF in _build directory
+            mut_ff_output = os.path.join(fep_output, "_build/mutant_ligand_ff")
             self._generate_mutant_ligand_ff(self.mutant_ligand, mut_ff_output)
             mut_ff_dir = os.path.join(mut_ff_output, "LIG.amb2gmx")
 
             # Build hybrid topology using ITPBuilder
-            hybrid_output = os.path.join(self.output_dir, "hybrid_topology")
+            hybrid_output = os.path.join(fep_output, "common/hybrid")
             os.makedirs(hybrid_output, exist_ok=True)
 
             # Read ligand atoms from ITP and GRO files
@@ -1110,10 +1114,9 @@ fi
 
             print_success(f"Hybrid topology: {hybrid_itp}")
 
-            # Phase 4: Create FEP scaffold
+            # Phase 4: Create FEP scaffold with complete systems
             print_step(4, 5, "Creating FEP scaffold with complete systems")
 
-            fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
             fep_builder = FEPScaffoldBuilder(
                 output_dir=fep_output, lambda_windows=self.lambda_windows, config=self.config, overwrite=True
             )
@@ -1129,14 +1132,34 @@ fi
 
             print_success(f"FEP scaffold created: {fep_output}")
 
-            # Phase 5: Summary
-            print_step(5, 5, "FEP setup complete")
+            # Phase 5: Clean up intermediate build files
+            print_step(5, 5, "Cleaning up intermediate build files")
+
+            import shutil
+
+            build_dir = os.path.join(fep_output, "_build")
+            if os.path.exists(build_dir):
+                shutil.rmtree(build_dir)
+                print(f"  ✓ Removed build directory: {build_dir}")
+
+            # Also clean up any files in output_dir root (outside GMX_PROLIG_FEP)
+            cleanup_items = [
+                os.path.join(self.output_dir, "LIG.amb2gmx"),
+                os.path.join(self.output_dir, "mdps"),
+            ]
+
+            for item in cleanup_items:
+                if os.path.exists(item):
+                    if os.path.isdir(item):
+                        shutil.rmtree(item)
+                    else:
+                        os.remove(item)
+                    print(f"  ✓ Removed {os.path.basename(item)}")
+
+            print_success("Cleanup complete")
 
             print_header("FEP Workflow Complete!")
-            print(f"\n  Bound MD system:    {path(bound_system_dir)}")
-            print(f"  Unbound MD system:  {path(unbound_system_dir)}")
-            print(f"  Hybrid topology:    {path(hybrid_output)}")
-            print(f"  FEP scaffold:       {path(fep_output)}")
+            print(f"\n  FEP scaffold:       {path(fep_output)}")
             print(f"\n  To run FEP simulations:")
             print(f"  1. cd {fep_output}/bound && ./localrun.sh")
             print(f"  2. cd {fep_output}/unbound && ./localrun.sh")
