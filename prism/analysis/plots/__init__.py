@@ -7,24 +7,31 @@ Centralized plotting utilities for molecular dynamics trajectory analysis.
 """
 
 from .basic import BasicPlotter, Visualizer
-from .structural_plots import (
+from .structural import (
     plot_violin_comparison,
     plot_ramachandran,
     plot_dihedral_time_series,
     plot_sasa_comparison,
     plot_property_distribution,
+)
+from .rmsd import (
+    plot_rmsd_simple_timeseries,
+    plot_rmsd_analysis,
+    plot_rmsf_analysis,
+    plot_rmsf_with_auto_chains,
     plot_rmsd_time_series,
     plot_rmsf_per_residue,
     plot_rmsd_rmsf_combined,
     plot_multi_chain_rmsf,
     plot_separate_rmsd,
     plot_multi_repeat_ligand_rmsd,
+)
+from .contact import (
     plot_contact_probability_barplot,
     plot_contact_probability_heatmap,
     plot_contact_distance_distribution,
-    plot_hydrogen_bond_analysis,
 )
-from .rmsd import plot_rmsd_simple_timeseries, plot_rmsd_analysis, plot_rmsf_analysis, plot_rmsf_with_auto_chains
+from .hbond import plot_hydrogen_bond_analysis
 from .comparison import (
     plot_multi_system_comparison,
     plot_correlation_matrix,

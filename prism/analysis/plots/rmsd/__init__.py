@@ -10,6 +10,13 @@ from .rmsd_plots import (
     plot_rmsf_analysis,
     plot_rmsf_with_auto_chains,
     plot_multi_trajectory_rmsf_comprehensive,
+    plot_rmsd_time_series,
+    plot_rmsf_per_residue,
+    plot_rmsd_rmsf_combined,
+    plot_multi_chain_rmsf,
+    plot_separate_rmsd,
+    plot_multi_repeat_ligand_rmsd,
+    plot_multi_chain_rmsf_example_style,
 )
 
 __all__ = [
@@ -18,4 +25,11 @@ __all__ = [
     "plot_rmsf_analysis",
     "plot_rmsf_with_auto_chains",
     "plot_multi_trajectory_rmsf_comprehensive",
+    "plot_rmsd_time_series",
+    "plot_rmsf_per_residue",
+    "plot_rmsd_rmsf_combined",
+    "plot_multi_chain_rmsf",
+    "plot_separate_rmsd",
+    "plot_multi_repeat_ligand_rmsd",
+    "plot_multi_chain_rmsf_example_style",
 ]

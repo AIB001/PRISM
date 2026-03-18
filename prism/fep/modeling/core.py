@@ -410,12 +410,44 @@ class FEPScaffoldBuilder:
         script = """#!/usr/bin/env bash
 set -euo pipefail
 
-echo "PRISM-FEP scaffold created."
-echo "Next intended order:"
-echo "  1. Complete bound-leg system build"
-echo "  2. Reuse bound-leg box vectors for unbound leg"
-echo "  3. Run bound/localrun.sh"
-echo "  4. Run unbound/localrun.sh"
+FEP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    PRISM-FEP Full Workflow                                ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Run bound leg
+echo "═══════════════════════════════════════════════════════════════════════════"
+echo "Running Bound Leg..."
+echo "═══════════════════════════════════════════════════════════════════════════"
+cd "${FEP_ROOT}/bound"
+bash localrun.sh
+if [ $? -ne 0 ]; then
+    echo "✗ Bound leg failed"
+    exit 1
+fi
+
+# Run unbound leg
+echo ""
+echo "═══════════════════════════════════════════════════════════════════════════"
+echo "Running Unbound Leg..."
+echo "═══════════════════════════════════════════════════════════════════════════"
+cd "${FEP_ROOT}/unbound"
+bash localrun.sh
+if [ $? -ne 0 ]; then
+    echo "✗ Unbound leg failed"
+    exit 1
+fi
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    ✓ FEP Workflow Complete                               ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Next steps:"
+echo "  - Analyze results with: gmx bar -f bound/build/prod_*.xvg unbound/build/prod_*.xvg"
+echo "  - Check convergence and calculate ΔΔG"
 """
         path = layout.root / "run_all.sh"
         path.write_text(script)
@@ -906,22 +938,261 @@ Hybrid ligand package
         if not topol_top.exists():
             raise FileNotFoundError(f"topol.top not found in {prism_system_dir}")
 
-        # Copy coordinate file
-        shutil.copy2(solv_ions_gro, leg_dir / "input" / "conf.gro")
-        print(f"  ✓ Copied solv_ions.gro → {leg_name}/input/conf.gro")
+        # Check if hybrid GRO exists
+        hybrid_gro = self.output_dir / "common" / "hybrid" / "hybrid.gro"
+        if hybrid_gro.exists():
+            # Replace ligand atoms with hybrid ligand atoms
+            self._replace_ligand_with_hybrid(solv_ions_gro, leg_dir / "input" / "conf.gro", hybrid_gro)
+            print(f"  ✓ Replaced ligand with hybrid ligand → {leg_name}/input/conf.gro")
+        else:
+            # Copy coordinate file as-is
+            shutil.copy2(solv_ions_gro, leg_dir / "input" / "conf.gro")
+            print(f"  ✓ Copied solv_ions.gro → {leg_name}/input/conf.gro")
 
         # Copy and modify topology to use hybrid ligand
         self._copy_and_modify_topology(topol_top, leg_dir / "topol.top")
         print(f"  ✓ Copied and modified topol.top → {leg_name}/topol.top")
 
+        # Generate position restraint file for protein
+        self._generate_posre_file(leg_dir, leg_name)
+
         print(f"  ✓ {leg_name.capitalize()} leg system ready")
         print(f"{'='*70}\n")
+
+    def _generate_posre_file(self, leg_dir: Path, leg_name: str) -> None:
+        """
+        Generate position restraint file for protein atoms.
+
+        For bound leg: extracts protein atoms from GRO, generates restraints with molecule-relative indices.
+        For unbound leg: creates empty posre.itp to satisfy topology include.
+
+        Parameters:
+        -----------
+        leg_dir : Path
+            FEP leg directory (bound or unbound)
+        leg_name : str
+            "bound" or "unbound"
+        """
+        import subprocess
+
+        posre_file = leg_dir / "posre.itp"
+        conf_gro = leg_dir / "input" / "conf.gro"
+
+        if not conf_gro.exists():
+            print(f"  ⚠ Warning: {conf_gro} not found, skipping posre.itp generation")
+            return
+
+        # For unbound leg, create empty posre.itp
+        if leg_name != "bound":
+            with open(posre_file, "w") as f:
+                f.write("; Position restraint file (empty for unbound leg)\n")
+                f.write("[ position_restraints ]\n")
+                f.write("; Empty - no position restraints for unbound leg\n")
+            print(f"  ✓ Created empty posre.itp for {leg_name} leg")
+            return
+
+        # For bound leg: extract protein atoms manually from GRO, then generate posre
+        try:
+            protein_gro = leg_dir / "protein_only.gro"
+
+            # Read conf.gro and extract protein atoms (skip hybrid ligand)
+            lines = conf_gro.read_text().splitlines()
+            if len(lines) < 3:
+                raise ValueError("Invalid GRO file format")
+
+            title = lines[0]
+            n_atoms = int(lines[1].strip())
+            atom_lines = lines[2 : 2 + n_atoms]
+            box_line = lines[2 + n_atoms] if len(lines) > 2 + n_atoms else "   10.00000   10.00000   10.00000"
+
+            # Filter protein atoms (residue name not HYB/LIG/SOL/ions)
+            protein_atoms = []
+            for line in atom_lines:
+                if len(line) < 20:
+                    continue
+                resname = line[5:10].strip()
+                if resname not in ["HYB", "LIG", "SOL", "NA", "CL", "K", "MG", "CA"]:
+                    protein_atoms.append(line)
+
+            if not protein_atoms:
+                print(f"  ⚠ Warning: No protein atoms found in {conf_gro}")
+                # Create empty posre
+                with open(posre_file, "w") as f:
+                    f.write("; Position restraint file (no protein found)\n")
+                    f.write("[ position_restraints ]\n")
+                return
+
+            # Write protein-only GRO
+            with open(protein_gro, "w") as f:
+                f.write(f"{title} (protein only)\n")
+                f.write(f"{len(protein_atoms)}\n")
+                for line in protein_atoms:
+                    f.write(line + "\n")
+                f.write(box_line + "\n")
+
+            # Generate posre from protein-only GRO (indices will be 1-based within protein)
+            cmd_genrestr = [
+                "gmx",
+                "genrestr",
+                "-f",
+                str(protein_gro),
+                "-o",
+                str(posre_file),
+                "-fc",
+                "1000",
+                "1000",
+                "1000",
+            ]
+            subprocess.run(cmd_genrestr, input="0\n", text=True, capture_output=True, check=True, timeout=30)
+
+            # Clean up temporary file
+            if protein_gro.exists():
+                protein_gro.unlink()
+
+            print(f"  ✓ Generated posre.itp for {leg_name} leg (protein restraints)")
+
+        except subprocess.CalledProcessError as e:
+            print(f"  ⚠ Warning: Failed to generate posre.itp: {e}")
+            # Create empty file to avoid topology errors
+            with open(posre_file, "w") as f:
+                f.write("; Position restraint file (fallback)\n")
+                f.write("[ position_restraints ]\n")
+                f.write("; Failed to generate - empty restraints\n")
+        except Exception as e:
+            print(f"  ⚠ Warning: Error generating posre.itp: {e}")
+
+    def _replace_ligand_with_hybrid(self, source_gro: Path, target_gro: Path, hybrid_gro: Path) -> None:
+        """
+        Replace ligand atoms in coordinate file with hybrid ligand atoms
+
+        Parameters:
+        -----------
+        source_gro : Path
+            Source GRO file (solv_ions.gro)
+        target_gro : Path
+            Target GRO file to write
+        hybrid_gro : Path
+            Hybrid ligand GRO file
+        """
+
+        # Read source GRO file
+        with open(source_gro, "r") as f:
+            source_lines = f.readlines()
+
+        # Read hybrid ligand GRO file
+        with open(hybrid_gro, "r") as f:
+            hybrid_lines = f.readlines()
+
+        # Parse hybrid ligand atoms
+        hybrid_atoms = []
+        for line in hybrid_lines[2:]:  # Skip title and atom count
+            # Skip empty lines
+            if len(line.strip()) == 0:
+                continue
+            # Check if this is a box line (contains only numbers, dots, and spaces)
+            stripped = line.strip()
+            if all(c in "0123456789. " for c in stripped):
+                break  # Box line found
+            # Parse GRO format
+            hybrid_atoms.append(line)
+
+        # Find ligand atoms in source file (residue name LIG)
+        ligand_start = -1
+        ligand_end = -1
+
+        for i, line in enumerate(source_lines[2:], start=2):  # Skip title and atom count
+            # Check if this is a ligand line (residue name LIG)
+            # Format: "  164LIG     CG    1   3.700   3.914   3.814"
+            # LIG is typically around position 5-8 after the residue number
+            if len(line) > 10:
+                # Try to find "LIG" in the line
+                if "LIG" in line[:15]:  # Check first 15 characters for "LIG"
+                    if ligand_start == -1:
+                        ligand_start = i
+                    ligand_end = i
+                elif ligand_start != -1:
+                    # We've moved past the ligand
+                    break
+
+        # Replace ligand atoms with hybrid ligand atoms
+        if ligand_start != -1:
+            # Build new file content
+            new_lines = source_lines[:ligand_start]
+
+            # Get the starting atom index and residue number from the source file
+            first_ligand_line = source_lines[ligand_start]
+            try:
+                # Parse: "  164LIG     CG    1   3.700   3.914   3.814"
+                # Extract residue number from positions 0-5
+                res_num_str = first_ligand_line[0:5].strip()
+                residue_number = int(res_num_str) if res_num_str else 164
+                # Extract first atom number (at positions 15-20)
+                atom_num_str = first_ligand_line[15:20].strip()
+                starting_atom_index = int(atom_num_str) if atom_num_str else 1
+            except (ValueError, IndexError):
+                residue_number = 164  # Default value
+                starting_atom_index = 1
+
+            # Add hybrid ligand atoms with updated indices
+            for i, hybrid_line in enumerate(hybrid_atoms):
+                parts = hybrid_line.split()
+                if len(parts) >= 7:
+                    try:
+                        # Hybrid GRO format: "    1LIG  CG    1   0.000   0.000   0.000"
+                        # parts[0]: "1" (atom index from hybrid)
+                        # parts[1]: "LIG" (residue name)
+                        # parts[2]: "CG" (atom name)
+                        # parts[3]: "1" (atom number - same as parts[0])
+                        # parts[4]: "0.000" (x)
+                        # parts[5]: "0.000" (y)
+                        # parts[6]: "0.000" (z)
+
+                        atom_idx = starting_atom_index + i  # Sequential atom index
+                        atom_name = parts[2]
+                        x = parts[4] if len(parts) > 4 else "0.000"
+                        y = parts[5] if len(parts) > 5 else "0.000"
+                        z = parts[6] if len(parts) > 6 else "0.000"
+
+                        # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
+                        # residuenum (5 chars, right-justified) + residuename (5 chars, left-justified)
+                        # + atomname (5 chars, right-justified) + atomnum (5 chars, right-justified)
+                        # + x (8 chars) + y (8 chars) + z (8 chars)
+                        new_line = f"{residue_number:5d}{parts[1]:<5.5s}{atom_name:>5.5s}{atom_idx:5d}{x:>8.8s}{y:>8.8s}{z:>8.8s}\n"
+                        new_lines.append(new_line)
+                    except (ValueError, IndexError):
+                        # If formatting fails, keep original line
+                        new_lines.append(hybrid_line)
+                else:
+                    new_lines.append(hybrid_line)
+
+            new_lines.extend(source_lines[ligand_end + 1 :])
+
+            # Write to target file
+            with open(target_gro, "w") as f:
+                f.writelines(new_lines)
+
+            # Update atom count in line 2
+            num_atoms_old = int(source_lines[1].strip())
+            num_atoms_diff = len(hybrid_atoms) - (ligand_end - ligand_start + 1)
+            num_atoms_new = num_atoms_old + num_atoms_diff
+
+            # Read back the file to update the count
+            with open(target_gro, "r") as f:
+                target_content = f.readlines()
+
+            target_content[1] = f"{num_atoms_new}\n"
+
+            with open(target_gro, "w") as f:
+                f.writelines(target_content)
+        else:
+            # No ligand found, copy as-is
+            shutil.copy2(source_gro, target_gro)
 
     def _copy_and_modify_topology(self, source_top: Path, target_top: Path) -> None:
         """
         Copy topology file and modify to use hybrid ligand.
 
-        Replaces ligand ITP include with hybrid ligand ITP.
+        Replaces ligand ITP include with hybrid ligand ITP and renames LIG to HYB in molecules section.
         """
         content = source_top.read_text()
 
@@ -930,6 +1201,9 @@ Hybrid ligand package
         import re
 
         content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/hybrid.itp"', content)
+
+        # Replace LIG with HYB in molecules section
+        content = re.sub(r"^LIG\s+", "HYB                  ", content, flags=re.MULTILINE)
 
         target_top.write_text(content)
 
@@ -1045,6 +1319,10 @@ LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 MDP_DIR="${{LEG_DIR}}/mdps"
 INPUT_DIR="${{LEG_DIR}}/input"
 BUILD_DIR="${{LEG_DIR}}/build"
+MDRUN_NSTEPS_ARG=""
+if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
+    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
+fi
 
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
 echo "║                    PRISM-FEP {leg_name.upper()} LEG                                    ║"
@@ -1076,8 +1354,9 @@ elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
     gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -cpi ${{BUILD_DIR}}/nvt.cpt -v
 else
     echo "Running NVT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v
+    gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 2
+    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
+    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
 fi
 
 # NPT equilibration
@@ -1088,8 +1367,9 @@ elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
     gmx mdrun -deffnm ${{BUILD_DIR}}/npt -cpi ${{BUILD_DIR}}/npt.cpt -v
 else
     echo "Running NPT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v
+    gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 2
+    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
+    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
 fi
 
 # FEP production runs
@@ -1104,7 +1384,8 @@ for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
     else
         echo "  ${{lambda_name}}: starting"
         gmx grompp -f ${{lambda_mdp}} -c ${{BUILD_DIR}}/npt.gro -p topol.top -o ${{BUILD_DIR}}/${{lambda_name}}.tpr -maxwarn 2
-        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
+        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
     fi
 done
 
