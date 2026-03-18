@@ -111,3 +111,4 @@ tests/*
 .history
 
 prism/*/*.backup
+.mcp.json
