@@ -5,6 +5,7 @@
 I/O utilities for protein cleaning.
 """
 
+import os
 from typing import List, Tuple
 
 

@@ -5,6 +5,7 @@
 Core ProteinCleaner class for PDB file cleaning.
 """
 
+import os
 import logging
 from typing import List, Optional
 

@@ -1035,7 +1035,11 @@ fi
 
             self._build_standard_system(bound_output, use_protein=True)
             bound_system_dir = os.path.join(bound_output, "GMX_PROLIG_MD")
+
+            # Save reference ligand FF directory from bound system
+            ref_ff_dir = self.lig_ff_dirs[0] if isinstance(self.lig_ff_dirs, list) else self.lig_ff_dirs
             print_success(f"Bound system built: {bound_system_dir}")
+            print(f"  Reference ligand FF: {ref_ff_dir}")
 
             # Phase 2: Build unbound system (ligand only) with same box size as bound
             print_step(2, 5, "Building unbound system (ligand in water)")
@@ -1053,9 +1057,7 @@ fi
             # Phase 3: Generate hybrid topology
             print_step(3, 5, "Generating hybrid topology via atom mapping")
 
-            ref_ligand = self.ligand_paths[0] if isinstance(self.ligand_paths, list) else self.ligand_paths
-            ref_ff_dir = self.lig_ff_dirs[0] if isinstance(self.lig_ff_dirs, list) else self.lig_ff_dirs
-
+            # ref_ff_dir was saved in Phase 1
             # Generate mutant ligand FF in _build directory
             mut_ff_output = os.path.join(fep_output, "_build/mutant_ligand_ff")
             self._generate_mutant_ligand_ff(self.mutant_ligand, mut_ff_output)
@@ -1069,13 +1071,23 @@ fi
             from ..fep.io import read_ligand_from_prism
             from ..fep.core.hybrid_topology import HybridTopologyBuilder
 
-            ref_atoms = read_ligand_from_prism(
-                itp_file=os.path.join(ref_ff_dir, "LIG.itp"), gro_file=os.path.join(ref_ff_dir, "LIG.gro")
-            )
+            # Debug: Check if files exist
+            ref_itp = os.path.join(ref_ff_dir, "LIG.itp")
+            ref_gro = os.path.join(ref_ff_dir, "LIG.gro")
+            mut_itp = os.path.join(mut_ff_dir, "LIG.itp")
+            mut_gro = os.path.join(mut_ff_dir, "LIG.gro")
 
-            mut_atoms = read_ligand_from_prism(
-                itp_file=os.path.join(mut_ff_dir, "LIG.itp"), gro_file=os.path.join(mut_ff_dir, "LIG.gro")
-            )
+            print(f"\n  Checking force field files:")
+            print(f"    ref_itp exists: {os.path.exists(ref_itp)} - {ref_itp}")
+            print(f"    ref_gro exists: {os.path.exists(ref_gro)} - {ref_gro}")
+            print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
+            print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
+
+            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_gro)
+
+            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_gro)
+
+            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_gro)
 
             # Perform atom mapping
             from ..fep.core.mapping import DistanceAtomMapper
@@ -1101,6 +1113,7 @@ fi
             # First write a temporary atoms-only ITP
             temp_itp = os.path.join(hybrid_output, "hybrid_atoms_temp.itp")
             ITPBuilder(hybrid_atoms, {}).write_itp(temp_itp, molecule_name="HYB")
+            print(f"  Debug: temp_itp written: {os.path.exists(temp_itp)}")
 
             # Then build complete hybrid ITP with bonded terms
             hybrid_itp = os.path.join(hybrid_output, "hybrid.itp")
@@ -1111,6 +1124,9 @@ fi
                 ligand_b_itp=os.path.join(mut_ff_dir, "LIG.itp"),
                 molecule_name="HYB",
             )
+            print(f"  Debug: hybrid.itp written: {os.path.exists(hybrid_itp)}")
+            if os.path.exists(hybrid_itp):
+                print(f"  Debug: hybrid.itp size: {os.path.getsize(hybrid_itp)} bytes")
 
             print_success(f"Hybrid topology: {hybrid_itp}")
 
@@ -1118,7 +1134,7 @@ fi
             print_step(4, 5, "Creating FEP scaffold with complete systems")
 
             fep_builder = FEPScaffoldBuilder(
-                output_dir=fep_output, lambda_windows=self.lambda_windows, config=self.config, overwrite=True
+                output_dir=fep_output, lambda_windows=self.lambda_windows, config=self.config, overwrite=False
             )
 
             layout = fep_builder.build_from_components(

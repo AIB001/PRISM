@@ -219,9 +219,7 @@ class FEPScaffoldBuilder:
 
     def _prepare_layout(self) -> FEPScaffoldLayout:
         root = self.output_dir
-        if root.exists():
-            if not self.overwrite:
-                raise FileExistsError(f"Output directory already exists: {root}")
+        if root.exists() and self.overwrite:
             shutil.rmtree(root)
 
         layout = FEPScaffoldLayout(

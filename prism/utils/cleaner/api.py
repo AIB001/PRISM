@@ -5,6 +5,7 @@
 Public API functions for protein cleaning.
 """
 
+import os
 from typing import Optional
 from .core import ProteinCleaner
 
