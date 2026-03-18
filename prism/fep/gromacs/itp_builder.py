@@ -30,6 +30,7 @@ class HybridAtomRecord:
     state_b_type: Optional[str] = None
     state_b_charge: Optional[float] = None
     mass_b: Optional[float] = None
+    name_b: Optional[str] = None  # B-side atom name for correct bonded mapping
 
 
 @dataclass
@@ -130,6 +131,12 @@ class ITPBuilder:
         ]
 
         for atom in self.hybrid_atoms:
+            # CRITICAL: Add comment for B-side atom name BEFORE the atom line
+            # This ensures _parse_hybrid_atom_records() can read the comment and
+            # associate it with the correct atom
+            if atom.name_b:
+                lines.append(f"; name_b (state B): {atom.name_b}")
+
             line = f"{atom.index:6d} {atom.state_a_type:>10s}      1     LIG {atom.name:>5s}      1 "
             line += f"{atom.state_a_charge:10.6f} {atom.mass:10.5f}"
 
@@ -217,6 +224,7 @@ class ITPBuilder:
     def _record_to_hybrid_atom(record: HybridAtomRecord) -> HybridAtom:
         return HybridAtom(
             name=record.name,
+            name_b=record.name_b,
             index=record.index,
             state_a_type=record.state_a_type,
             state_a_charge=record.state_a_charge,
@@ -231,6 +239,8 @@ class ITPBuilder:
         """Parse hybrid atom rows from an ITP content string."""
         records: List[HybridAtomRecord] = []
         in_atoms = False
+        name_b_for_next_atom = None  # Store name_b from comment for next atom
+
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.lower() == "[ atoms ]":
@@ -238,6 +248,12 @@ class ITPBuilder:
                 continue
             if stripped.startswith("[") and in_atoms:
                 break
+
+            # Parse name_b from comment (format: "; name_b (state B): XXXX")
+            if in_atoms and stripped.startswith(";") and "name_b (state B):" in stripped:
+                name_b_for_next_atom = stripped.split("name_b (state B):")[-1].strip()
+                continue
+
             if not in_atoms or not stripped or stripped.startswith(";"):
                 continue
 
@@ -256,18 +272,20 @@ class ITPBuilder:
                 else:
                     mass_b = float(parts[7])
 
-            records.append(
-                HybridAtomRecord(
-                    index=int(parts[0]),
-                    name=parts[4],
-                    state_a_type=parts[1],
-                    state_a_charge=float(parts[6]),
-                    mass=float(parts[7]),
-                    state_b_type=state_b_type,
-                    state_b_charge=state_b_charge,
-                    mass_b=mass_b,
-                )
+            record = HybridAtomRecord(
+                index=int(parts[0]),
+                name=parts[4],
+                state_a_type=parts[1],
+                state_a_charge=float(parts[6]),
+                mass=float(parts[7]),
+                state_b_type=state_b_type,
+                state_b_charge=state_b_charge,
+                mass_b=mass_b,
+                name_b=name_b_for_next_atom,  # Use name_b from comment if available
             )
+            records.append(record)
+            name_b_for_next_atom = None  # Reset for next atom
+
         return records
 
     @classmethod
@@ -288,10 +306,16 @@ class ITPBuilder:
                 map_b[record.name[:-1]] = record.index
                 continue
 
+            # Common atoms: use A-side name for map_a, B-side name for map_b
+            # CRITICAL FIX: For common atoms with different names in A and B (e.g., H03 in A, H04 in B),
+            # we must use the correct B-side atom name when building map_b to ensure bonded parameters
+            # are correctly matched during the merging process.
             if not state_a_dummy:
                 map_a[record.name] = record.index
             if not state_b_dummy:
-                map_b[record.name] = record.index
+                # Use B-side atom name if available, otherwise fall back to A-side name
+                b_name = record.name_b if record.name_b else record.name
+                map_b[b_name] = record.index
 
         return map_a, map_b
 
@@ -450,7 +474,13 @@ class ITPBuilder:
 
         if section in {"bonds", "angles"}:
             if len(zero) >= 2:
-                zero[1] = "0.000000"
+                # CRITICAL FIX: Use a small non-zero force constant instead of 0
+                # to prevent atoms from flying apart during MD.
+                # A force constant of 0 causes GROMACS to ignore the constraint entirely,
+                # leading to energy explosions and LINCS failures.
+                # Using 1.0 kJ/(mol·nm²) for bonds and 1.0 kJ/(mol·rad²) for angles
+                # provides minimal restraint while allowing the interaction to disappear smoothly.
+                zero[1] = "1.000000"  # Small non-zero force constant
             return zero
 
         if section in {"dihedrals", "impropers"}:

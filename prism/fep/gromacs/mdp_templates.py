@@ -341,6 +341,63 @@ constraint-algorithm    = {constraints_algorithm}
 """
     (output_path / "npt.mdp").write_text(npt_mdp)
 
+    # Generate NPT Short MDP for per-window equilibration (50-100 ps)
+    npt_short_ps = sim_cfg.get("per_window_npt_time_ps", 100)
+    npt_short_mdp = f"""; {leg_name} NPT Short - Per-Window NPT Equilibration
+define              = -DPOSRES
+integrator          = md
+dt                  = {dt}
+nsteps              = {int(npt_short_ps / dt)}
+
+; Output control
+nstxout             = 0
+nstvout             = 0
+nstfout             = 0
+nstlog              = {log_interval}
+nstenergy           = {energy_interval}
+nstxout-compressed  = 0
+
+; Neighbor searching
+cutoff-scheme       = Verlet
+ns_type             = grid
+nstlist             = 10
+rcoulomb            = {rcoulomb}
+rvdw                = {rvdw}
+
+; Electrostatics
+coulombtype         = {coulombtype}
+pme_order           = {pme_order}
+fourierspacing      = {fourierspacing}
+
+; VDW
+vdwtype             = Cut-off
+DispCorr            = EnerPres
+
+; Temperature coupling
+tcoupl              = {npt_config.get('tcoupl', 'V-rescale')}
+tc-grps             = System
+tau_t               = {npt_config.get('tau_t', 0.1)}
+ref_t               = {temp}
+
+; Pressure coupling
+pcoupl              = {npt_config.get('pcoupl', 'C-rescale')}
+pcoupltype          = {npt_config.get('pcoupltype', 'isotropic')}
+tau_p               = {npt_config.get('tau_p', 1.0)}
+ref_p               = {pressure}
+compressibility     = {npt_config.get('compressibility', 4.5e-5)}
+
+; Periodic boundary conditions
+pbc                 = xyz
+
+; Velocity generation
+gen_vel             = no
+
+; Constraints
+constraints             = {constraints_type}
+constraint-algorithm    = {constraints_algorithm}
+"""
+    (output_path / "npt_short.mdp").write_text(npt_short_mdp)
+
     lambda_values = schedule["fep_lambdas"].split()
     prod_steps = int(prod_ns * 1000 / dt)
 

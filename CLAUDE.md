@@ -118,3 +118,12 @@ This prevents "duplicate type key" warnings when loading multiple force field to
 **Customization**:
 - Single molecule with custom residue name: `python generate_charmm_ff.py --resname XXX path/to/ligand.mol2`
 - Force regeneration: add `--overwrite` flag (requires AmberTools installed)
+
+📝 关于LSP vs grep：LSP工具更高效：
+  - LSP: 语义理解，直接定位符号定义和引用
+  - grep: 文本搜索，需要人类解读结果
+今后会优先使用LSP工具（mcp__cclsp__系列）or serena来查找符号，这样可以：
+  1. 更准确地找到定义
+  2. 自动跳过注释/字符串中的匹配
+  3. 减少token消耗（直接获取结构化信息）
+  

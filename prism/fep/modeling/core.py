@@ -1372,22 +1372,45 @@ else
     gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
 fi
 
-# FEP production runs
+# FEP production runs for each lambda window
 echo "Running FEP production for all lambda windows..."
 for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
     lambda_name=$(basename ${{lambda_mdp}} .mdp)
-    if [ -f ${{BUILD_DIR}}/${{lambda_name}}.gro ]; then
-        echo "  ${{lambda_name}}: already completed"
-    elif [ -f ${{BUILD_DIR}}/${{lambda_name}}.tpr ]; then
-        echo "  ${{lambda_name}}: resuming from checkpoint"
-        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -cpi ${{BUILD_DIR}}/${{lambda_name}}.cpt -v
+    lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
+    window_dir="window_${{lambda_idx}}"
+
+    mkdir -p "${{window_dir}}"
+
+    # Per-window NPT short equilibration
+    if [ -f "${{window_dir}}/npt_short.gro" ]; then
+        echo "  ${{lambda_name}}: NPT short already completed"
+    elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
+        echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v
     else
-        echo "  ${{lambda_name}}: starting"
-        gmx grompp -f ${{lambda_mdp}} -c ${{BUILD_DIR}}/npt.gro -p topol.top -o ${{BUILD_DIR}}/${{lambda_name}}.tpr -maxwarn 2
-        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
-        gmx mdrun -deffnm ${{BUILD_DIR}}/${{lambda_name}} -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+        echo "  ${{lambda_name}}: starting NPT short equilibration"
+        gmx grompp -f ${{MDP_DIR}}/npt_short.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}"
+    fi
+
+    # Production run
+    if [ -f "${{window_dir}}/prod.gro" ]; then
+        echo "  ${{lambda_name}}: production already completed"
+    elif [ -f "${{window_dir}}/prod.tpr" ]; then
+        echo "  ${{lambda_name}}: production resuming from checkpoint"
+        gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v
+    else
+        echo "  ${{lambda_name}}: starting production"
+        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2
+        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
+        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}"
     fi
 done
+
+# Clean up intermediate step PDB files
+echo "Cleaning up intermediate PDB files..."
+rm -f step*.pdb 2>/dev/null || true
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"

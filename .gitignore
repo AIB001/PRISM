@@ -112,3 +112,4 @@ tests/*
 
 prism/*/*.backup
 .mcp.json
+.serena

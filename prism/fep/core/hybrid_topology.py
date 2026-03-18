@@ -23,7 +23,9 @@ class HybridAtom:
     Attributes
     ----------
     name : str
-        Atom name (original for common, tagged like 'C1A'/'C1B' for transformed)
+        Atom name in state A (original for common, tagged like 'C1A'/'C1B' for transformed)
+    name_b : Optional[str]
+        Atom name in state B (for common atoms with different names in A/B)
     index : int
         Atom index (starts from 1, GROMACS convention)
     state_a_type : str
@@ -51,6 +53,7 @@ class HybridAtom:
     element: str = ""
     mass: float = 0.0
     mass_b: Optional[float] = None
+    name_b: Optional[str] = None
 
 
 class HybridTopologyBuilder:
@@ -137,12 +140,17 @@ class HybridTopologyBuilder:
 
         # 1. Common atoms (shared structure, same or similar charges)
         for atom_a, atom_b in mapping.common:
+            # CRITICAL: Store B-side atom name for correct bonded parameter mapping
+            # Common atoms may have different names in A and B (e.g., H03 in A, H04 in B)
+            name_b = atom_b.name if atom_b.name != atom_a.name else None
+
             if self.charge_strategy == "none":
                 # Keep original charges (different for A/B)
                 # MUST have typeB/chargeB because charges are different
                 self.hybrid_atoms.append(
                     HybridAtom(
                         name=atom_a.name,
+                        name_b=name_b,  # Store B-side name if different
                         index=index,
                         state_a_type=atom_a.atom_type,
                         state_a_charge=atom_a.charge,  # Original A charge
@@ -160,6 +168,7 @@ class HybridTopologyBuilder:
                 self.hybrid_atoms.append(
                     HybridAtom(
                         name=atom_a.name,
+                        name_b=name_b,  # Store B-side name if different
                         index=index,
                         state_a_type=atom_a.atom_type,
                         state_a_charge=charge,
