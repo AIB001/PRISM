@@ -109,6 +109,12 @@ class TestRenameHisForCmap:
         ff_dir = tmp_path / "amber19sb.ff"
         ff_dir.mkdir()
         (ff_dir / "cmap.itp").write_text("; cmap data\n")
+        # Add aminoacids.rtp with HIE definition
+        (ff_dir / "aminoacids.rtp").write_text("""
+[ HIE ]
+ [ atoms ]
+  N    N       -0.4157
+""")
 
         pdb = tmp_path / "test.pdb"
         pdb.write_text(_atom_line(1, "N", "HIS", "A", 10) + _atom_line(2, "CA", "HIS", "A", 10) + "END\n")
@@ -164,6 +170,12 @@ class TestRenameHisForCmap:
         ff_dir = tmp_path / "amber19sb.ff"
         ff_dir.mkdir()
         (ff_dir / "cmap.itp").write_text("; cmap\n")
+        # Add aminoacids.rtp with HIE definition
+        (ff_dir / "aminoacids.rtp").write_text("""
+[ HIE ]
+ [ atoms ]
+  N    N       -0.4157
+""")
 
         pdb = tmp_path / "test.pdb"
         pdb.write_text(
