@@ -1009,8 +1009,315 @@ fi
             return self.run_rest2()
         elif self.mmpbsa_mode:
             return self.run_mmpbsa()
+        elif self.fep_mode:
+            return self.run_fep()
         else:
             return self.run_normal()
+
+    def run_fep(self):
+        """Run the FEP workflow: build standard MD systems, generate hybrid topology, create FEP scaffold"""
+        from ..fep.modeling import FEPScaffoldBuilder
+        from ..fep.gromacs.itp_builder import ITPBuilder
+
+        print_header("PRISM FEP Builder Workflow")
+
+        if not self.mutant_ligand:
+            raise ValueError("FEP mode requires --mutant ligand file")
+
+        try:
+            # Phase 1: Build bound system with reference ligand
+            print_step(1, 5, "Building bound system with reference ligand")
+            bound_output = os.path.join(self.output_dir, "bound_md")
+
+            self._build_standard_system(bound_output, use_protein=True)
+            bound_system_dir = os.path.join(bound_output, "GMX_PROLIG_MD")
+            print_success(f"Bound system built: {bound_system_dir}")
+
+            # Phase 2: Build unbound system (ligand only)
+            print_step(2, 5, "Building unbound system (ligand in water)")
+            unbound_output = os.path.join(self.output_dir, "unbound_md")
+
+            self._build_standard_system(unbound_output, use_protein=False)
+            unbound_system_dir = os.path.join(unbound_output, "GMX_PROLIG_MD")
+            print_success(f"Unbound system built: {unbound_system_dir}")
+
+            # Phase 3: Generate hybrid topology
+            print_step(3, 5, "Generating hybrid topology via atom mapping")
+
+            ref_ligand = self.ligand_paths[0] if isinstance(self.ligand_paths, list) else self.ligand_paths
+            ref_ff_dir = self.lig_ff_dirs[0] if isinstance(self.lig_ff_dirs, list) else self.lig_ff_dirs
+
+            # Generate mutant ligand FF
+            mut_ff_output = os.path.join(self.output_dir, "mutant_ligand_ff")
+            self._generate_mutant_ligand_ff(self.mutant_ligand, mut_ff_output)
+            mut_ff_dir = os.path.join(mut_ff_output, "LIG.amb2gmx")
+
+            # Build hybrid topology using ITPBuilder
+            hybrid_output = os.path.join(self.output_dir, "hybrid_topology")
+            os.makedirs(hybrid_output, exist_ok=True)
+
+            # Read ligand atoms from ITP and GRO files
+            from ..fep.io import read_ligand_from_prism
+            from ..fep.core.hybrid_topology import HybridTopologyBuilder
+
+            ref_atoms = read_ligand_from_prism(
+                itp_file=os.path.join(ref_ff_dir, "LIG.itp"), gro_file=os.path.join(ref_ff_dir, "LIG.gro")
+            )
+
+            mut_atoms = read_ligand_from_prism(
+                itp_file=os.path.join(mut_ff_dir, "LIG.itp"), gro_file=os.path.join(mut_ff_dir, "LIG.gro")
+            )
+
+            # Perform atom mapping
+            from ..fep.core.mapping import DistanceAtomMapper
+
+            mapper = DistanceAtomMapper(dist_cutoff=self.distance_cutoff)
+            mapping = mapper.map(ref_atoms, mut_atoms)
+
+            # Build hybrid topology
+            hybrid_builder = HybridTopologyBuilder(
+                mapping=mapping,
+                ref_itp_path=os.path.join(ref_ff_dir, "LIG.itp"),
+                mut_itp_path=os.path.join(mut_ff_dir, "LIG.itp"),
+                charge_strategy=self.charge_strategy,
+            )
+
+            hybrid_atoms, hybrid_params = hybrid_builder.build()
+
+            # Generate hybrid ITP file
+            itp_builder = ITPBuilder(hybrid_atoms, hybrid_params)
+            hybrid_itp = os.path.join(hybrid_output, "hybrid.itp")
+            itp_builder.write_itp(hybrid_itp, molecule_name="HYB")
+
+            print_success(f"Hybrid topology: {hybrid_itp}")
+
+            # Phase 4: Create FEP scaffold
+            print_step(4, 5, "Creating FEP scaffold with complete systems")
+
+            fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
+            fep_builder = FEPScaffoldBuilder(output_dir=fep_output, lambda_windows=self.lambda_windows, overwrite=True)
+
+            layout = fep_builder.build_from_components(
+                receptor_pdb=self.protein_path,
+                hybrid_itp=hybrid_itp,
+                reference_ligand_dir=ref_ff_dir,
+                mutant_ligand_dir=mut_ff_dir,
+                bound_system_dir=bound_system_dir,
+                unbound_system_dir=unbound_system_dir,
+            )
+
+            print_success(f"FEP scaffold created: {fep_output}")
+
+            # Phase 5: Summary
+            print_step(5, 5, "FEP setup complete")
+
+            print_header("FEP Workflow Complete!")
+            print(f"\n  Bound MD system:    {path(bound_system_dir)}")
+            print(f"  Unbound MD system:  {path(unbound_system_dir)}")
+            print(f"  Hybrid topology:    {path(hybrid_output)}")
+            print(f"  FEP scaffold:       {path(fep_output)}")
+            print(f"\n  To run FEP simulations:")
+            print(f"  1. cd {fep_output}/bound && ./localrun.sh")
+            print(f"  2. cd {fep_output}/unbound && ./localrun.sh")
+            print(f"  3. Analyze with gmx bar or alchemical-analysis")
+
+            return self.output_dir
+
+        except Exception as e:
+            print_error(f"FEP workflow failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+            raise
+
+    def _build_standard_system(self, output_dir: str, use_protein: bool):
+        """Build standard MD system (bound or unbound)"""
+        os.makedirs(output_dir, exist_ok=True)
+
+        original_fep = self.fep_mode
+        original_output = self.output_dir
+        original_protein = self.protein_path
+
+        self.fep_mode = False
+        self.output_dir = output_dir
+
+        # Update sub-component output directories
+        from pathlib import Path
+
+        self.system_builder.output_dir = Path(output_dir)
+        self.system_builder.model_dir = Path(output_dir) / "GMX_PROLIG_MD"
+        self.system_builder.model_dir.mkdir(exist_ok=True)
+        self.mdp_generator.output_dir = output_dir
+
+        if use_protein:
+            # Normal protein+ligand system
+            self.run_normal()
+        else:
+            # Ligand-only system: skip protein processing
+            self._build_ligand_only_system(output_dir)
+
+        # Restore
+        self.fep_mode = original_fep
+        self.output_dir = original_output
+        self.protein_path = original_protein
+        self.system_builder.output_dir = Path(original_output)
+        self.system_builder.model_dir = Path(original_output) / "GMX_PROLIG_MD"
+        self.mdp_generator.output_dir = original_output
+
+    def _build_ligand_only_system(self, output_dir: str):
+        """Build ligand-only system (no protein) for unbound FEP leg"""
+        from pathlib import Path
+        import shutil
+
+        # Step 1: Generate ligand force field in unbound directory
+        print_step(1, 5, f"Generating ligand force field for unbound system")
+
+        # Save original state
+        original_output = self.output_dir
+        self.output_dir = output_dir
+
+        # Generate ligand FF
+        self.generate_ligand_forcefield()
+
+        # Restore
+        self.output_dir = original_output
+
+        # Step 2: Create model directory
+        model_dir = Path(output_dir) / "GMX_PROLIG_MD"
+        model_dir.mkdir(exist_ok=True, parents=True)
+
+        # Step 3: Get ligand structure and topology from newly generated FF
+        ligand_ff_dir = Path(output_dir) / "LIG.amb2gmx"
+        ligand_gro = ligand_ff_dir / "LIG.gro"
+        ligand_itp = ligand_ff_dir / "LIG.itp"
+
+        if not ligand_gro.exists():
+            raise FileNotFoundError(f"Ligand structure not found: {ligand_gro}")
+
+        # Step 4: Create topology file for ligand-only system
+        print_step(2, 5, "Creating ligand-only topology")
+        topol_path = model_dir / "topol.top"
+
+        # Read force field info from config
+        ff_name = self.config.get("protein", {}).get("forcefield", "amber99sb")
+        water_model = self.config.get("protein", {}).get("water_model", "tip3p")
+
+        with open(topol_path, "w") as f:
+            f.write(f"; Ligand-only topology for FEP unbound leg\n")
+            f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
+            f.write(f'#include "../LIG.amb2gmx/atomtypes_LIG.itp"\n')
+            f.write(f'#include "../LIG.amb2gmx/LIG.itp"\n')
+            f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
+            f.write(f'#include "{ff_name}.ff/ions.itp"\n\n')
+            f.write(f"[ system ]\n")
+            f.write(f"Ligand in water\n\n")
+            f.write(f"[ molecules ]\n")
+            f.write(f"LIG    1\n")
+
+        # Step 5: Copy ligand structure
+        shutil.copy(ligand_gro, model_dir / "lig.gro")
+
+        # Step 6: Create box
+        print_step(3, 5, "Creating simulation box")
+        boxed_gro = model_dir / "lig_newbox.gro"
+        box_distance = self.config.get("system", {}).get("box_distance", 1.5)
+
+        self.system_builder._run_command(
+            [
+                self.system_builder.gmx_command,
+                "editconf",
+                "-f",
+                str(model_dir / "lig.gro"),
+                "-o",
+                str(boxed_gro),
+                "-bt",
+                "cubic",
+                "-d",
+                str(box_distance),
+                "-c",
+            ],
+            work_dir=str(model_dir),
+        )
+
+        # Step 7: Solvate
+        print_step(4, 5, "Solvating system")
+        solvated_gro = self.system_builder._solvate(str(boxed_gro), str(topol_path))
+
+        # Step 8: Add ions
+        print_step(5, 5, "Adding ions")
+        self.system_builder._add_ions(solvated_gro, str(topol_path))
+
+        print_success(f"Ligand-only system built in {model_dir}")
+        ff_name = self.config.get("protein", {}).get("forcefield", "amber99sb")
+        water_model = self.config.get("protein", {}).get("water_model", "tip3p")
+
+        with open(topol_path, "w") as f:
+            f.write(f"; Ligand-only topology for FEP unbound leg\n")
+            f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
+            f.write(f'#include "../LIG.amb2gmx/LIG.itp"\n')
+            f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
+            f.write(f'#include "{ff_name}.ff/ions.itp"\n\n')
+            f.write(f"[ system ]\n")
+            f.write(f"Ligand in water\n\n")
+            f.write(f"[ molecules ]\n")
+            f.write(f"LIG    1\n")
+
+        # Step 5: Copy ligand structure
+        import shutil
+
+        shutil.copy(ligand_gro, model_dir / "lig.gro")
+
+        # Step 6: Create box
+        print_step(3, 4, "Creating simulation box")
+        boxed_gro = model_dir / "lig_newbox.gro"
+        box_distance = self.config.get("system", {}).get("box_distance", 1.5)
+
+        self.system_builder._run_command(
+            [
+                self.system_builder.gmx_command,
+                "editconf",
+                "-f",
+                str(model_dir / "lig.gro"),
+                "-o",
+                str(boxed_gro),
+                "-bt",
+                "cubic",
+                "-d",
+                str(box_distance),
+                "-c",
+            ],
+            work_dir=str(model_dir),
+        )
+
+        # Step 7: Solvate
+        print_step(4, 4, "Solvating and adions")
+        solvated_gro = self.system_builder._solvate(str(boxed_gro), str(topol_path))
+
+        # Step 8: Add ions
+        self.system_builder._add_ions(solvated_gro, str(topol_path))
+
+        print_success(f"Ligand-only system built in {model_dir}")
+
+    def _generate_mutant_ligand_ff(self, mutant_ligand: str, output_dir: str):
+        """Generate force field for mutant ligand"""
+        # Reuse existing force field generation logic
+
+        # Temporarily save current state
+        original_ligands = self.ligand_paths
+        original_output = self.output_dir
+        original_lig_ff_dirs = self.lig_ff_dirs
+
+        # Set up for mutant ligand
+        self.ligand_paths = [mutant_ligand]
+        self.output_dir = output_dir
+
+        # Generate FF
+        self.generate_ligand_forcefield()
+
+        # Restore state
+        self.ligand_paths = original_ligands
+        self.output_dir = original_output
+        self.lig_ff_dirs = original_lig_ff_dirs
 
     def run_rest2(self):
         """Run the REST2 workflow: build standard MD first, then convert to REST2"""

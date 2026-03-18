@@ -17,6 +17,7 @@ from prism.fep.core.mapping import Atom, AtomMapping, DistanceAtomMapper
 from prism.fep.core.hybrid_topology import HybridAtom, HybridTopologyBuilder
 from prism.fep.gromacs.itp_builder import ITPBuilder
 from prism.fep.gromacs.mdp_templates import FEP_PROD_MDP, write_fep_mdps
+from prism.fep.modeling import FEPScaffoldBuilder
 from prism.fep.analysis.xvg_parser import XVGParser
 from prism.fep.analysis.estimators import FEstimator
 from prism.fep.io import read_ligand_from_prism, read_mol2_atoms, read_rtf_for_fep
@@ -41,6 +42,7 @@ __all__ = [
     "ITPBuilder",
     "FEP_PROD_MDP",
     "write_fep_mdps",
+    "FEPScaffoldBuilder",
     # Analysis
     "XVGParser",
     "FEstimator",

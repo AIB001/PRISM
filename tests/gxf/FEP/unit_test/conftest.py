@@ -7,10 +7,11 @@ from pathlib import Path
 
 def resolve_fep_case_dir(case_name: str) -> Path:
     """Resolve a case directory across the current test-data layout."""
+    test_root = Path(__file__).parent
     candidates = [
-        Path("tests/gxf/FEP/unit_test") / case_name,
-        Path("tests/gxf/FEP/test/hif2a") / case_name,
-        Path("tests/gxf/FEP/test") / case_name,
+        test_root / case_name,
+        test_root.parent / "hif2a" / case_name,
+        test_root.parent / case_name,
     ]
     for candidate in candidates:
         if candidate.exists():

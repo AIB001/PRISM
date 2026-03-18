@@ -39,7 +39,7 @@ def test_charmm_gui_to_prism_format_39_8():
     print("CHARMM-GUI → PRISM 格式转换测试：39-8 系统")
     print("=" * 70)
 
-    test_dir = Path("tests/gxf/FEP/unit_test/39-8")
+    test_dir = Path(__file__).parent / "39-8"
 
     # ============================================================
     # Step 1: 转换 Ligand 39

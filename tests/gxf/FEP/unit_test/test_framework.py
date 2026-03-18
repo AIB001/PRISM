@@ -187,6 +187,28 @@ class TestMethodNotImplemented:
         builder.write_itp(str(output))
         assert output.exists()
 
+    def test_charge_reception_does_not_change_mapping_categories(self):
+        """charge_reception should only affect redistribution, not atom classification."""
+        common_a = Atom("C1", "C", np.array([0.0, 0.0, 0.0]), 0.1, "ca", 1)
+        transformed_a = Atom("C2", "C", np.array([2.0, 0.0, 0.0]), -0.1, "ca", 2)
+
+        common_b = Atom("C1", "C", np.array([0.0, 0.0, 0.0]), 0.1, "ca", 1)
+
+        mapping_surround = DistanceAtomMapper(charge_reception="surround").map(
+            [common_a, transformed_a],
+            [common_b],
+        )
+        mapping_unique = DistanceAtomMapper(charge_reception="unique").map(
+            [
+                Atom("C1", "C", np.array([0.0, 0.0, 0.0]), 0.1, "ca", 1),
+                Atom("C2", "C", np.array([2.0, 0.0, 0.0]), -0.1, "ca", 2),
+            ],
+            [Atom("C1", "C", np.array([0.0, 0.0, 0.0]), 0.1, "ca", 1)],
+        )
+
+        assert [atom.name for atom in mapping_surround.transformed_a] == ["C2"]
+        assert [atom.name for atom in mapping_unique.transformed_a] == ["C2"]
+
     def test_xvg_parser_parse_not_implemented(self):
         """Test that XVGParser.parse raises NotImplementedError"""
         parser = XVGParser()

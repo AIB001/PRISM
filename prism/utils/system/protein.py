@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Protein processing utilities for SystemBuilder.
+"""
+
+import shutil
+from pathlib import Path
+
+
+class ProteinProcessorMixin:
+    """Mixin for protein-related operations."""
+
+    def _fix_protein(self, cleaned_protein: str) -> str:
+        """Fix missing atoms in protein using pdbfixer."""
+        print("\n  Step 1: Fixing protein with pdbfixer...")
+        fixed_pdb = self.model_dir / "fixed_clean_protein.pdb"
+
+        if fixed_pdb.exists() and not self.overwrite:
+            print(f"Fixed protein PDB already exists at {fixed_pdb}, skipping pdbfixer.")
+            return str(fixed_pdb)
+
+        # Check if pdbfixer is available
+        if not shutil.which("pdbfixer"):
+            print("Warning: pdbfixer command not found. Skipping protein fixing step.")
+            print("RECOMMENDED INSTALLATION:")
+            print("  mamba install -c conda-forge pdbfixer")
+            print("  # OR: conda install -c conda-forge pdbfixer")
+            shutil.copy(cleaned_protein, fixed_pdb)
+        else:
+            # Run pdbfixer to fix missing atoms
+            # Note: pdbfixer with --keep-heterogens=all will move metals to chain 'M'
+            # This is OK - we extract them from chain 'M' after pdb2gmx
+            command = [
+                "pdbfixer",
+                cleaned_protein,
+                "--add-residues",
+                "--output",
+                str(fixed_pdb),
+                "--add-atoms=heavy",
+                "--keep-heterogens=all",
+                f"--ph={self.config['simulation']['pH']}",
+            ]
+            self._run_command(command, str(self.model_dir.parent))
+
+        # Fix terminal atoms for GROMACS compatibility (OXT → O or OC1/OC2)
+        print("Fixing terminal atoms for GROMACS compatibility...")
+        from prism.utils.cleaner import fix_terminal_atoms
+
+        # Get force field name if available
+        ff_name = getattr(self, "ff_info", {}).get("name") if hasattr(self, "ff_info") and self.ff_info else None
+        fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), force_field=ff_name, verbose=True)
+
+        return str(fixed_pdb)
+
+    def _apply_propka_renaming(self, pdb_file: str):
+        """Apply PROPKA pKa-based histidine renaming to fixed PDB.
+
+        This must run AFTER pdbfixer (which may revert HIS names back to HIS)
+        and BEFORE _generate_topology / _rename_his_for_cmap.
+        """
+        from ..protonation import PropkaProtonator
+
+        ph = self.config.get("protonation", {}).get("ph", self.config.get("simulation", {}).get("pH", 7.0))
+
+        print(f"\n  Applying PROPKA pKa-based residue renaming (pH {ph})...")
+        protonator = PropkaProtonator(ph=ph, verbose=True)
+        stats = protonator.optimize_protein_protonation(pdb_file, pdb_file, ff_info=self.ff_info)
+
+        renamed = stats.get("renamed", {})
+        if renamed:
+            print(f"  PROPKA: Renamed {len(renamed)} residue(s):")
+            for (chain, resnum, resname), new_name in renamed.items():
+                chain_label = chain or "-"
+                print(f"    Chain {chain_label} Residue {resnum}: {resname} -> {new_name}")
+        else:
+            print("  PROPKA: No residues needed renaming")
+
+    def _rename_his_for_cmap(self, pdb_file: str, ff_info: dict) -> bool:
+        """Rename HIS → HISE in PDB for force fields with CMAP corrections.
+
+        GROMACS pdb2gmx keeps the original PDB residue name in the topology
+        even after selecting a specific protonation state (e.g. HIE).  For
+        force fields that use CMAP corrections (like amber19sb), the CMAP
+        type lookup is residue-name-dependent (e.g. XC-HIE, N-HIE), so
+        leaving the name as HIS causes 'Unknown cmap torsion' errors.
+
+        Renaming HIS → HISE in the PDB triggers the r2b mapping (HISE → HIE),
+        so pdb2gmx writes the correct residue name and skips the interactive
+        histidine protonation prompt.
+
+        Returns True if any residues were renamed.
+        """
+        if not ff_info or "path" not in ff_info:
+            return False
+
+        ff_dir = Path(ff_info["path"])
+        if not (ff_dir / "cmap.itp").exists():
+            return False
+
+        from ..protonation import default_histidine_name, get_ff_residue_names
+
+        ff_residues = get_ff_residue_names(ff_info)
+        if not ff_residues:
+            return False
+
+        target_name = default_histidine_name(ff_info)
+        # Only auto-rename for Amber-style histidines (HIE exists in rtp).
+        # For other force fields (e.g., CHARMM), keep interactive selection.
+        if target_name != "HIE":
+            return False
+
+        # Read and rename HIS → force-field default (neutral histidine)
+        # PDB format (0-indexed): positions 17-19 = residue name (3 chars).
+        # Replace "HIS" with the target name so pdb2gmx uses the correct rtp block
+        # and writes the residue name in the topology (avoids CMAP lookup errors).
+        with open(pdb_file, "r") as f:
+            lines = f.readlines()
+
+        renamed_residues = set()
+        new_lines = []
+        for line in lines:
+            if (line.startswith("ATOM") or line.startswith("HETATM")) and line[17:20] == "HIS" and line[20] == " ":
+                resnum = line[22:26].strip()
+                chain = line[21].strip()
+                res_id = f"{chain}:{resnum}" if chain else resnum
+                renamed_residues.add(res_id)
+                line = line[:17] + f"{target_name:3s}" + line[20:]
+            new_lines.append(line)
+
+        if renamed_residues:
+            with open(pdb_file, "w") as f:
+                f.writelines(new_lines)
+            print(f"  Renamed {len(renamed_residues)} HIS residue(s) → {target_name} for CMAP compatibility")
+            return True
+
+        return False

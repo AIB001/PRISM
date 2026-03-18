@@ -251,12 +251,6 @@ class DistanceAtomMapper:
         transformed_a = [atom for atom in ligand_a if atom.index not in matched_a_indices]
         transformed_b = [atom for atom in ligand_b if atom.index not in matched_b_indices]
 
-        # Apply charge_reception strategy
-        if self.charge_reception == "unique" and not self.recharge_hydrogen:
-            # Only hydrogens in transformed
-            transformed_a = [atom for atom in transformed_a if atom.name.startswith("H")]
-            transformed_b = [atom for atom in transformed_b if atom.name.startswith("H")]
-
         # Step 3: Identify surrounding atoms
         # (atoms with divergent types or charges)
         surrounding_a = []
