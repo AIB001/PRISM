@@ -1075,19 +1075,33 @@ fi
             mapping = mapper.map(ref_atoms, mut_atoms)
 
             # Build hybrid topology
-            hybrid_builder = HybridTopologyBuilder(
-                mapping=mapping,
-                ref_itp_path=os.path.join(ref_ff_dir, "LIG.itp"),
-                mut_itp_path=os.path.join(mut_ff_dir, "LIG.itp"),
-                charge_strategy=self.charge_strategy,
-            )
+            hybrid_builder = HybridTopologyBuilder(charge_strategy=self.charge_strategy)
 
-            hybrid_atoms, hybrid_params = hybrid_builder.build()
+            # Read ITP parameters for hybrid topology building
+            from pathlib import Path
 
-            # Generate hybrid ITP file
-            itp_builder = ITPBuilder(hybrid_atoms, hybrid_params)
+            ref_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(ref_ff_dir, "LIG.itp")).read_text())
+            mut_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(mut_ff_dir, "LIG.itp")).read_text())
+
+            params_a = {"masses": {}, "bonds": ref_itp_data["sections"].get("bonds", [])}
+            params_b = {"masses": {}, "bonds": mut_itp_data["sections"].get("bonds", [])}
+
+            hybrid_atoms = hybrid_builder.build(mapping, params_a, params_b, ref_atoms, mut_atoms)
+
+            # Build hybrid bonded parameters from source ITPs
+            # First write a temporary atoms-only ITP
+            temp_itp = os.path.join(hybrid_output, "hybrid_atoms_temp.itp")
+            ITPBuilder(hybrid_atoms, {}).write_itp(temp_itp, molecule_name="HYB")
+
+            # Then build complete hybrid ITP with bonded terms
             hybrid_itp = os.path.join(hybrid_output, "hybrid.itp")
-            itp_builder.write_itp(hybrid_itp, molecule_name="HYB")
+            hybrid_params = ITPBuilder.write_complete_hybrid_itp(
+                output_path=hybrid_itp,
+                hybrid_itp=temp_itp,
+                ligand_a_itp=os.path.join(ref_ff_dir, "LIG.itp"),
+                ligand_b_itp=os.path.join(mut_ff_dir, "LIG.itp"),
+                molecule_name="HYB",
+            )
 
             print_success(f"Hybrid topology: {hybrid_itp}")
 
