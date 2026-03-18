@@ -110,3 +110,4 @@ tests/*
 .playwright*
 .history
 
+prism/*/*.backup

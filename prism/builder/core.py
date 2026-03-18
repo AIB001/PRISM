@@ -1033,11 +1033,16 @@ fi
             bound_system_dir = os.path.join(bound_output, "GMX_PROLIG_MD")
             print_success(f"Bound system built: {bound_system_dir}")
 
-            # Phase 2: Build unbound system (ligand only)
+            # Phase 2: Build unbound system (ligand only) with same box size as bound
             print_step(2, 5, "Building unbound system (ligand in water)")
             unbound_output = os.path.join(self.output_dir, "unbound_md")
 
-            self._build_standard_system(unbound_output, use_protein=False)
+            # Read bound system box size
+            bound_conf = os.path.join(bound_system_dir, "solv_ions.gro")
+            box_size = self._read_box_size(bound_conf)
+            print(f"  Using bound system box size: {box_size[0]:.3f} x {box_size[1]:.3f} x {box_size[2]:.3f} nm")
+
+            self._build_standard_system(unbound_output, use_protein=False, box_size=box_size)
             unbound_system_dir = os.path.join(unbound_output, "GMX_PROLIG_MD")
             print_success(f"Unbound system built: {unbound_system_dir}")
 
@@ -1109,7 +1114,9 @@ fi
             print_step(4, 5, "Creating FEP scaffold with complete systems")
 
             fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
-            fep_builder = FEPScaffoldBuilder(output_dir=fep_output, lambda_windows=self.lambda_windows, overwrite=True)
+            fep_builder = FEPScaffoldBuilder(
+                output_dir=fep_output, lambda_windows=self.lambda_windows, config=self.config, overwrite=True
+            )
 
             layout = fep_builder.build_from_components(
                 receptor_pdb=self.protein_path,
@@ -1144,7 +1151,14 @@ fi
             traceback.print_exc()
             raise
 
-    def _build_standard_system(self, output_dir: str, use_protein: bool):
+    def _read_box_size(self, gro_file: str) -> tuple:
+        """Read box size from GRO file last line"""
+        with open(gro_file, "r") as f:
+            lines = f.readlines()
+            box_line = lines[-1].strip().split()
+            return tuple(float(x) for x in box_line[:3])
+
+    def _build_standard_system(self, output_dir: str, use_protein: bool, box_size: tuple = None):
         """Build standard MD system (bound or unbound)"""
         os.makedirs(output_dir, exist_ok=True)
 
@@ -1168,7 +1182,7 @@ fi
             self.run_normal()
         else:
             # Ligand-only system: skip protein processing
-            self._build_ligand_only_system(output_dir)
+            self._build_ligand_only_system(output_dir, box_size=box_size)
 
         # Restore
         self.fep_mode = original_fep
@@ -1178,8 +1192,17 @@ fi
         self.system_builder.model_dir = Path(original_output) / "GMX_PROLIG_MD"
         self.mdp_generator.output_dir = original_output
 
-    def _build_ligand_only_system(self, output_dir: str):
-        """Build ligand-only system (no protein) for unbound FEP leg"""
+    def _build_ligand_only_system(self, output_dir: str, box_size: tuple = None):
+        """Build ligand-only system (no protein) for unbound FEP leg
+
+        Parameters
+        ----------
+        output_dir : str
+            Output directory for the system
+        box_size : tuple, optional
+            Box size (x, y, z) in nm. If provided, uses this exact box size.
+            If None, uses box_distance parameter to create box around ligand.
+        """
         from pathlib import Path
         import shutil
 
@@ -1234,24 +1257,47 @@ fi
         # Step 6: Create box
         print_step(3, 5, "Creating simulation box")
         boxed_gro = model_dir / "lig_newbox.gro"
-        box_distance = self.config.get("system", {}).get("box_distance", 1.5)
 
-        self.system_builder._run_command(
-            [
-                self.system_builder.gmx_command,
-                "editconf",
-                "-f",
-                str(model_dir / "lig.gro"),
-                "-o",
-                str(boxed_gro),
-                "-bt",
-                "cubic",
-                "-d",
-                str(box_distance),
-                "-c",
-            ],
-            work_dir=str(model_dir),
-        )
+        if box_size:
+            # Use specified box size (for matching bound system)
+            print(f"  Using specified box size: {box_size[0]:.3f} x {box_size[1]:.3f} x {box_size[2]:.3f} nm")
+            self.system_builder._run_command(
+                [
+                    self.system_builder.gmx_command,
+                    "editconf",
+                    "-f",
+                    str(model_dir / "lig.gro"),
+                    "-o",
+                    str(boxed_gro),
+                    "-bt",
+                    "cubic",
+                    "-box",
+                    str(box_size[0]),
+                    str(box_size[1]),
+                    str(box_size[2]),
+                    "-c",
+                ],
+                work_dir=str(model_dir),
+            )
+        else:
+            # Use box_distance parameter (default behavior)
+            box_distance = self.config.get("system", {}).get("box_distance", 1.5)
+            self.system_builder._run_command(
+                [
+                    self.system_builder.gmx_command,
+                    "editconf",
+                    "-f",
+                    str(model_dir / "lig.gro"),
+                    "-o",
+                    str(boxed_gro),
+                    "-bt",
+                    "cubic",
+                    "-d",
+                    str(box_distance),
+                    "-c",
+                ],
+                work_dir=str(model_dir),
+            )
 
         # Step 7: Solvate
         print_step(4, 5, "Solvating system")

@@ -158,6 +158,40 @@ class FEPScaffoldBuilder:
         else:
             self._write_unbound_leg(layout, ligand_seed_pdb)
 
+        # Generate MDP files for both legs
+        print(f"\n{'='*70}")
+        print("Generating MDP files for FEP legs")
+        print(f"{'='*70}")
+        print(f"  Lambda strategy: {self.lambda_strategy}")
+        print(f"  Lambda windows: {self.lambda_windows}")
+        print(f"  Bound MDP dir: {layout.bound_dir / 'mdps'}")
+        print(f"  Unbound MDP dir: {layout.unbound_dir / 'mdps'}")
+
+        write_fep_mdps(
+            output_dir=str(layout.bound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="bound",
+        )
+        print(f"  ✓ Bound MDP files generated")
+
+        write_fep_mdps(
+            output_dir=str(layout.unbound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="unbound",
+        )
+        print(f"  ✓ Unbound MDP files generated")
+        print(f"{'='*70}\n")
+
+        # Generate run scripts
+        self._write_fep_run_script(layout.bound_dir, "bound")
+        self._write_fep_run_script(layout.unbound_dir, "unbound")
+
         self._write_root_scripts(layout)
         self._write_manifest(
             layout,
@@ -303,8 +337,8 @@ class FEPScaffoldBuilder:
             bound_input / "complex_seed.pdb",
         )
 
-        # NEW: Build complete system (protein + hybrid ligand + water + ions)
-        self._build_complete_system("bound", layout, receptor_path)
+        # Note: This creates a placeholder. Use build_from_components() with PRISM-built systems for complete setup.
+        self._create_placeholder_system("bound", layout, receptor_path)
 
         write_fep_mdps(
             output_dir=str(layout.bound_dir / "mdps"),
@@ -320,8 +354,8 @@ class FEPScaffoldBuilder:
         unbound_input = layout.unbound_dir / "input"
         shutil.copy2(ligand_seed_pdb, unbound_input / "ligand_seed.pdb")
 
-        # NEW: Build complete system (hybrid ligand + water + ions)
-        self._build_complete_system("unbound", layout, protein_path=None)
+        # Note: This creates a placeholder. Use build_from_components() with PRISM-built systems for complete setup.
+        self._create_placeholder_system("unbound", layout, protein_path=None)
 
         write_fep_mdps(
             output_dir=str(layout.unbound_dir / "mdps"),
@@ -806,15 +840,41 @@ Hybrid ligand package
         # Copy bound system
         self._copy_prism_system_to_leg(Path(bound_system_dir), layout.bound_dir, "bound")
 
-        # Copy or create unbound system
+        # Copy unbound system
         if unbound_system_dir:
             self._copy_prism_system_to_leg(Path(unbound_system_dir), layout.unbound_dir, "unbound")
         else:
-            # Create placeholder for unbound
-            self._build_complete_system("unbound", layout, None)
+            raise ValueError("unbound_system_dir is required - build it first with PRISMBuilder")
 
-        # Generate MDP files
-        self._write_mdp_files(layout)
+        # Generate MDP files for both legs
+        print(f"\n{'='*70}")
+        print("Generating MDP files for FEP legs")
+        print(f"{'='*70}")
+        print(f"  Lambda strategy: {self.lambda_strategy}")
+        print(f"  Lambda windows: {self.lambda_windows}")
+        print(f"  Bound MDP dir: {layout.bound_dir / 'mdps'}")
+        print(f"  Unbound MDP dir: {layout.unbound_dir / 'mdps'}")
+
+        write_fep_mdps(
+            output_dir=str(layout.bound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="bound",
+        )
+        print(f"  ✓ Bound MDP files generated")
+
+        write_fep_mdps(
+            output_dir=str(layout.unbound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="unbound",
+        )
+        print(f"  ✓ Unbound MDP files generated")
+        print(f"{'='*70}\n")
 
         # Generate run scripts
         self._write_fep_run_script(layout.bound_dir, "bound")
@@ -871,53 +931,9 @@ Hybrid ligand package
         # Pattern: #include "path/to/LIG.itp" or similar
         import re
 
-        content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/LIG.itp"', content)
+        content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/hybrid.itp"', content)
 
         target_top.write_text(content)
-
-        """
-        Prepare FEP system by copying from pre-built PRISM system.
-
-        WORKFLOW:
-        1. User builds standard MD system with PRISM first:
-           prism protein.pdb ref_ligand.mol2 -o bound_md -lff gaff2
-        2. FEP tool copies system files and replaces ligand with hybrid
-
-        For now, creates placeholder. Full automation requires:
-        - Pre-built PRISM system directory as input
-        - Ligand replacement in coordinates and topology
-
-        Parameters:
-        -----------
-        leg_name : str
-            "bound" or "unbound"
-        layout : FEPScaffoldLayout
-            Scaffold layout with directories
-        protein_path : Optional[Path]
-            Path to protein PDB (None for unbound leg)
-        """
-        leg_dir = layout.bound_dir if leg_name == "bound" else layout.unbound_dir
-
-        # Create placeholder conf.gro (just the hybrid ligand for now)
-        # Users should replace this with their PRISM-built system
-        hybrid_gro = layout.hybrid_dir / self.hybrid_gro_filename
-        if hybrid_gro.exists():
-            shutil.copy2(hybrid_gro, leg_dir / "input" / "conf.gro")
-
-        # Write topology template
-        if leg_name == "bound":
-            self._write_bound_topology_template(leg_dir / "topol.top")
-        else:
-            self._write_unbound_topology(leg_dir / "topol.top")
-
-        print(f"\n{'='*70}")
-        print(f"⚠ {leg_name.capitalize()} leg: Placeholder system created")
-        print(f"{'='*70}")
-        print(f"To complete the system, build with PRISM first:")
-        print(f"  1. prism protein.pdb ref_ligand.mol2 -o {leg_name}_md -lff gaff2")
-        print(f"  2. cp {leg_name}_md/GMX_PROLIG_MD/solv_ions.gro {leg_dir}/input/conf.gro")
-        print(f"  3. Update topology to use hybrid ligand")
-        print(f"{'='*70}\n")
 
     def _prepare_protein_for_system_builder(self, protein_path: Path, leg_dir: Path) -> Path:
         """Prepare protein PDB for system builder"""

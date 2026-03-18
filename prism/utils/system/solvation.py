@@ -5,6 +5,8 @@
 Solvation and ion addition utilities for SystemBuilder.
 """
 
+import subprocess
+
 
 class SolvationProcessorMixin:
     """Mixin for solvation and ion addition operations."""
