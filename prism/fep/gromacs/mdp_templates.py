@@ -146,12 +146,20 @@ def write_fep_mdps(
 
     # Get simulation parameters (use FEP config if provided, otherwise PRISM defaults)
     sim_cfg = config.get("simulation", {})
+    fep_cfg = config.get("fep", {})
+
+    # Temperature and pressure
     temp = sim_cfg.get("temperature", prism_config.get("md", {}).get("temperature", 310))
     pressure = sim_cfg.get("pressure", prism_config.get("md", {}).get("pressure", 1.0))
     dt = sim_cfg.get("dt", prism_config.get("md", {}).get("dt", 0.002))
+
+    # Equilibration times
     nvt_ps = sim_cfg.get("equilibration_nvt_time_ps", 500)
     npt_ps = sim_cfg.get("equilibration_npt_time_ps", 500)
-    prod_ns = sim_cfg.get("production_time_ns", 5)
+    npt_short_ps = sim_cfg.get("per_window_npt_time_ps", fep_cfg.get("per_window_npt_time_ps", 100))
+
+    # Production time - check both fep and simulation sections
+    prod_ns = fep_cfg.get("production_time_ns", sim_cfg.get("production_time_ns", 5))
 
     # Get electrostatics and VDW parameters from PRISM config
     elec_cfg = prism_config.get("electrostatics", {})
@@ -341,8 +349,7 @@ constraint-algorithm    = {constraints_algorithm}
 """
     (output_path / "npt.mdp").write_text(npt_mdp)
 
-    # Generate NPT Short MDP for per-window equilibration (50-100 ps)
-    npt_short_ps = sim_cfg.get("per_window_npt_time_ps", 100)
+    # Generate NPT Short MDP for per-window equilibration
     npt_short_mdp = f"""; {leg_name} NPT Short - Per-Window NPT Equilibration
 define              = -DPOSRES
 integrator          = md

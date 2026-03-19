@@ -77,12 +77,12 @@ class ProteinProcessorMixin:
         """
         # AMBER to GROMACS histidine name mapping
         his_mapping = {
-            'HSD': 'HID',  # δ-protonated histidine
-            'HSE': 'HIE',  # ε-protonated histidine
-            'HSP': 'HIP',  # doubly protonated histidine
+            "HSD": "HID",  # δ-protonated histidine
+            "HSE": "HIE",  # ε-protonated histidine
+            "HSP": "HIP",  # doubly protonated histidine
         }
 
-        with open(pdb_file, 'r') as f:
+        with open(pdb_file, "r") as f:
             lines = f.readlines()
 
         # Track conversion statistics
@@ -90,7 +90,7 @@ class ProteinProcessorMixin:
         new_lines = []
 
         for line in lines:
-            if (line.startswith("ATOM") or line.startswith("HETATM")):
+            if line.startswith("ATOM") or line.startswith("HETATM"):
                 # PDB format: positions 17-20 (index 17:21) contain residue name
                 # But we need to be careful with whitespace
                 if len(line) >= 20:
@@ -104,7 +104,7 @@ class ProteinProcessorMixin:
             new_lines.append(line)
 
         # Write back
-        with open(pdb_file, 'w') as f:
+        with open(pdb_file, "w") as f:
             f.writelines(new_lines)
 
         # Report conversions
