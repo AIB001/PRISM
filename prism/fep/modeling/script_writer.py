@@ -25,6 +25,7 @@ WARNING: Results obtained with PRISM_MDRUN_NSTEPS set are NOT valid for publicat
 """
 
 from pathlib import Path
+from typing import Optional
 
 
 def write_root_scripts(layout) -> None:
@@ -65,7 +66,7 @@ def write_root_scripts(layout) -> None:
     submit_all_script.chmod(0o755)
 
 
-def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
+def write_fep_run_script(leg_dir: Path, leg_name: str, config: Optional[dict] = None) -> None:
     """
     Generate localrun.sh script for FEP calculations.
 
@@ -75,12 +76,23 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         Path to the leg directory (bound or unbound)
     leg_name : str
         Name of the leg ('bound' or 'unbound')
+    config : dict, optional
+        Configuration dictionary with GPU settings
     """
+    # Get GPU settings from config (default to GPU enabled for backward compatibility)
+    config = config or {}
+    exec_config = config.get("execution", {})
+    use_gpu_pme = exec_config.get("use_gpu_pme", True)
+
+    # Build GPU PME flag for mdrun commands
+    pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
+
     script_path = leg_dir / "localrun.sh"
 
     with open(script_path, "w") as f:
         # Script header with environment variable support
         f.write("#!/usr/bin/env bash\n")
+        f.write("# GPU PME: " + ("enabled" if use_gpu_pme else "disabled (CPU PME for small systems)") + "\n")
         f.write("set -euo pipefail\n\n")
         f.write('LEG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n')
         f.write('MDP_DIR="${LEG_DIR}/mdps"\n')
@@ -123,7 +135,9 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         # Validate EM convergence
         f.write("# Check EM convergence\n")
         f.write("if [ -f ${BUILD_DIR}/em.log ]; then\n")
-        f.write('    max_force=$(grep "Maximum force" ${BUILD_DIR}/em.log | tail -1 | awk "{print \\$4}")\n')
+        f.write(
+            '    max_force=$(grep -E "Maximum force|Fmax=" ${BUILD_DIR}/em.log | tail -1 | grep -oE "[0-9]+\\.?[0-9]*e[+-][0-9]+" | tail -1 || true)\n'
+        )
         f.write('    if [ -n "$max_force" ]; then\n')
         f.write('        echo "EM final max force: $max_force kJ/mol/nm"\n')
         f.write("        # Warning if force is still high (> 1000 kJ/mol/nm)\n")
@@ -145,7 +159,9 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         f.write(
             "    gmx grompp -f ${MDP_DIR}/nvt.mdp -c ${BUILD_DIR}/em.gro -r ${BUILD_DIR}/em.gro -p topol.top -o ${BUILD_DIR}/nvt.tpr -maxwarn 2\n"
         )
-        f.write("    gmx mdrun -deffnm ${BUILD_DIR}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v || ")
+        f.write(
+            f"    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
+        )
         f.write("gmx mdrun -deffnm ${BUILD_DIR}/nvt -ntmpi 1 -ntomp 10 -v\n")
         f.write("fi\n\n")
 
@@ -166,7 +182,9 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         f.write(
             "        gmx grompp -f ${MDP_DIR}/npt.mdp -c ${BUILD_DIR}/nvt.gro -r ${BUILD_DIR}/nvt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o ${BUILD_DIR}/npt.tpr -maxwarn 2\n"
         )
-        f.write("        gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v || ")
+        f.write(
+            f"        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
+        )
         f.write("gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 10 -v\n")
         f.write("    fi\n")
         f.write("else\n")
@@ -174,7 +192,9 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         f.write(
             "    gmx grompp -f ${MDP_DIR}/npt.mdp -c ${BUILD_DIR}/nvt.gro -r ${BUILD_DIR}/nvt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o ${BUILD_DIR}/npt.tpr -maxwarn 2\n"
         )
-        f.write("    gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v || ")
+        f.write(
+            f"    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
+        )
         f.write("gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 10 -v\n")
         f.write("fi\n\n")
 
@@ -197,10 +217,10 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
         f.write("    else\n")
         f.write('        echo "  ${lambda_name}: starting NPT short equilibration"\n')
         f.write(
-            '        gmx grompp -f ${MDP_DIR}/npt_short.mdp -c ${BUILD_DIR}/npt.gro -r ${BUILD_DIR}/npt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o "${window_dir}/npt_short.tpr" -maxwarn 2\n'
+            '        gmx grompp -f ${MDP_DIR}/npt_short_${lambda_idx}.mdp -c ${BUILD_DIR}/npt.gro -r ${BUILD_DIR}/npt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o "${window_dir}/npt_short.tpr" -maxwarn 2\n'
         )
         f.write(
-            '        gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${MDRUN_NSTEPS_ARG} || '
+            f'        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
         )
         f.write('gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
         f.write("    fi\n\n")
@@ -216,7 +236,7 @@ def write_fep_run_script(leg_dir: Path, leg_name: str) -> None:
             '        gmx grompp -f ${lambda_mdp} -c "${window_dir}/npt_short.gro" -p topol.top -o "${window_dir}/prod.tpr" -maxwarn 2\n'
         )
         f.write(
-            '        gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${MDRUN_NSTEPS_ARG} || '
+            f'        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
         )
         f.write('gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
         f.write("    fi\n")

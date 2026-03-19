@@ -333,7 +333,7 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="bound",
         )
-        script_writer.write_fep_run_script(layout.bound_dir, "bound")
+        script_writer.write_fep_run_script(layout.bound_dir, "bound", self.config)
         script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg(self, layout: FEPScaffoldLayout, ligand_seed_pdb: Path) -> None:
@@ -352,7 +352,7 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="unbound",
         )
-        script_writer.write_fep_run_script(layout.unbound_dir, "unbound")
+        script_writer.write_fep_run_script(layout.unbound_dir, "unbound", self.config)
         script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
 
     def _write_bound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
@@ -367,7 +367,7 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="bound",
         )
-        script_writer.write_fep_run_script(layout.bound_dir, "bound")
+        script_writer.write_fep_run_script(layout.bound_dir, "bound", self.config)
         script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
@@ -382,12 +382,24 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="unbound",
         )
-        script_writer.write_fep_run_script(layout.unbound_dir, "unbound")
+        script_writer.write_fep_run_script(layout.unbound_dir, "unbound", self.config)
         script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
 
     def _create_placeholder_system(
-        self, leg_name: str, layout: FEPScaffoldLayout, protein_path: Optional[Path]
+        self, leg_name: str, layout: FEPScaffoldLayout, protein_path: Optional[Path] | None = None
     ) -> None:
+        """Create placeholder topology and coordinate files.
+
+        Parameters
+        ----------
+        leg_name : str
+            Name of the leg ('bound' or 'unbound')
+        layout : FEPScaffoldLayout
+            Scaffold layout
+        protein_path : Optional[Path]
+            Not used in placeholder creation (kept for API compatibility)
+        """
+        _ = protein_path  # Mark as intentionally unused for compatibility
         """Create placeholder topology and coordinate files."""
         leg_dir = layout.bound_dir if leg_name == "bound" else layout.unbound_dir
 

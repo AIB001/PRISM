@@ -55,9 +55,13 @@ sc-coul                  = yes
 ; Nonbonded settings
 cutoff-scheme   = Verlet
 ns_type         = grid
-nstlist         = 10
+nstlist         = 200  ; Optimized for multi-GPU with PME (GROMACS docs: 200-300)
 rcoulomb        = {rcoulomb}
 rvdw            = {rvdw}
+table-extension = 2.0
+
+; For dual-topology FEP, state A and state B atoms can have large separations.
+; The table extension ensures the lookup table covers these long-range interactions.
 
 ; Temperature coupling
 tcoupl          = {tcoupl}
@@ -85,8 +89,12 @@ DispCorr        = EnerPres
 pbc             = xyz
 
 ; Constraints
+; For hybrid topologies, use standard constraints with increased LINCS accuracy
 constraints             = {constraints_type}
 constraint-algorithm    = {constraints_algorithm}
+lincs-order             = 6
+lincs-iter              = 2
+lincs-warnangle         = 30
 """
 
 
@@ -195,7 +203,8 @@ def write_fep_mdps(
     (output_path / "lambda_schedule.json").write_text(json.dumps(schedule, indent=2) + "\n")
 
     # Generate EM MDP (same as PRISM standard)
-    em_config = prism_config.get("energy_minimization", {})
+    # Support both "energy_minimization" and "simulation" config keys
+    em_config = prism_config.get("energy_minimization", prism_config.get("simulation", {}))
     em_mdp = f"""; {leg_name} EM - Energy Minimization
 integrator      = {em_config.get('integrator', 'steep')}
 emtol           = {em_config.get('emtol', 1000.0)}
@@ -214,6 +223,10 @@ ns_type         = grid
 nstlist         = 10
 rcoulomb        = {rcoulomb}
 rvdw            = {rvdw}
+table-extension = 2.0
+
+; For dual-topology FEP, state A and state B atoms can have large separations.
+; The table extension ensures the lookup table covers these long-range interactions.
 
 ; Electrostatics
 coulombtype     = {coulombtype}
@@ -232,8 +245,10 @@ pcoupl          = no
 pbc             = xyz
 
 ; Constraints
-constraints             = {constraints_type}
-constraint-algorithm    = {constraints_algorithm}
+; For FEP hybrid topologies, constraints are disabled during EM because
+; overlapping dual-topology atoms (state A and state B) cause LINCS failures.
+; Energy minimization with bonded parameters will resolve the geometry.
+constraints             = none
 """
     (output_path / "em.mdp").write_text(em_mdp)
 
@@ -256,9 +271,13 @@ nstxout-compressed  = 0
 ; Neighbor searching
 cutoff-scheme       = Verlet
 ns_type             = grid
-nstlist             = 10
+nstlist             = 80  ; Increased from 10 for better GPU efficiency (reduces CPU-GPU sync)
 rcoulomb            = {rcoulomb}
 rvdw                = {rvdw}
+table-extension     = 2.0
+
+; For dual-topology FEP, state A and state B atoms can have large separations.
+; The table extension ensures the lookup table covers these long-range interactions.
 
 ; Electrostatics
 coulombtype         = {coulombtype}
@@ -287,8 +306,12 @@ gen_temp            = {temp}
 gen_seed            = -1
 
 ; Constraints
+; For hybrid topologies, use standard constraints with increased LINCS accuracy
 constraints             = {constraints_type}
 constraint-algorithm    = {constraints_algorithm}
+lincs-order             = 6
+lincs-iter              = 2
+lincs-warnangle         = 30
 """
     (output_path / "nvt.mdp").write_text(nvt_mdp)
 
@@ -311,9 +334,13 @@ nstxout-compressed  = 0
 ; Neighbor searching
 cutoff-scheme       = Verlet
 ns_type             = grid
-nstlist             = 10
+nstlist             = 80  ; Increased from 10 for better GPU efficiency (reduces CPU-GPU sync)
 rcoulomb            = {rcoulomb}
 rvdw                = {rvdw}
+table-extension     = 2.0
+
+; For dual-topology FEP, state A and state B atoms can have large separations.
+; The table extension ensures the lookup table covers these long-range interactions.
 
 ; Electrostatics
 coulombtype         = {coulombtype}
@@ -344,17 +371,37 @@ pbc                 = xyz
 gen_vel             = no
 
 ; Constraints
+; For hybrid topologies, use standard constraints with increased LINCS accuracy
 constraints             = {constraints_type}
 constraint-algorithm    = {constraints_algorithm}
+lincs-order             = 6
+lincs-iter              = 2
+lincs-warnangle         = 30
 """
     (output_path / "npt.mdp").write_text(npt_mdp)
 
-    # Generate NPT Short MDP for per-window equilibration
-    npt_short_mdp = f"""; {leg_name} NPT Short - Per-Window NPT Equilibration
+    # NOTE: NPT short MDPs are now generated per-window below (after lambda schedule is defined)
+    # to include lambda-specific parameters for each window
+
+    lambda_values = schedule["fep_lambdas"].split()
+    prod_steps = int(prod_ns * 1000 / dt)
+
+    # Get common MD parameters from PRISM config
+    md_config = prism_config.get("md", {})
+    tcoupl = md_config.get("tcoupl", "V-rescale")
+    tau_t = md_config.get("tau_t", 0.5)
+    pcoupl = md_config.get("pcoupl", "Parrinello-Rahman")
+    pcoupltype = md_config.get("pcoupltype", "isotropic")
+    tau_p = md_config.get("tau_p", 2.0)
+    compressibility = md_config.get("compressibility", 4.5e-5)
+
+    # Generate per-window NPT short MDPs with lambda-specific parameters
+    for index, lambda_value in enumerate(lambda_values):
+        npt_short_mdp = f"""; {leg_name} NPT Short - Per-Window NPT Equilibration (Window {index:02d})
 define              = -DPOSRES
 integrator          = md
-dt                  = {dt}
-nsteps              = {int(npt_short_ps / dt)}
+dt                  = 0.001  ; Reduced timestep for stability at intermediate lambda states
+nsteps              = {int(npt_short_ps / 0.001)}
 
 ; Output control
 nstxout             = 0
@@ -364,12 +411,40 @@ nstlog              = {log_interval}
 nstenergy           = {energy_interval}
 nstxout-compressed  = 0
 
+; Free energy parameters
+free-energy              = yes
+init-lambda-state        = {index}
+delta-lambda             = 0
+calc-lambda-neighbors    = -1
+nstdhdl                  = 100
+separate-dhdl-file       = yes
+
+; Lambda schedules (strategy: {schedule['strategy']})
+coul-lambdas             = {schedule['coul_lambdas']}
+vdw-lambdas              = {schedule['vdw_lambdas']}
+bonded-lambdas           = {schedule['bonded_lambdas']}
+mass-lambdas             = {schedule['mass_lambdas']}
+
+; Soft-core parameters (avoid singularities)
+; Increased sc-sigma for smoother VDW transformation and reduced clashes at intermediate lambda
+sc-alpha                 = 0.5
+sc-power                 = 1
+sc-sigma                 = 0.5
+sc-coul                  = yes
+
+; NOTE: couple-moltype is NOT used because the hybrid topology
+; already defines typeB/chargeB in the ITP file
+
 ; Neighbor searching
 cutoff-scheme       = Verlet
 ns_type             = grid
-nstlist             = 10
+nstlist             = 80  ; Increased from 10 for better GPU efficiency (reduces CPU-GPU sync)
 rcoulomb            = {rcoulomb}
 rvdw                = {rvdw}
+table-extension     = 2.0
+
+; For dual-topology FEP, state A and state B atoms can have large separations.
+; The table extension ensures the lookup table covers these long-range interactions.
 
 ; Electrostatics
 coulombtype         = {coulombtype}
@@ -381,17 +456,18 @@ vdwtype             = Cut-off
 DispCorr            = EnerPres
 
 ; Temperature coupling
-tcoupl              = {npt_config.get('tcoupl', 'V-rescale')}
+tcoupl              = {tcoupl}
 tc-grps             = System
-tau_t               = {npt_config.get('tau_t', 0.1)}
+tau_t               = {tau_t}
 ref_t               = {temp}
 
 ; Pressure coupling
-pcoupl              = {npt_config.get('pcoupl', 'C-rescale')}
-pcoupltype          = {npt_config.get('pcoupltype', 'isotropic')}
-tau_p               = {npt_config.get('tau_p', 2.0)}
+; Use C-rescale for stability during per-window NPT short at intermediate lambda states
+pcoupl              = C-rescale
+pcoupltype          = isotropic
+tau_p               = 1.0
 ref_p               = {pressure}
-compressibility     = {npt_config.get('compressibility', 4.5e-5)}
+compressibility     = {compressibility}
 
 ; Periodic boundary conditions
 pbc                 = xyz
@@ -400,23 +476,18 @@ pbc                 = xyz
 gen_vel             = no
 
 ; Constraints
+; For hybrid topologies, use standard constraints with increased LINCS accuracy
 constraints             = {constraints_type}
 constraint-algorithm    = {constraints_algorithm}
+lincs-order             = 6
+lincs-iter              = 2
+lincs-warnangle         = 30
+
+; Lambda window {index}: nominal lambda = {lambda_value}
 """
-    (output_path / "npt_short.mdp").write_text(npt_short_mdp)
+        (output_path / f"npt_short_{index:02d}.mdp").write_text(npt_short_mdp)
 
-    lambda_values = schedule["fep_lambdas"].split()
-    prod_steps = int(prod_ns * 1000 / dt)
-
-    # Get production MD parameters from PRISM config
-    md_config = prism_config.get("md", {})
-    tcoupl = md_config.get("tcoupl", "V-rescale")
-    tau_t = md_config.get("tau_t", 0.5)
-    pcoupl = md_config.get("pcoupl", "Parrinello-Rahman")
-    pcoupltype = md_config.get("pcoupltype", "isotropic")
-    tau_p = md_config.get("tau_p", 2.0)
-    compressibility = md_config.get("compressibility", 4.5e-5)
-
+    # Generate production MDPs for each lambda window
     for index, lambda_value in enumerate(lambda_values):
         prod_mdp = FEP_PROD_MDP.format(
             date="generated",
