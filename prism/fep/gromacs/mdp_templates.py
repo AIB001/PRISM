@@ -55,7 +55,7 @@ sc-coul                  = yes
 ; Nonbonded settings
 cutoff-scheme   = Verlet
 ns_type         = grid
-nstlist         = 200  ; Optimized for multi-GPU with PME (GROMACS docs: 200-300)
+nstlist         = 20   ; GPU-optimized (GROMACS auto-tunes this upward as needed)
 rcoulomb        = {rcoulomb}
 rvdw            = {rvdw}
 table-extension = 2.0
