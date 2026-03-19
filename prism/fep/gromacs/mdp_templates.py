@@ -192,7 +192,7 @@ def write_fep_mdps(
 integrator      = {em_config.get('integrator', 'steep')}
 emtol           = {em_config.get('emtol', 1000.0)}
 emstep          = {em_config.get('emstep', 0.01)}
-nsteps          = {em_config.get('nsteps', 50000)}
+nsteps          = 100000
 
 ; Output control
 nstxout         = 500
@@ -325,7 +325,7 @@ ref_t               = {temp}
 ; Pressure coupling
 pcoupl              = {npt_config.get('pcoupl', 'C-rescale')}
 pcoupltype          = {npt_config.get('pcoupltype', 'isotropic')}
-tau_p               = {npt_config.get('tau_p', 1.0)}
+tau_p               = {npt_config.get('tau_p', 2.0)}
 ref_p               = {pressure}
 compressibility     = {npt_config.get('compressibility', 4.5e-5)}
 
@@ -382,7 +382,7 @@ ref_t               = {temp}
 ; Pressure coupling
 pcoupl              = {npt_config.get('pcoupl', 'C-rescale')}
 pcoupltype          = {npt_config.get('pcoupltype', 'isotropic')}
-tau_p               = {npt_config.get('tau_p', 1.0)}
+tau_p               = {npt_config.get('tau_p', 2.0)}
 ref_p               = {pressure}
 compressibility     = {npt_config.get('compressibility', 4.5e-5)}
 

@@ -111,5 +111,6 @@ tests/*
 .history
 
 prism/*/*.backup
+prism/*/*/*.backup
 .mcp.json
 .serena

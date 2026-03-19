@@ -4,10 +4,10 @@
 """
 Scaffold builders for PRISM-FEP modeling workflows.
 
-This module does not run the full alchemical system build yet. It stages the
-directory layout, hybrid ligand assets, seed coordinate files, topology
-templates, and per-leg MDP files so the later full integration can plug into a
-stable on-disk structure.
+This module orchestrates FEP scaffold building by delegating to specialized builders:
+- HybridPackageBuilder: hybrid ligand force field assembly
+- LegWriter: bound/unbound leg directory writing and topology management
+- script_writer: shell script and SLURM submission script generation
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
-from prism.fep.gromacs.itp_builder import ITPBuilder
 from prism.fep.gromacs.mdp_templates import write_fep_mdps
+from prism.fep.modeling.hybrid_package import HybridPackageBuilder
+from prism.fep.modeling.leg_writer import LegWriter
+from prism.fep.modeling import script_writer
 
 
 @dataclass
@@ -62,6 +64,12 @@ class FEPScaffoldBuilder:
         self.lambda_strategy = lambda_strategy
         self.lambda_distribution = lambda_distribution
         self.overwrite = overwrite
+
+        # Initialize sub-builders
+        self.hybrid_builder = HybridPackageBuilder()
+        self.leg_writer = LegWriter(self.output_dir)
+
+        # Default hybrid asset filenames (used by build() with pre-built hybrid dirs)
         self.hybrid_itp_filename = "LIG.itp"
         self.hybrid_atomtypes_filename = "atomtypes_LIG.itp"
         self.hybrid_forcefield_filename = "ff_hybrid.itp"
@@ -81,7 +89,7 @@ class FEPScaffoldBuilder:
         ligand_seed_pdb = layout.common_dir / "hybrid" / "ligand_seed.pdb"
         self._write_bound_leg(layout, receptor_path, ligand_seed_pdb)
         self._write_unbound_leg(layout, ligand_seed_pdb)
-        self._write_root_scripts(layout)
+        script_writer.write_root_scripts(layout)
         self._write_manifest(layout, receptor_path, hybrid_dir)
 
         return layout
@@ -99,239 +107,216 @@ class FEPScaffoldBuilder:
         """
         Create the scaffold from an existing hybrid ITP plus ligand FF directories.
 
-        This is the intended near-term bridge for cases where atom mapping and
-        single-topology construction are already done and only the system/leg
-        modeling scaffold is still missing.
+        This is the main entry point for building FEP scaffolds from PRISM-generated
+        ligand force fields and hybrid topology.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         receptor_pdb : str
             Path to receptor PDB file
         hybrid_itp : str
-            Path to hybrid ligand ITP file
+            Path to hybrid ITP file (atom mapping)
         reference_ligand_dir : str
-            Path to reference ligand force field directory
+            Directory containing reference ligand force field
         mutant_ligand_dir : Optional[str]
-            Path to mutant ligand force field directory
+            Directory containing mutant ligand force field (None for single-topology)
         hybrid_gro : Optional[str]
-            Path to hybrid ligand GRO file (defaults to reference_ligand_dir/LIG.gro)
+            Path to hybrid GRO file (if None, uses reference_ligand_dir/LIG.gro)
         bound_system_dir : Optional[str]
-            Path to pre-built PRISM bound system (GMX_PROLIG_MD directory).
-            If provided, copies complete system instead of creating placeholder.
+            Path to PRISM-built bound system (GMX_PROLIG_MD directory)
         unbound_system_dir : Optional[str]
-            Path to pre-built PRISM unbound system (GMX_PROLIG_MD directory).
-            If provided, copies complete system instead of creating placeholder.
+            Path to PRISM-built unbound system (GMX_PROLIG_MD directory)
+
+        Returns
+        -------
+        FEPScaffoldLayout
+            The created scaffold layout
         """
         receptor_path = Path(receptor_pdb)
         hybrid_itp_path = Path(hybrid_itp)
-        ref_dir = Path(reference_ligand_dir)
-        mut_dir = Path(mutant_ligand_dir) if mutant_ligand_dir else None
+        reference_ligand_path = Path(reference_ligand_dir)
+        mutant_ligand_path = Path(mutant_ligand_dir) if mutant_ligand_dir else None
 
+        # Validate inputs
         if not receptor_path.exists():
             raise FileNotFoundError(f"Receptor PDB not found: {receptor_path}")
         if not hybrid_itp_path.exists():
             raise FileNotFoundError(f"Hybrid ITP not found: {hybrid_itp_path}")
-        if not ref_dir.exists():
-            raise FileNotFoundError(f"Reference ligand FF dir not found: {ref_dir}")
-        if mut_dir and not mut_dir.exists():
-            raise FileNotFoundError(f"Mutant ligand FF dir not found: {mut_dir}")
+        if not reference_ligand_path.exists():
+            raise FileNotFoundError(f"Reference ligand directory not found: {reference_ligand_path}")
+        if mutant_ligand_path and not mutant_ligand_path.exists():
+            raise FileNotFoundError(f"Mutant ligand directory not found: {mutant_ligand_path}")
 
-        ref_gro = Path(hybrid_gro) if hybrid_gro else ref_dir / "LIG.gro"
-        if not ref_gro.exists():
-            raise FileNotFoundError(f"Hybrid/seed GRO not found: {ref_gro}")
-
+        # Prepare layout
         layout = self._prepare_layout()
+
+        # Copy receptor
         shutil.copy2(receptor_path, layout.protein_dir / "receptor.pdb")
-        self._prepare_hybrid_package_from_components(layout, hybrid_itp_path, ref_dir, mut_dir, ref_gro)
 
-        ligand_seed_pdb = layout.common_dir / "hybrid" / "ligand_seed.pdb"
+        # Determine seed GRO
+        if hybrid_gro:
+            seed_gro = Path(hybrid_gro)
+        else:
+            seed_gro = reference_ligand_path / "LIG.gro"
 
-        # Build bound leg
+        if not seed_gro.exists():
+            raise FileNotFoundError(f"Seed GRO file not found: {seed_gro}")
+
+        # Build hybrid package
+        self.hybrid_builder.prepare_hybrid_package_from_components(
+            hybrid_dir=layout.hybrid_dir,
+            hybrid_itp=hybrid_itp_path,
+            reference_ligand_dir=reference_ligand_path,
+            mutant_ligand_dir=mutant_ligand_path,
+            seed_gro=seed_gro,
+        )
+
+        # Update naming to hybrid outputs for topology/script/template generation
+        self.hybrid_itp_filename = self.hybrid_builder.hybrid_itp_filename
+        self.hybrid_atomtypes_filename = self.hybrid_builder.hybrid_atomtypes_filename
+        self.hybrid_forcefield_filename = self.hybrid_builder.hybrid_forcefield_filename
+        self.hybrid_posre_filename = self.hybrid_builder.hybrid_posre_filename
+        self.hybrid_gro_filename = self.hybrid_builder.hybrid_gro_filename
+        self.molecule_name = self.hybrid_builder.molecule_name
+        self.leg_writer.molecule_name = self.molecule_name
+
+        ligand_seed_pdb = layout.hybrid_dir / "ligand_seed.pdb"
+
+        # Write legs
         if bound_system_dir:
-            self._copy_prism_system_to_leg(Path(bound_system_dir), layout.bound_dir, "bound")
+            self._write_bound_leg_from_prism(layout, Path(bound_system_dir))
         else:
             self._write_bound_leg(layout, receptor_path, ligand_seed_pdb)
 
-        # Build unbound leg
         if unbound_system_dir:
-            self._copy_prism_system_to_leg(Path(unbound_system_dir), layout.unbound_dir, "unbound")
+            self._write_unbound_leg_from_prism(layout, Path(unbound_system_dir))
         else:
             self._write_unbound_leg(layout, ligand_seed_pdb)
 
-        # Generate MDP files for both legs
-        print(f"\n{'='*70}")
-        print("Generating MDP files for FEP legs")
-        print(f"{'='*70}")
-        print(f"  Lambda strategy: {self.lambda_strategy}")
-        print(f"  Lambda windows: {self.lambda_windows}")
-        print(f"  Bound MDP dir: {layout.bound_dir / 'mdps'}")
-        print(f"  Unbound MDP dir: {layout.unbound_dir / 'mdps'}")
-
-        write_fep_mdps(
-            output_dir=str(layout.bound_dir / "mdps"),
-            lambda_strategy=self.lambda_strategy,
-            lambda_distribution=self.lambda_distribution,
-            lambda_windows=self.lambda_windows,
-            config=self.config,
-            leg_name="bound",
-        )
-        print(f"  ✓ Bound MDP files generated")
-
-        write_fep_mdps(
-            output_dir=str(layout.unbound_dir / "mdps"),
-            lambda_strategy=self.lambda_strategy,
-            lambda_distribution=self.lambda_distribution,
-            lambda_windows=self.lambda_windows,
-            config=self.config,
-            leg_name="unbound",
-        )
-        print(f"  ✓ Unbound MDP files generated")
-        print(f"{'='*70}\n")
-
-        # Generate run scripts
-        self._write_fep_run_script(layout.bound_dir, "bound")
-        self._write_fep_run_script(layout.unbound_dir, "unbound")
-        self._write_fep_slurm_script(layout.bound_dir, "bound")
-        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
-
-        self._write_root_scripts(layout)
+        # Write scripts and manifest
+        script_writer.write_root_scripts(layout)
         self._write_manifest(
             layout,
             receptor_path,
-            hybrid_itp_path.parent,
+            layout.hybrid_dir,
             extra_sources={
                 "hybrid_itp": str(hybrid_itp_path.resolve()),
-                "reference_ligand_dir": str(ref_dir.resolve()),
-                "mutant_ligand_dir": str(mut_dir.resolve()) if mut_dir else None,
+                "reference_ligand_dir": str(reference_ligand_path.resolve()),
+                "mutant_ligand_dir": str(mutant_ligand_path.resolve()) if mutant_ligand_path else None,
             },
         )
 
         return layout
 
+    def build_from_prism_system(
+        self,
+        receptor_pdb: str,
+        hybrid_itp: str,
+        reference_ligand_dir: str,
+        mutant_ligand_dir: Optional[str],
+        bound_prism_system: str,
+        unbound_prism_system: str,
+    ) -> FEPScaffoldLayout:
+        """
+        Build FEP scaffold from PRISM-built systems.
+
+        This method integrates with PRISM-built MD systems, copying coordinate files
+        and topologies from GMX_PROLIG_MD directories.
+
+        Parameters
+        ----------
+        receptor_pdb : str
+            Path to receptor PDB file
+        hybrid_itp : str
+            Path to hybrid ITP file
+        reference_ligand_dir : str
+            Directory containing reference ligand force field
+        mutant_ligand_dir : Optional[str]
+            Directory containing mutant ligand force field
+        bound_prism_system : str
+            Path to bound GMX_PROLIG_MD directory
+        unbound_prism_system : str
+            Path to unbound GMX_PROLIG_MD directory
+
+        Returns
+        -------
+        FEPScaffoldLayout
+            The created scaffold layout
+        """
+        return self.build_from_components(
+            receptor_pdb=receptor_pdb,
+            hybrid_itp=hybrid_itp,
+            reference_ligand_dir=reference_ligand_dir,
+            mutant_ligand_dir=mutant_ligand_dir,
+            bound_system_dir=bound_prism_system,
+            unbound_system_dir=unbound_prism_system,
+        )
+
     def _validate_inputs(self, receptor_path: Path, hybrid_dir: Path) -> None:
+        """Validate input files exist."""
         if not receptor_path.exists():
             raise FileNotFoundError(f"Receptor PDB not found: {receptor_path}")
         if not hybrid_dir.exists():
             raise FileNotFoundError(f"Hybrid ligand directory not found: {hybrid_dir}")
-        if not (hybrid_dir / "LIG.itp").exists():
-            raise FileNotFoundError(f"Hybrid ligand ITP not found: {hybrid_dir / 'LIG.itp'}")
-        if not (hybrid_dir / "LIG.gro").exists():
-            raise FileNotFoundError(f"Hybrid ligand GRO not found: {hybrid_dir / 'LIG.gro'}")
-        self.molecule_name = "LIG"
 
     def _prepare_layout(self) -> FEPScaffoldLayout:
+        """Create directory structure for FEP scaffold."""
         root = self.output_dir
-        if root.exists() and self.overwrite:
-            shutil.rmtree(root)
+        # Note: Don't check if root.exists() here because previous steps
+        # (bound/unbound system building, hybrid topology) may have already
+        # created parts of the directory structure. Just ensure required
+        # subdirectories exist.
 
-        layout = FEPScaffoldLayout(
-            root=root,
-            common_dir=root / "common",
-            hybrid_dir=root / "common" / "hybrid",
-            protein_dir=root / "common" / "protein",
-            bound_dir=root / "bound",
-            unbound_dir=root / "unbound",
-        )
+        # Create directory structure
+        common_dir = root / "common"
+        hybrid_dir = common_dir / "hybrid"
+        protein_dir = common_dir / "protein"
+        bound_dir = root / "bound"
+        unbound_dir = root / "unbound"
 
-        for directory in [
-            layout.common_dir,
-            layout.hybrid_dir,
-            layout.protein_dir,
-            layout.bound_dir / "input",
-            layout.bound_dir / "build",
-            layout.bound_dir / "mdps",
-            layout.unbound_dir / "input",
-            layout.unbound_dir / "build",
-            layout.unbound_dir / "mdps",
-        ]:
+        for directory in [hybrid_dir, protein_dir, bound_dir / "input", unbound_dir / "input"]:
             directory.mkdir(parents=True, exist_ok=True)
 
-        return layout
+        return FEPScaffoldLayout(
+            root=root,
+            common_dir=common_dir,
+            hybrid_dir=hybrid_dir,
+            protein_dir=protein_dir,
+            bound_dir=bound_dir,
+            unbound_dir=unbound_dir,
+        )
 
     def _copy_common_assets(self, receptor_path: Path, hybrid_dir: Path, layout: FEPScaffoldLayout) -> None:
+        """Copy receptor and hybrid ligand assets to common directory."""
         shutil.copy2(receptor_path, layout.protein_dir / "receptor.pdb")
 
         for asset in self._iter_hybrid_assets(hybrid_dir):
-            target = layout.hybrid_dir / asset.name
-            shutil.copy2(asset, target)
+            shutil.copy2(asset, layout.hybrid_dir / asset.name)
 
-        ligand_seed_pdb = layout.hybrid_dir / "ligand_seed.pdb"
-        ligand_seed_pdb.write_text(self._gro_to_pdb(hybrid_dir / "LIG.gro"))
+        # Generate ligand_seed.pdb from GRO file
+        gro_file = hybrid_dir / self.hybrid_gro_filename
+        if gro_file.exists():
+            (layout.hybrid_dir / "ligand_seed.pdb").write_text(self.hybrid_builder._gro_to_pdb(gro_file))
 
     def _iter_hybrid_assets(self, hybrid_dir: Path) -> Iterable[Path]:
-        asset_names = [
-            "LIG.itp",
-            "LIG.gro",
-            "LIG.top",
-            "atomtypes_LIG.itp",
-            "posre_LIG.itp",
-        ]
-        for name in asset_names:
+        """Iterate over hybrid ligand asset files."""
+        for name in [
+            self.hybrid_itp_filename,
+            self.hybrid_atomtypes_filename,
+            self.hybrid_forcefield_filename,
+            self.hybrid_gro_filename,
+            self.hybrid_posre_filename,
+        ]:
             path = hybrid_dir / name
             if path.exists():
                 yield path
 
-    def _prepare_hybrid_package_from_components(
-        self,
-        layout: FEPScaffoldLayout,
-        hybrid_itp: Path,
-        reference_ligand_dir: Path,
-        mutant_ligand_dir: Optional[Path],
-        seed_gro: Path,
-    ) -> None:
-        self.hybrid_itp_filename = "hybrid.itp"
-        self.hybrid_atomtypes_filename = "atomtypes_hybrid.itp"
-        self.hybrid_forcefield_filename = "ff_hybrid.itp"
-        self.hybrid_posre_filename = "posre_hybrid.itp"
-        self.hybrid_gro_filename = "hybrid.gro"
-        self.molecule_name = "HYB"
-
-        normalized_itp = self._normalize_hybrid_itp(hybrid_itp.read_text(), self.molecule_name)
-        hybrid_itp_output = layout.hybrid_dir / self.hybrid_itp_filename
-        hybrid_itp_output.write_text(normalized_itp)
-
-        if self._itp_needs_bonded_sections(normalized_itp):
-            ITPBuilder.write_complete_hybrid_itp(
-                output_path=str(hybrid_itp_output),
-                hybrid_itp=str(hybrid_itp_output),
-                ligand_a_itp=str(reference_ligand_dir / "LIG.itp"),
-                ligand_b_itp=str(mutant_ligand_dir / "LIG.itp")
-                if mutant_ligand_dir
-                else str(reference_ligand_dir / "LIG.itp"),
-                molecule_name=self.molecule_name,
-            )
-            normalized_itp = hybrid_itp_output.read_text()
-
-        atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
-        atomtypes_content = self._build_hybrid_atomtypes_itp(normalized_itp, atomtypes)
-        (layout.hybrid_dir / self.hybrid_atomtypes_filename).write_text(atomtypes_content)
-
-        defaults_block = self._extract_defaults_block(reference_ligand_dir, mutant_ligand_dir)
-        if defaults_block:
-            ff_hybrid = defaults_block + f'\n#include "{self.hybrid_atomtypes_filename}"\n'
-            (layout.hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
-
-        hybrid_gro_content = self._build_hybrid_gro(
-            hybrid_itp_content=normalized_itp,
-            reference_gro=seed_gro,
-            mutant_gro=(mutant_ligand_dir / "LIG.gro") if mutant_ligand_dir else None,
-        )
-        (layout.hybrid_dir / self.hybrid_gro_filename).write_text(hybrid_gro_content)
-        (layout.hybrid_dir / "ligand_seed.pdb").write_text(
-            self._gro_to_pdb(layout.hybrid_dir / self.hybrid_gro_filename)
-        )
-
-        ref_posre = reference_ligand_dir / "posre_LIG.itp"
-        if ref_posre.exists():
-            shutil.copy2(ref_posre, layout.hybrid_dir / self.hybrid_posre_filename)
-
-        self._write_hybrid_top_template(layout.hybrid_dir / "hybrid.top")
-
     def _write_bound_leg(self, layout: FEPScaffoldLayout, receptor_path: Path, ligand_seed_pdb: Path) -> None:
+        """Write bound leg directory structure."""
         bound_input = layout.bound_dir / "input"
         shutil.copy2(layout.protein_dir / "receptor.pdb", bound_input / "receptor.pdb")
         shutil.copy2(ligand_seed_pdb, bound_input / "ligand_seed.pdb")
-        self._write_complex_seed(
+        self.leg_writer.write_complex_seed(
             bound_input / "receptor.pdb",
             bound_input / "ligand_seed.pdb",
             bound_input / "complex_seed.pdb",
@@ -348,10 +333,11 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="bound",
         )
-        self._write_fep_run_script(layout.bound_dir, "bound")
-        self._write_fep_slurm_script(layout.bound_dir, "bound")
+        script_writer.write_fep_run_script(layout.bound_dir, "bound")
+        script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg(self, layout: FEPScaffoldLayout, ligand_seed_pdb: Path) -> None:
+        """Write unbound leg directory structure."""
         unbound_input = layout.unbound_dir / "input"
         shutil.copy2(ligand_seed_pdb, unbound_input / "ligand_seed.pdb")
 
@@ -366,8 +352,59 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="unbound",
         )
-        self._write_fep_run_script(layout.unbound_dir, "unbound")
-        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
+        script_writer.write_fep_run_script(layout.unbound_dir, "unbound")
+        script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
+
+    def _write_bound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
+        """Write bound leg from PRISM-built system."""
+        self.leg_writer.copy_prism_system_to_leg(prism_system_dir, layout.bound_dir, "bound")
+
+        write_fep_mdps(
+            output_dir=str(layout.bound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="bound",
+        )
+        script_writer.write_fep_run_script(layout.bound_dir, "bound")
+        script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
+
+    def _write_unbound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
+        """Write unbound leg from PRISM-built system."""
+        self.leg_writer.copy_prism_system_to_leg(prism_system_dir, layout.unbound_dir, "unbound")
+
+        write_fep_mdps(
+            output_dir=str(layout.unbound_dir / "mdps"),
+            lambda_strategy=self.lambda_strategy,
+            lambda_distribution=self.lambda_distribution,
+            lambda_windows=self.lambda_windows,
+            config=self.config,
+            leg_name="unbound",
+        )
+        script_writer.write_fep_run_script(layout.unbound_dir, "unbound")
+        script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
+
+    def _create_placeholder_system(
+        self, leg_name: str, layout: FEPScaffoldLayout, protein_path: Optional[Path]
+    ) -> None:
+        """Create placeholder topology and coordinate files."""
+        leg_dir = layout.bound_dir if leg_name == "bound" else layout.unbound_dir
+
+        # Write placeholder topology
+        if leg_name == "bound":
+            self._write_bound_topology_template(leg_dir / "topol.top")
+        else:
+            self._write_unbound_topology(leg_dir / "topol.top")
+
+        # Write placeholder coordinate file
+        placeholder_gro = leg_dir / "input" / "conf.gro"
+        if not placeholder_gro.exists():
+            with open(placeholder_gro, "w") as f:
+                f.write("Placeholder system\n")
+                f.write("1\n")
+                f.write("    1HYB     C1    1   0.000   0.000   0.000\n")
+                f.write("   5.00000   5.00000   5.00000\n")
 
     def _write_manifest(
         self,
@@ -376,6 +413,7 @@ class FEPScaffoldBuilder:
         hybrid_dir: Path,
         extra_sources: Optional[Dict[str, Optional[str]]] = None,
     ) -> None:
+        """Write FEP scaffold manifest file."""
         manifest = {
             "scaffold_version": 1,
             "receptor_pdb": str(receptor_path.resolve()),
@@ -410,121 +448,9 @@ class FEPScaffoldBuilder:
             manifest["sources"] = extra_sources
         (layout.root / "fep_scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-    def _write_root_scripts(self, layout: FEPScaffoldLayout) -> None:
-        script = """#!/usr/bin/env bash
-set -euo pipefail
-
-FEP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    PRISM-FEP Full Workflow                                ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-
-# Run bound leg
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "Running Bound Leg..."
-echo "═══════════════════════════════════════════════════════════════════════════"
-cd "${FEP_ROOT}/bound"
-bash localrun.sh
-if [ $? -ne 0 ]; then
-    echo "✗ Bound leg failed"
-    exit 1
-fi
-
-# Run unbound leg
-echo ""
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "Running Unbound Leg..."
-echo "═══════════════════════════════════════════════════════════════════════════"
-cd "${FEP_ROOT}/unbound"
-bash localrun.sh
-if [ $? -ne 0 ]; then
-    echo "✗ Unbound leg failed"
-    exit 1
-fi
-
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    ✓ FEP Workflow Complete                               ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-echo "Next steps:"
-echo "  - Analyze results with: gmx bar -f bound/build/prod_*.xvg unbound/build/prod_*.xvg"
-echo "  - Check convergence and calculate ΔΔG"
-"""
-        path = layout.root / "run_all.sh"
-        path.write_text(script)
-        path.chmod(0o755)
-
-        # Also generate SLURM submission script for submitting both legs
-        slurm_script = """#!/bin/bash
-#SBATCH -J fep-both-legs
-#SBATCH -p gpu
-#SBATCH --time=96:00:00
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:1
-
-echo "Start time: $(date)"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "hostname: $(hostname)"
-echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
-
-# Load GROMACS module (adjust for your cluster)
-# module load gromacs/2023.2
-# source /path/to/gromacs/bin/GMXRC
-
-FEP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    PRISM-FEP Full Workflow (SLURM)                       ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-
-# Run bound leg
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "Running Bound Leg..."
-echo "═══════════════════════════════════════════════════════════════════════════"
-cd "${FEP_ROOT}/bound"
-bash localrun.sh
-if [ $? -ne 0 ]; then
-    echo "✗ Bound leg failed"
-    exit 1
-fi
-
-# Run unbound leg
-echo ""
-echo "═══════════════════════════════════════════════════════════════════════════"
-echo "Running Unbound Leg..."
-echo "═══════════════════════════════════════════════════════════════════════════"
-cd "${FEP_ROOT}/unbound"
-bash localrun.sh
-if [ $? -ne 0 ]; then
-    echo "✗ Unbound leg failed"
-    exit 1
-fi
-
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    ✓ FEP Workflow Complete                               ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-echo "Next steps:"
-echo "  - Analyze results with: gmx bar -f bound/build/prod_*.xvg unbound/build/prod_*.xvg"
-echo "  - Check convergence and calculate ΔΔG"
-echo "End time: $(date)"
-"""
-        slurm_path = layout.root / "submit_all.slurm.sh"
-        slurm_path.write_text(slurm_script)
-        slurm_path.chmod(0o755)
-
     def _write_unbound_topology(self, topol_path: Path) -> None:
-        content = """; PRISM-FEP unbound topology template
-; This file is already close to a valid ligand-only topology if the force field
-; include chain is complete inside common/hybrid/.
-""".format(posre=self.hybrid_posre_filename)
+        """Write unbound leg topology template."""
+        content = "; PRISM-FEP unbound topology template\n"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
         if ff_path.exists():
@@ -537,1214 +463,12 @@ echo "End time: $(date)"
         topol_path.write_text(content)
 
     def _write_bound_topology_template(self, topol_path: Path) -> None:
-        content = """; PRISM-FEP bound topology template
-; Protein topology include will be supplied during full builder integration.
-; The ligand include chain is already staged.
-
-; TODO: include generated protein topology here, e.g.
-; #include "topol_protein.itp"
-"""
+        """Write bound leg topology template."""
+        content = "; PRISM-FEP bound topology template\n"
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
         if atomtypes_path.exists():
             content += f'#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
         content += f'#include "../common/hybrid/{self.hybrid_itp_filename}"\n\n'
         content += "[ system ]\nBound FEP leg\n\n"
-        content += f"[ molecules ]\n; Protein      1\n{self.molecule_name} 1\n"
+        content += f"[ molecules ]\nProtein      1\n{self.molecule_name} 1\n"
         topol_path.write_text(content)
-
-    def _write_hybrid_top_template(self, output_path: Path) -> None:
-        content = "; PRISM-FEP hybrid ligand topology bundle\n"
-        ff_path = output_path.parent / self.hybrid_forcefield_filename
-        atomtypes_path = output_path.parent / self.hybrid_atomtypes_filename
-        if ff_path.exists():
-            content += f'#include "{self.hybrid_forcefield_filename}"\n'
-        elif atomtypes_path.exists():
-            content += f'#include "{self.hybrid_atomtypes_filename}"\n'
-        content += f'#include "{self.hybrid_itp_filename}"\n\n'
-
-        content += f"""
-[ system ]
-Hybrid ligand package
-
-[ molecules ]
-{self.molecule_name} 1
-"""
-        output_path.write_text(content)
-
-    def _gro_to_pdb(self, gro_file: Path) -> str:
-        lines = gro_file.read_text().splitlines()
-        pdb_lines = ["REMARK   Generated from LIG.gro for PRISM-FEP scaffold"]
-        atom_lines = lines[2:-1]
-        for serial, line in enumerate(atom_lines, start=1):
-            resnum = int(line[:5].strip())
-            resname = line[5:10].strip() or "LIG"
-            atom_name = line[10:15].strip() or f"A{serial}"
-            atom_serial = int(line[15:20].strip())
-            x = float(line[20:28].strip()) * 10.0
-            y = float(line[28:36].strip()) * 10.0
-            z = float(line[36:44].strip()) * 10.0
-            element = "".join([c for c in atom_name if c.isalpha()])[:1].upper() or "C"
-            pdb_lines.append(
-                f"HETATM{serial:5d} {atom_name:>4s} {resname:>3s} A{resnum:4d}    "
-                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element:>2s}"
-            )
-        pdb_lines.append("END")
-        return "\n".join(pdb_lines) + "\n"
-
-    def _write_complex_seed(self, receptor_pdb: Path, ligand_pdb: Path, output_pdb: Path) -> None:
-        receptor_records = self._extract_pdb_records(receptor_pdb)
-        ligand_records = self._extract_pdb_records(ligand_pdb)
-
-        merged = ["REMARK   PRISM-FEP bound-leg seed complex"]
-        serial = 1
-        for record in receptor_records + ligand_records:
-            merged.append(record[:6] + f"{serial:5d}" + record[11:])
-            serial += 1
-        merged.append("END")
-        output_pdb.write_text("\n".join(merged) + "\n")
-
-    def _extract_pdb_records(self, pdb_path: Path) -> list[str]:
-        records = []
-        for line in pdb_path.read_text().splitlines():
-            if line.startswith(("ATOM", "HETATM")):
-                records.append(line)
-        return records
-
-    def _normalize_hybrid_itp(self, content: str, molecule_name: str) -> str:
-        lines = content.splitlines()
-        output = []
-        in_moleculetype = False
-        in_atoms = False
-        replaced = False
-
-        for line in lines:
-            stripped = line.strip()
-            if '#include "posre_LIG.itp"' in line:
-                output.append(line.replace("posre_LIG.itp", self.hybrid_posre_filename))
-                continue
-            if stripped.lower() == "[ atoms ]":
-                in_atoms = True
-                output.append(line)
-                continue
-            if stripped.startswith("[") and in_atoms:
-                in_atoms = False
-            if in_atoms and stripped and not stripped.startswith(";"):
-                output.append(self._normalize_hybrid_atom_line(stripped))
-                continue
-            output.append(line)
-            if stripped.lower() == "[ moleculetype ]":
-                in_moleculetype = True
-                continue
-            if in_moleculetype and stripped and not stripped.startswith(";") and not replaced:
-                output[-1] = f"{molecule_name:16s}     3"
-                replaced = True
-                in_moleculetype = False
-
-        return "\n".join(output) + "\n"
-
-    def _normalize_hybrid_atom_line(self, line: str) -> str:
-        parts = line.split()
-        if len(parts) >= 10 and not self._looks_like_float(parts[8]) and len(parts) == 10:
-            parts.append(parts[7])
-        return " ".join(parts)
-
-    def _itp_needs_bonded_sections(self, content: str) -> bool:
-        lower = content.lower()
-        return "[ bonds ]" not in lower and "[ angles ]" not in lower and "[ dihedrals ]" not in lower
-
-    def _collect_atomtypes(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> Dict[str, str]:
-        atomtypes = {}
-        for ligand_dir in [reference_ligand_dir, mutant_ligand_dir]:
-            if ligand_dir is None:
-                continue
-            atomtypes_file = ligand_dir / "atomtypes_LIG.itp"
-            if not atomtypes_file.exists():
-                continue
-            for atomtype_name, line in self._parse_atomtypes_file(atomtypes_file).items():
-                atomtypes.setdefault(atomtype_name, line)
-        return atomtypes
-
-    def _parse_atomtypes_file(self, atomtypes_file: Path) -> Dict[str, str]:
-        atomtypes = {}
-        in_section = False
-        for line in atomtypes_file.read_text().splitlines():
-            stripped = line.strip()
-            if stripped.lower() == "[ atomtypes ]":
-                in_section = True
-                continue
-            if stripped.startswith("[") and in_section:
-                break
-            if not in_section or not stripped or stripped.startswith(";"):
-                continue
-            parts = stripped.split()
-            atomtypes[parts[0]] = stripped
-        return atomtypes
-
-    def _build_hybrid_atomtypes_itp(self, hybrid_itp_content: str, source_atomtypes: Dict[str, str]) -> str:
-        used_types = self._parse_used_atomtypes(hybrid_itp_content)
-        lines = [
-            "[ atomtypes ]",
-            "; merged atomtypes for hybrid ligand",
-        ]
-
-        written = set()
-        dummy_requests = set()
-        for atomtype in used_types:
-            if atomtype.startswith("DUM_"):
-                dummy_requests.add(atomtype)
-                continue
-            source = source_atomtypes.get(atomtype)
-            if source and atomtype not in written:
-                lines.append(source)
-                written.add(atomtype)
-
-        for dummy_atomtype in sorted(dummy_requests):
-            if dummy_atomtype in written:
-                continue
-            base_type = dummy_atomtype[4:]
-            base_line = source_atomtypes.get(base_type)
-            bond_type = base_type
-            if base_line:
-                bond_type = base_line.split()[1]
-            lines.append(
-                f"{dummy_atomtype:<8s} {bond_type:<8s} 0.00000 0.00000 A 0.00000e+00 0.00000e+00 ; dummy from {base_type}"
-            )
-            written.add(dummy_atomtype)
-
-        missing_non_dummy = sorted(
-            atomtype for atomtype in used_types if not atomtype.startswith("DUM_") and atomtype not in source_atomtypes
-        )
-        if missing_non_dummy:
-            raise ValueError(f"Missing atomtype definitions for: {', '.join(missing_non_dummy)}")
-
-        return "\n".join(lines) + "\n"
-
-    def _extract_defaults_block(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> str:
-        defaults_blocks = []
-        for ligand_dir in [reference_ligand_dir, mutant_ligand_dir]:
-            if ligand_dir is None:
-                continue
-            top_file = ligand_dir / "LIG.top"
-            if not top_file.exists():
-                continue
-            block = self._parse_defaults_block(top_file.read_text())
-            if block:
-                defaults_blocks.append(block)
-
-        if not defaults_blocks:
-            return self._infer_defaults_block(reference_ligand_dir, mutant_ligand_dir)
-
-        first = defaults_blocks[0]
-        for block in defaults_blocks[1:]:
-            if block != first:
-                raise ValueError("Inconsistent [ defaults ] blocks between ligand topologies")
-        return first
-
-    def _infer_defaults_block(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> str:
-        atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
-        if atomtypes and all(name.startswith("opls_") or name.startswith("DUM_opls_") for name in atomtypes):
-            return (
-                "[ defaults ]\n"
-                "; nbfunc        comb-rule       gen-pairs       fudgeLJ fudgeQQ\n"
-                "1               3               yes             0.5     0.5\n"
-            )
-        return ""
-
-    def _parse_defaults_block(self, top_content: str) -> str:
-        lines = top_content.splitlines()
-        block = []
-        in_defaults = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.lower() == "[ defaults ]":
-                in_defaults = True
-                block.append("[ defaults ]")
-                continue
-            if stripped.startswith("[") and in_defaults:
-                break
-            if in_defaults:
-                block.append(line)
-        if len(block) <= 1:
-            return ""
-        return "\n".join(block).rstrip() + "\n"
-
-    def _build_hybrid_gro(
-        self,
-        hybrid_itp_content: str,
-        reference_gro: Path,
-        mutant_gro: Optional[Path],
-    ) -> str:
-        ref_atoms, ref_box = self._parse_gro_atoms(reference_gro)
-        mut_atoms, _ = self._parse_gro_atoms(mutant_gro) if mutant_gro else ({}, None)
-        hybrid_atoms = self._parse_hybrid_atoms(hybrid_itp_content)
-
-        output = ["Hybrid ligand", f"{len(hybrid_atoms):5d}"]
-        for index, atom in enumerate(hybrid_atoms, start=1):
-            source_atom = self._resolve_hybrid_atom_coordinates(atom["atom_name"], ref_atoms, mut_atoms)
-            output.append(
-                f"{atom['resnr']:5d}{atom['residue']:<5s}{atom['atom_name']:>5s}{index:5d}"
-                f"{source_atom['x']:8.3f}{source_atom['y']:8.3f}{source_atom['z']:8.3f}"
-            )
-        output.append(self._normalize_box_line(ref_box))
-        return "\n".join(output) + "\n"
-
-    def _parse_gro_atoms(self, gro_path: Optional[Path]) -> tuple[Dict[str, list[Dict[str, float]]], Optional[str]]:
-        if gro_path is None or not gro_path.exists():
-            return {}, None
-
-        lines = gro_path.read_text().splitlines()
-        atom_count = int(lines[1].strip())
-        atoms = {}
-        for line in lines[2 : 2 + atom_count]:
-            atom_name = line[10:15].strip()
-            atoms.setdefault(atom_name, []).append(
-                {
-                    "resnr": int(line[:5].strip()),
-                    "resname": line[5:10].strip(),
-                    "x": float(line[20:28].strip()),
-                    "y": float(line[28:36].strip()),
-                    "z": float(line[36:44].strip()),
-                }
-            )
-        box = lines[2 + atom_count] if len(lines) > 2 + atom_count else None
-        return atoms, box
-
-    def _parse_hybrid_atoms(self, hybrid_itp_content: str) -> list[Dict[str, str]]:
-        atoms = []
-        in_atoms = False
-        for line in hybrid_itp_content.splitlines():
-            stripped = line.strip()
-            if stripped.lower() == "[ atoms ]":
-                in_atoms = True
-                continue
-            if stripped.startswith("[") and in_atoms:
-                break
-            if not in_atoms or not stripped or stripped.startswith(";"):
-                continue
-            parts = stripped.split()
-            if len(parts) < 5:
-                continue
-            atoms.append(
-                {
-                    "resnr": int(parts[2]),
-                    "residue": parts[3],
-                    "atom_name": parts[4],
-                }
-            )
-        return atoms
-
-    def _resolve_hybrid_atom_coordinates(
-        self,
-        atom_name: str,
-        ref_atoms: Dict[str, list[Dict[str, float]]],
-        mut_atoms: Dict[str, list[Dict[str, float]]],
-    ) -> Dict[str, float]:
-        candidates = []
-        if atom_name.endswith("A"):
-            base = atom_name[:-1]
-            candidates = [(ref_atoms, atom_name), (ref_atoms, base), (mut_atoms, atom_name), (mut_atoms, base)]
-        elif atom_name.endswith("B"):
-            base = atom_name[:-1]
-            candidates = [(mut_atoms, atom_name), (mut_atoms, base), (ref_atoms, atom_name), (ref_atoms, base)]
-        else:
-            candidates = [(ref_atoms, atom_name), (mut_atoms, atom_name)]
-
-        for atom_pool, key in candidates:
-            entries = atom_pool.get(key)
-            if entries:
-                return entries[0]
-        raise ValueError(f"Could not resolve coordinates for hybrid atom: {atom_name}")
-
-    def _normalize_box_line(self, box_line: Optional[str]) -> str:
-        if box_line:
-            try:
-                values = [float(value) for value in box_line.split()[:3]]
-                if len(values) == 3 and min(values) >= 2.2:
-                    return box_line
-            except ValueError:
-                pass
-        return "   3.00000   3.00000   3.00000"
-
-    def _parse_used_atomtypes(self, hybrid_itp_content: str) -> set[str]:
-        used_types = set()
-        in_atoms = False
-        for line in hybrid_itp_content.splitlines():
-            stripped = line.strip()
-            if stripped.lower() == "[ atoms ]":
-                in_atoms = True
-                continue
-            if stripped.startswith("[") and in_atoms:
-                break
-            if not in_atoms or not stripped or stripped.startswith(";"):
-                continue
-            parts = stripped.split()
-            if len(parts) < 8:
-                continue
-            used_types.add(parts[1])
-            if len(parts) >= 9 and not self._looks_like_float(parts[8]):
-                used_types.add(parts[8])
-        return used_types
-
-    def _looks_like_float(self, value: str) -> bool:
-        try:
-            float(value)
-        except ValueError:
-            return False
-        return True
-
-    def build_from_prism_system(
-        self,
-        bound_system_dir: str,
-        unbound_system_dir: Optional[str],
-        hybrid_itp: str,
-        reference_ligand_dir: str,
-        mutant_ligand_dir: str,
-    ) -> "FEPScaffoldLayout":
-        """
-        Build FEP scaffold from pre-built PRISM MD systems.
-
-        This is the recommended workflow:
-        1. Build bound system: prism protein.pdb ref_ligand.mol2 -o bound_md
-        2. Build unbound system: prism dummy.pdb ref_ligand.mol2 -o unbound_md
-        3. Generate hybrid topology: (mapping tool)
-        4. Call this method to create FEP scaffold with complete systems
-
-        Parameters:
-        -----------
-        bound_system_dir : str
-            Path to PRISM-built bound system (GMX_PROLIG_MD directory)
-        unbound_system_dir : Optional[str]
-            Path to PRISM-built unbound system (or None to create placeholder)
-        hybrid_itp : str
-            Path to hybrid ligand ITP file
-        reference_ligand_dir : str
-            Path to reference ligand force field directory
-        mutant_ligand_dir : str
-            Path to mutant ligand force field directory
-
-        Returns:
-        --------
-        FEPScaffoldLayout
-            Layout object with paths to bound/unbound/common directories
-        """
-        layout = self._create_scaffold_structure()
-
-        # Copy hybrid ligand files
-        self._copy_hybrid_ligand_files(
-            Path(hybrid_itp).parent, Path(reference_ligand_dir), Path(mutant_ligand_dir), layout
-        )
-
-        # Copy bound system
-        self._copy_prism_system_to_leg(Path(bound_system_dir), layout.bound_dir, "bound")
-
-        # Copy unbound system
-        if unbound_system_dir:
-            self._copy_prism_system_to_leg(Path(unbound_system_dir), layout.unbound_dir, "unbound")
-        else:
-            raise ValueError("unbound_system_dir is required - build it first with PRISMBuilder")
-
-        # Generate MDP files for both legs
-        print(f"\n{'='*70}")
-        print("Generating MDP files for FEP legs")
-        print(f"{'='*70}")
-        print(f"  Lambda strategy: {self.lambda_strategy}")
-        print(f"  Lambda windows: {self.lambda_windows}")
-        print(f"  Bound MDP dir: {layout.bound_dir / 'mdps'}")
-        print(f"  Unbound MDP dir: {layout.unbound_dir / 'mdps'}")
-
-        write_fep_mdps(
-            output_dir=str(layout.bound_dir / "mdps"),
-            lambda_strategy=self.lambda_strategy,
-            lambda_distribution=self.lambda_distribution,
-            lambda_windows=self.lambda_windows,
-            config=self.config,
-            leg_name="bound",
-        )
-        print(f"  ✓ Bound MDP files generated")
-
-        write_fep_mdps(
-            output_dir=str(layout.unbound_dir / "mdps"),
-            lambda_strategy=self.lambda_strategy,
-            lambda_distribution=self.lambda_distribution,
-            lambda_windows=self.lambda_windows,
-            config=self.config,
-            leg_name="unbound",
-        )
-        print(f"  ✓ Unbound MDP files generated")
-        print(f"{'='*70}\n")
-
-        # Generate run scripts
-        self._write_fep_run_script(layout.bound_dir, "bound")
-        self._write_fep_run_script(layout.unbound_dir, "unbound")
-        self._write_fep_slurm_script(layout.bound_dir, "bound")
-        self._write_fep_slurm_script(layout.unbound_dir, "unbound")
-
-        return layout
-
-    def _copy_prism_system_to_leg(self, prism_system_dir: Path, leg_dir: Path, leg_name: str) -> None:
-        """
-        Copy files from PRISM-built system to FEP leg directory.
-
-        Parameters:
-        -----------
-        prism_system_dir : Path
-            Path to GMX_PROLIG_MD directory from PRISM
-        leg_dir : Path
-            Target FEP leg directory (bound or unbound)
-        leg_name : str
-            "bound" or "unbound"
-        """
-        print(f"\n{'='*70}")
-        print(f"Copying {leg_name} leg from PRISM system")
-        print(f"{'='*70}")
-
-        # Check source files exist
-        solv_ions_gro = prism_system_dir / "solv_ions.gro"
-        topol_top = prism_system_dir / "topol.top"
-
-        if not solv_ions_gro.exists():
-            raise FileNotFoundError(f"solv_ions.gro not found in {prism_system_dir}")
-        if not topol_top.exists():
-            raise FileNotFoundError(f"topol.top not found in {prism_system_dir}")
-
-        # Check if hybrid GRO exists
-        hybrid_gro = self.output_dir / "common" / "hybrid" / "hybrid.gro"
-        if hybrid_gro.exists():
-            # Replace ligand atoms with hybrid ligand atoms
-            self._replace_ligand_with_hybrid(solv_ions_gro, leg_dir / "input" / "conf.gro", hybrid_gro)
-            print(f"  ✓ Replaced ligand with hybrid ligand → {leg_name}/input/conf.gro")
-        else:
-            # Copy coordinate file as-is
-            shutil.copy2(solv_ions_gro, leg_dir / "input" / "conf.gro")
-            print(f"  ✓ Copied solv_ions.gro → {leg_name}/input/conf.gro")
-
-        # Copy and modify topology to use hybrid ligand
-        self._copy_and_modify_topology(topol_top, leg_dir / "topol.top")
-
-        # Unbound leg topology from ligand-only builder may miss solvent/ion counts;
-        # rebuild [ molecules ] from generated coordinate file to keep topology consistent.
-        if leg_name == "unbound":
-            self._sync_unbound_molecules_with_conf(leg_dir / "topol.top", leg_dir / "input" / "conf.gro")
-
-        print(f"  ✓ Copied and modified topol.top → {leg_name}/topol.top")
-
-        # Generate position restraint file for protein
-        self._generate_posre_file(leg_dir, leg_name)
-
-        print(f"  ✓ {leg_name.capitalize()} leg system ready")
-        print(f"{'='*70}\n")
-
-    def _generate_posre_file(self, leg_dir: Path, leg_name: str) -> None:
-        """
-        Generate position restraint file for protein atoms.
-
-        For bound leg: extracts protein atoms from GRO, generates restraints with molecule-relative indices.
-        For unbound leg: creates empty posre.itp to satisfy topology include.
-
-        Parameters:
-        -----------
-        leg_dir : Path
-            FEP leg directory (bound or unbound)
-        leg_name : str
-            "bound" or "unbound"
-        """
-        import subprocess
-
-        posre_file = leg_dir / "posre.itp"
-        conf_gro = leg_dir / "input" / "conf.gro"
-
-        if not conf_gro.exists():
-            print(f"  ⚠ Warning: {conf_gro} not found, skipping posre.itp generation")
-            return
-
-        # For unbound leg, create empty posre.itp
-        if leg_name != "bound":
-            with open(posre_file, "w") as f:
-                f.write("; Position restraint file (empty for unbound leg)\n")
-                f.write("[ position_restraints ]\n")
-                f.write("; Empty - no position restraints for unbound leg\n")
-            print(f"  ✓ Created empty posre.itp for {leg_name} leg")
-            return
-
-        # For bound leg: extract protein atoms manually from GRO, then generate posre
-        try:
-            protein_gro = leg_dir / "protein_only.gro"
-
-            # Read conf.gro and extract protein atoms (skip hybrid ligand)
-            lines = conf_gro.read_text().splitlines()
-            if len(lines) < 3:
-                raise ValueError("Invalid GRO file format")
-
-            title = lines[0]
-            n_atoms = int(lines[1].strip())
-            atom_lines = lines[2 : 2 + n_atoms]
-            box_line = lines[2 + n_atoms] if len(lines) > 2 + n_atoms else "   10.00000   10.00000   10.00000"
-
-            # Filter protein atoms (residue name not HYB/LIG/SOL/ions)
-            protein_atoms = []
-            for line in atom_lines:
-                if len(line) < 20:
-                    continue
-                resname = line[5:10].strip()
-                if resname not in ["HYB", "LIG", "SOL", "NA", "CL", "K", "MG", "CA"]:
-                    protein_atoms.append(line)
-
-            if not protein_atoms:
-                print(f"  ⚠ Warning: No protein atoms found in {conf_gro}")
-                # Create empty posre
-                with open(posre_file, "w") as f:
-                    f.write("; Position restraint file (no protein found)\n")
-                    f.write("[ position_restraints ]\n")
-                return
-
-            # Write protein-only GRO
-            with open(protein_gro, "w") as f:
-                f.write(f"{title} (protein only)\n")
-                f.write(f"{len(protein_atoms)}\n")
-                for line in protein_atoms:
-                    f.write(line + "\n")
-                f.write(box_line + "\n")
-
-            # Generate posre from protein-only GRO (indices will be 1-based within protein)
-            cmd_genrestr = [
-                "gmx",
-                "genrestr",
-                "-f",
-                str(protein_gro),
-                "-o",
-                str(posre_file),
-                "-fc",
-                "1000",
-                "1000",
-                "1000",
-            ]
-            subprocess.run(cmd_genrestr, input="0\n", text=True, capture_output=True, check=True, timeout=30)
-
-            # Clean up temporary file
-            if protein_gro.exists():
-                protein_gro.unlink()
-
-            print(f"  ✓ Generated posre.itp for {leg_name} leg (protein restraints)")
-
-        except subprocess.CalledProcessError as e:
-            print(f"  ⚠ Warning: Failed to generate posre.itp: {e}")
-            # Create empty file to avoid topology errors
-            with open(posre_file, "w") as f:
-                f.write("; Position restraint file (fallback)\n")
-                f.write("[ position_restraints ]\n")
-                f.write("; Failed to generate - empty restraints\n")
-        except Exception as e:
-            print(f"  ⚠ Warning: Error generating posre.itp: {e}")
-
-    def _replace_ligand_with_hybrid(self, source_gro: Path, target_gro: Path, hybrid_gro: Path) -> None:
-        """
-        Replace ligand atoms in coordinate file with hybrid ligand atoms
-
-        Parameters:
-        -----------
-        source_gro : Path
-            Source GRO file (solv_ions.gro)
-        target_gro : Path
-            Target GRO file to write
-        hybrid_gro : Path
-            Hybrid ligand GRO file
-        """
-
-        # Read source GRO file
-        with open(source_gro, "r") as f:
-            source_lines = f.readlines()
-
-        # Read hybrid ligand GRO file
-        with open(hybrid_gro, "r") as f:
-            hybrid_lines = f.readlines()
-
-        # Parse hybrid ligand atoms
-        hybrid_atoms = []
-        for line in hybrid_lines[2:]:  # Skip title and atom count
-            # Skip empty lines
-            if len(line.strip()) == 0:
-                continue
-            # Check if this is a box line (contains only numbers, dots, and spaces)
-            stripped = line.strip()
-            if all(c in "0123456789. " for c in stripped):
-                break  # Box line found
-            # Parse GRO format
-            hybrid_atoms.append(line)
-
-        # Find ligand atoms in source file (residue name LIG)
-        ligand_start = -1
-        ligand_end = -1
-
-        for i, line in enumerate(source_lines[2:], start=2):  # Skip title and atom count
-            # Check if this is a ligand line (residue name LIG)
-            # Format: "  164LIG     CG    1   3.700   3.914   3.814"
-            # LIG is typically around position 5-8 after the residue number
-            if len(line) > 10:
-                # Try to find "LIG" in the line
-                if "LIG" in line[:15]:  # Check first 15 characters for "LIG"
-                    if ligand_start == -1:
-                        ligand_start = i
-                    ligand_end = i
-                elif ligand_start != -1:
-                    # We've moved past the ligand
-                    break
-
-        # Replace ligand atoms with hybrid ligand atoms
-        if ligand_start != -1:
-            # Build new file content
-            new_lines = source_lines[:ligand_start]
-
-            # Get the starting atom index and residue number from the source file
-            first_ligand_line = source_lines[ligand_start]
-            try:
-                # Parse: "  164LIG     CG    1   3.700   3.914   3.814"
-                # Extract residue number from positions 0-5
-                res_num_str = first_ligand_line[0:5].strip()
-                residue_number = int(res_num_str) if res_num_str else 164
-                # Extract first atom number (at positions 15-20)
-                atom_num_str = first_ligand_line[15:20].strip()
-                starting_atom_index = int(atom_num_str) if atom_num_str else 1
-            except (ValueError, IndexError):
-                residue_number = 164  # Default value
-                starting_atom_index = 1
-
-            # Add hybrid ligand atoms with updated indices
-            for i, hybrid_line in enumerate(hybrid_atoms):
-                parts = hybrid_line.split()
-                if len(parts) >= 7:
-                    try:
-                        # Hybrid GRO format: "    1LIG  CG    1   0.000   0.000   0.000"
-                        # parts[0]: "1" (atom index from hybrid)
-                        # parts[1]: "LIG" (residue name)
-                        # parts[2]: "CG" (atom name)
-                        # parts[3]: "1" (atom number - same as parts[0])
-                        # parts[4]: "0.000" (x)
-                        # parts[5]: "0.000" (y)
-                        # parts[6]: "0.000" (z)
-
-                        atom_idx = starting_atom_index + i  # Sequential atom index
-                        atom_name = parts[2]
-                        x = parts[4] if len(parts) > 4 else "0.000"
-                        y = parts[5] if len(parts) > 5 else "0.000"
-                        z = parts[6] if len(parts) > 6 else "0.000"
-
-                        # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
-                        # residuenum (5 chars, right-justified) + residuename (5 chars, left-justified)
-                        # + atomname (5 chars, right-justified) + atomnum (5 chars, right-justified)
-                        # + x (8 chars) + y (8 chars) + z (8 chars)
-                        new_line = f"{residue_number:5d}{parts[1]:<5.5s}{atom_name:>5.5s}{atom_idx:5d}{x:>8.8s}{y:>8.8s}{z:>8.8s}\n"
-                        new_lines.append(new_line)
-                    except (ValueError, IndexError):
-                        # If formatting fails, keep original line
-                        new_lines.append(hybrid_line)
-                else:
-                    new_lines.append(hybrid_line)
-
-            new_lines.extend(source_lines[ligand_end + 1 :])
-
-            # Write to target file
-            with open(target_gro, "w") as f:
-                f.writelines(new_lines)
-
-            # Update atom count in line 2
-            num_atoms_old = int(source_lines[1].strip())
-            num_atoms_diff = len(hybrid_atoms) - (ligand_end - ligand_start + 1)
-            num_atoms_new = num_atoms_old + num_atoms_diff
-
-            # Read back the file to update the count
-            with open(target_gro, "r") as f:
-                target_content = f.readlines()
-
-            target_content[1] = f"{num_atoms_new}\n"
-
-            with open(target_gro, "w") as f:
-                f.writelines(target_content)
-        else:
-            # No ligand found, copy as-is
-            shutil.copy2(source_gro, target_gro)
-
-    def _copy_and_modify_topology(self, source_top: Path, target_top: Path) -> None:
-        """
-        Copy topology file and modify to use hybrid ligand.
-
-        Replaces ligand ITP include with hybrid ligand ITP and renames LIG to HYB in molecules section.
-        Also adds hybrid atomtypes includes for unbound leg.
-        """
-        content = source_top.read_text()
-
-        # Replace ligand ITP include with hybrid ligand
-        # Pattern: #include "path/to/LIG.itp" or similar
-        import re
-
-        # Check if we need to add hybrid atomtypes (for unbound leg)
-        # We only include atomtypes_hybrid.itp, not ff_hybrid.itp, to avoid duplicate [ defaults ]
-        hybrid_dir = target_top.parent.parent / "common" / "hybrid"
-        atomtypes_hybrid_path = hybrid_dir / self.hybrid_atomtypes_filename
-
-        # Step 1: Add atomtypes_hybrid.itp after forcefield.itp if needed
-        if atomtypes_hybrid_path.exists() and "atomtypes_hybrid.itp" not in content:
-            # Look for forcefield.itp include and add atomtypes after it
-            ff_match = re.search(r'(#include\s+"[^"]*/forcefield\.itp")\s*\n?', content)
-            if ff_match:
-                # Insert atomtypes_hybrid.itp after forcefield.itp with proper newline
-                ff_include_end = ff_match.end()
-                insert_text = f'\n#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
-                content = content[:ff_include_end] + insert_text + content[ff_include_end:]
-
-                # Remove local [ atomtypes ] section to avoid duplicates
-                # Match from comment line before [ atomtypes ] to the end of the atomtypes section
-                # Stop at the next #include or [ section
-                atomtypes_section_pattern = (
-                    r"\n?; Include ligand atomtypes[^\n]*\n\[ atomtypes \][^\[]*?(?=\n#include|\n\[)"
-                )
-                content = re.sub(atomtypes_section_pattern, "", content, flags=re.DOTALL)
-
-        # Step 2: Remove ALL existing hybrid.itp includes (but NOT atomtypes_hybrid.itp)
-        # Use a more specific pattern to only match hybrid.itp, not atomtypes_hybrid.itp
-        # Match: #include "../common/hybrid/hybrid.itp" or similar
-        # But NOT: #include "../common/hybrid/atomtypes_hybrid.itp"
-        content = re.sub(r'#include\s+"[^"]*hybrid/hybrid\.itp"\s*\n?', "", content)
-        content = re.sub(r"#include\s+'[^']*hybrid/hybrid\.itp'\s*\n?", "", content)
-
-        # Step 3: Replace ligand ITP include with hybrid ligand
-        # Only replace the FIRST occurrence to avoid duplicates
-        ligand_itp_count = len(re.findall(r'#include\s+"[^"]*LIG\.itp"', content))
-        content = re.sub(r'#include\s+"[^"]*LIG\.itp"', '#include "../common/hybrid/hybrid.itp"', content, count=1)
-        # Remove any remaining LIG.itp includes (duplicates)
-        content = re.sub(r'#include\s+"[^"]*LIG\.itp"\s*\n?', "", content)
-
-        # Step 4: Add hybrid.itp ONLY if it's not already present AND LIG.itp was not found
-        # (If LIG.itp was found, step 3 already added hybrid.itp)
-        if "hybrid.itp" not in content and ligand_itp_count == 0:
-            # Add hybrid.itp after atomtypes_hybrid.itp if it exists
-            if "atomtypes_hybrid.itp" in content:
-                # Find the atomtypes_hybrid.itp include line and add hybrid.itp after it
-                atomtypes_match = re.search(r'(#[\s]*include\s+"[^"]*atomtypes_hybrid\.itp")\s*\n?', content)
-                if atomtypes_match:
-                    insert_pos = atomtypes_match.end()
-                    insert_text = '#include "../common/hybrid/hybrid.itp"\n'
-                    content = content[:insert_pos] + insert_text + content[insert_pos:]
-            else:
-                # Add after the last include (before [ system ])
-                last_include_match = list(re.finditer(r"^#include\s+", content, re.MULTILINE))
-                if last_include_match:
-                    # Find the end of the last include line
-                    last_include = last_include_match[-1]
-                    line_end = content.find("\n", last_include.end())
-                    if line_end != -1:
-                        insert_pos = line_end + 1
-                        content = (
-                            content[:insert_pos] + '#include "../common/hybrid/hybrid.itp"\n' + content[insert_pos:]
-                        )
-
-        # Step 5: Replace LIG with HYB in molecules section
-        content = re.sub(r"^LIG\s+", "HYB                  ", content, flags=re.MULTILINE)
-
-        target_top.write_text(content)
-
-    def _sync_unbound_molecules_with_conf(self, topol_path: Path, conf_gro_path: Path) -> None:
-        """Synchronize unbound topology [ molecules ] section with coordinate file."""
-        import re
-
-        if not topol_path.exists() or not conf_gro_path.exists():
-            return
-
-        lines = conf_gro_path.read_text().splitlines()
-        if len(lines) < 3:
-            return
-
-        try:
-            n_atoms = int(lines[1].strip())
-        except ValueError:
-            return
-
-        atom_lines = lines[2 : 2 + n_atoms]
-
-        # Count residues/molecules by unique (residue_number, residue_name)
-        molecule_counts: Dict[str, int] = {}
-        seen_residues = set()
-        for line in atom_lines:
-            if len(line) < 10:
-                continue
-            residue_number = line[0:5].strip()
-            residue_name = line[5:10].strip()
-            if not residue_number or not residue_name:
-                continue
-
-            key = (residue_number, residue_name)
-            if key in seen_residues:
-                continue
-            seen_residues.add(key)
-
-            mapped_name = "HYB" if residue_name == "LIG" else residue_name
-            molecule_counts[mapped_name] = molecule_counts.get(mapped_name, 0) + 1
-
-        # Build deterministic output order
-        preferred_order = ["HYB", "SOL", "NA", "CL", "K", "MG", "CA"]
-        ordered_names = [name for name in preferred_order if name in molecule_counts]
-        ordered_names.extend(sorted(name for name in molecule_counts if name not in preferred_order))
-
-        molecules_block = "[ molecules ]\n"
-        for name in ordered_names:
-            molecules_block += f"{name:20s} {molecule_counts[name]}\n"
-
-        content = topol_path.read_text()
-        if "[ molecules ]" in content:
-            content = re.sub(r"\[ molecules \][\s\S]*$", molecules_block.rstrip() + "\n", content)
-        else:
-            if not content.endswith("\n"):
-                content += "\n"
-            content += "\n" + molecules_block
-
-        topol_path.write_text(content)
-
-    def _prepare_protein_for_system_builder(self, protein_path: Path, leg_dir: Path) -> Path:
-        """Prepare protein PDB for system builder"""
-        cleaned_path = leg_dir / "build" / "cleaned_protein.pdb"
-        cleaned_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Use absolute path to avoid path resolution issues
-        abs_protein_path = protein_path.resolve()
-        shutil.copy2(abs_protein_path, cleaned_path)
-
-        return cleaned_path.resolve()  # Return absolute path
-
-    def _create_dummy_protein(self, leg_dir: Path) -> Path:
-        """Create minimal dummy protein for ligand-only systems"""
-        dummy_pdb = """REMARK   Dummy protein for ligand-only FEP system
-ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C
-END
-"""
-        dummy_path = leg_dir / "build" / "dummy_protein.pdb"
-        dummy_path.parent.mkdir(parents=True, exist_ok=True)
-        dummy_path.write_text(dummy_pdb)
-        return dummy_path.resolve()  # Return absolute path
-
-    def _get_forcefield_indices(self, config: dict) -> tuple:
-        """Get force field and water model indices from config"""
-        ff_name = config.get("forcefield", {}).get("protein", "amber14sb")
-        water_name = config.get("forcefield", {}).get("water", "tip3p")
-        ff_map = {"amber14sb": 0, "amber99sb-ildn": 1, "charmm36": 2}
-        water_map = {"tip3p": 0, "tip4p": 1, "spc": 2}
-        return ff_map.get(ff_name.lower(), 0), water_map.get(water_name.lower(), 0)
-
-    def _get_forcefield_info(self, _config: dict, ff_idx: int) -> dict:
-        """Get force field info dict"""
-        ff_names = ["amber14sb", "amber99sb-ildn", "charmm36"]
-        # SystemBuilder expects path to be set, use GROMACS built-in path
-        return {"name": ff_names[ff_idx], "dir": f"{ff_names[ff_idx]}.ff", "path": f"{ff_names[ff_idx]}.ff"}
-
-    def _get_water_info(self, _conf, water_idx: int) -> dict:
-        """Get water model info dict"""
-        water_names = ["tip3p", "tip4p", "spc"]
-        return {"name": water_names[water_idx]}
-
-    def _write_complete_topology(
-        self, topol_path: Path, leg_name: str, layout: FEPScaffoldLayout, model_path: Path
-    ) -> None:
-        """Write complete topology including protein/water/ions"""
-        content = f"; PRISM-FEP {leg_name} topology\n\n"
-
-        # Include force field
-        ff_path = layout.hybrid_dir / self.hybrid_forcefield_filename
-        if ff_path.exists():
-            content += f'#include "../common/hybrid/{self.hybrid_forcefield_filename}"\n'
-
-        # Include protein topology (if bound leg)
-        if leg_name == "bound":
-            protein_itp = model_path / "topol_Protein_chain_A.itp"
-            if protein_itp.exists():
-                shutil.copy2(protein_itp, topol_path.parent / "topol_Protein_chain_A.itp")
-                content += '#include "topol_Protein_chain_A.itp"\n'
-
-        # Include hybrid ligand
-        content += f'#include "../common/hybrid/{self.hybrid_itp_filename}"\n\n'
-
-        # Include water and ions
-        content += "; Include water topology\n"
-        content += '#include "amber14sb.ff/tip3p.itp"\n\n'
-        content += "#ifdef POSRES_WATER\n"
-        content += "[ position_restraints ]\n"
-        content += "   1    1       1000       1000       1000\n"
-        content += "#endif\n\n"
-        content += '#include "amber14sb.ff/ions.itp"\n\n'
-
-        content += f"[ system ]\n{leg_name.capitalize()} FEP leg\n\n"
-        content += "[ molecules ]\n"
-
-        # Read molecule counts
-        model_top = model_path / "topol.top"
-        if model_top.exists():
-            molecules = self._extract_molecules_from_topology(model_top)
-            for mol_name, count in molecules:
-                if mol_name == "LIG":
-                    mol_name = self.molecule_name
-                content += f"{mol_name:20s} {count}\n"
-
-        topol_path.write_text(content)
-
-    def _extract_molecules_from_topology(self, topol_path: Path) -> list:
-        """Extract molecule list from topology"""
-        molecules = []
-        in_molecules = False
-        for line in topol_path.read_text().splitlines():
-            stripped = line.strip()
-            if stripped.lower() == "[ molecules ]":
-                in_molecules = True
-                continue
-            if in_molecules and stripped and not stripped.startswith(";"):
-                parts = stripped.split()
-                if len(parts) >= 2:
-                    try:
-                        molecules.append((parts[0], int(parts[1])))
-                    except ValueError:
-                        continue
-        return molecules
-
-    def _write_fep_run_script(self, leg_dir: Path, leg_name: str) -> None:
-        """Generate real FEP run script"""
-        script = f"""#!/usr/bin/env bash
-set -euo pipefail
-
-LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-MDP_DIR="${{LEG_DIR}}/mdps"
-INPUT_DIR="${{LEG_DIR}}/input"
-BUILD_DIR="${{LEG_DIR}}/build"
-MDRUN_NSTEPS_ARG=""
-if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
-    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
-fi
-
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    PRISM-FEP {leg_name.upper()} LEG                                    ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-
-cd "${{LEG_DIR}}"
-
-# Energy minimization
-mkdir -p ${{BUILD_DIR}}
-
-# Energy minimization
-if [ -f ${{BUILD_DIR}}/em.gro ]; then
-    echo "EM already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/em.tpr ]; then
-    echo "EM checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -v
-else
-    echo "Running energy minimization..."
-    gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp 10 -v
-fi
-
-# NVT equilibration
-if [ -f ${{BUILD_DIR}}/nvt.gro ]; then
-    echo "NVT already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
-    echo "NVT checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -cpi ${{BUILD_DIR}}/nvt.cpt -v
-else
-    echo "Running NVT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-fi
-
-# NPT equilibration
-if [ -f ${{BUILD_DIR}}/npt.gro ]; then
-    echo "NPT already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
-    echo "NPT checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -cpi ${{BUILD_DIR}}/npt.cpt -v
-else
-    echo "Running NPT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-fi
-
-# FEP production runs for each lambda window
-echo "Running FEP production for all lambda windows..."
-for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
-    lambda_name=$(basename ${{lambda_mdp}} .mdp)
-    lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
-    window_dir="window_${{lambda_idx}}"
-
-    mkdir -p "${{window_dir}}"
-
-    # Per-window NPT short equilibration
-    if [ -f "${{window_dir}}/npt_short.gro" ]; then
-        echo "  ${{lambda_name}}: NPT short already completed"
-    elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
-        echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v
-    else
-        echo "  ${{lambda_name}}: starting NPT short equilibration"
-        gmx grompp -f ${{MDP_DIR}}/npt_short.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}"
-    fi
-
-    # Production run
-    if [ -f "${{window_dir}}/prod.gro" ]; then
-        echo "  ${{lambda_name}}: production already completed"
-    elif [ -f "${{window_dir}}/prod.tpr" ]; then
-        echo "  ${{lambda_name}}: production resuming from checkpoint"
-        gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v
-    else
-        echo "  ${{lambda_name}}: starting production"
-        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2
-        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}} || \
-        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}"
-    fi
-done
-
-# Clean up intermediate step PDB files
-echo "Cleaning up intermediate PDB files..."
-rm -f step*.pdb 2>/dev/null || true
-
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    {leg_name.upper()} LEG COMPLETE                                   ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-"""
-        path = leg_dir / "localrun.sh"
-        path.write_text(script)
-        path.chmod(0o755)
-
-    def _write_fep_slurm_script(
-        self,
-        leg_dir: Path,
-        leg_name: str,
-        job_name: str = "fep",
-        partition: str = "gpu",
-        time: str = "48:00:00",
-        nodes: int = 1,
-        ntasks: int = 1,
-        cpus_per_task: int = 16,
-        gpus: int = 1,
-    ) -> None:
-        """Generate SLURM submission script for FEP calculations"""
-        script = f"""#!/bin/bash
-#SBATCH -J {job_name}-{leg_name}
-#SBATCH -p {partition}
-#SBATCH --time={time}
-#SBATCH --nodes={nodes}
-#SBATCH --ntasks={ntasks}
-#SBATCH --cpus-per-task={cpus_per_task}
-#SBATCH --gres=gpu:{gpus}
-
-echo "Start time: $(date)"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "hostname: $(hostname)"
-echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
-echo "Job directory: $(pwd)"
-
-# Load GROMACS module (adjust for your cluster)
-# module load gromacs/2023.2
-# source /path/to/gromacs/bin/GMXRC
-
-LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-MDP_DIR="${{LEG_DIR}}/mdps"
-INPUT_DIR="${{LEG_DIR}}/input"
-BUILD_DIR="${{LEG_DIR}}/build"
-MDRUN_NSTEPS_ARG=""
-if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
-    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
-fi
-
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    PRISM-FEP {leg_name.upper()} LEG (SLURM)                          ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo ""
-
-cd "${{LEG_DIR}}"
-
-# Set OpenMP threads
-export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
-
-# Energy minimization
-mkdir -p ${{BUILD_DIR}}
-
-if [ -f ${{BUILD_DIR}}/em.gro ]; then
-    echo "EM already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/em.tpr ]; then
-    echo "EM checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -v
-else
-    echo "Running energy minimization..."
-    gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -v
-fi
-
-# NVT equilibration
-if [ -f ${{BUILD_DIR}}/nvt.gro ]; then
-    echo "NVT already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
-    echo "NVT checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -cpi ${{BUILD_DIR}}/nvt.cpt -v
-else
-    echo "Running NVT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
-fi
-
-# NPT equilibration
-if [ -f ${{BUILD_DIR}}/npt.gro ]; then
-    echo "NPT already completed, skipping..."
-elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
-    echo "NPT checkpoint found, resuming..."
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -cpi ${{BUILD_DIR}}/npt.cpt -v
-else
-    echo "Running NPT equilibration..."
-    gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 2
-    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
-fi
-
-# FEP production runs for each lambda window
-echo "Running FEP production for all lambda windows..."
-for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
-    lambda_name=$(basename ${{lambda_mdp}} .mdp)
-    lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
-    window_dir="window_${{lambda_idx}}"
-
-    mkdir -p "${{window_dir}}"
-
-    # Per-window NPT short equilibration
-    if [ -f "${{window_dir}}/npt_short.gro" ]; then
-        echo "  ${{lambda_name}}: NPT short already completed"
-    elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
-        echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v
-    else
-        echo "  ${{lambda_name}}: starting NPT short equilibration"
-        gmx grompp -f ${{MDP_DIR}}/npt_short.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
-    fi
-
-    # Production run
-    if [ -f "${{window_dir}}/prod.gro" ]; then
-        echo "  ${{lambda_name}}: production already completed"
-    elif [ -f "${{window_dir}}/prod.tpr" ]; then
-        echo "  ${{lambda_name}}: production resuming from checkpoint"
-        gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v
-    else
-        echo "  ${{lambda_name}}: starting production"
-        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2
-        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp ${{SLURM_CPUS_PER_TASK}} -nb gpu -bonded gpu -pme gpu -v ${{MDRUN_NSTEPS_ARG}}
-    fi
-done
-
-# Clean up intermediate step PDB files
-echo "Cleaning up intermediate PDB files..."
-rm -f step*.pdb 2>/dev/null || true
-
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    {leg_name.upper()} LEG COMPLETE                                   ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo "End time: $(date)"
-"""
-        path = leg_dir / "submit.slurm.sh"
-        path.write_text(script)
-        path.chmod(0o755)

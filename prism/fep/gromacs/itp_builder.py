@@ -173,6 +173,10 @@ class ITPBuilder:
         hybrid_records = cls._parse_hybrid_atom_records(Path(hybrid_itp).read_text())
         name_map_a, name_map_b = cls._build_state_name_maps(hybrid_records)
 
+        # Build sets of hybrid indices that are dummy in each state
+        dummy_in_a: set = {r.index for r in hybrid_records if r.state_a_type.startswith("DUM_")}
+        dummy_in_b: set = {r.index for r in hybrid_records if (r.state_b_type or "").startswith("DUM_")}
+
         source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text())
         source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text())
 
@@ -186,6 +190,8 @@ class ITPBuilder:
                 atom_names_b=source_b["atom_names"],
                 name_map_a=name_map_a,
                 name_map_b=name_map_b,
+                dummy_in_a=dummy_in_a,
+                dummy_in_b=dummy_in_b,
             )
         return hybrid_params
 
@@ -370,6 +376,8 @@ class ITPBuilder:
         atom_names_b: Dict[int, str],
         name_map_a: Dict[str, int],
         name_map_b: Dict[str, int],
+        dummy_in_a: Optional[set] = None,
+        dummy_in_b: Optional[set] = None,
     ) -> List[Dict]:
         """Merge A/B section terms into hybrid interaction lines."""
         merged: Dict[Tuple, Dict[str, Optional[InteractionTerm]]] = {}
@@ -413,15 +421,24 @@ class ITPBuilder:
                 output.append({"atoms": canonical_atoms, "funct": funct})
                 continue
 
+            has_dummy_in_a = bool(dummy_in_a and set(canonical_atoms) & dummy_in_a)
+            has_dummy_in_b = bool(dummy_in_b and set(canonical_atoms) & dummy_in_b)
+
             if term_a is not None:
                 params_a = list(term_a.params)
+                # Zero force constant if any atom is dummy in state A (undefined geometry)
+                if has_dummy_in_a and section in {"angles", "dihedrals", "impropers"}:
+                    params_a = cls._zeroize_params(section, funct, params_a)
             else:
-                params_a = cls._zeroize_params(section, funct, list(term_b.params))
+                params_a = cls._zeroize_params(section, funct, list(term_b.params))  # type: ignore[union-attr]
 
             if term_b is not None:
                 params_b = list(term_b.params)
+                # Zero force constant if any atom is dummy in state B (undefined geometry)
+                if has_dummy_in_b and section in {"angles", "dihedrals", "impropers"}:
+                    params_b = cls._zeroize_params(section, funct, params_b)
             else:
-                params_b = cls._zeroize_params(section, funct, list(term_a.params))
+                params_b = cls._zeroize_params(section, funct, list(term_a.params))  # type: ignore[union-attr]
 
             output.append(
                 {
@@ -461,15 +478,16 @@ class ITPBuilder:
 
         zero = list(params)
 
-        if section in {"bonds", "angles"}:
+        if section == "bonds":
+            # Keep bond force constant for dummy atoms — they must maintain geometry
+            # to avoid instability. Nonbonded interactions are zeroed via DUM_ atomtype.
+            return zero
+
+        if section == "angles":
+            # Zero angle force constant for dummy state — angles involving dummy atoms
+            # can have undefined geometry (e.g. two H's at same position), causing huge forces.
             if len(zero) >= 2:
-                # CRITICAL FIX: Use a small non-zero force constant instead of 0
-                # to prevent atoms from flying apart during MD.
-                # A force constant of 0 causes GROMACS to ignore the constraint entirely,
-                # leading to energy explosions and LINCS failures.
-                # Using 1.0 kJ/(mol·nm²) for bonds and 1.0 kJ/(mol·rad²) for angles
-                # provides minimal restraint while allowing the interaction to disappear smoothly.
-                zero[1] = "1.000000"  # Small non-zero force constant
+                zero[1] = "0.000000"
             return zero
 
         if section in {"dihedrals", "impropers"}:

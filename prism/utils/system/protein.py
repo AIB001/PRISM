@@ -44,6 +44,10 @@ class ProteinProcessorMixin:
             ]
             self._run_command(command, str(self.model_dir.parent))
 
+        # Convert AMBER histidine names to GROMACS-compatible names
+        print("Converting AMBER histidine names to GROMACS format...")
+        self._convert_amber_histidine(str(fixed_pdb))
+
         # Fix terminal atoms for GROMACS compatibility (OXT → O or OC1/OC2)
         print("Fixing terminal atoms for GROMACS compatibility...")
         from prism.utils.cleaner import fix_terminal_atoms
@@ -53,6 +57,65 @@ class ProteinProcessorMixin:
         fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), force_field=ff_name, verbose=True)
 
         return str(fixed_pdb)
+
+    def _convert_amber_histidine(self, pdb_file: str) -> None:
+        """Convert AMBER histidine residue names to GROMACS-compatible names.
+
+        AMBER force fields use: HSD, HSE, HSP
+        GROMACS force fields use: HID, HIE, HIP
+
+        This conversion is necessary for pdb2gmx to recognize the residues.
+        The mapping is:
+            HSD (δ-protonated) → HID
+            HSE (ε-protonated) → HIE
+            HSP (protonated)    → HIP
+
+        Parameters
+        ----------
+        pdb_file : str
+            Path to PDB file to modify
+        """
+        # AMBER to GROMACS histidine name mapping
+        his_mapping = {
+            'HSD': 'HID',  # δ-protonated histidine
+            'HSE': 'HIE',  # ε-protonated histidine
+            'HSP': 'HIP',  # doubly protonated histidine
+        }
+
+        with open(pdb_file, 'r') as f:
+            lines = f.readlines()
+
+        # Track conversion statistics
+        conversion_stats = {name: 0 for name in his_mapping.keys()}
+        new_lines = []
+
+        for line in lines:
+            if (line.startswith("ATOM") or line.startswith("HETATM")):
+                # PDB format: positions 17-20 (index 17:21) contain residue name
+                # But we need to be careful with whitespace
+                if len(line) >= 20:
+                    resname = line[17:20].strip()  # Get residue name (columns 17-20)
+                    if resname in his_mapping:
+                        # Replace with GROMACS name
+                        # Preserve formatting (right-justified in 3 columns)
+                        new_resname = his_mapping[resname]
+                        line = line[:17] + f"{new_resname:>3s}" + line[20:]
+                        conversion_stats[resname] += 1
+            new_lines.append(line)
+
+        # Write back
+        with open(pdb_file, 'w') as f:
+            f.writelines(new_lines)
+
+        # Report conversions
+        total_converted = sum(conversion_stats.values())
+        if total_converted > 0:
+            print(f"  Converted {total_converted} histidine residue(s):")
+            for amber, gmx in his_mapping.items():
+                if conversion_stats[amber] > 0:
+                    print(f"    {amber} → {gmx}: {conversion_stats[amber]} residue(s)")
+        else:
+            print("  No AMBER histidine residues found (HSD/HSE/HSP)")
 
     def _apply_propka_renaming(self, pdb_file: str):
         """Apply PROPKA pKa-based histidine renaming to fixed PDB.
