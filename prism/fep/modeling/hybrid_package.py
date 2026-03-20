@@ -209,14 +209,27 @@ class HybridPackageBuilder:
         written = set()
         dummy_requests = set()
 
-        # Collect real and dummy atomtypes (real ones are NOT written here -
-        # they are already defined in the protein force field and writing them
-        # again causes "Atomtype X was defined previously" warnings in grompp)
+        # Collect real and dummy atomtypes.
+        # Real atomtypes are written here so unbound leg (ligand-only, no protein FF)
+        # can find them. Bound leg topology inlines them separately from PRISM build,
+        # so duplication is avoided by grompp's deduplication (same values = no error).
+        real_requests = set()
         for atomtype in used_types:
             if atomtype.startswith("DUM_"):
                 dummy_requests.add(atomtype)
+            else:
+                real_requests.add(atomtype)
 
-        # Write dummy atomtypes only
+        # Write real atomtypes first
+        for atomtype in sorted(real_requests):
+            if atomtype in written:
+                continue
+            base_line = source_atomtypes.get(atomtype)
+            if base_line:
+                lines.append(base_line)
+                written.add(atomtype)
+
+        # Write dummy atomtypes
         for dummy_atomtype in sorted(dummy_requests):
             if dummy_atomtype in written:
                 continue

@@ -316,6 +316,21 @@ class LegWriter:
             content,
         )
 
+        # Deduplicate hybrid.itp includes (can happen if source topology was already modified)
+        hybrid_include = '#include "../common/hybrid/hybrid.itp"'
+        if content.count(hybrid_include) > 1:
+            lines = content.splitlines()
+            seen = False
+            deduped = []
+            for line in lines:
+                if line.strip() == hybrid_include:
+                    if not seen:
+                        deduped.append(line)
+                        seen = True
+                else:
+                    deduped.append(line)
+            content = "\n".join(deduped) + "\n"
+
         # Add hybrid force field include if needed (after forcefield.itp)
         # Note: Must be after forcefield.itp to ensure [ defaults ] comes before [ atomtypes ]
         if needs_hybrid_ff and '#include "../common/hybrid/ff_hybrid.itp"' not in content:
