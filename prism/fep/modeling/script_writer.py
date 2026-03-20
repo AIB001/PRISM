@@ -88,113 +88,111 @@ def write_fep_parallel_script(leg_dir: Path, leg_name: str, config: Optional[dic
 
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
     script_path = leg_dir / "parallel_run.sh"
+    leg_upper = leg_name.upper()
+
+    # Use single f-string template for efficiency (78 writes → 1 write)
+    script_content = f"""\
+#!/usr/bin/env bash
+# Parallel FEP runner for {leg_name} leg - {parallel_windows} windows on {num_gpus} GPUs
+set -euo pipefail
+
+LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+MDP_DIR="${{LEG_DIR}}/mdps"
+BUILD_DIR="${{LEG_DIR}}/build"
+
+NUM_GPUS={num_gpus}
+PARALLEL_WINDOWS={parallel_windows}
+OMP_THREADS={omp_threads}
+
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║         PRISM-FEP {leg_upper} LEG - PARALLEL GPU EXECUTION                  ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+echo "  GPUs: $NUM_GPUS | Parallel windows: $PARALLEL_WINDOWS | Threads/window: $OMP_THREADS"
+echo ""
+
+cd "${{LEG_DIR}}"
+
+# Check equilibration is complete
+if [ ! -f "${{BUILD_DIR}}/npt.gro" ]; then
+    echo "✗ Equilibration not complete. Run localrun.sh first to complete EM/NVT/NPT."
+    exit 1
+fi
+
+# Get list of pending windows
+PENDING=()
+for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
+    lambda_idx=$(basename ${{lambda_mdp}} .mdp | sed 's/prod_//')
+    if [ ! -f "window_${{lambda_idx}}/prod.gro" ]; then
+        PENDING+=("${{lambda_idx}}")
+    fi
+done
+
+echo "Found ${{#PENDING[@]}} pending windows"
+if [ ${{#PENDING[@]}} -eq 0 ]; then
+    echo "✓ All windows completed!"
+    exit 0
+fi
+
+# Function to run a single window
+run_window() {{
+    local idx=$1
+    local gpu_id=$2
+    local window_dir="window_${{idx}}"
+    local lambda_mdp="${{MDP_DIR}}/prod_${{idx}}.mdp"
+
+    export CUDA_VISIBLE_DEVICES=$gpu_id
+    export OMP_NUM_THREADS=$OMP_THREADS
+
+    echo "[$(date +%H:%M:%S)] Window ${{idx}}: Starting on GPU ${{gpu_id}}"
+
+    mkdir -p "${{window_dir}}"
+
+    # NPT short
+    if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
+        if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
+            gmx grompp -f ${{MDP_DIR}}/npt_short_${{idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2 >/dev/null 2>&1
+        fi
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/npt_short.log" 2>&1
+    fi
+
+    # Production
+    if [ ! -f "${{window_dir}}/prod.gro" ]; then
+        if [ ! -f "${{window_dir}}/prod.tpr" ]; then
+            gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2 >/dev/null 2>&1
+        fi
+        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/prod.log" 2>&1
+    fi
+
+    echo "[$(date +%H:%M:%S)] Window ${{idx}}: ✓ Complete"
+}}
+
+export -f run_window
+
+# Run windows in parallel
+JOB_COUNT=0
+for idx in "${{PENDING[@]}}"; do
+    # Wait if too many jobs running
+    while [ $(jobs -r | wc -l) -ge $PARALLEL_WINDOWS ]; do
+        sleep 1
+    done
+
+    # Assign GPU (round-robin)
+    gpu_id=$((JOB_COUNT % NUM_GPUS))
+    run_window "$idx" "$gpu_id" &
+    ((JOB_COUNT++))
+done
+
+# Wait for all jobs to complete
+wait
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+echo "║                    {leg_upper} LEG COMPLETE                                   ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+"""
 
     with open(script_path, "w") as f:
-        f.write("#!/usr/bin/env bash\n")
-        f.write(f"# Parallel FEP runner for {leg_name} leg - {parallel_windows} windows on {num_gpus} GPUs\n")
-        f.write("set -euo pipefail\n\n")
-
-        f.write('LEG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n')
-        f.write('MDP_DIR="${LEG_DIR}/mdps"\n')
-        f.write('BUILD_DIR="${LEG_DIR}/build"\n\n')
-
-        f.write(f"NUM_GPUS={num_gpus}\n")
-        f.write(f"PARALLEL_WINDOWS={parallel_windows}\n")
-        f.write(f"OMP_THREADS={omp_threads}\n\n")
-
-        f.write('echo "╔═══════════════════════════════════════════════════════════════════════════╗"\n')
-        f.write(f'echo "║         PRISM-FEP {leg_name.upper()} LEG - PARALLEL GPU EXECUTION                  ║"\n')
-        f.write('echo "╚═══════════════════════════════════════════════════════════════════════════╝"\n')
-        f.write(f'echo "  GPUs: $NUM_GPUS | Parallel windows: $PARALLEL_WINDOWS | Threads/window: $OMP_THREADS"\n')
-        f.write('echo ""\n\n')
-
-        f.write('cd "${LEG_DIR}"\n\n')
-
-        f.write("# Check equilibration is complete\n")
-        f.write('if [ ! -f "${BUILD_DIR}/npt.gro" ]; then\n')
-        f.write('    echo "✗ Equilibration not complete. Run localrun.sh first to complete EM/NVT/NPT."\n')
-        f.write("    exit 1\n")
-        f.write("fi\n\n")
-
-        f.write("# Get list of pending windows\n")
-        f.write("PENDING=()\n")
-        f.write("for lambda_mdp in ${MDP_DIR}/prod_*.mdp; do\n")
-        f.write("    lambda_idx=$(basename ${lambda_mdp} .mdp | sed 's/prod_//')\n")
-        f.write('    if [ ! -f "window_${lambda_idx}/prod.gro" ]; then\n')
-        f.write('        PENDING+=("${lambda_idx}")\n')
-        f.write("    fi\n")
-        f.write("done\n\n")
-
-        f.write('echo "Found ${#PENDING[@]} pending windows"\n')
-        f.write("if [ ${#PENDING[@]} -eq 0 ]; then\n")
-        f.write('    echo "✓ All windows completed!"\n')
-        f.write("    exit 0\n")
-        f.write("fi\n\n")
-
-        f.write("# Function to run a single window\n")
-        f.write("run_window() {\n")
-        f.write("    local idx=$1\n")
-        f.write("    local gpu_id=$2\n")
-        f.write('    local window_dir="window_${idx}"\n')
-        f.write('    local lambda_mdp="${MDP_DIR}/prod_${idx}.mdp"\n\n')
-
-        f.write("    export CUDA_VISIBLE_DEVICES=$gpu_id\n")
-        f.write("    export OMP_NUM_THREADS=$OMP_THREADS\n\n")
-
-        f.write('    echo "[$(date +%H:%M:%S)] Window ${idx}: Starting on GPU ${gpu_id}"\n\n')
-
-        f.write('    mkdir -p "${window_dir}"\n\n')
-
-        f.write("    # NPT short\n")
-        f.write('    if [ ! -f "${window_dir}/npt_short.gro" ]; then\n')
-        f.write('        if [ ! -f "${window_dir}/npt_short.tpr" ]; then\n')
-        f.write(
-            '            gmx grompp -f ${MDP_DIR}/npt_short_${idx}.mdp -c ${BUILD_DIR}/npt.gro -r ${BUILD_DIR}/npt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o "${window_dir}/npt_short.tpr" -maxwarn 2 >/dev/null 2>&1\n'
-        )
-        f.write("        fi\n")
-        f.write(
-            f'        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/npt_short.log" 2>&1\n'
-        )
-        f.write("    fi\n\n")
-
-        f.write("    # Production\n")
-        f.write('    if [ ! -f "${window_dir}/prod.gro" ]; then\n')
-        f.write('        if [ ! -f "${window_dir}/prod.tpr" ]; then\n')
-        f.write(
-            '            gmx grompp -f ${lambda_mdp} -c "${window_dir}/npt_short.gro" -p topol.top -o "${window_dir}/prod.tpr" -maxwarn 2 >/dev/null 2>&1\n'
-        )
-        f.write("        fi\n")
-        f.write(
-            f'        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/prod.log" 2>&1\n'
-        )
-        f.write("    fi\n\n")
-
-        f.write('    echo "[$(date +%H:%M:%S)] Window ${idx}: ✓ Complete"\n')
-        f.write("}\n\n")
-
-        f.write("export -f run_window\n\n")
-
-        f.write("# Run windows in parallel\n")
-        f.write("JOB_COUNT=0\n")
-        f.write('for idx in "${PENDING[@]}"; do\n')
-        f.write("    # Wait if too many jobs running\n")
-        f.write("    while [ $(jobs -r | wc -l) -ge $PARALLEL_WINDOWS ]; do\n")
-        f.write("        sleep 1\n")
-        f.write("    done\n\n")
-
-        f.write("    # Assign GPU (round-robin)\n")
-        f.write("    gpu_id=$((JOB_COUNT % NUM_GPUS))\n")
-        f.write('    run_window "$idx" "$gpu_id" &\n')
-        f.write("    ((JOB_COUNT++))\n")
-        f.write("done\n\n")
-
-        f.write("# Wait for all jobs to complete\n")
-        f.write("wait\n\n")
-
-        f.write('echo ""\n')
-        f.write('echo "╔═══════════════════════════════════════════════════════════════════════════╗"\n')
-        f.write(f'echo "║                    {leg_name.upper()} LEG COMPLETE                                   ║"\n')
-        f.write('echo "╚═══════════════════════════════════════════════════════════════════════════╝"\n')
+        f.write(script_content)
 
     script_path.chmod(0o755)
 
