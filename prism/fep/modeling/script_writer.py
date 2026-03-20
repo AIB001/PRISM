@@ -206,14 +206,35 @@ def write_fep_run_script(leg_dir: Path, leg_name: str, config: Optional[dict] = 
         f.write("    lambda_idx=$(echo ${lambda_name} | sed 's/prod_//')\n")
         f.write('    window_dir="window_${lambda_idx}"\n\n')
         f.write('    mkdir -p "${window_dir}"\n\n')
+        f.write('    lock_file="${window_dir}/.run.lock"\n')
+        f.write('    if [ -f "${lock_file}" ]; then\n')
+        f.write('        lock_pid=$(cat "${lock_file}" 2>/dev/null || true)\n')
+        f.write('        if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then\n')
+        f.write(
+            '            echo "  ${lambda_name}: another localrun.sh process is active (pid ${lock_pid}), skipping window"\n'
+        )
+        f.write("            continue\n")
+        f.write("        fi\n")
+        f.write('        echo "  ${lambda_name}: removing stale lock file"\n')
+        f.write('        rm -f "${lock_file}"\n')
+        f.write("    fi\n")
+        f.write('    echo $$ > "${lock_file}"\n\n')
         f.write("    # Per-window NPT short equilibration (quick, can use test mode)\n")
         f.write('    if [ -f "${window_dir}/npt_short.gro" ]; then\n')
         f.write('        echo "  ${lambda_name}: NPT short already completed"\n')
         f.write('    elif [ -f "${window_dir}/npt_short.tpr" ]; then\n')
-        f.write('        echo "  ${lambda_name}: NPT short resuming from checkpoint"\n')
+        f.write('        if [ -f "${window_dir}/npt_short.cpt" ]; then\n')
+        f.write('            echo "  ${lambda_name}: NPT short resuming from checkpoint"\n')
         f.write(
-            '        gmx mdrun -deffnm "${window_dir}/npt_short" -cpi "${window_dir}/npt_short.cpt" -v ${MDRUN_NSTEPS_ARG}\n'
+            '            gmx mdrun -deffnm "${window_dir}/npt_short" -cpi "${window_dir}/npt_short.cpt" -v ${MDRUN_NSTEPS_ARG}\n'
         )
+        f.write("        else\n")
+        f.write('            echo "  ${lambda_name}: NPT short TPR exists without checkpoint, continuing from TPR"\n')
+        f.write(
+            f'            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
+        )
+        f.write('gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
+        f.write("        fi\n")
         f.write("    else\n")
         f.write('        echo "  ${lambda_name}: starting NPT short equilibration"\n')
         f.write(
@@ -228,8 +249,18 @@ def write_fep_run_script(leg_dir: Path, leg_name: str, config: Optional[dict] = 
         f.write('    if [ -f "${window_dir}/prod.gro" ]; then\n')
         f.write('        echo "  ${lambda_name}: production already completed"\n')
         f.write('    elif [ -f "${window_dir}/prod.tpr" ]; then\n')
-        f.write('        echo "  ${lambda_name}: production resuming from checkpoint"\n')
-        f.write('        gmx mdrun -deffnm "${window_dir}/prod" -cpi "${window_dir}/prod.cpt" -v ${MDRUN_NSTEPS_ARG}\n')
+        f.write('        if [ -f "${window_dir}/prod.cpt" ]; then\n')
+        f.write('            echo "  ${lambda_name}: production resuming from checkpoint"\n')
+        f.write(
+            '            gmx mdrun -deffnm "${window_dir}/prod" -cpi "${window_dir}/prod.cpt" -v ${MDRUN_NSTEPS_ARG}\n'
+        )
+        f.write("        else\n")
+        f.write('            echo "  ${lambda_name}: production TPR exists without checkpoint, continuing from TPR"\n')
+        f.write(
+            f'            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
+        )
+        f.write('gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
+        f.write("        fi\n")
         f.write("    else\n")
         f.write('        echo "  ${lambda_name}: starting production"\n')
         f.write(
@@ -240,6 +271,8 @@ def write_fep_run_script(leg_dir: Path, leg_name: str, config: Optional[dict] = 
         )
         f.write('gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
         f.write("    fi\n")
+        f.write('    rm -f "${lock_file}"\n')
+
         f.write("done\n\n")
 
         # Cleanup and completion message
