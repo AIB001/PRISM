@@ -33,7 +33,7 @@ nstxout-compressed = {nstxout_compressed}
 free-energy              = yes
 init-lambda-state        = {init_lambda_state}
 delta-lambda             = 0
-calc-lambda-neighbors    = -1
+calc-lambda-neighbors    = 1
 nstdhdl                  = 100
 separate-dhdl-file       = yes
 
@@ -55,7 +55,7 @@ sc-coul                  = yes
 ; Nonbonded settings
 cutoff-scheme   = Verlet
 ns_type         = grid
-nstlist         = 20   ; GPU-optimized (GROMACS auto-tunes this upward as needed)
+nstlist         = 200  ; Optimized for multi-GPU with PME (matching bound performance)
 rcoulomb        = {rcoulomb}
 rvdw            = {rvdw}
 table-extension = 2.0
