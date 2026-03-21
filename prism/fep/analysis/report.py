@@ -6,6 +6,8 @@ HTML Report Generator for FEP Analysis
 
 Generates comprehensive, publication-ready HTML reports for FEP calculations.
 Includes interactive plots, tables, and convergence diagnostics.
+
+Modern UI design inspired by FEP mapping visualization.
 """
 
 from pathlib import Path
@@ -107,7 +109,7 @@ class HTMLReportGenerator:
         return html
 
     def _get_css(self) -> str:
-        """Get CSS styles"""
+        """Get modern CSS styles inspired by mapping visualization"""
         return """
     <style>
         * {{
@@ -117,152 +119,317 @@ class HTMLReportGenerator:
         }}
 
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
             line-height: 1.6;
             color: #333;
-            background: #f5f5f5;
-        }}
-
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             padding: 20px;
         }}
 
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            background: transparent;
+        }}
+
         header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 20px;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            margin-bottom: 25px;
+            text-align: center;
+            animation: slideDown 0.5s ease-out;
+        }}
+
+        @keyframes slideDown {{
+            from {{
+                opacity: 0;
+                transform: translateY(-20px);
+            }}
+            to {{
+                opacity: 1;
+                transform: translateY(0);
+            }}
         }}
 
         header h1 {{
-            font-size: 2.5em;
+            font-size: 2.2em;
             margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }}
 
         header .subtitle {{
-            font-size: 1.2em;
-            opacity: 0.9;
+            font-size: 1.1em;
+            color: #666;
         }}
 
         .card {{
             background: white;
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 0.6s ease-out;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }}
+
+        .card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(0, 0, 0, 0.15);
+        }}
+
+        @keyframes fadeIn {{
+            from {{
+                opacity: 0;
+            }}
+            to {{
+                opacity: 1;
+            }}
         }}
 
         .card h2 {{
             color: #667eea;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #667eea;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+            font-size: 1.6em;
+            display: flex;
+            align-items: center;
+        }}
+
+        .card h2::before {{
+            content: "▸";
+            margin-right: 10px;
+            font-size: 1.3em;
+        }}
+
+        .card h3 {{
+            color: #555;
+            margin: 20px 0 15px 0;
+            font-size: 1.2em;
+            font-weight: 600;
         }}
 
         .summary-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
             gap: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }}
 
         .summary-item {{
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s;
+            cursor: pointer;
+        }}
+
+        .summary-item:hover {{
+            transform: translateX(5px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
         }}
 
         .summary-item .label {{
             font-size: 0.9em;
             color: #666;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }}
 
         .summary-item .value {{
-            font-size: 1.8em;
+            font-size: 2.2em;
             font-weight: bold;
             color: #333;
+            line-height: 1.2;
         }}
 
         .summary-item .error {{
-            font-size: 0.9em;
-            color: #999;
-            margin-top: 5px;
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 8px;
+            font-style: italic;
         }}
 
         table {{
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
-        }}
-
-        th, td {{
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }}
 
         th {{
-            background: #f8f9fa;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
             font-weight: 600;
-            color: #333;
+            font-size: 0.95em;
         }}
 
-        tr:hover {{
+        td {{
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            color: #444;
+        }}
+
+        tr:last-child td {{
+            border-bottom: none;
+        }}
+
+        tr:hover td {{
             background: #f8f9fa;
         }}
 
         .plot-container {{
-            margin: 20px 0;
+            margin: 25px 0;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
         }}
 
         footer {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
             text-align: center;
-            padding: 20px;
             color: #666;
             font-size: 0.9em;
         }}
 
         .badge {{
             display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 6px 12px;
+            border-radius: 20px;
             font-size: 0.85em;
             font-weight: 600;
-        }}
-
-        .badge-success {{
-            background: #d4edda;
-            color: #155724;
-        }}
-
-        .badge-warning {{
-            background: #fff3cd;
-            color: #856404;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }}
 
         .badge-info {{
-            background: #d1ecf1;
-            color: #0c5460;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }}
+
+        .badge-success {{
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+            color: white;
+        }}
+
+        .badge-warning {{
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }}
+
+        /* Responsive */
+        @media (max-width: 768px) {{
+            .container {{
+                padding: 10px;
+            }}
+
+            header {{
+                padding: 20px;
+            }}
+
+            header h1 {{
+                font-size: 1.6em;
+            }}
+
+            .card {{
+                padding: 20px;
+            }}
+
+            .summary-grid {{
+                grid-template-columns: 1fr;
+            }}
         }}
     </style>
 """
 
     def _get_javascript(self) -> str:
-        """Get JavaScript for interactive plots"""
+        """Get JavaScript for interactive plots and animations"""
         return """
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script>
-        // Plotly will be used for interactive plots
-        function createPlot(divId, data, layout) {
-            Plotly.newPlot(divId, data, layout, {responsive: true});
-        }
+        // Add smooth scrolling
+        document.addEventListener('DOMContentLoaded', function() {{
+            // Animate cards on scroll
+            const observerOptions = {{
+                threshold: 0.1,
+                rootMargin: '0px 0px -50px 0px'
+            }};
+
+            const observer = new IntersectionObserver((entries) => {{
+                entries.forEach(entry => {{
+                    if (entry.isIntersecting) {{
+                        entry.target.style.animationPlayState = 'running';
+                    }}
+                }});
+            }}, observerOptions);
+
+            document.querySelectorAll('.card').forEach(card => {{
+                observer.observe(card);
+            }});
+
+            // Add click-to-copy for values
+            document.querySelectorAll('.summary-item').forEach(item => {{
+                item.addEventListener('click', function() {{
+                    const value = this.querySelector('.value');
+                    if (value) {{
+                        const text = value.textContent.trim();
+                        navigator.clipboard.writeText(text).then(() => {{
+                            // Show feedback
+                            const feedback = document.createElement('div');
+                            feedback.textContent = '✓ Copied!';
+                            feedback.style.cssText = 'position:fixed;top:20px;right:20px;background:#4CAF50;color:white;padding:10px 20px;border-radius:5px;animation:fadeInOut 2s forwards;';
+                            document.body.appendChild(feedback);
+                            setTimeout(() => feedback.remove(), 2000);
+                        }});
+                    }}
+                }});
+            }});
+        }});
+
+        // Enhanced Plotly config
+        const plotConfig = {{
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+            toImageButtonOptions: {{
+                format: 'png',
+                filename: 'fep_analysis_plot',
+                height: 600,
+                width: 1000,
+                scale: 2
+            }}
+        }};
+
+        function createPlot(divId, data, layout) {{
+            Plotly.newPlot(divId, data, layout, plotConfig);
+        }}
     </script>
+    <style>
+        @keyframes fadeInOut {{
+            0% {{ opacity: 0; transform: translateY(-10px); }}
+            20% {{ opacity: 1; transform: translateY(0); }}
+            80% {{ opacity: 1; transform: translateY(0); }}
+            100% {{ opacity: 0; transform: translateY(-10px); }}
+        }}
+    </style>
 """
 
     def _generate_header(self) -> str:
