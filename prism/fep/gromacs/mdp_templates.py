@@ -156,6 +156,20 @@ def write_fep_mdps(
     sim_cfg = config.get("simulation", {})
     fep_cfg = config.get("fep", {})
 
+    # Override lambda parameters from config if provided (only if still at defaults)
+    if fep_cfg:
+        # Only override if parameters are still at default values
+        if lambda_windows == 32 and "lambda_windows" in fep_cfg:
+            lambda_windows = fep_cfg["lambda_windows"]
+        if coul_windows == 12 and "coul_windows" in fep_cfg:
+            coul_windows = fep_cfg["coul_windows"]
+        if vdw_windows == 20 and "vdw_windows" in fep_cfg:
+            vdw_windows = fep_cfg["vdw_windows"]
+        if soft_core_alpha == 0.5 and "soft_core_alpha" in fep_cfg:
+            soft_core_alpha = fep_cfg["soft_core_alpha"]
+        if soft_core_sigma == 0.3 and "soft_core_sigma" in fep_cfg:
+            soft_core_sigma = fep_cfg["soft_core_sigma"]
+
     # Temperature and pressure
     temp = sim_cfg.get("temperature", prism_config.get("md", {}).get("temperature", 310))
     pressure = sim_cfg.get("pressure", prism_config.get("md", {}).get("pressure", 1.0))

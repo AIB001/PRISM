@@ -81,6 +81,8 @@ class PRISMBuilder(PMFBuilderMixin):
         distance_cutoff=0.6,
         charge_strategy="mean",
         lambda_windows=11,
+        lambda_strategy="decoupled",
+        lambda_distribution="nonlinear",
     ):
         """
         Initialize PRISM Builder with configuration support
@@ -158,6 +160,10 @@ class PRISMBuilder(PMFBuilderMixin):
             Charge strategy for common atoms: 'ref', 'mut', or 'mean' (default: 'mean').
         lambda_windows : int, optional
             Number of lambda windows for FEP calculations (default: 11).
+        lambda_strategy : str, optional
+            Lambda schedule strategy: 'coupled', 'decoupled', or 'custom' (default: 'decoupled').
+        lambda_distribution : str, optional
+            Lambda distribution type: 'linear', 'nonlinear', or 'quadratic' (default: 'nonlinear').
         """
         self.protein_path = os.path.abspath(protein_path)
 
@@ -231,6 +237,8 @@ class PRISMBuilder(PMFBuilderMixin):
         self.distance_cutoff = distance_cutoff
         self.charge_strategy = charge_strategy
         self.lambda_windows = lambda_windows
+        self.lambda_strategy = lambda_strategy
+        self.lambda_distribution = lambda_distribution
 
         # Handle resp_files - normalize to list or None
         if resp_files is None:
@@ -276,6 +284,17 @@ class PRISMBuilder(PMFBuilderMixin):
 
         # Extract configuration values
         self.overwrite = self.config["general"]["overwrite"]
+
+        # Extract FEP configuration from config file (if available)
+        fep_cfg = self.config.get("fep", {})
+        if fep_cfg:
+            # Override lambda parameters from config file if specified
+            if "strategy" in fep_cfg and lambda_strategy == "decoupled":
+                self.lambda_strategy = fep_cfg["strategy"]
+            if "distribution" in fep_cfg and lambda_distribution == "nonlinear":
+                self.lambda_distribution = fep_cfg["distribution"]
+            if "lambda_windows" in fep_cfg and lambda_windows == 11:
+                self.lambda_windows = fep_cfg["lambda_windows"]
         self.forcefield_idx = self.config["forcefield"]["index"]
         self.water_model_idx = self.config["water_model"]["index"]
 
@@ -1143,7 +1162,12 @@ fi
             print_step(4, 5, "Creating FEP scaffold with complete systems")
 
             fep_builder = FEPScaffoldBuilder(
-                output_dir=fep_output, lambda_windows=self.lambda_windows, config=self.config, overwrite=False
+                output_dir=fep_output,
+                lambda_windows=self.lambda_windows,
+                lambda_strategy=self.lambda_strategy,
+                lambda_distribution=self.lambda_distribution,
+                config=self.config,
+                overwrite=False,
             )
 
             layout = fep_builder.build_from_components(

@@ -89,7 +89,7 @@ class FEPScaffoldBuilder:
         ligand_seed_pdb = layout.common_dir / "hybrid" / "ligand_seed.pdb"
         self._write_bound_leg(layout, receptor_path, ligand_seed_pdb)
         self._write_unbound_leg(layout, ligand_seed_pdb)
-        script_writer.write_root_scripts(layout)
+        script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(layout, receptor_path, hybrid_dir)
 
         return layout
@@ -194,7 +194,7 @@ class FEPScaffoldBuilder:
             self._write_unbound_leg(layout, ligand_seed_pdb)
 
         # Write scripts and manifest
-        script_writer.write_root_scripts(layout)
+        script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(
             layout,
             receptor_path,
@@ -333,8 +333,6 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="bound",
         )
-        script_writer.write_fep_run_script(layout.bound_dir, "bound", self.config)
-        script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg(self, layout: FEPScaffoldLayout, ligand_seed_pdb: Path) -> None:
         """Write unbound leg directory structure."""
@@ -352,8 +350,6 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="unbound",
         )
-        script_writer.write_fep_run_script(layout.unbound_dir, "unbound", self.config)
-        script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
 
     def _write_bound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
         """Write bound leg from PRISM-built system."""
@@ -367,8 +363,6 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="bound",
         )
-        script_writer.write_fep_run_script(layout.bound_dir, "bound", self.config)
-        script_writer.write_fep_slurm_script(layout.bound_dir, "bound")
 
     def _write_unbound_leg_from_prism(self, layout: FEPScaffoldLayout, prism_system_dir: Path) -> None:
         """Write unbound leg from PRISM-built system."""
@@ -382,8 +376,6 @@ class FEPScaffoldBuilder:
             config=self.config,
             leg_name="unbound",
         )
-        script_writer.write_fep_run_script(layout.unbound_dir, "unbound", self.config)
-        script_writer.write_fep_slurm_script(layout.unbound_dir, "unbound")
 
     def _create_placeholder_system(
         self, leg_name: str, layout: FEPScaffoldLayout, protein_path: Optional[Path] | None = None

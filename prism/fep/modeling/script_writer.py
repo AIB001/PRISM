@@ -28,397 +28,415 @@ from pathlib import Path
 from typing import Optional
 
 
-def write_root_scripts(layout) -> None:
+def write_root_scripts(layout, config: Optional[dict] = None) -> None:
     """
-    Write root-level run scripts (run_all.sh, submit_all.slurm.sh).
+    Write root-level run_fep.sh master script.
 
     Parameters
     ----------
     layout : FEPScaffoldLayout
         The scaffold layout containing paths to bound/unbound legs
-    """
-    # Write run_all.sh
-    run_all_script = layout.root / "run_all.sh"
-    with open(run_all_script, "w") as f:
-        f.write("#!/bin/bash\n\n")
-        f.write("# Run all FEP calculations\n\n")
-        f.write("echo 'Starting bound leg...'\n")
-        f.write("cd bound && bash localrun.sh\n")
-        f.write("cd ..\n\n")
-        f.write("echo 'Starting unbound leg...'\n")
-        f.write("cd unbound && bash localrun.sh\n")
-        f.write("cd ..\n\n")
-        f.write("echo 'All FEP calculations completed.'\n")
-    run_all_script.chmod(0o755)
-
-    # Write submit_all.slurm.sh
-    submit_all_script = layout.root / "submit_all.slurm.sh"
-    with open(submit_all_script, "w") as f:
-        f.write("#!/bin/bash\n\n")
-        f.write("# Submit all FEP calculations to SLURM\n\n")
-        f.write("echo 'Submitting bound leg...'\n")
-        f.write("cd bound && sbatch submit.slurm.sh\n")
-        f.write("cd ..\n\n")
-        f.write("echo 'Submitting unbound leg...'\n")
-        f.write("cd unbound && sbatch submit.slurm.sh\n")
-        f.write("cd ..\n\n")
-        f.write("echo 'All jobs submitted.'\n")
-    submit_all_script.chmod(0o755)
-
-
-def write_fep_parallel_script(leg_dir: Path, leg_name: str, config: Optional[dict] = None) -> None:
-    """
-    Generate parallel_run.sh script for multi-GPU parallel FEP calculations.
-
-    Parameters
-    ----------
-    leg_dir : Path
-        Path to the leg directory (bound or unbound)
-    leg_name : str
-        Name of the leg ('bound' or 'unbound')
     config : dict, optional
-        Configuration dictionary with GPU and parallel settings
+        Configuration dictionary with GPU and parallel execution settings
+
+    Note
+    ----
+    This generates a single master script (run_fep.sh) that can run bound, unbound,
+    or both legs via command-line arguments. Legacy run_all.sh and submit_all.slurm.sh
+    scripts are no longer generated as they are redundant with run_fep.sh.
+
+    Configuration Options
+    ---------------------
+    execution.use_gpu_pme : bool
+        Enable GPU PME (default: True)
+    execution.num_gpus : int
+        Number of GPUs available (default: 1)
+    execution.parallel_windows : int
+        Number of concurrent lambda windows (default: 1, set to >1 for parallel execution)
+    execution.omp_threads : int
+        OpenMP threads per GPU (default: 14)
+    fep.replicas : int
+        Number of replica runs for error estimation (default: 1)
+        When >1, creates bound1, bound2, ... and unbound1, unbound2, ... directories
     """
-    config = config or {}
-    exec_config = config.get("execution", {})
-    num_gpus = exec_config.get("num_gpus", 4)
-    parallel_windows = exec_config.get("parallel_windows", num_gpus)
-    omp_threads = exec_config.get("omp_threads", 14)
-    use_gpu_pme = exec_config.get("use_gpu_pme", True)
-
-    pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
-    script_path = leg_dir / "parallel_run.sh"
-    leg_upper = leg_name.upper()
-
-    # Use single f-string template for efficiency (78 writes → 1 write)
-    script_content = f"""\
-#!/usr/bin/env bash
-# Parallel FEP runner for {leg_name} leg - {parallel_windows} windows on {num_gpus} GPUs
-set -euo pipefail
-
-LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-MDP_DIR="${{LEG_DIR}}/mdps"
-BUILD_DIR="${{LEG_DIR}}/build"
-
-NUM_GPUS={num_gpus}
-PARALLEL_WINDOWS={parallel_windows}
-OMP_THREADS={omp_threads}
-
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║         PRISM-FEP {leg_upper} LEG - PARALLEL GPU EXECUTION                  ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-echo "  GPUs: $NUM_GPUS | Parallel windows: $PARALLEL_WINDOWS | Threads/window: $OMP_THREADS"
-echo ""
-
-cd "${{LEG_DIR}}"
-
-# Check equilibration is complete
-if [ ! -f "${{BUILD_DIR}}/npt.gro" ]; then
-    echo "✗ Equilibration not complete. Run localrun.sh first to complete EM/NVT/NPT."
-    exit 1
-fi
-
-# Get list of pending windows
-PENDING=()
-for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
-    lambda_idx=$(basename ${{lambda_mdp}} .mdp | sed 's/prod_//')
-    if [ ! -f "window_${{lambda_idx}}/prod.gro" ]; then
-        PENDING+=("${{lambda_idx}}")
-    fi
-done
-
-echo "Found ${{#PENDING[@]}} pending windows"
-if [ ${{#PENDING[@]}} -eq 0 ]; then
-    echo "✓ All windows completed!"
-    exit 0
-fi
-
-# Function to run a single window
-run_window() {{
-    local idx=$1
-    local gpu_id=$2
-    local window_dir="window_${{idx}}"
-    local lambda_mdp="${{MDP_DIR}}/prod_${{idx}}.mdp"
-
-    export CUDA_VISIBLE_DEVICES=$gpu_id
-    export OMP_NUM_THREADS=$OMP_THREADS
-
-    echo "[$(date +%H:%M:%S)] Window ${{idx}}: Starting on GPU ${{gpu_id}}"
-
-    mkdir -p "${{window_dir}}"
-
-    # NPT short
-    if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
-        if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
-            gmx grompp -f ${{MDP_DIR}}/npt_short_${{idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 2 >/dev/null 2>&1
-        fi
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/npt_short.log" 2>&1
-    fi
-
-    # Production
-    if [ ! -f "${{window_dir}}/prod.gro" ]; then
-        if [ ! -f "${{window_dir}}/prod.tpr" ]; then
-            gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 2 >/dev/null 2>&1
-        fi
-        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp $OMP_THREADS -nb gpu -bonded gpu {pme_gpu_flag} -v > "${{window_dir}}/prod.log" 2>&1
-    fi
-
-    echo "[$(date +%H:%M:%S)] Window ${{idx}}: ✓ Complete"
-}}
-
-export -f run_window
-
-# Run windows in parallel
-JOB_COUNT=0
-for idx in "${{PENDING[@]}}"; do
-    # Wait if too many jobs running
-    while [ $(jobs -r | wc -l) -ge $PARALLEL_WINDOWS ]; do
-        sleep 1
-    done
-
-    # Assign GPU (round-robin)
-    gpu_id=$((JOB_COUNT % NUM_GPUS))
-    run_window "$idx" "$gpu_id" &
-    ((JOB_COUNT++))
-done
-
-# Wait for all jobs to complete
-wait
-
-echo ""
-echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-echo "║                    {leg_upper} LEG COMPLETE                                   ║"
-echo "╚═══════════════════════════════════════════════════════════════════════════╝"
-"""
-
-    with open(script_path, "w") as f:
-        f.write(script_content)
-
-    script_path.chmod(0o755)
+    write_fep_master_script(layout.root, config)
 
 
-def write_fep_run_script(leg_dir: Path, leg_name: str, config: Optional[dict] = None) -> None:
+def write_fep_master_script(fep_dir: Path, config: Optional[dict] = None) -> None:
     """
-    Generate localrun.sh script for FEP calculations.
+    Generate master run_fep.sh script at FEP root level.
+    This single script can run bound, unbound, or both legs via command-line arguments.
 
     Parameters
     ----------
-    leg_dir : Path
-        Path to the leg directory (bound or unbound)
-    leg_name : str
-        Name of the leg ('bound' or 'unbound')
+    fep_dir : Path
+        Path to the FEP root directory (GMX_PROLIG_FEP/)
     config : dict, optional
         Configuration dictionary with GPU settings
     """
-    # Get GPU settings from config (default to GPU enabled for backward compatibility)
+    # Get GPU and parallel settings from config
     config = config or {}
     exec_config = config.get("execution", {})
-    use_gpu_pme = exec_config.get("use_gpu_pme", True)
+    fep_config = config.get("fep", {})
 
-    # Also generate parallel script if multi-GPU config detected
-    num_gpus = exec_config.get("num_gpus", 1)
-    if num_gpus > 1:
-        write_fep_parallel_script(leg_dir, leg_name, config)
+    # Default settings for FEP calculations
+    # - Auto-detect num_gpus from environment if available, else use 1
+    # - Use num_gpus as default for parallel_windows (one window per GPU)
+    # - This gives good parallel performance by default
+    use_gpu_pme = exec_config.get("use_gpu_pme", True)
+    num_gpus_config = exec_config.get("num_gpus")
+    omp_threads = exec_config.get("omp_threads", 14)
+    replicas = fep_config.get("replicas", 1)  # Number of replica runs
+
+    # Auto-detect number of GPUs if not specified
+    if num_gpus_config is None:
+        # Try to detect from CUDA_VISIBLE_DEVICES or nvidia-smi
+        import os
+
+        cuda_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if cuda_devices:
+            # Count GPUs in CUDA_VISIBLE_DEVICES (comma-separated)
+            num_gpus = len(cuda_devices.split(","))
+        else:
+            # Fallback to single GPU
+            num_gpus = 1
+    else:
+        num_gpus = num_gpus_config
+
+    # Default to parallel execution if multiple GPUs available
+    parallel_windows = exec_config.get("parallel_windows", num_gpus)
 
     # Build GPU PME flag for mdrun commands
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
 
-    script_path = leg_dir / "localrun.sh"
+    script_path = fep_dir / "run_fep.sh"
+
+    script_content = f"""#!/usr/bin/env bash
+# PRISM-FEP Master Script
+# GPU PME: {"enabled" if use_gpu_pme else "disabled (CPU PME for small systems)"}
+set -euo pipefail
+
+# Test mode: limit production run steps (DO NOT use for production FEP calculations)
+if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
+    echo "⚠️  WARNING: PRISM_MDRUN_NSTEPS is set to ${{PRISM_MDRUN_NSTEPS}}"
+    echo "⚠️  This is for TESTING ONLY - results will NOT be valid for publication!"
+    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
+else
+    MDRUN_NSTEPS_ARG=""
+fi
+
+# Function to run a single leg
+run_leg() {{
+    local leg_name=$1
+    local leg_dir="${{FEP_DIR}}/${{leg_name}}"
+
+    if [ ! -d "${{leg_dir}}" ]; then
+        echo "Error: Leg directory not found: ${{leg_dir}}"
+        return 1
+    fi
+
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+    echo "║                    PRISM-FEP ${{leg_name}} LEG                                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    cd "${{leg_dir}}"
+
+    local MDP_DIR="${{leg_dir}}/mdps"
+    local INPUT_DIR="${{leg_dir}}/input"
+    local BUILD_DIR="${{leg_dir}}/build"
+
+    # Energy minimization
+    mkdir -p ${{BUILD_DIR}}
+
+    if [ -f ${{BUILD_DIR}}/em.gro ]; then
+        echo "✓ EM already completed, skipping..."
+    elif [ -f ${{BUILD_DIR}}/em.tpr ]; then
+        echo "EM checkpoint found, resuming..."
+        gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -v
+    else
+        echo "Running energy minimization..."
+        gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 10
+        gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp 10 -v
+    fi
+
+    # Check EM convergence
+    if [ -f ${{BUILD_DIR}}/em.log ]; then
+        max_force=$(grep -E "Maximum force|Fmax=" ${{BUILD_DIR}}/em.log | tail -1 | grep -oE "[0-9]+\\\\.?[0-9]*e[+-][0-9]+" | tail -1 || true)
+        if [ -n "$max_force" ]; then
+            echo "EM final max force: $max_force kJ/mol/nm"
+            # Warning if force is still high (> 1000 kJ/mol/nm)
+            # Use awk to handle scientific notation comparison
+            if [ "$(echo "$max_force" | awk '{{print ($1 > 1000)}}')" -eq 1 ]; then
+                echo "⚠️  WARNING: EM converged with high force. System may need more minimization."
+            fi
+        fi
+    fi
+
+    # NVT equilibration (must run to completion)
+    if [ -f ${{BUILD_DIR}}/nvt.gro ]; then
+        echo "✓ NVT already completed, skipping..."
+    elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
+        echo "NVT checkpoint found, resuming..."
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -cpi ${{BUILD_DIR}}/nvt.cpt -v
+    else
+        echo "Running NVT equilibration..."
+        gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 10
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 10 -v
+    fi
+
+    # NPT equilibration (must run to completion)
+    if [ -f ${{BUILD_DIR}}/npt.gro ]; then
+        echo "✓ NPT already completed, skipping..."
+    elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
+        # Check if NPT checkpoint is valid (has corresponding cpt file)
+        if [ -f ${{BUILD_DIR}}/npt.cpt ]; then
+            echo "NPT checkpoint found, resuming..."
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -cpi ${{BUILD_DIR}}/npt.cpt -v
+        else
+            # NPT TPR exists but no checkpoint - previous run failed, clean up and restart
+            echo "⚠️  Previous NPT run failed (no checkpoint), cleaning up and restarting..."
+            rm -f ${{BUILD_DIR}}/npt.* 2>/dev/null || true
+            echo "Running NPT equilibration..."
+            gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 10
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v
+        fi
+    else
+        echo "Running NPT equilibration..."
+        gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 10
+        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v
+    fi
+
+    # FEP production runs for each lambda window
+    echo "Running FEP production for all lambda windows..."
+    JOB_COUNT=0
+    for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
+        lambda_name=$(basename ${{lambda_mdp}} .mdp)
+        lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
+        window_dir="window_${{lambda_idx}}"
+
+        mkdir -p "${{window_dir}}"
+
+        # Check if already completed
+        if [ -f "${{window_dir}}/prod.gro" ]; then
+            echo "  ${{lambda_name}}: already completed"
+            continue
+        fi
+
+        # Parallel execution: wait if too many jobs already started
+        if [ {parallel_windows} -gt 1 ]; then
+            # Count running jobs by checking .run files
+            running_jobs=$(find . -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
+            while [ ${{running_jobs}} -ge {parallel_windows} ]; do
+                sleep 1
+                running_jobs=$(find . -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
+            done
+        fi
+
+        # Assign GPU (round-robin for multi-GPU)
+        if [ {num_gpus} -gt 1 ]; then
+            gpu_id=$((JOB_COUNT % {num_gpus}))
+            export CUDA_VISIBLE_DEVICES=$gpu_id
+            export OMP_NUM_THREADS={omp_threads}
+            echo "  ${{lambda_name}}: starting on GPU ${{gpu_id}} (job ${{JOB_COUNT}})"
+        else
+            echo "  ${{lambda_name}}: starting"
+        fi
+
+        # Run in background if parallel
+        if [ {parallel_windows} -gt 1 ]; then
+            (
+                # Mark job as running
+                echo "$$" > .run_${{lambda_idx}}
+
+                # Per-window NPT short equilibration
+                if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
+                    if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
+                        gmx grompp -f ${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 10 >/dev/null 2>&1
+                    fi
+                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} > "${{window_dir}}/npt_short.log" 2>&1
+                fi
+
+                # Production run
+                if [ ! -f "${{window_dir}}/prod.gro" ]; then
+                    if [ ! -f "${{window_dir}}/prod.tpr" ]; then
+                        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 10 >/dev/null 2>&1
+                    fi
+                    gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} > "${{window_dir}}/prod.log" 2>&1
+                fi
+
+                # Mark job as completed
+                rm -f .run_${{lambda_idx}}
+
+                echo "  ${{lambda_name}}: ✓ Complete"
+            ) &
+            JOB_COUNT=$((JOB_COUNT + 1))
+        else
+            # Sequential execution
+            # Per-window NPT short equilibration
+            if [ -f "${{window_dir}}/npt_short.gro" ]; then
+                echo "  ${{lambda_name}}: NPT short already completed"
+            elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
+                if [ -f "${{window_dir}}/npt_short.cpt" ]; then
+                    echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
+                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                else
+                    echo "  ${{lambda_name}}: NPT short TPR exists without checkpoint, continuing from TPR"
+                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+                fi
+            else
+                echo "  ${{lambda_name}}: starting NPT short equilibration"
+                gmx grompp -f ${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 10
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+            fi
+
+            # Production run
+            if [ -f "${{window_dir}}/prod.gro" ]; then
+                echo "  ${{lambda_name}}: production already completed"
+            elif [ -f "${{window_dir}}/prod.tpr" ]; then
+                if [ -f "${{window_dir}}/prod.cpt" ]; then
+                    echo "  ${{lambda_name}}: production resuming from checkpoint"
+                    gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                else
+                    echo "  ${{lambda_name}}: production TPR exists without checkpoint, continuing from TPR"
+                    gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+                fi
+            else
+                echo "  ${{lambda_name}}: starting production"
+                gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 10
+                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+            fi
+        fi
+    done
+
+    # Wait for all background jobs to complete
+    if [ {parallel_windows} -gt 1 ]; then
+        echo "Waiting for all windows to complete..."
+        wait
+    fi
+
+    # Clean up intermediate step PDB files
+    echo "Cleaning up intermediate PDB files..."
+    rm -f step*.pdb 2>/dev/null || true
+
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+    echo "║                    ${{leg_name}} LEG COMPLETE                                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+
+    cd "${{FEP_DIR}}"
+}}
+
+# Main script logic
+FEP_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+
+# Number of replica runs (configured at build time)
+REPLICAS={replicas}
+
+# Parse target specification (e.g., bound1, bound1-3, unbound1-2,unbound3, etc.)
+parse_targets() {{
+    local spec=$1
+    local targets=()
+
+    # Check if it's a simple leg name (bound, unbound, bound, unbound with replicas)
+    if [[ "$spec" =~ ^(bound|unbound)$ ]]; then
+        if [ ${{REPLICAS}} -gt 1 ]; then
+            # Expand to all replicas: bound -> bound1 bound2 bound3
+            for i in $(seq 1 ${{REPLICAS}}); do
+                targets+=("${{spec}}${{i}}")
+            done
+        else
+            # No replicas, just the leg name
+            targets+=("$spec")
+        fi
+    elif [[ "$spec" =~ ^(bound|unbound)([0-9]+)$ ]]; then
+        # Single replica: bound1, unbound2, etc.
+        targets+=("$spec")
+    elif [[ "$spec" =~ ^(bound|unbound)([0-9]+)-([0-9]+)$ ]]; then
+        # Range of replicas: bound1-3, unbound1-2, etc.
+        local leg="${{BASH_REMATCH[1]}}"
+        local start="${{BASH_REMATCH[2]}}"
+        local end="${{BASH_REMATCH[3]}}"
+        for i in $(seq $start $end); do
+            targets+=("${{leg}}${{i}}")
+        done
+    else
+        echo "Error: Invalid target specification: $spec"
+        return 1
+    fi
+
+    # Output targets as space-separated list
+    echo "${{targets[@]}}"
+}}
+
+# Show usage if no argument or invalid argument
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <target> [target ...]"
+    echo ""
+    echo "Target specifications:"
+    echo "  bound           - Run all bound replicas (bound1, bound2, ...)"
+    echo "  unbound         - Run all unbound replicas (unbound1, unbound2, ...)"
+    echo "  all             - Run all bound and unbound replicas"
+    echo "  bound1          - Run specific replica"
+    echo "  bound1-3        - Run range of replicas (bound1, bound2, bound3)"
+    echo "  unbound1-2      - Run range of replicas"
+    echo "  bound1,unbound2 - Mix different legs and replicas"
+    echo "  bound1-3,unbound1-2 - Mix ranges"
+    echo ""
+    echo "Configuration:"
+    echo "  Replicas configured: ${{REPLICAS}}"
+    if [ ${{REPLICAS}} -gt 1 ]; then
+        echo "  Available: bound1..bound${{REPLICAS}}, unbound1..unbound${{REPLICAS}}"
+    else
+        echo "  Available: bound, unbound"
+    fi
+    echo ""
+    echo "Environment variables:"
+    echo "  PRISM_MDRUN_NSTEPS - Limit production steps (testing only, DO NOT use for production)"
+    exit 1
+fi
+
+# Special case: 'all' means all bound and unbound replicas
+if [ "$1" = "all" ]; then
+    all_targets=()
+    if [ ${{REPLICAS}} -gt 1 ]; then
+        for i in $(seq 1 ${{REPLICAS}}); do
+            all_targets+=("bound${{i}}")
+            all_targets+=("unbound${{i}}")
+        done
+    else
+        all_targets=("bound" "unbound")
+    fi
+else
+    # Parse all target specifications
+    all_targets=()
+    for spec in "$@"; do
+        targets=$(parse_targets "$spec")
+        if [ $? -ne 0 ]; then
+            exit 1
+        fi
+        for target in $targets; do
+            all_targets+=("$target")
+        done
+    done
+fi
+
+# Run all requested targets
+for target in "${{all_targets[@]}}"; do
+    if [ -d "${{FEP_DIR}}/${{target}}" ]; then
+        run_leg "${{target}}"
+    else
+        echo "⚠️  Warning: Directory ${{target}} not found, skipping..."
+    fi
+done
+
+echo ""
+echo "✓ All requested FEP calculations completed."
+"""
 
     with open(script_path, "w") as f:
-        # Script header with environment variable support
-        f.write("#!/usr/bin/env bash\n")
-        f.write("# GPU PME: " + ("enabled" if use_gpu_pme else "disabled (CPU PME for small systems)") + "\n")
-        f.write("set -euo pipefail\n\n")
-        f.write('LEG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n')
-        f.write('MDP_DIR="${LEG_DIR}/mdps"\n')
-        f.write('INPUT_DIR="${LEG_DIR}/input"\n')
-        f.write('BUILD_DIR="${LEG_DIR}/build"\n')
-        # WARNING: PRISM_MDRUN_NSTEPS should ONLY be used for quick testing of production runs
-        # It is intentionally NOT applied to EM/NVT/NPT equilibration - these must complete fully
-        f.write("# Test mode: limit production run steps (DO NOT use for production FEP calculations)\n")
-        f.write('if [ -n "${PRISM_MDRUN_NSTEPS:-}" ]; then\n')
-        f.write('    echo "⚠️  WARNING: PRISM_MDRUN_NSTEPS is set to ${PRISM_MDRUN_NSTEPS}"\n')
-        f.write('    echo "⚠️  This is for TESTING ONLY - results will NOT be valid for publication!"\n')
-        f.write('    MDRUN_NSTEPS_ARG="-nsteps ${PRISM_MDRUN_NSTEPS}"\n')
-        f.write("else\n")
-        f.write('    MDRUN_NSTEPS_ARG=""\n')
-        f.write("fi\n\n")
-
-        # Banner
-        f.write('echo "╔═══════════════════════════════════════════════════════════════════════════╗"\n')
-        f.write(f'echo "║                    PRISM-FEP {leg_name.upper()} LEG                                    ║"\n')
-        f.write('echo "╚═══════════════════════════════════════════════════════════════════════════╝"\n')
-        f.write('echo ""\n\n')
-
-        f.write('cd "${LEG_DIR}"\n\n')
-
-        # Energy Minimization
-        f.write("# Energy minimization\n")
-        f.write("mkdir -p ${BUILD_DIR}\n\n")
-        f.write("if [ -f ${BUILD_DIR}/em.gro ]; then\n")
-        f.write('    echo "✓ EM already completed, skipping..."\n')
-        f.write("elif [ -f ${BUILD_DIR}/em.tpr ]; then\n")
-        f.write('    echo "EM checkpoint found, resuming..."\n')
-        f.write("    gmx mdrun -deffnm ${BUILD_DIR}/em -cpi ${BUILD_DIR}/em.cpt -v\n")
-        f.write("else\n")
-        f.write('    echo "Running energy minimization..."\n')
-        f.write(
-            "    gmx grompp -f ${MDP_DIR}/em.mdp -c ${INPUT_DIR}/conf.gro -p topol.top -o ${BUILD_DIR}/em.tpr -maxwarn 2\n"
-        )
-        f.write("    gmx mdrun -deffnm ${BUILD_DIR}/em -ntmpi 1 -ntomp 10 -v\n")
-        f.write("fi\n\n")
-        # Validate EM convergence
-        f.write("# Check EM convergence\n")
-        f.write("if [ -f ${BUILD_DIR}/em.log ]; then\n")
-        f.write(
-            '    max_force=$(grep -E "Maximum force|Fmax=" ${BUILD_DIR}/em.log | tail -1 | grep -oE "[0-9]+\\.?[0-9]*e[+-][0-9]+" | tail -1 || true)\n'
-        )
-        f.write('    if [ -n "$max_force" ]; then\n')
-        f.write('        echo "EM final max force: $max_force kJ/mol/nm"\n')
-        f.write("        # Warning if force is still high (> 1000 kJ/mol/nm)\n")
-        f.write('        if (( $(echo "$max_force > 1000" | bc -l) )); then\n')
-        f.write('            echo "⚠️  WARNING: EM converged with high force. System may need more minimization."\n')
-        f.write("        fi\n")
-        f.write("    fi\n")
-        f.write("fi\n\n")
-
-        # NVT equilibration
-        f.write("# NVT equilibration (must run to completion)\n")
-        f.write("if [ -f ${BUILD_DIR}/nvt.gro ]; then\n")
-        f.write('    echo "✓ NVT already completed, skipping..."\n')
-        f.write("elif [ -f ${BUILD_DIR}/nvt.tpr ]; then\n")
-        f.write('    echo "NVT checkpoint found, resuming..."\n')
-        f.write("    gmx mdrun -deffnm ${BUILD_DIR}/nvt -cpi ${BUILD_DIR}/nvt.cpt -v\n")
-        f.write("else\n")
-        f.write('    echo "Running NVT equilibration..."\n')
-        f.write(
-            "    gmx grompp -f ${MDP_DIR}/nvt.mdp -c ${BUILD_DIR}/em.gro -r ${BUILD_DIR}/em.gro -p topol.top -o ${BUILD_DIR}/nvt.tpr -maxwarn 2\n"
-        )
-        f.write(
-            f"    gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
-        )
-        f.write("gmx mdrun -deffnm ${BUILD_DIR}/nvt -ntmpi 1 -ntomp 10 -v\n")
-        f.write("fi\n\n")
-
-        # NPT equilibration
-        f.write("# NPT equilibration (must run to completion)\n")
-        f.write("if [ -f ${BUILD_DIR}/npt.gro ]; then\n")
-        f.write('    echo "✓ NPT already completed, skipping..."\n')
-        f.write("elif [ -f ${BUILD_DIR}/npt.tpr ]; then\n")
-        f.write("    # Check if NPT checkpoint is valid (has corresponding cpt file)\n")
-        f.write("    if [ -f ${BUILD_DIR}/npt.cpt ]; then\n")
-        f.write('        echo "NPT checkpoint found, resuming..."\n')
-        f.write("        gmx mdrun -deffnm ${BUILD_DIR}/npt -cpi ${BUILD_DIR}/npt.cpt -v\n")
-        f.write("    else\n")
-        f.write("        # NPT TPR exists but no checkpoint - previous run failed, clean up and restart\n")
-        f.write('        echo "⚠️  Previous NPT run failed (no checkpoint), cleaning up and restarting..."\n')
-        f.write("        rm -f ${BUILD_DIR}/npt.* 2>/dev/null || true\n")
-        f.write('        echo "Running NPT equilibration..."\n')
-        f.write(
-            "        gmx grompp -f ${MDP_DIR}/npt.mdp -c ${BUILD_DIR}/nvt.gro -r ${BUILD_DIR}/nvt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o ${BUILD_DIR}/npt.tpr -maxwarn 2\n"
-        )
-        f.write(
-            f"        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
-        )
-        f.write("gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 10 -v\n")
-        f.write("    fi\n")
-        f.write("else\n")
-        f.write('    echo "Running NPT equilibration..."\n')
-        f.write(
-            "    gmx grompp -f ${MDP_DIR}/npt.mdp -c ${BUILD_DIR}/nvt.gro -r ${BUILD_DIR}/nvt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o ${BUILD_DIR}/npt.tpr -maxwarn 2\n"
-        )
-        f.write(
-            f"    gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || "
-        )
-        f.write("gmx mdrun -deffnm ${BUILD_DIR}/npt -ntmpi 1 -ntomp 10 -v\n")
-        f.write("fi\n\n")
-
-        # FEP production runs for each lambda window
-        f.write("# FEP production runs for each lambda window\n")
-        f.write('echo "Running FEP production for all lambda windows..."\n')
-        f.write("for lambda_mdp in ${MDP_DIR}/prod_*.mdp; do\n")
-        f.write("    lambda_name=$(basename ${lambda_mdp} .mdp)\n")
-        f.write("    lambda_idx=$(echo ${lambda_name} | sed 's/prod_//')\n")
-        f.write('    window_dir="window_${lambda_idx}"\n\n')
-        f.write('    mkdir -p "${window_dir}"\n\n')
-        f.write('    lock_file="${window_dir}/.run.lock"\n')
-        f.write('    if [ -f "${lock_file}" ]; then\n')
-        f.write('        lock_pid=$(cat "${lock_file}" 2>/dev/null || true)\n')
-        f.write('        if [ -n "${lock_pid}" ] && kill -0 "${lock_pid}" 2>/dev/null; then\n')
-        f.write(
-            '            echo "  ${lambda_name}: another localrun.sh process is active (pid ${lock_pid}), skipping window"\n'
-        )
-        f.write("            continue\n")
-        f.write("        fi\n")
-        f.write('        echo "  ${lambda_name}: removing stale lock file"\n')
-        f.write('        rm -f "${lock_file}"\n')
-        f.write("    fi\n")
-        f.write('    echo $$ > "${lock_file}"\n\n')
-        f.write("    # Per-window NPT short equilibration (quick, can use test mode)\n")
-        f.write('    if [ -f "${window_dir}/npt_short.gro" ]; then\n')
-        f.write('        echo "  ${lambda_name}: NPT short already completed"\n')
-        f.write('    elif [ -f "${window_dir}/npt_short.tpr" ]; then\n')
-        f.write('        if [ -f "${window_dir}/npt_short.cpt" ]; then\n')
-        f.write('            echo "  ${lambda_name}: NPT short resuming from checkpoint"\n')
-        f.write(
-            '            gmx mdrun -deffnm "${window_dir}/npt_short" -cpi "${window_dir}/npt_short.cpt" -v ${MDRUN_NSTEPS_ARG}\n'
-        )
-        f.write("        else\n")
-        f.write('            echo "  ${lambda_name}: NPT short TPR exists without checkpoint, continuing from TPR"\n')
-        f.write(
-            f'            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
-        )
-        f.write('gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
-        f.write("        fi\n")
-        f.write("    else\n")
-        f.write('        echo "  ${lambda_name}: starting NPT short equilibration"\n')
-        f.write(
-            '        gmx grompp -f ${MDP_DIR}/npt_short_${lambda_idx}.mdp -c ${BUILD_DIR}/npt.gro -r ${BUILD_DIR}/npt.gro -t ${BUILD_DIR}/nvt.cpt -p topol.top -o "${window_dir}/npt_short.tpr" -maxwarn 2\n'
-        )
-        f.write(
-            f'        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
-        )
-        f.write('gmx mdrun -deffnm "${window_dir}/npt_short" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
-        f.write("    fi\n\n")
-        f.write("    # Production run (can use test mode for quick validation)\n")
-        f.write('    if [ -f "${window_dir}/prod.gro" ]; then\n')
-        f.write('        echo "  ${lambda_name}: production already completed"\n')
-        f.write('    elif [ -f "${window_dir}/prod.tpr" ]; then\n')
-        f.write('        if [ -f "${window_dir}/prod.cpt" ]; then\n')
-        f.write('            echo "  ${lambda_name}: production resuming from checkpoint"\n')
-        f.write(
-            '            gmx mdrun -deffnm "${window_dir}/prod" -cpi "${window_dir}/prod.cpt" -v ${MDRUN_NSTEPS_ARG}\n'
-        )
-        f.write("        else\n")
-        f.write('            echo "  ${lambda_name}: production TPR exists without checkpoint, continuing from TPR"\n')
-        f.write(
-            f'            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
-        )
-        f.write('gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
-        f.write("        fi\n")
-        f.write("    else\n")
-        f.write('        echo "  ${lambda_name}: starting production"\n')
-        f.write(
-            '        gmx grompp -f ${lambda_mdp} -c "${window_dir}/npt_short.gro" -p topol.top -o "${window_dir}/prod.tpr" -maxwarn 2\n'
-        )
-        f.write(
-            f'        gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || '
-        )
-        f.write('gmx mdrun -deffnm "${window_dir}/prod" -ntmpi 1 -ntomp 10 -v ${MDRUN_NSTEPS_ARG}\n')
-        f.write("    fi\n")
-        f.write('    rm -f "${lock_file}"\n')
-
-        f.write("done\n\n")
-
-        # Cleanup and completion message
-        f.write("# Clean up intermediate step PDB files\n")
-        f.write('echo "Cleaning up intermediate PDB files..."\n')
-        f.write("rm -f step*.pdb 2>/dev/null || true\n\n")
-        f.write('echo ""\n')
-        f.write('echo "╔═══════════════════════════════════════════════════════════════════════════╗"\n')
-        f.write(f'echo "║                    {leg_name.upper()} LEG COMPLETE                                   ║"\n')
-        f.write('echo "╚═══════════════════════════════════════════════════════════════════════════╝"\n')
+        f.write(script_content)
 
     script_path.chmod(0o755)
 
