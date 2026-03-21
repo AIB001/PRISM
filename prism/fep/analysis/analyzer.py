@@ -28,7 +28,7 @@ Author: PRISM Team
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 from dataclasses import dataclass, field
 import numpy as np
 
@@ -247,6 +247,11 @@ class FEPAnalyzer:
             # Store fitted models for plotting
             self.raw_data["fitted_bound"] = fitted_bound
             self.raw_data["fitted_unbound"] = fitted_unbound
+            self.raw_data["lambda_profiles"] = self._build_lambda_profiles(
+                fitted_bound,
+                fitted_unbound,
+                self.estimator_name,
+            )
         else:  # gmx_bar backend
             self.logger.info("Computing free energy differences using gmx bar...")
             delta_g_bound, error_bound = self._compute_free_energy_gmx_bar(self.bound_dir, "bound")
@@ -255,6 +260,7 @@ class FEPAnalyzer:
             # For gmx_bar, we don't parse data into memory
             bound_data = []
             unbound_data = []
+            self.raw_data["lambda_profiles"] = None
 
         # Binding free energy = unbound - bound
         delta_g = delta_g_unbound - delta_g_bound
@@ -556,9 +562,89 @@ class FEPAnalyzer:
             self.logger.error(f"stderr: {e.stderr}")
             raise RuntimeError(f"gmx bar command failed: {e}")
 
-    def _count_windows(self, leg_dir: Path) -> int:
-        """Count number of lambda windows in a leg directory"""
-        return len(list(leg_dir.glob("window_*")))
+    def _build_lambda_profiles(
+        self,
+        fitted_bound: Any,
+        fitted_unbound: Any,
+        estimator_name: str,
+    ) -> Dict[str, Optional[Dict[str, List[float]]]]:
+        """
+        Build lambda-dependent profiles for bound and unbound legs.
+
+        Parameters
+        ----------
+        fitted_bound : Any
+            Fitted estimator for bound leg.
+        fitted_unbound : Any
+            Fitted estimator for unbound leg.
+        estimator_name : str
+            Estimator name (TI, BAR, MBAR).
+
+        Returns
+        -------
+        Dict[str, Optional[Dict[str, List[float]]]]
+            Dictionary with bound/unbound lambda profiles.
+        """
+        estimator = estimator_name.upper()
+        return {
+            "bound": self._extract_lambda_data(fitted_bound, estimator),
+            "unbound": self._extract_lambda_data(fitted_unbound, estimator),
+        }
+
+    def _extract_lambda_data(self, fitted_model: Any, estimator_name: str) -> Optional[Dict[str, List[float]]]:
+        """
+        Extract lambda-dependent data from a fitted estimator.
+
+        Parameters
+        ----------
+        fitted_model : Any
+            Fitted estimator instance.
+        estimator_name : str
+            Estimator name (TI, BAR, MBAR).
+
+        Returns
+        -------
+        Optional[Dict[str, List[float]]]
+            Lambda profile with lambdas, dhdl, cumulative_dg, state_dg.
+        """
+        if fitted_model is None:
+            return None
+
+        lambda_data: Dict[str, List[float]] = {
+            "lambdas": [],
+            "dhdl": [],
+            "cumulative_dg": [],
+            "state_dg": [],
+        }
+
+        if estimator_name == "TI" and hasattr(fitted_model, "dhdl"):
+            dhdl_df = fitted_model.dhdl
+            n_states = len(dhdl_df)
+            lambda_data["lambdas"] = list(range(n_states))
+            lambda_data["dhdl"] = [float(v) for v in dhdl_df.sum(axis=1).values]
+            if hasattr(fitted_model, "delta_f_"):
+                lambda_data["cumulative_dg"] = [float(v) for v in fitted_model.delta_f_.iloc[0].values]
+        elif hasattr(fitted_model, "delta_f_"):
+            delta_f = fitted_model.delta_f_
+            n_states = delta_f.shape[0]
+            if n_states > 1:
+                lambda_data["lambdas"] = [float(i) / (n_states - 1) for i in range(n_states)]
+            else:
+                lambda_data["lambdas"] = [0.0]
+
+            for i in range(n_states):
+                if i == 0:
+                    lambda_data["state_dg"].append(0.0)
+                else:
+                    lambda_data["state_dg"].append(float(delta_f.iloc[0, i]))
+
+            lambda_data["cumulative_dg"] = lambda_data["state_dg"].copy()
+            lambda_data["dhdl"] = [0.0] * n_states
+
+        if not lambda_data["lambdas"]:
+            return None
+
+        return lambda_data
 
     def _analyze_convergence(self, bound_data: List, unbound_data: List) -> Dict:  # noqa: ARG002
         """
