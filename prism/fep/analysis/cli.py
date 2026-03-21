@@ -118,6 +118,14 @@ For more information, see: https://github.com/your-repo/prism
         help="Free energy estimator method (default: MBAR)",
     )
     analysis.add_argument(
+        "--backend",
+        type=str,
+        choices=["alchemlyb", "gmx_bar"],
+        default="alchemlyb",
+        help="Backend for analysis (default: alchemlyb). "
+        "'alchemlyb' supports TI/BAR/MBAR; 'gmx_bar' only supports BAR",
+    )
+    analysis.add_argument(
         "--temperature",
         type=float,
         default=310.0,
@@ -222,6 +230,7 @@ def main() -> int:
             unbound_dir=args.unbound_dir,
             temperature=args.temperature,
             estimator=args.estimator,
+            backend=args.backend,
             energy_components=args.components,
         )
 

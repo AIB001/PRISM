@@ -33,9 +33,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 try:
-    import alchemlyb
     from alchemlyb.estimators import MBAR, BAR, TI
-    from alchemlyb.preprocessing import slicing
     from alchemlyb.parsing import gmx
 
     ALCHEMLYB_AVAILABLE = True
@@ -141,6 +139,7 @@ class FEPAnalyzer:
         unbound_dir: Union[str, Path],
         temperature: float = 310.0,
         estimator: str = "MBAR",
+        backend: str = "alchemlyb",
         energy_components: Optional[List[str]] = None,
         allow_mock: bool = False,  # For testing without alchemlyb
     ):
@@ -157,6 +156,10 @@ class FEPAnalyzer:
             Temperature in Kelvin (default: 310.0)
         estimator : str, optional
             Estimator method: 'MBAR', 'BAR', or 'TI' (default: 'MBAR')
+        backend : str, optional
+            Backend for analysis: 'alchemlyb' or 'gmx_bar' (default: 'alchemlyb')
+            - 'alchemlyb': Use alchemlyb library (supports TI, BAR, MBAR)
+            - 'gmx_bar': Use GROMACS gmx bar command (only supports BAR)
         energy_components : List[str], optional
             Energy components to analyze (default: ['elec', 'vdw'])
         allow_mock : bool, optional
@@ -165,23 +168,35 @@ class FEPAnalyzer:
         Raises
         ------
         ValueError
-            If estimator is not available or alchemlyb is not installed
+            If estimator is not available or required dependencies are missing
         """
         self.bound_dir = Path(bound_dir)
         self.unbound_dir = Path(unbound_dir)
         self.temperature = temperature
         self.estimator_name = estimator.upper()
+        self.backend = backend.lower()
         self.energy_components = energy_components or ["elec", "vdw"]
         self.allow_mock = allow_mock
 
-        # Validate estimator
-        if not ALCHEMLYB_AVAILABLE and not allow_mock:
-            raise ValueError("alchemlyb is required for FEP analysis. " "Install with: pip install alchemlyb")
+        # Validate backend
+        if self.backend not in ["alchemlyb", "gmx_bar"]:
+            raise ValueError(f"Unknown backend: {backend}. Available: ['alchemlyb', 'gmx_bar']")
 
-        if self.estimator_name not in self.ESTIMATORS:
-            raise ValueError(f"Unknown estimator: {estimator}. " f"Available: {list(self.ESTIMATORS.keys())}")
+        # Validate backend+estimator compatibility
+        if self.backend == "gmx_bar" and self.estimator_name != "BAR":
+            raise ValueError(f"gmx_bar backend only supports BAR estimator, got {estimator}")
 
-        self.estimator = self.ESTIMATORS[self.estimator_name]
+        # Validate estimator for alchemlyb backend
+        if self.backend == "alchemlyb":
+            if not ALCHEMLYB_AVAILABLE and not allow_mock:
+                raise ValueError("alchemlyb is required for FEP analysis. " "Install with: pip install alchemlyb")
+
+            if self.estimator_name not in self.ESTIMATORS:
+                raise ValueError(f"Unknown estimator: {estimator}. " f"Available: {list(self.ESTIMATORS.keys())}")
+
+            self.estimator = self.ESTIMATORS[self.estimator_name]
+        else:
+            self.estimator = None  # gmx_bar doesn't use alchemlyb estimators
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -196,7 +211,7 @@ class FEPAnalyzer:
 
         This method:
         1. Parses GROMACS output files from bound and unbound legs
-        2. Computes free energy differences using the selected estimator
+        2. Computes free energy differences using the selected estimator and backend
         3. Performs convergence analysis
         4. Decomposes free energy by components
 
@@ -213,20 +228,29 @@ class FEPAnalyzer:
             If data format is incorrect
         """
         # Use mock mode if alchemlyb not available
-        if not ALCHEMLYB_AVAILABLE and self.allow_mock:
+        if self.backend == "alchemlyb" and not ALCHEMLYB_AVAILABLE and self.allow_mock:
             return self._analyze_mock()
 
-        self.logger.info(f"Starting FEP analysis with {self.estimator_name}")
+        self.logger.info(f"Starting FEP analysis with {self.backend} backend ({self.estimator_name})")
 
-        # Step 1: Parse input files
-        self.logger.info("Parsing GROMACS output files...")
-        bound_data = self._parse_leg_data(self.bound_dir, "bound")
-        unbound_data = self._parse_leg_data(self.unbound_dir, "unbound")
+        # Step 1: Parse input files (for alchemlyb) or prepare file lists (for gmx_bar)
+        if self.backend == "alchemlyb":
+            self.logger.info("Parsing GROMACS output files...")
+            bound_data = self._parse_leg_data(self.bound_dir, "bound")
+            unbound_data = self._parse_leg_data(self.unbound_dir, "unbound")
 
-        # Step 2: Compute free energy differences
-        self.logger.info(f"Computing free energy differences using {self.estimator_name}...")
-        delta_g_bound, error_bound = self._compute_free_energy(bound_data)
-        delta_g_unbound, error_unbound = self._compute_free_energy(unbound_data)
+            # Step 2: Compute free energy differences
+            self.logger.info(f"Computing free energy differences using {self.estimator_name}...")
+            delta_g_bound, error_bound = self._compute_free_energy_alchemlyb(bound_data)
+            delta_g_unbound, error_unbound = self._compute_free_energy_alchemlyb(unbound_data)
+        else:  # gmx_bar backend
+            self.logger.info("Computing free energy differences using gmx bar...")
+            delta_g_bound, error_bound = self._compute_free_energy_gmx_bar(self.bound_dir, "bound")
+            delta_g_unbound, error_unbound = self._compute_free_energy_gmx_bar(self.unbound_dir, "unbound")
+
+            # For gmx_bar, we don't parse data into memory
+            bound_data = []
+            unbound_data = []
 
         # Binding free energy = unbound - bound
         delta_g = delta_g_unbound - delta_g_bound
@@ -249,7 +273,8 @@ class FEPAnalyzer:
             metadata={
                 "temperature": self.temperature,
                 "estimator": self.estimator_name,
-                "n_lambda_windows": len(bound_data),
+                "backend": self.backend,
+                "n_lambda_windows": len(bound_data) if bound_data else self._count_windows(self.bound_dir),
             },
         )
 
@@ -328,18 +353,25 @@ class FEPAnalyzer:
         # Parse dhdl.xvg from each window
         datasets = []
         for window_dir in window_dirs:
-            xvg_file = window_dir / "dhdl.xvg"
-            if not xvg_file.exists():
-                # Check for production run output
-                xvg_file = window_dir / "prod" / "dhdl.xvg"
+            # Check multiple possible filenames (PRISM uses prod.xvg, legacy uses dhdl.xvg)
+            xvg_file = None
+            for candidate in ["dhdl.xvg", "prod.xvg", "prod/dhdl.xvg"]:
+                candidate_path = window_dir / candidate
+                if candidate_path.exists():
+                    xvg_file = candidate_path
+                    break
 
-            if not xvg_file.exists():
-                self.logger.warning(f"dhdl.xvg not found in {window_dir}, skipping")
+            if xvg_file is None:
+                self.logger.warning(f"dhdl.xvg/prod.xvg not found in {window_dir}, skipping")
                 continue
 
             try:
                 # Parse using alchemlyb
-                df = gmx.extract_dHdl(xvg_file, T=self.temperature)
+                # Choose extraction method based on estimator
+                if self.estimator_name == "TI":
+                    df = gmx.extract_dHdl(xvg_file, T=self.temperature)
+                else:  # BAR or MBAR
+                    df = gmx.extract_u_nk(xvg_file, T=self.temperature)
                 datasets.append(df)
                 self.logger.debug(f"Parsed {xvg_file}: {len(df)} frames")
             except Exception as e:
@@ -351,7 +383,7 @@ class FEPAnalyzer:
 
         return datasets
 
-    def _compute_free_energy(self, datasets: List) -> Tuple[float, float]:
+    def _compute_free_energy_alchemlyb(self, datasets: List) -> Tuple[float, float]:
         """
         Compute free energy difference using selected estimator
 
@@ -365,18 +397,22 @@ class FEPAnalyzer:
         Tuple[float, float]
             (delta_g, error) in kcal/mol
         """
-        # Subsample if necessary (alchemlyb handles this automatically)
-        # Fit estimator
-        fitted = self.estimator().fit(datasets)
+        import pandas as pd
+
+        # alchemlyb estimators require a single concatenated DataFrame
+        combined = pd.concat(datasets)
+        fitted = self.estimator().fit(combined)
 
         # Get delta_g and error
         # Note: alchemlyb returns results in kJ/mol, need to convert to kcal/mol
-        delta_g_kj = fitted.delta_f_.iloc[-1]  # Last lambda point
+        # delta_f_ is a DataFrame with states as both rows and columns
+        # iloc[0, -1] gives the free energy from first state to last state
+        delta_g_kj = float(fitted.delta_f_.iloc[0, -1])  # First to last state
         delta_g_kcal = delta_g_kj / 4.184  # Convert kJ to kcal
 
         # Error estimate (if available)
         if hasattr(fitted, "d_delta_f_"):
-            error_kj = fitted.d_delta_f_.iloc[-1]
+            error_kj = float(fitted.d_delta_f_.iloc[0, -1])
             error_kcal = error_kj / 4.184
         else:
             error_kcal = 0.0
@@ -384,7 +420,143 @@ class FEPAnalyzer:
 
         return delta_g_kcal, error_kcal
 
-    def _analyze_convergence(self, bound_data: List, unbound_data: List) -> Dict:
+    def _compute_free_energy_gmx_bar(self, leg_dir: Path, leg_name: str) -> Tuple[float, float]:
+        """
+        Compute free energy difference using GROMACS gmx bar command
+
+        Parameters
+        ----------
+        leg_dir : Path
+            Path to leg directory
+        leg_name : str
+            Name of leg ('bound' or 'unbound')
+
+        Returns
+        -------
+        Tuple[float, float]
+            (delta_g, error) in kcal/mol
+        """
+        import subprocess
+        import re
+
+        # Find all dhdl.xvg files
+        xvg_files = []
+        window_dirs = sorted(leg_dir.glob("window_*"))
+
+        for window_dir in window_dirs:
+            # Check multiple possible filenames
+            for candidate in ["dhdl.xvg", "prod.xvg", "prod/dhdl.xvg"]:
+                xvg_file = window_dir / candidate
+                if xvg_file.exists():
+                    xvg_files.append(str(xvg_file))
+                    break
+
+        if not xvg_files:
+            raise FileNotFoundError(f"No dhdl.xvg files found in {leg_dir}")
+
+        self.logger.info(f"Found {len(xvg_files)} XVG files for {leg_name} leg")
+
+        # Run gmx bar
+        # Output to a temporary file
+        output_file = leg_dir / f"bar_{leg_name}.xvg"
+
+        cmd = [
+            "gmx",
+            "bar",
+            "-f",
+            *xvg_files,
+            "-o",
+            str(output_file),
+            "-temp",
+            str(self.temperature),
+            "-prec",
+            "6",
+        ]
+
+        self.logger.info(f"Running: gmx bar -f ... -o {output_file}")
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+            # Parse output from stdout (gmx bar prints results to stdout)
+            # Format: "Total free energy difference: X.XXX +/- Y.YYY kT"
+            # Or: "Delta G = X.XXX +/- Y.YYY kT"
+            stdout = result.stdout
+
+            # Try to find the final result line
+            # gmx bar output format varies, look for patterns like:
+            # "Total Delta G:  XXXX +/- YYYY kT"
+            # "Final estimate: XXXX +/- YYYY"
+
+            delta_g_kt = None
+            error_kt = None
+
+            # Pattern 1: Look for "total" line (most reliable)
+            # Format: "total      0 -     31,   DG -25.137419 +/- 15.177305"
+            for line in stdout.split("\n"):
+                if line.strip().startswith("total"):
+                    # Extract numbers using regex
+                    match = re.search(r"DG\s+([+-]?\d+\.?\d*)\s*\+/-\s*([+-]?\d+\.?\d*)", line)
+                    if match:
+                        delta_g_kt = float(match.group(1))
+                        error_kt = float(match.group(2))
+                        self.logger.info(f"Found total result: {delta_g_kt:.2f} ± {error_kt:.2f} kT")
+                        break
+
+            # Pattern 2: Fallback - look for "Total Delta G" or "Final estimate"
+            if delta_g_kt is None:
+                for line in stdout.split("\n"):
+                    if "Delta G" in line or "estimate" in line:
+                        match = re.search(r"([+-]?\d+\.?\d*)\s*\+/-\s*([+-]?\d+\.?\d*)", line)
+                        if match:
+                            delta_g_kt = float(match.group(1))
+                            error_kt = float(match.group(2))
+                            break
+
+            if delta_g_kt is None:
+                # Fallback: parse the output file
+                if output_file.exists():
+                    with open(output_file) as f:
+                        for line in f:
+                            if not line.startswith("#") and not line.startswith("@"):
+                                parts = line.split()
+                                if len(parts) >= 2:
+                                    try:
+                                        delta_g_kt = float(parts[0])
+                                        error_kt = float(parts[1])
+                                        break
+                                    except ValueError:
+                                        continue
+
+            if delta_g_kt is None:
+                raise ValueError("Could not parse gmx bar output")
+
+            # Convert from kT to kJ/mol
+            # kT at temperature T: kT = R * T, where R = 8.314 J/(mol·K)
+            R = 8.314 / 1000  # kJ/(mol·K)
+            kT_to_kj = R * self.temperature
+
+            delta_g_kj = delta_g_kt * kT_to_kj
+            error_kj = error_kt * kT_to_kj if error_kt else 0.0
+
+            # Convert to kcal/mol
+            delta_g_kcal = delta_g_kj / 4.184
+            error_kcal = error_kj / 4.184
+
+            self.logger.info(f"gmx bar result: {delta_g_kcal:.2f} ± {error_kcal:.2f} kcal/mol")
+
+            return delta_g_kcal, error_kcal
+
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"gmx bar failed: {e}")
+            self.logger.error(f"stderr: {e.stderr}")
+            raise RuntimeError(f"gmx bar command failed: {e}")
+
+    def _count_windows(self, leg_dir: Path) -> int:
+        """Count number of lambda windows in a leg directory"""
+        return len(list(leg_dir.glob("window_*")))
+
+    def _analyze_convergence(self, bound_data: List, unbound_data: List) -> Dict:  # noqa: ARG002
         """
         Analyze convergence of free energy calculations
 
@@ -393,7 +565,7 @@ class FEPAnalyzer:
         bound_data : List
             Bound leg datasets
         unbound_data : List
-            Unbound leg datasets
+            Unbound leg datasets (not used in current implementation)
 
         Returns
         -------
@@ -403,22 +575,16 @@ class FEPAnalyzer:
         convergence = {
             "hysteresis": None,
             "time_convergence": {},
-            "n_samples": sum(len(df) for df in bound_data),
+            "n_samples": sum(len(df) for df in bound_data) if bound_data else 0,
         }
 
         # Time convergence analysis (subsample by time)
-        try:
-            from alchemlyb.convergence import forward_backward_convergence
-
-            # This is a placeholder - actual implementation would analyze
-            # convergence as a function of simulation time
-            convergence["time_convergence"]["status"] = "not_implemented"
-        except ImportError:
-            convergence["time_convergence"]["status"] = "alchemlyb_convergence_not_available"
+        # TODO: Implement actual convergence analysis
+        convergence["time_convergence"]["status"] = "not_implemented"
 
         return convergence
 
-    def _decompose_energies(self, bound_data: List, unbound_data: List) -> Dict[str, float]:
+    def _decompose_energies(self, bound_data: List, unbound_data: List) -> Dict[str, float]:  # noqa: ARG002
         """
         Decompose free energy by components (elec, vdw, etc.)
 
@@ -427,7 +593,7 @@ class FEPAnalyzer:
         bound_data : List
             Bound leg datasets
         unbound_data : List
-            Unbound leg datasets
+            Unbound leg datasets (not used in current implementation)
 
         Returns
         -------
