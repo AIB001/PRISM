@@ -241,8 +241,12 @@ class FEPAnalyzer:
 
             # Step 2: Compute free energy differences
             self.logger.info(f"Computing free energy differences using {self.estimator_name}...")
-            delta_g_bound, error_bound = self._compute_free_energy_alchemlyb(bound_data)
-            delta_g_unbound, error_unbound = self._compute_free_energy_alchemlyb(unbound_data)
+            delta_g_bound, error_bound, fitted_bound = self._compute_free_energy_alchemlyb(bound_data)
+            delta_g_unbound, error_unbound, fitted_unbound = self._compute_free_energy_alchemlyb(unbound_data)
+
+            # Store fitted models for plotting
+            self.raw_data["fitted_bound"] = fitted_bound
+            self.raw_data["fitted_unbound"] = fitted_unbound
         else:  # gmx_bar backend
             self.logger.info("Computing free energy differences using gmx bar...")
             delta_g_bound, error_bound = self._compute_free_energy_gmx_bar(self.bound_dir, "bound")
@@ -394,8 +398,8 @@ class FEPAnalyzer:
 
         Returns
         -------
-        Tuple[float, float]
-            (delta_g, error) in kcal/mol
+        Tuple[float, float, object]
+            (delta_g, error) in kcal/mol, and fitted estimator object
         """
         import pandas as pd
 
@@ -418,7 +422,7 @@ class FEPAnalyzer:
             error_kcal = 0.0
             self.logger.warning("Error estimate not available for this estimator")
 
-        return delta_g_kcal, error_kcal
+        return delta_g_kcal, error_kcal, fitted
 
     def _compute_free_energy_gmx_bar(self, leg_dir: Path, leg_name: str) -> Tuple[float, float]:
         """
@@ -634,7 +638,7 @@ class FEPAnalyzer:
 
         from prism.fep.analysis.report import HTMLReportGenerator
 
-        generator = HTMLReportGenerator(self.results)
+        generator = HTMLReportGenerator(self.results, self.raw_data)
         html_path = generator.generate(output_path)
 
         self.logger.info(f"HTML report generated: {html_path}")

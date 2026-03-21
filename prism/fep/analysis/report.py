@@ -37,7 +37,7 @@ class HTMLReportGenerator:
     >>> html_path = generator.generate('report.html')
     """
 
-    def __init__(self, results, template_path: Optional[str] = None):
+    def __init__(self, results, raw_data=None, template_path: Optional[str] = None):
         """
         Initialize report generator
 
@@ -45,10 +45,13 @@ class HTMLReportGenerator:
         ----------
         results : FEResults
             Analysis results
+        raw_data : dict, optional
+            Raw data from analysis (contains fitted models for plotting)
         template_path : str, optional
             Custom template path
         """
         self.results = results
+        self.raw_data = raw_data or {}
         self.template_path = template_path
 
     def generate(self, output_path: str) -> Path:
@@ -357,7 +360,39 @@ class HTMLReportGenerator:
 """
 
     def _generate_plots_section(self) -> str:
-        """Generate plots section"""
+        """Generate plots section with Plotly visualizations"""
+        # Check if we have fitted data for plotting
+        if not self.raw_data:
+            return self._generate_placeholder_plots()
+
+        fitted_bound = self.raw_data.get("fitted_bound")
+        fitted_unbound = self.raw_data.get("fitted_unbound")
+
+        if fitted_bound is None and fitted_unbound is None:
+            return self._generate_placeholder_plots()
+
+        # Generate ΔG vs λ plot
+        dg_plot_html = self._generate_dg_plot(fitted_bound, fitted_unbound)
+
+        # Generate dH/dλ vs λ plot (for TI estimator)
+        dhdl_plot_html = self._generate_dhdl_plot(fitted_bound, fitted_unbound)
+
+        return f"""
+        <div class="card">
+            <h2>Free Energy Profile</h2>
+            <div class="plot-container">
+                <h3>ΔG vs λ (Cumulative Free Energy)</h3>
+                {dg_plot_html}
+            </div>
+            <div class="plot-container">
+                <h3>dH/dλ vs λ (Free Energy Gradient)</h3>
+                {dhdl_plot_html}
+            </div>
+        </div>
+"""
+
+    def _generate_placeholder_plots(self) -> str:
+        """Generate placeholder for plots section"""
         return """
         <div class="card">
             <h2>Free Energy Profile</h2>
@@ -369,6 +404,163 @@ class HTMLReportGenerator:
             </div>
         </div>
 """
+
+    def _generate_dg_plot(self, fitted_bound, fitted_unbound) -> str:
+        """Generate ΔG vs λ plot using Plotly"""
+        import json
+
+        plots_data = []
+
+        # Plot bound leg
+        if fitted_bound is not None:
+            lambda_vals, dg_vals, dg_errors = self._extract_dg_data(fitted_bound)
+            plots_data.append(
+                {
+                    "x": lambda_vals,
+                    "y": [v / 4.184 for v in dg_vals],  # Convert kJ/mol to kcal/mol
+                    "error_y": {"array": [e / 4.184 for e in dg_errors], "visible": True},
+                    "mode": "lines+markers",
+                    "name": "Bound Leg",
+                    "line": {"color": "#667eea", "width": 2},
+                    "marker": {"size": 6},
+                }
+            )
+
+        # Plot unbound leg
+        if fitted_unbound is not None:
+            lambda_vals, dg_vals, dg_errors = self._extract_dg_data(fitted_unbound)
+            plots_data.append(
+                {
+                    "x": lambda_vals,
+                    "y": [v / 4.184 for v in dg_vals],  # Convert kJ/mol to kcal/mol
+                    "error_y": {"array": [e / 4.184 for e in dg_errors], "visible": True},
+                    "mode": "lines+markers",
+                    "name": "Unbound Leg",
+                    "line": {"color": "#764ba2", "width": 2},
+                    "marker": {"size": 6},
+                }
+            )
+
+        layout = {
+            "xaxis": {"title": "λ (Lambda)", "tickformat": ".2f"},
+            "yaxis": {"title": "ΔG (kcal/mol)", "zeroline": True},
+            "hovermode": "closest",
+            "showlegend": True,
+            "height": 500,
+        }
+
+        return f"""
+        <div id="dg-plot"></div>
+        <script>
+        var dgData = {json.dumps(plots_data)};
+        var dgLayout = {json.dumps(layout)};
+        Plotly.newPlot('dg-plot', dgData, dgLayout, {{responsive: true}});
+        </script>
+"""
+
+    def _generate_dhdl_plot(self, fitted_bound, fitted_unbound) -> str:
+        """Generate dH/dλ vs λ plot using Plotly (TI only)"""
+        import json
+
+        # Only for TI estimator
+        if not hasattr(fitted_bound, "dhdl") if fitted_bound else True:
+            return '<p style="color: #666; text-align: center;">dH/dλ plot only available for TI estimator</p>'
+
+        plots_data = []
+
+        # Plot bound leg dH/dλ
+        if fitted_bound is not None and hasattr(fitted_bound, "dhdl"):
+            lambda_vals, dhdl_vals = self._extract_dhdl_data(fitted_bound)
+            # Plot vdw component (column index 2)
+            if len(dhdl_vals) > 2:
+                plots_data.append(
+                    {
+                        "x": lambda_vals,
+                        "y": [v / 4.184 for v in dhdl_vals[2]],  # vdw component, kJ to kcal
+                        "mode": "lines+markers",
+                        "name": "Bound (vdW)",
+                        "line": {"color": "#667eea", "width": 2},
+                    }
+                )
+
+        # Plot unbound leg dH/dλ
+        if fitted_unbound is not None and hasattr(fitted_unbound, "dhdl"):
+            lambda_vals, dhdl_vals = self._extract_dhdl_data(fitted_unbound)
+            if len(dhdl_vals) > 2:
+                plots_data.append(
+                    {
+                        "x": lambda_vals,
+                        "y": [v / 4.184 for v in dhdl_vals[2]],  # vdw component
+                        "mode": "lines+markers",
+                        "name": "Unbound (vdW)",
+                        "line": {"color": "#764ba2", "width": 2},
+                    }
+                )
+
+        if not plots_data:
+            return '<p style="color: #666; text-align: center;">No dH/dλ data available</p>'
+
+        layout = {
+            "xaxis": {"title": "λ (Lambda)", "tickformat": ".2f"},
+            "yaxis": {"title": "dH/dλ (kcal/mol)", "zeroline": True},
+            "hovermode": "closest",
+            "showlegend": True,
+            "height": 500,
+        }
+
+        return f"""
+        <div id="dhdl-plot"></div>
+        <script>
+        var dhdlData = {json.dumps(plots_data)};
+        var dhdlLayout = {json.dumps(layout)};
+        Plotly.newPlot('dhdl-plot', dhdlData, dhdlLayout, {{responsive: true}});
+        </script>
+"""
+
+    def _extract_dg_data(self, fitted) -> tuple:
+        """Extract lambda values, ΔG, and errors from fitted estimator"""
+        # delta_f_ is a DataFrame with states as both index and columns
+        # iloc[0] gives ΔG from state 0 to all states (in kT)
+
+        # Get lambda values from index (MultiIndex with 4 components: mass, coul, vdw, bonded)
+        # Use vdw-lambda as the primary lambda coordinate
+        lambda_vals = []
+        for idx in fitted.delta_f_.index:
+            if isinstance(idx, tuple):
+                # Use vdw-lambda (index 2) or coul-lambda (index 1)
+                lambda_val = idx[2] if len(idx) > 2 else idx[0]
+                lambda_vals.append(lambda_val)
+            else:
+                lambda_vals.append(idx)
+
+        # Get ΔG values from first row (ΔG from state 0 to each state, in kT)
+        dg_vals = fitted.delta_f_.iloc[0].values.tolist()
+
+        # Get errors if available
+        if hasattr(fitted, "d_delta_f_"):
+            dg_errors = fitted.d_delta_f_.iloc[0].values.tolist()
+        else:
+            dg_errors = [0.0] * len(dg_vals)
+
+        return lambda_vals, dg_vals, dg_errors
+
+    def _extract_dhdl_data(self, fitted) -> tuple:
+        """Extract lambda values and dH/dλ from fitted TI estimator"""
+        # dhdl is a DataFrame with lambda states as index and components as columns
+        # Columns: mass, coul, vdw, bonded
+
+        lambda_vals = []
+        for idx in fitted.dhdl.index:
+            if isinstance(idx, tuple):
+                lambda_val = idx[2] if len(idx) > 2 else idx[0]
+                lambda_vals.append(lambda_val)
+            else:
+                lambda_vals.append(idx)
+
+        # Get dH/dλ values for each component
+        dhdl_vals = fitted.dhdl.values.T.tolist()  # Transpose to get [mass, coul, vdw, bonded]
+
+        return lambda_vals, dhdl_vals
 
     def _generate_convergence_section(self) -> str:
         """Generate convergence analysis section"""
