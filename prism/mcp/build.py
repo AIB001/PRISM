@@ -243,6 +243,14 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
+        protonation: str = "gromacs",
+        temperature: float = 310.0,
+        ph: float = 7.0,
+        salt_concentration: float = 0.15,
+        ligand_charge: int = 0,
+        gaussian_method: Optional[str] = None,
+        do_optimization: bool = False,
+        nterm_met: str = "keep",
         box_extension_z: float = 2.0,
         umbrella_time_ns: float = 10.0,
         umbrella_spacing: float = 0.12,
@@ -275,6 +283,18 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
+            protonation: Protonation method. Default: "gromacs".
+                "gromacs": Let pdb2gmx handle protonation states (default HIE).
+                "propka": Use PROPKA pKa prediction for intelligent per-residue
+                ionizable residue states. Requires propka package.
+            temperature: Simulation temperature in Kelvin. Default: 310.
+            ph: pH for protonation state assignment. Default: 7.0.
+            salt_concentration: NaCl concentration in mol/L. Default: 0.15.
+            ligand_charge: Net formal charge of the ligand. Default: 0.
+            gaussian_method: Enable Gaussian RESP charge calculation. Default: None.
+                Set to "hf" for HF/6-31G* or "dft" for B3LYP/6-31G*.
+            do_optimization: Perform geometry optimization before ESP. Default: false.
+            nterm_met: N-terminal methionine handling. Default: "keep".
             box_extension_z: Extra Z-axis length (nm) for pulling space. Default: 2.0.
             umbrella_time_ns: Simulation time per umbrella window in ns. Default: 10.0.
             umbrella_spacing: Distance between umbrella windows in nm. Default: 0.12.
@@ -283,10 +303,18 @@ def register(mcp):
         logger.info(f"build_pmf_system: {protein_path} + {ligand_path}")
 
         errors = []
-        if not os.path.exists(protein_path):
+        if not os.path.isabs(protein_path):
+            errors.append(f"protein_path must be an absolute path, got: {protein_path}")
+        elif not os.path.exists(protein_path):
             errors.append(f"Protein file not found: {protein_path}")
-        if not os.path.exists(ligand_path):
+        if not os.path.isabs(ligand_path):
+            errors.append(f"ligand_path must be an absolute path, got: {ligand_path}")
+        elif not os.path.exists(ligand_path):
             errors.append(f"Ligand file not found: {ligand_path}")
+        if gaussian_method and gaussian_method not in ("hf", "dft"):
+            errors.append(f"gaussian_method must be 'hf' or 'dft', got: {gaussian_method}")
+        if nterm_met not in ("keep", "drop", "auto"):
+            errors.append(f"nterm_met must be 'keep', 'drop', or 'auto', got: {nterm_met}")
         if errors:
             return json.dumps({"success": False, "errors": errors}, indent=2)
 
@@ -303,9 +331,20 @@ def register(mcp):
                     forcefield=forcefield,
                     water_model=water_model,
                     overwrite=overwrite,
+                    gaussian_method=gaussian_method,
+                    do_optimization=do_optimization,
                     pmf_mode=True,
                     box_extension=(0.0, 0.0, box_extension_z),
                 )
+
+                # Apply shared simulation parameters
+                builder.config["simulation"]["temperature"] = temperature
+                builder.config["simulation"]["pH"] = ph
+                builder.config["simulation"]["ligand_charge"] = ligand_charge
+                builder.config["ligand_forcefield"]["charge"] = ligand_charge
+                builder.config["ions"]["concentration"] = salt_concentration
+                builder.config.setdefault("protonation", {})["method"] = protonation
+                builder.config.setdefault("protein_preparation", {})["nterm_met"] = nterm_met
 
                 # Apply PMF-specific parameters
                 builder.config.setdefault("pmf", {})
@@ -330,6 +369,11 @@ def register(mcp):
                     "parameters": {
                         "protein_forcefield": forcefield,
                         "ligand_forcefield": ligand_forcefield,
+                        "water_model": water_model,
+                        "protonation": protonation,
+                        "temperature_K": temperature,
+                        "salt_concentration_M": salt_concentration,
+                        "gaussian_method": gaussian_method,
                         "box_extension_z_nm": box_extension_z,
                         "umbrella_time_ns": umbrella_time_ns,
                         "umbrella_spacing_nm": umbrella_spacing,
@@ -350,6 +394,13 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
+        protonation: str = "gromacs",
+        ph: float = 7.0,
+        salt_concentration: float = 0.15,
+        ligand_charge: int = 0,
+        gaussian_method: Optional[str] = None,
+        do_optimization: bool = False,
+        nterm_met: str = "keep",
         t_ref: float = 310.0,
         t_max: float = 450.0,
         n_replicas: int = 16,
@@ -379,6 +430,17 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
+            protonation: Protonation method. Default: "gromacs".
+                "gromacs": Let pdb2gmx handle protonation states (default HIE).
+                "propka": Use PROPKA pKa prediction for intelligent per-residue
+                ionizable residue states. Requires propka package.
+            ph: pH for protonation state assignment. Default: 7.0.
+            salt_concentration: NaCl concentration in mol/L. Default: 0.15.
+            ligand_charge: Net formal charge of the ligand. Default: 0.
+            gaussian_method: Enable Gaussian RESP charge calculation. Default: None.
+                Set to "hf" for HF/6-31G* or "dft" for B3LYP/6-31G*.
+            do_optimization: Perform geometry optimization before ESP. Default: false.
+            nterm_met: N-terminal methionine handling. Default: "keep".
             t_ref: Reference (physical) temperature in Kelvin. Default: 310.
             t_max: Maximum effective temperature in Kelvin. Default: 450.
             n_replicas: Number of REST2 replicas. Default: 16.
@@ -390,10 +452,18 @@ def register(mcp):
         logger.info(f"build_rest2_system: {protein_path} + {ligand_path}")
 
         errors = []
-        if not os.path.exists(protein_path):
+        if not os.path.isabs(protein_path):
+            errors.append(f"protein_path must be an absolute path, got: {protein_path}")
+        elif not os.path.exists(protein_path):
             errors.append(f"Protein file not found: {protein_path}")
-        if not os.path.exists(ligand_path):
+        if not os.path.isabs(ligand_path):
+            errors.append(f"ligand_path must be an absolute path, got: {ligand_path}")
+        elif not os.path.exists(ligand_path):
             errors.append(f"Ligand file not found: {ligand_path}")
+        if gaussian_method and gaussian_method not in ("hf", "dft"):
+            errors.append(f"gaussian_method must be 'hf' or 'dft', got: {gaussian_method}")
+        if nterm_met not in ("keep", "drop", "auto"):
+            errors.append(f"nterm_met must be 'keep', 'drop', or 'auto', got: {nterm_met}")
         if errors:
             return json.dumps({"success": False, "errors": errors}, indent=2)
 
@@ -410,12 +480,23 @@ def register(mcp):
                     forcefield=forcefield,
                     water_model=water_model,
                     overwrite=overwrite,
+                    gaussian_method=gaussian_method,
+                    do_optimization=do_optimization,
                     rest2_mode=True,
                     t_ref=t_ref,
                     t_max=t_max,
                     n_replicas=n_replicas,
                     rest2_cutoff=rest2_cutoff,
                 )
+
+                # Apply shared simulation parameters
+                builder.config["simulation"]["pH"] = ph
+                builder.config["simulation"]["ligand_charge"] = ligand_charge
+                builder.config["ligand_forcefield"]["charge"] = ligand_charge
+                builder.config["ions"]["concentration"] = salt_concentration
+                builder.config.setdefault("protonation", {})["method"] = protonation
+                builder.config.setdefault("protein_preparation", {})["nterm_met"] = nterm_met
+
                 result_dir = builder.run()
 
             rest2_dir = os.path.join(result_dir, "GMX_PROLIG_REST2")
@@ -434,6 +515,10 @@ def register(mcp):
                     "parameters": {
                         "protein_forcefield": forcefield,
                         "ligand_forcefield": ligand_forcefield,
+                        "water_model": water_model,
+                        "protonation": protonation,
+                        "salt_concentration_M": salt_concentration,
+                        "gaussian_method": gaussian_method,
                         "t_ref_K": t_ref,
                         "t_max_K": t_max,
                         "n_replicas": n_replicas,
@@ -455,6 +540,14 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
+        protonation: str = "gromacs",
+        temperature: float = 310.0,
+        ph: float = 7.0,
+        salt_concentration: float = 0.15,
+        ligand_charge: int = 0,
+        gaussian_method: Optional[str] = None,
+        do_optimization: bool = False,
+        nterm_met: str = "keep",
         mmpbsa_traj_ns: Optional[float] = None,
         gmx2amber: bool = False,
         overwrite: bool = False,
@@ -481,6 +574,18 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
+            protonation: Protonation method. Default: "gromacs".
+                "gromacs": Let pdb2gmx handle protonation states (default HIE).
+                "propka": Use PROPKA pKa prediction for intelligent per-residue
+                ionizable residue states. Requires propka package.
+            temperature: Simulation temperature in Kelvin. Default: 310.
+            ph: pH for protonation state assignment. Default: 7.0.
+            salt_concentration: NaCl concentration in mol/L. Default: 0.15.
+            ligand_charge: Net formal charge of the ligand. Default: 0.
+            gaussian_method: Enable Gaussian RESP charge calculation. Default: None.
+                Set to "hf" for HF/6-31G* or "dft" for B3LYP/6-31G*.
+            do_optimization: Perform geometry optimization before ESP. Default: false.
+            nterm_met: N-terminal methionine handling. Default: "keep".
             mmpbsa_traj_ns: Production MD length in ns for trajectory-based mode.
                 If None (default), uses single-frame mode (no production MD).
             gmx2amber: Use AMBER MMPBSA.py via parmed instead of gmx_MMPBSA.
@@ -490,10 +595,18 @@ def register(mcp):
         logger.info(f"build_mmpbsa_system: {protein_path} + {ligand_path}")
 
         errors = []
-        if not os.path.exists(protein_path):
+        if not os.path.isabs(protein_path):
+            errors.append(f"protein_path must be an absolute path, got: {protein_path}")
+        elif not os.path.exists(protein_path):
             errors.append(f"Protein file not found: {protein_path}")
-        if not os.path.exists(ligand_path):
+        if not os.path.isabs(ligand_path):
+            errors.append(f"ligand_path must be an absolute path, got: {ligand_path}")
+        elif not os.path.exists(ligand_path):
             errors.append(f"Ligand file not found: {ligand_path}")
+        if gaussian_method and gaussian_method not in ("hf", "dft"):
+            errors.append(f"gaussian_method must be 'hf' or 'dft', got: {gaussian_method}")
+        if nterm_met not in ("keep", "drop", "auto"):
+            errors.append(f"nterm_met must be 'keep', 'drop', or 'auto', got: {nterm_met}")
         if errors:
             return json.dumps({"success": False, "errors": errors}, indent=2)
 
@@ -510,10 +623,22 @@ def register(mcp):
                     forcefield=forcefield,
                     water_model=water_model,
                     overwrite=overwrite,
+                    gaussian_method=gaussian_method,
+                    do_optimization=do_optimization,
                     mmpbsa_mode=True,
                     mmpbsa_traj_ns=mmpbsa_traj_ns,
                     gmx2amber=gmx2amber,
                 )
+
+                # Apply shared simulation parameters
+                builder.config["simulation"]["temperature"] = temperature
+                builder.config["simulation"]["pH"] = ph
+                builder.config["simulation"]["ligand_charge"] = ligand_charge
+                builder.config["ligand_forcefield"]["charge"] = ligand_charge
+                builder.config["ions"]["concentration"] = salt_concentration
+                builder.config.setdefault("protonation", {})["method"] = protonation
+                builder.config.setdefault("protein_preparation", {})["nterm_met"] = nterm_met
+
                 result_dir = builder.run()
 
             mode = "trajectory" if mmpbsa_traj_ns else "single-frame"
@@ -533,6 +658,11 @@ def register(mcp):
                     "parameters": {
                         "protein_forcefield": forcefield,
                         "ligand_forcefield": ligand_forcefield,
+                        "water_model": water_model,
+                        "protonation": protonation,
+                        "temperature_K": temperature,
+                        "salt_concentration_M": salt_concentration,
+                        "gaussian_method": gaussian_method,
                         "mode": mode,
                         "mmpbsa_traj_ns": mmpbsa_traj_ns,
                         "gmx2amber": gmx2amber,

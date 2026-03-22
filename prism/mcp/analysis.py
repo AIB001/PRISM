@@ -1,6 +1,7 @@
-"""Trajectory analysis tools (contacts, RMSD, H-bonds)."""
+"""Trajectory analysis tools (contacts, RMSD, H-bonds, MM/PBSA)."""
 
 import os
+import re
 import json
 import traceback
 
@@ -310,3 +311,101 @@ def register(mcp):
         except Exception as e:
             logger.error(f"analyze_hbonds failed: {e}\n{traceback.format_exc()}")
             return json.dumps({"success": False, "error": str(e), "traceback": traceback.format_exc()}, indent=2)
+
+    @mcp.tool()
+    def analyze_mmpbsa(
+        mmpbsa_dir: str,
+    ) -> str:
+        """Parse MM/PBSA results from a completed gmx_MMPBSA calculation.
+
+        Reads the FINAL_RESULTS_MMPBSA.dat file produced by gmx_MMPBSA and
+        extracts the binding free energy components (van der Waals, electrostatic,
+        polar solvation, non-polar solvation, and total).
+
+        Also checks for the CSV output file if available.
+
+        Call this AFTER mmpbsa_run.sh has completed successfully.
+
+        Args:
+            mmpbsa_dir: Absolute path to the GMX_PROLIG_MMPBSA directory.
+
+        Returns:
+            JSON with binding energy components and total ΔG_bind.
+        """
+        logger.info(f"analyze_mmpbsa: {mmpbsa_dir}")
+
+        if not os.path.isdir(mmpbsa_dir):
+            return json.dumps(
+                {"success": False, "error": f"Directory not found: {mmpbsa_dir}"},
+                indent=2,
+            )
+
+        # Look for the results file
+        dat_path = os.path.join(mmpbsa_dir, "FINAL_RESULTS_MMPBSA.dat")
+        csv_path = os.path.join(mmpbsa_dir, "FINAL_RESULTS_MMPBSA.csv")
+
+        if not os.path.exists(dat_path):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Results file not found: {dat_path}. Has mmpbsa_run.sh finished?",
+                },
+                indent=2,
+            )
+
+        try:
+            with open(dat_path, "r") as f:
+                content = f.read()
+
+            result = {
+                "success": True,
+                "mmpbsa_dir": mmpbsa_dir,
+                "results_file": dat_path,
+                "energy_components": {},
+                "warnings": [],
+            }
+
+            # Parse energy terms from gmx_MMPBSA output
+            # Typical format:
+            #   DELTA TOTAL = -35.2 +/- 2.1
+            #   VDWAALS     = -42.1 +/- 1.5
+            #   EEL         = -15.3 +/- 3.2
+            #   EPB/EGB     =  28.4 +/- 2.8
+            #   ESURF/ENPOLAR = -6.2 +/- 0.4
+            energy_pattern = re.compile(
+                r"^\s*([\w\s/]+?)\s*=\s*([-\d.]+)\s*\+/-\s*([-\d.]+)",
+                re.MULTILINE,
+            )
+            for match in energy_pattern.finditer(content):
+                name = match.group(1).strip()
+                mean = float(match.group(2))
+                std = float(match.group(3))
+                result["energy_components"][name] = {
+                    "mean_kcal_mol": mean,
+                    "std_kcal_mol": std,
+                }
+
+            # Extract DELTA TOTAL as the headline binding energy
+            delta_total = result["energy_components"].get("DELTA TOTAL")
+            if delta_total:
+                result["delta_g_bind_kcal_mol"] = delta_total["mean_kcal_mol"]
+                result["delta_g_bind_std"] = delta_total["std_kcal_mol"]
+            else:
+                result["warnings"].append(
+                    "Could not find 'DELTA TOTAL' in results. "
+                    "File may use a different format — check raw content."
+                )
+                result["raw_content"] = content[:2000]
+
+            # Check for CSV
+            if os.path.exists(csv_path):
+                result["csv_file"] = csv_path
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            logger.error(f"analyze_mmpbsa failed: {e}\n{traceback.format_exc()}")
+            return json.dumps(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()},
+                indent=2,
+            )

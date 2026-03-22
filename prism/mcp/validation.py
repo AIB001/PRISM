@@ -254,13 +254,16 @@ def register(mcp):
             }
         elif build_mode == "rest2":
             expected_files = {
+                "solv_ions.gro": "GMX_PROLIG_REST2/solv_ions.gro",
+                "topol.top": "GMX_PROLIG_REST2/topol.top",
                 "rest2_run.sh": "GMX_PROLIG_REST2/rest2_run.sh",
             }
         elif build_mode == "mmpbsa":
             expected_files = {
+                "solv_ions.gro": "GMX_PROLIG_MMPBSA/solv_ions.gro",
+                "topol.top": "GMX_PROLIG_MMPBSA/topol.top",
                 "mmpbsa_run.sh": "GMX_PROLIG_MMPBSA/mmpbsa_run.sh",
                 "mmpbsa.in": "GMX_PROLIG_MMPBSA/mmpbsa.in",
-                "topol.top": "GMX_PROLIG_MMPBSA/topol.top",
             }
         else:
             result["warnings"].append(f"Unknown build_mode '{build_mode}'. Options: md, pmf, rest2, mmpbsa")
