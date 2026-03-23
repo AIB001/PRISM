@@ -162,3 +162,42 @@ function generateOverlapMatrix(containerId, matrix, lambdaValues) {
 
     Plotly.newPlot(containerId, data, layout, plotConfig);
 }
+
+// Estimator tab switching for multi-estimator reports
+function showEstimatorTab(estimatorId) {
+    'use strict';
+    // Hide all tab contents
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // Remove active class from all buttons
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // Show selected tab content
+    const targetTab = document.getElementById('estimator-' + estimatorId);
+    if (targetTab) {
+        targetTab.style.display = 'block';
+    }
+
+    // Add active class to clicked button
+    const activeBtn = document.querySelector(`[onclick="showEstimatorTab('${estimatorId}')"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+
+    // Refresh Plotly charts in visible tab (if any)
+    // This ensures charts resize properly when tab becomes visible
+    if (targetTab) {
+        const plotDivs = targetTab.querySelectorAll('[id*="plot"]');
+        plotDivs.forEach(div => {
+            if (div.data && div.data.length > 0) {
+                Plotly.Plots.resize(div);
+            }
+        });
+    }
+}

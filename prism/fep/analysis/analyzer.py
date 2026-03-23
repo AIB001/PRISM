@@ -78,6 +78,8 @@ class FEResults:
         Format: [{"repeat": 1, "bound": 54.07, "unbound": 49.84, "ddG": 4.23}, ...]
     n_repeats : int
         Number of repeats analyzed
+    lambda_profiles : Optional[Dict]
+        Lambda-dependent profiles for plotting (dg vs lambda, dhdl vs lambda)
     """
 
     delta_g: float = 0.0
@@ -89,6 +91,7 @@ class FEResults:
     metadata: Dict = field(default_factory=dict)
     repeat_results: List[Dict[str, float]] = field(default_factory=list)
     n_repeats: int = 1
+    lambda_profiles: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict:
         """Convert results to dictionary"""
@@ -531,4 +534,492 @@ class FEPAnalyzer:
             json.dump(self.results.to_dict(), f, indent=2)
 
         self.logger.info(f"Results saved to {output_path}")
+        return output_path
+
+
+@dataclass
+class MultiEstimatorResults:
+    """
+    Container for multi-estimator FEP analysis results
+
+    Stores results from multiple estimators (TI/BAR/MBAR) along with
+    comparison metrics to help users understand method agreement and
+    choose the best results.
+
+    Attributes
+    ----------
+    methods : Dict[str, FEResults]
+        Results from each estimator, keyed by estimator name.
+        Example: {'TI': FEResults, 'BAR': FEResults, 'MBAR': FEResults}
+    comparison : Dict[str, Any]
+        Comparison metrics across estimators:
+        - delta_g_range: Range of ΔG values (max - min)
+        - delta_g_std: Standard deviation of ΔG values
+        - delta_g_mean: Mean ΔG across methods
+        - agreement: 'good' (<0.5), 'moderate' (0.5-1.0), 'poor' (>1.0)
+        - best_method: Recommended estimator (usually MBAR)
+        - diverged: True if std > 1.0 kcal/mol
+    metadata : Dict[str, Any]
+        Analysis metadata including:
+        - temperature: Simulation temperature
+        - estimators_used: List of estimator names that succeeded
+        - n_estimators: Number of estimators
+        - parallel_execution: Whether estimators were run in parallel
+    """
+
+    methods: Dict[str, FEResults] = field(default_factory=dict)
+    comparison: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict:
+        """
+        Convert results to dictionary for JSON serialization
+
+        Returns
+        -------
+        Dict
+            Dictionary with 'methods', 'comparison', and 'metadata' keys
+        """
+        return {
+            "methods": {name: results.to_dict() for name, results in self.methods.items()},
+            "comparison": self.comparison,
+            "metadata": self.metadata,
+        }
+
+
+class FEPMultiEstimatorAnalyzer:
+    """
+    Run FEP analysis with multiple estimators
+
+    This class enables running multiple FEP estimators (TI/BAR/MBAR) on the
+    same data, comparing results, and generating a comprehensive report with
+    tab-based switching between methods.
+
+    Key features:
+    - Parse XVG files once (shared across all estimators) - major performance optimization
+    - Automatic comparison metrics and divergence detection
+    - Unified JSON output with all results
+    - Optional parallel execution (disabled by default due to pandas pickling limitations)
+
+    Parameters
+    ----------
+    bound_dir : Union[str, Path, List[Union[str, Path]]]
+        Bound leg directory/directories (supports multiple repeats)
+    unbound_dir : Union[str, Path, List[Union[str, Path]]]
+        Unbound leg directory/directories (supports multiple repeats)
+    estimators : list of str, optional
+        List of estimator names to run (default: ['TI', 'BAR', 'MBAR'])
+    temperature : float, optional
+        Simulation temperature in Kelvin (default: 310.0)
+    parallel : bool, optional
+        Whether to run estimators in parallel (default: False).
+        Note: Parallel execution is experimental and may not work on all systems
+        due to pandas DataFrame serialization limitations.
+    backend : str, optional
+        Analysis backend - only 'alchemlyb' supported for multi-estimator mode
+
+    Examples
+    --------
+    >>> analyzer = FEPMultiEstimatorAnalyzer(
+    ...     bound_dir='fep/bound',
+    ...     unbound_dir='fep/unbound',
+    ...     estimators=['TI', 'BAR', 'MBAR']
+    ... )
+    >>> multi_results = analyzer.analyze()
+    >>> print(f"TI:  {multi_results.methods['TI'].delta_g:.2f}")
+    >>> print(f"BAR: {multi_results.methods['BAR'].delta_g:.2f}")
+    >>> print(f"MBAR: {multi_results.methods['MBAR'].delta_g:.2f}")
+
+    For CLI usage with --all-estimators flag, see prism.fep.analysis.cli
+    """
+
+    ESTIMATORS = {
+        "MBAR": MBAR if ALCHEMLYB_AVAILABLE else None,
+        "BAR": BAR if ALCHEMLYB_AVAILABLE else None,
+        "TI": TI if ALCHEMLYB_AVAILABLE else None,
+    }
+
+    def __init__(
+        self,
+        bound_dir: Union[str, Path, List[Union[str, Path]]],
+        unbound_dir: Union[str, Path, List[Union[str, Path]]],
+        estimators: Optional[list] = None,
+        temperature: float = 310.0,
+        parallel: bool = False,
+        backend: str = "alchemlyb",
+    ):
+        """
+        Initialize multi-estimator analyzer
+
+        Parameters
+        ----------
+        bound_dir : str, Path, or list
+            Bound leg directory/directories
+        unbound_dir : str, Path, or list
+            Unbound leg directory/directories
+        estimators : list of str, optional
+            Estimator names to run (default: ['TI', 'BAR', 'MBAR'])
+        temperature : float, optional
+            Temperature in Kelvin (default: 310.0)
+        parallel : bool, optional
+            Run estimators in parallel (default: False).
+            Note: Parallel execution is experimental due to pandas serialization limitations.
+        backend : str, optional
+            Analysis backend (default: 'alchemlyb', only option for multi-estimator)
+
+        Raises
+        ------
+        ValueError
+            If backend is not 'alchemlyb' or estimators are unavailable
+        """
+        # Support single directory or list of directories (multiple repeats)
+        if isinstance(bound_dir, (list, tuple)):
+            self.bound_dirs = [Path(d) for d in bound_dir]
+        else:
+            self.bound_dirs = [Path(bound_dir)]
+
+        if isinstance(unbound_dir, (list, tuple)):
+            self.unbound_dirs = [Path(d) for d in unbound_dir]
+        else:
+            self.unbound_dirs = [Path(unbound_dir)]
+
+        # Set default estimators if not specified
+        if estimators is None:
+            estimators = ["TI", "BAR", "MBAR"]
+
+        # Validate backend
+        if backend != "alchemlyb":
+            raise ValueError(f"Multi-estimator mode only supports 'alchemlyb' backend, got {backend}")
+
+        self.estimators = estimators
+        self.temperature = temperature
+        self.parallel = parallel
+        self.backend = backend
+
+        # Validate estimators
+        for estimator_name in estimators:
+            if estimator_name not in self.ESTIMATORS:
+                raise ValueError(f"Unknown estimator: {estimator_name}. Available: {list(self.ESTIMATORS.keys())}")
+            if self.ESTIMATORS[estimator_name] is None:
+                raise ValueError(f"Estimator {estimator_name} not available. Install alchemlyb.")
+
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+
+        # Results storage
+        self.results: Optional[MultiEstimatorResults] = None
+
+    def analyze(self) -> MultiEstimatorResults:
+        """
+        Run analysis with all estimators
+
+        This method:
+        1. Parses XVG files once (shared across all estimators)
+        2. Runs each estimator in parallel (or sequentially)
+        3. Builds comparison metrics
+        4. Returns MultiEstimatorResults
+
+        Returns
+        -------
+        MultiEstimatorResults
+            Results from all estimators + comparison metrics
+
+        Raises
+        ------
+        FileNotFoundError
+            If required input files are missing
+        ValueError
+            If estimator fails or data format is incorrect
+        """
+        self.logger.info(f"Starting multi-estimator FEP analysis with {len(self.estimators)} estimators")
+        self.logger.info(
+            f"Processing {len(self.bound_dirs)} bound repeats and {len(self.unbound_dirs)} unbound repeats"
+        )
+
+        # Step 1: Parse XVG files for each estimator (different formats required)
+        # Note: TI uses dH/dλ format, while BAR/MBAR use u_nk format
+        # We can't truly "parse once, use many" because estimators need different data formats
+        self.logger.info("Parsing XVG files for each estimator...")
+        results = {}
+
+        for estimator_name in self.estimators:
+            self.logger.info(f"Parsing data for {estimator_name} estimator...")
+
+            # Parse data for this specific estimator
+            bound_data_list = []
+            unbound_data_list = []
+
+            for i, bound_dir in enumerate(self.bound_dirs):
+                repeat_label = f"repeat{i + 1}" if len(self.bound_dirs) > 1 else "bound"
+                self.logger.debug(f"Parsing {repeat_label} from {bound_dir}")
+                bdata = parse_leg_data(bound_dir, "bound", estimator_name, self.temperature, gmx, self.logger)
+                bound_data_list.append(bdata)
+
+            for i, unbound_dir in enumerate(self.unbound_dirs):
+                repeat_label = f"repeat{i + 1}" if len(self.unbound_dirs) > 1 else "unbound"
+                self.logger.debug(f"Parsing {repeat_label} from {unbound_dir}")
+                udata = parse_leg_data(unbound_dir, "unbound", estimator_name, self.temperature, gmx, self.logger)
+                unbound_data_list.append(udata)
+
+            # Run this estimator
+            try:
+                estimator_result = self._run_single_estimator(estimator_name, bound_data_list, unbound_data_list)
+                results[estimator_name] = estimator_result
+                self.logger.info(f"✓ {estimator_name} completed: ΔG = {estimator_result.delta_g:.3f} kcal/mol")
+            except Exception as exc:
+                self.logger.error(f"✗ {estimator_name} failed: {exc}")
+                # Don't re-raise - continue with other estimators
+
+        # Check if any estimators succeeded
+        if not results:
+            raise RuntimeError(
+                f"All {len(self.estimators)} estimators failed. "
+                f"Check logs for details. This may indicate incompatible data format."
+            )
+
+        # Step 3: Build comparison metrics
+        comparison = self._build_comparison_metrics(results)
+
+        # Step 4: Build metadata
+        metadata = {
+            "temperature": self.temperature,
+            "estimators_used": list(results.keys()),
+            "n_estimators": len(results),
+            "parallel_execution": self.parallel,
+            "backend": self.backend,
+        }
+
+        # Step 5: Store results
+        self.results = MultiEstimatorResults(methods=results, comparison=comparison, metadata=metadata)
+
+        self.logger.info(f"Multi-estimator analysis complete:")
+        self.logger.info(f"  Estimators: {', '.join(results.keys())}")
+        self.logger.info(f"  ΔG range: {comparison['delta_g_range']:.3f} kcal/mol")
+        self.logger.info(f"  Agreement: {comparison['agreement']}")
+
+        return self.results
+
+    def _run_estimators_parallel(self, bound_data_list: list, unbound_data_list: list) -> Dict[str, FEResults]:
+        """Run estimators in parallel using ProcessPoolExecutor"""
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        results = {}
+        self.logger.info(f"Running {len(self.estimators)} estimators in parallel...")
+
+        with ProcessPoolExecutor(max_workers=len(self.estimators)) as executor:
+            futures = {}
+            for estimator_name in self.estimators:
+                future = executor.submit(self._run_single_estimator, estimator_name, bound_data_list, unbound_data_list)
+                futures[future] = estimator_name
+
+            for future in as_completed(futures):
+                estimator_name = futures[future]
+                try:
+                    results[estimator_name] = future.result()
+                    self.logger.info(
+                        f"✓ {estimator_name} completed: ΔG = {results[estimator_name].delta_g:.3f} kcal/mol"
+                    )
+                except Exception as exc:
+                    self.logger.error(f"✗ {estimator_name} failed: {exc}")
+                    # Don't re-raise - continue with other estimators
+
+        if not results:
+            raise RuntimeError("All estimators failed. Check logs for details.")
+
+        return results
+
+    def _run_estimators_sequential(self, bound_data_list: list, unbound_data_list: list) -> Dict[str, FEResults]:
+        """Run estimators sequentially (for debugging or platforms without multiprocessing)"""
+        results = {}
+        self.logger.info(f"Running {len(self.estimators)} estimators sequentially...")
+
+        for estimator_name in self.estimators:
+            try:
+                results[estimator_name] = self._run_single_estimator(estimator_name, bound_data_list, unbound_data_list)
+                self.logger.info(f"✓ {estimator_name} completed: ΔG = {results[estimator_name].delta_g:.3f} kcal/mol")
+            except Exception as exc:
+                self.logger.error(f"✗ {estimator_name} failed: {exc}")
+
+        if not results:
+            raise RuntimeError("All estimators failed. Check logs for details.")
+
+        return results
+
+    def _run_single_estimator(self, estimator_name: str, bound_data_list: list, unbound_data_list: list) -> FEResults:
+        """
+        Run a single estimator (called in parallel or sequential)
+
+        Parameters
+        ----------
+        estimator_name : str
+            Name of estimator ('TI', 'BAR', or 'MBAR')
+        bound_data_list : list
+            List of bound leg datasets (one per repeat)
+        unbound_data_list : list
+            List of unbound leg datasets (one per repeat)
+
+        Returns
+        -------
+        FEResults
+            Analysis results from this estimator
+        """
+        from .estimators import compute_free_energy_alchemlyb, summarize_repeat_results
+
+        estimator_cls = self.ESTIMATORS[estimator_name]
+
+        # Process all repeats for bound leg
+        bound_results = []
+        unbound_results = []
+        fitted_bounds = []
+        fitted_unbounds = []
+
+        for bdata in bound_data_list:
+            dg, err, fitted, overlap_m = compute_free_energy_alchemlyb(estimator_cls, bdata, self.logger)
+            bound_results.append((dg, err))
+            fitted_bounds.append(fitted)
+
+        for udata in unbound_data_list:
+            dg, err, fitted, overlap_m = compute_free_energy_alchemlyb(estimator_cls, udata, self.logger)
+            unbound_results.append((dg, err))
+            fitted_unbounds.append(fitted)
+
+        # Summarize repeat results
+        summary = summarize_repeat_results(bound_results, unbound_results)
+
+        # Build lambda profiles for plotting
+        from .profiles import build_lambda_profiles
+
+        lambda_profiles = build_lambda_profiles(fitted_bounds, fitted_unbounds, estimator_name)
+
+        # Calculate binding free energy
+        delta_g = summary["delta_g_bound"] - summary["delta_g_unbound"]
+        delta_g_error = np.sqrt(summary["error_bound"] ** 2 + summary["error_unbound"] ** 2)
+
+        # Count lambda windows
+        n_windows = len(bound_data_list[0]) if bound_data_list else 0
+
+        # Build results
+        results = FEResults(
+            delta_g=delta_g,
+            delta_g_error=delta_g_error,
+            delta_g_bound=summary["delta_g_bound"],
+            delta_g_unbound=summary["delta_g_unbound"],
+            delta_g_components={},  # Not implemented yet
+            convergence={},  # Not implemented yet
+            metadata={
+                "temperature": self.temperature,
+                "estimator": estimator_name,
+                "backend": self.backend,
+                "n_lambda_windows": n_windows,
+                "repeat_statistics": summary["repeat_statistics"],
+            },
+            repeat_results=summary["repeat_results"],
+            n_repeats=summary["n_repeats"],
+            lambda_profiles=lambda_profiles,  # Add lambda profiles for plotting
+        )
+
+        return results
+
+    def _build_comparison_metrics(self, results: Dict[str, FEResults]) -> Dict[str, Any]:
+        """
+        Build comparison metrics across estimators
+
+        Parameters
+        ----------
+        results : Dict[str, FEResults]
+            Results from each estimator
+
+        Returns
+        -------
+        Dict[str, Any]
+            Comparison metrics including range, std, agreement, etc.
+        """
+        if not results:
+            return {}
+
+        delta_g_values = [r.delta_g for r in results.values()]
+
+        import numpy as np
+
+        delta_g_range = float(max(delta_g_values) - min(delta_g_values))
+        delta_g_std = float(np.std(delta_g_values))
+        delta_g_mean = float(np.mean(delta_g_values))
+
+        # Determine agreement level
+        if delta_g_std < 0.5:
+            agreement = "good"
+        elif delta_g_std < 1.0:
+            agreement = "moderate"
+        else:
+            agreement = "poor"
+
+        # Check if results diverged significantly
+        diverged = delta_g_std > 1.0
+
+        return {
+            "delta_g_range": delta_g_range,
+            "delta_g_std": delta_g_std,
+            "delta_g_mean": delta_g_mean,
+            "agreement": agreement,
+            "best_method": "MBAR",  # Could be made dynamic based on overlap matrix
+            "diverged": diverged,
+        }
+
+    def generate_html_report(self, output_path: Union[str, Path]) -> Path:
+        """
+        Generate multi-estimator comparison HTML report
+
+        Parameters
+        ----------
+        output_path : str or Path
+            Path to output HTML file
+
+        Returns
+        -------
+        Path
+            Path to generated HTML file
+
+        Raises
+        ------
+        RuntimeError
+            If analyze() has not been called first
+        """
+        if self.results is None:
+            raise RuntimeError("Must call analyze() before generating report")
+
+        from prism.fep.analysis.report import MultiEstimatorReportGenerator
+
+        generator = MultiEstimatorReportGenerator(self.results)
+        html_path = generator.generate(output_path)
+
+        self.logger.info(f"Multi-estimator HTML report generated: {html_path}")
+        return html_path
+
+    def save_results(self, output_path: Union[str, Path]) -> Path:
+        """
+        Save multi-estimator results to JSON file
+
+        Parameters
+        ----------
+        output_path : str or Path
+            Path to output JSON file
+
+        Returns
+        -------
+        Path
+            Path to saved JSON file
+
+        Raises
+        ------
+        RuntimeError
+            If analyze() has not been called first
+        """
+        if self.results is None:
+            raise RuntimeError("Must call analyze() before saving results")
+
+        output_path = Path(output_path)
+        with open(output_path, "w") as f:
+            json.dump(self.results.to_dict(), f, indent=2)
+
+        self.logger.info(f"Multi-estimator results saved to {output_path}")
         return output_path

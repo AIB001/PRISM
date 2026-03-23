@@ -5,19 +5,20 @@
 Lambda-profile helpers for FEP analysis.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
-def extract_lambda_data(fitted_model: Any, estimator_name: str) -> Optional[Dict[str, List[float]]]:
+def extract_lambda_data(fitted_model: Any, estimator_name: str) -> Optional[Dict[str, Any]]:
     """Extract lambda-dependent profile data from a fitted estimator."""
     if fitted_model is None:
         return None
 
-    lambda_data: Dict[str, List[float]] = {
+    lambda_data: Dict[str, Any] = {
         "lambdas": [],
         "dhdl": [],
         "cumulative_dg": [],
         "state_dg": [],
+        "overlap_matrix": None,  # Only for MBAR
     }
 
     if estimator_name == "TI" and hasattr(fitted_model, "dhdl"):
@@ -43,6 +44,13 @@ def extract_lambda_data(fitted_model: Any, estimator_name: str) -> Optional[Dict
 
         lambda_data["cumulative_dg"] = lambda_data["state_dg"].copy()
         lambda_data["dhdl"] = [0.0] * n_states
+
+        # Extract overlap matrix for MBAR
+        if hasattr(fitted_model, "overlap_matrix"):
+            overlap_matrix = fitted_model.overlap_matrix
+            if overlap_matrix is not None:
+                # Convert to list for JSON serialization
+                lambda_data["overlap_matrix"] = overlap_matrix.tolist()
 
     if not lambda_data["lambdas"]:
         return None

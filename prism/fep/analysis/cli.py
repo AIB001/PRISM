@@ -23,7 +23,8 @@ import logging
 import sys
 from pathlib import Path
 
-from prism.fep.analysis.analyzer import FEPAnalyzer
+from prism.fep.analysis.analyzer import FEPAnalyzer, FEPMultiEstimatorAnalyzer
+from prism.fep.analysis.report import MultiEstimatorReportGenerator
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -64,6 +65,20 @@ Examples:
       --unbound-dir fep_project/unbound \\
       --estimator BAR \\
       --temperature 300 \\
+      --output report.html
+
+  # Run multiple estimators and generate comparison report
+  prism --fep-analyze \\
+      --bound-dir fep_project/bound \\
+      --unbound-dir fep_project/unbound \\
+      --estimator TI BAR MBAR \\
+      --output report.html
+
+  # Run all estimators (convenience flag)
+  prism --fep-analyze \\
+      --bound-dir fep_project/bound \\
+      --unbound-dir fep_project/unbound \\
+      --all-estimators \\
       --output report.html
 
   # Save results to JSON as well
@@ -112,10 +127,21 @@ For more information, see: https://github.com/your-repo/prism
     analysis = parser.add_argument_group("Analysis Options")
     analysis.add_argument(
         "--estimator",
-        type=str,
+        "-e",
+        nargs="+",
         choices=["MBAR", "BAR", "TI"],
-        default="MBAR",
-        help="Free energy estimator method (default: MBAR)",
+        default=["MBAR"],
+        help="Free energy estimator method(s). Can specify multiple: --estimator TI BAR MBAR (default: MBAR)",
+    )
+    analysis.add_argument(
+        "--all-estimators",
+        action="store_true",
+        help="Run all estimators (TI, BAR, MBAR) and generate comparison report",
+    )
+    analysis.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Run estimators in parallel (experimental, may not work on all systems)",
     )
     analysis.add_argument(
         "--backend",
@@ -192,6 +218,14 @@ def validate_arguments(args: argparse.Namespace) -> None:
     if args.temperature <= 0:
         raise ValueError(f"Temperature must be positive: {args.temperature}")
 
+    # Validate multi-estimator mode backend
+    if args.all_estimators or len(args.estimator) > 1:
+        if args.backend != "alchemlyb":
+            raise ValueError(
+                f"Multi-estimator mode only supports 'alchemlyb' backend. "
+                f"Got: {args.backend}. Please use --backend alchemlyb or omit this flag."
+            )
+
 
 def main() -> int:
     """
@@ -213,50 +247,122 @@ def main() -> int:
         # Validate arguments
         validate_arguments(args)
 
+        # Detect multi-estimator mode
+        if args.all_estimators or len(args.estimator) > 1:
+            # Multi-estimator mode
+            estimators = ["TI", "BAR", "MBAR"] if args.all_estimators else args.estimator
+            multi_mode = True
+        else:
+            # Single estimator mode
+            estimators = [args.estimator[0]] if args.estimator else ["MBAR"]
+            multi_mode = False
+
         # Print banner
         logger.info("=" * 70)
         logger.info("PRISM-FEP Analysis")
         logger.info("=" * 70)
         logger.info(f"Bound directory: {args.bound_dir}")
         logger.info(f"Unbound directory: {args.unbound_dir}")
-        logger.info(f"Estimator: {args.estimator}")
+        if multi_mode:
+            logger.info(f"Estimators: {', '.join(estimators)}")
+            logger.info(f"Parallel execution: {args.parallel}")
+        else:
+            logger.info(f"Estimator: {estimators[0]}")
         logger.info(f"Temperature: {args.temperature} K")
         logger.info("=" * 70)
 
-        # Create analyzer
-        analyzer = FEPAnalyzer(
-            bound_dir=args.bound_dir,
-            unbound_dir=args.unbound_dir,
-            temperature=args.temperature,
-            estimator=args.estimator,
-            backend=args.backend,
-            energy_components=args.components,
-        )
+        if multi_mode:
+            # Multi-estimator mode
+            # Validate backend (only alchemlyb supported for multi-estimator)
+            if args.backend != "alchemlyb":
+                raise ValueError(
+                    f"Multi-estimator mode only supports 'alchemlyb' backend. "
+                    f"Got: {args.backend}. Please use --backend alchemlyb or omit this flag."
+                )
 
-        # Run analysis
-        logger.info("Starting FEP analysis...")
-        results = analyzer.analyze()
+            # Create multi-estimator analyzer
+            analyzer = FEPMultiEstimatorAnalyzer(
+                bound_dir=args.bound_dir,
+                unbound_dir=args.unbound_dir,
+                estimators=estimators,
+                temperature=args.temperature,
+                parallel=args.parallel,
+                backend=args.backend,
+            )
 
-        # Print summary
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("RESULTS SUMMARY")
-        logger.info("=" * 70)
-        logger.info(f"Binding Free Energy (ΔG): {results.delta_g:.2f} ± {results.delta_g_error:.2f} kcal/mol")
-        logger.info(f"  Bound leg:   {results.delta_g_bound:.2f} kcal/mol")
-        logger.info(f"  Unbound leg: {results.delta_g_unbound:.2f} kcal/mol")
-        logger.info("=" * 70)
+            # Run analysis
+            logger.info("Starting FEP analysis with multiple estimators...")
+            multi_results = analyzer.analyze()
 
-        # Generate HTML report
-        logger.info(f"Generating HTML report: {args.output}")
-        report_path = analyzer.generate_html_report(args.output)
-        logger.info(f"✓ HTML report saved: {report_path}")
+            # Print summary for all estimators
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("RESULTS SUMMARY - Multi-Estimator Comparison")
+            logger.info("=" * 70)
+            for name, results in multi_results.methods.items():
+                logger.info(
+                    f"{name}: ΔG = {results.delta_g:.2f} ± {results.delta_g_error:.2f} kcal/mol "
+                    f"(bound: {results.delta_g_bound:.2f}, unbound: {results.delta_g_unbound:.2f})"
+                )
+            logger.info("-" * 70)
+            logger.info(
+                f"Agreement: {multi_results.comparison['agreement']} "
+                f"(std: {multi_results.comparison['delta_g_std']:.2f} kcal/mol)"
+            )
+            logger.info("=" * 70)
 
-        # Save JSON if requested
-        if args.json:
-            logger.info(f"Saving JSON results: {args.json}")
-            json_path = analyzer.save_results(args.json)
-            logger.info(f"✓ JSON results saved: {json_path}")
+            # Generate HTML report
+            logger.info(f"Generating HTML report: {args.output}")
+            generator = MultiEstimatorReportGenerator(multi_results)
+            report_path = generator.generate(args.output)
+            logger.info(f"✓ HTML report saved: {report_path}")
+
+            # Save JSON if requested
+            if args.json:
+                logger.info(f"Saving JSON results: {args.json}")
+                import json
+
+                json_path = Path(args.json)
+                with open(json_path, "w") as f:
+                    json.dump(multi_results.to_dict(), f, indent=2)
+                logger.info(f"✓ JSON results saved: {json_path}")
+
+        else:
+            # Single estimator mode (existing behavior)
+            # Create analyzer
+            analyzer = FEPAnalyzer(
+                bound_dir=args.bound_dir,
+                unbound_dir=args.unbound_dir,
+                temperature=args.temperature,
+                estimator=estimators[0],
+                backend=args.backend,
+                energy_components=args.components,
+            )
+
+            # Run analysis
+            logger.info("Starting FEP analysis...")
+            results = analyzer.analyze()
+
+            # Print summary
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("RESULTS SUMMARY")
+            logger.info("=" * 70)
+            logger.info(f"Binding Free Energy (ΔG): {results.delta_g:.2f} ± {results.delta_g_error:.2f} kcal/mol")
+            logger.info(f"  Bound leg:   {results.delta_g_bound:.2f} kcal/mol")
+            logger.info(f"  Unbound leg: {results.delta_g_unbound:.2f} kcal/mol")
+            logger.info("=" * 70)
+
+            # Generate HTML report
+            logger.info(f"Generating HTML report: {args.output}")
+            report_path = analyzer.generate_html_report(args.output)
+            logger.info(f"✓ HTML report saved: {report_path}")
+
+            # Save JSON if requested
+            if args.json:
+                logger.info(f"Saving JSON results: {args.json}")
+                json_path = analyzer.save_results(args.json)
+                logger.info(f"✓ JSON results saved: {json_path}")
 
         logger.info("")
         logger.info("Analysis complete!")

@@ -48,21 +48,24 @@ Install:
 Author: PRISM Team
 """
 
-from .analyzer import FEPAnalyzer, FEResults
+from .analyzer import FEPAnalyzer, FEResults, MultiEstimatorResults, FEPMultiEstimatorAnalyzer
 from .xvg_parser import XVGParser
 from .estimators import FEstimator
 from .profiles import build_lambda_profiles, extract_lambda_data
-from .report import HTMLReportGenerator
+from .report import HTMLReportGenerator, MultiEstimatorReportGenerator
 from .cli import main
 
 __all__ = [
     "FEPAnalyzer",
     "FEResults",
+    "MultiEstimatorResults",
+    "FEPMultiEstimatorAnalyzer",
     "XVGParser",
     "FEstimator",
     "build_lambda_profiles",
     "extract_lambda_data",
     "HTMLReportGenerator",
+    "MultiEstimatorReportGenerator",
     "main",
 ]
 

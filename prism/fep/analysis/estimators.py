@@ -42,7 +42,7 @@ def compute_free_energy_alchemlyb(
     # Extract overlap matrix for MBAR estimator
     overlap_matrix = None
     if hasattr(fitted, "overlap_matrix"):
-        overlap_matrix = fitted.overlap_matrix_
+        overlap_matrix = fitted.overlap_matrix
 
     return delta_g_kcal, error_kcal, fitted, overlap_matrix
 
