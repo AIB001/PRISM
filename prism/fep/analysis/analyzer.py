@@ -320,6 +320,16 @@ class FEPAnalyzer:
             bound_data = bound_data_list[0] if len(bound_data_list) == 1 else bound_data_list
             unbound_data = unbound_data_list[0] if len(unbound_data_list) == 1 else unbound_data_list
 
+            # Time convergence and bootstrap analysis
+            from prism.fep.analysis.convergence import compute_time_convergence, compute_bootstrap
+
+            self.raw_data["time_convergence"] = compute_time_convergence(
+                bound_data_list, unbound_data_list, self.estimator, n_points=10
+            )
+            self.raw_data["bootstrap"] = compute_bootstrap(
+                bound_data_list, unbound_data_list, self.estimator, n_bootstrap=50, fraction=0.8
+            )
+
             # Log repeat results if multiple
             repeat_results = []
             n_repeats = 1
@@ -362,7 +372,14 @@ class FEPAnalyzer:
             # For gmx_bar, we don't parse data into memory
             bound_data = []
             unbound_data = []
+            bound_data_list = []
+            unbound_data_list = []
+            repeat_results = []
+            n_repeats = 1
+            repeat_statistics = {}
             self.raw_data["lambda_profiles"] = None
+            self.raw_data["time_convergence"] = None
+            self.raw_data["bootstrap"] = None
 
         # Binding free energy = bound - unbound
         delta_g = delta_g_bound - delta_g_unbound
@@ -860,11 +877,6 @@ class FEPAnalyzer:
             Free energy decomposition by component
         """
         components = {}
-
-        # Handle list of datasets (multiple repeats) - use first repeat
-        if isinstance(bound_data, list):
-            if not bound_data:
-                return components
 
         # Handle list of datasets (multiple repeats) - use first repeat
         if isinstance(bound_data, list):

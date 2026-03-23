@@ -11,7 +11,7 @@ Modern UI design with static templates.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Union
 from datetime import datetime
 
 
@@ -73,7 +73,7 @@ class HTMLReportGenerator:
         self.template_style = template_style
         self.template_path = template_path
 
-    def generate(self, output_path: str) -> Path:
+    def generate(self, output_path: Union[str, Path]) -> Path:
         """
         Generate HTML report
 
@@ -131,6 +131,10 @@ class HTMLReportGenerator:
         lambda_profiles = self.raw_data.get("lambda_profiles")
         estimator_name = results_dict.get("estimator", "MBAR")
         dhdl_divs, lambda_plot_script = self._build_lambda_plots_html(lambda_profiles, estimator_name)
+
+        # Build convergence and bootstrap plots
+        time_conv_html = self._build_time_convergence_html(self.raw_data.get("time_convergence"))
+        bootstrap_html = self._build_bootstrap_html(self.raw_data.get("bootstrap"))
 
         # Build HTML
         html = f"""<!DOCTYPE html>
@@ -223,42 +227,6 @@ class HTMLReportGenerator:
 
         <div class="card">
             <h2>📋 Detailed Results</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Property</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><strong>Backend</strong></td>
-                        <td class="value">{results_dict['backend']}</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Estimator</strong></td>
-                        <td class="value">{results_dict['estimator']}</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Total Binding ΔG</strong></td>
-                        <td class="value">{results_dict['delta_g']:.2f} kcal/mol</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Error Estimate</strong></td>
-                        <td class="value">
-                            {f"± {results_dict['delta_g_error']:.2f}" if results_dict['delta_g_error'] == results_dict['delta_g_error'] else "N/A"}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong>Bound Leg ΔG</strong></td>
-                        <td class="value">{results_dict['delta_g_bound']:.2f} kcal/mol</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Unbound Leg ΔG</strong></td>
-                        <td class="value">{results_dict['delta_g_unbound']:.2f} kcal/mol</td>
-                    </tr>
-                </tbody>
-            </table>
 {self._build_repeats_table_html()}
         </div>
 
@@ -274,15 +242,12 @@ class HTMLReportGenerator:
 
         <div class="card">
             <h2>📊 Convergence Diagnostics</h2>
-            <div class="alert">
-                <strong>⚠️ Note:</strong> Convergence analysis requires trajectory data.
-                For production analysis, ensure adequate sampling time and check:
-                <ul style="margin: 10px 0 0 20px;">
-                    <li>Time series of dH/dλ for stationarity</li>
-                    <li>Block averaging for error convergence</li>
-                    <li>Forward/reverse hysteresis for thermodynamic consistency</li>
-                </ul>
-            </div>
+{time_conv_html}
+        </div>
+
+        <div class="card">
+            <h2>🔄 Bootstrap Analysis</h2>
+{bootstrap_html}
         </div>
 
         <div class="card">
@@ -539,6 +504,171 @@ class HTMLReportGenerator:
 
         return table_html
 
+    def _build_time_convergence_html(self, time_conv_data: Optional[Dict]) -> str:
+        """
+        Build HTML for time convergence analysis section.
+
+        Parameters
+        ----------
+        time_conv_data : dict or None
+            As returned by FEPAnalyzer._compute_time_convergence.
+            Contains 'bound' and 'unbound' lists of {frac, dg, err} dicts.
+
+        Returns
+        -------
+        str
+            HTML content (empty string if no data).
+        """
+        if not time_conv_data:
+            return """            <div class="alert">
+                <strong>ℹ️ Note:</strong> Time convergence analysis was not performed or data was insufficient.
+            </div>"""
+
+        import json as _json
+
+        bound_pts = time_conv_data.get("bound", [])
+        unbound_pts = time_conv_data.get("unbound", [])
+
+        if not bound_pts and not unbound_pts:
+            return """            <div class="alert">
+                <strong>ℹ️ Note:</strong> Time convergence analysis yielded no data points.
+            </div>"""
+
+        traces = []
+        if bound_pts:
+            x = [p["frac"] for p in bound_pts]
+            y = [p["dg"] for p in bound_pts]
+            err = [p["err"] for p in bound_pts]
+            traces.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "error_y": {"type": "data", "array": err, "visible": True},
+                    "name": "Bound",
+                    "mode": "lines+markers",
+                    "line": {"width": 3, "color": "rgb(76,175,80)"},
+                    "marker": {"size": 8, "symbol": "circle-open"},
+                }
+            )
+        if unbound_pts:
+            x = [p["frac"] for p in unbound_pts]
+            y = [p["dg"] for p in unbound_pts]
+            err = [p["err"] for p in unbound_pts]
+            traces.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "error_y": {"type": "data", "array": err, "visible": True},
+                    "name": "Unbound",
+                    "mode": "lines+markers",
+                    "line": {"width": 3, "color": "rgb(244,67,54)"},
+                    "marker": {"size": 8, "symbol": "circle-open"},
+                }
+            )
+
+        layout = {
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(255,255,255,0.8)",
+            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
+            "title": {"text": "Time Convergence of ΔG"},
+            "xaxis": {"title": "Fraction of simulation data"},
+            "yaxis": {"title": "ΔG (kcal/mol)"},
+        }
+
+        return f"""
+            <div id="time-conv-plot" style="min-height:350px;"></div>
+            <script>
+            Plotly.newPlot('time-conv-plot', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
+            </script>
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                <strong>📊 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
+                If ΔG is still changing at 100%, more sampling is needed.
+            </p>"""
+
+    def _build_bootstrap_html(self, bootstrap_data: Optional[Dict]) -> str:
+        """
+        Build HTML for bootstrap error estimation section.
+
+        Parameters
+        ----------
+        bootstrap_data : dict or None
+            As returned by FEPAnalyzer._compute_bootstrap.
+
+        Returns
+        -------
+        str
+            HTML content.
+        """
+        if not bootstrap_data:
+            return """            <div class="alert">
+                <strong>ℹ️ Note:</strong> Bootstrap analysis was not performed or data was insufficient.
+            </div>"""
+
+        import json as _json
+
+        ddG_values = bootstrap_data.get("ddG_values", [])
+        ddG_mean = bootstrap_data.get("ddG_mean", 0.0)
+        ddG_std = bootstrap_data.get("ddG_std", 0.0)
+        ddG_stderr = bootstrap_data.get("ddG_stderr", 0.0)
+        n_bootstrap = bootstrap_data.get("n_bootstrap", 0)
+
+        if not ddG_values:
+            return """            <div class="alert">
+                <strong>ℹ️ Note:</strong> Bootstrap analysis yielded no data.
+            </div>"""
+
+        # Histogram trace
+        hist_trace = {
+            "x": ddG_values,
+            "type": "histogram",
+            "name": "ΔΔG bootstrap",
+            "marker": {"color": "rgba(33,150,243,0.7)", "line": {"color": "rgb(33,150,243)", "width": 1}},
+            "nbinsx": max(5, n_bootstrap // 5),
+        }
+        layout = {
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(255,255,255,0.8)",
+            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
+            "title": {"text": "Bootstrap ΔΔG Distribution"},
+            "xaxis": {"title": "ΔΔG (kcal/mol)"},
+            "yaxis": {"title": "Count"},
+            "shapes": [
+                {
+                    "type": "line",
+                    "x0": ddG_mean,
+                    "x1": ddG_mean,
+                    "y0": 0,
+                    "y1": 1,
+                    "xref": "x",
+                    "yref": "paper",
+                    "line": {"color": "red", "width": 2, "dash": "dash"},
+                }
+            ],
+        }
+
+        return f"""
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center;">
+                <div id="bootstrap-hist-plot" style="min-height:300px;"></div>
+                <div>
+                    <table>
+                        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                        <tbody>
+                            <tr><td><strong>Mean ΔΔG</strong></td><td class="value">{ddG_mean:.3f} kcal/mol</td></tr>
+                            <tr><td><strong>Std Dev</strong></td><td class="value">{ddG_std:.3f} kcal/mol</td></tr>
+                            <tr><td><strong>Stderr</strong></td><td class="value">{ddG_stderr:.3f} kcal/mol</td></tr>
+                            <tr><td><strong>N Bootstrap</strong></td><td class="value">{n_bootstrap}</td></tr>
+                        </tbody>
+                    </table>
+                    <p style="margin-top:10px;font-size:0.85em;color:#666;">
+                        Bootstrap resamples 80% of frames per window, {n_bootstrap} iterations.
+                        Red dashed line = mean.
+                    </p>
+                </div>
+            </div>
+            <script>
+            Plotly.newPlot('bootstrap-hist-plot', [{_json.dumps(hist_trace)}], {_json.dumps(layout)}, {{responsive:true}});
+            </script>"""
+
 
 class MultiBackendReportGenerator:
     """
@@ -580,7 +710,7 @@ class MultiBackendReportGenerator:
         self.all_results = all_results
         self.template_style = template_style
 
-    def generate(self, output_path: str) -> Path:
+    def generate(self, output_path: Union[str, Path]) -> Path:
         """
         Generate HTML report
 
@@ -610,9 +740,6 @@ class MultiBackendReportGenerator:
         # Load templates
         css_content = _load_template("styles.css")
         js_content = _load_template("script.js")
-
-        # Generate backend names
-        backend_names = [f"{r['backend']}-{r['estimator']}" for r in self.all_results]
 
         # Build comparison table
         comparison_rows = ""
