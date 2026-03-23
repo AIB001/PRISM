@@ -52,6 +52,7 @@ from .analyzer import FEPAnalyzer, FEResults, MultiEstimatorResults, FEPMultiEst
 from .xvg_parser import XVGParser
 from .estimators import FEstimator
 from .profiles import build_lambda_profiles, extract_lambda_data
+from . import plots  # Shared plotting functions
 from .report import HTMLReportGenerator, MultiEstimatorReportGenerator
 from .cli import main
 
@@ -64,6 +65,7 @@ __all__ = [
     "FEstimator",
     "build_lambda_profiles",
     "extract_lambda_data",
+    "plots",  # Shared plotting module
     "HTMLReportGenerator",
     "MultiEstimatorReportGenerator",
     "main",

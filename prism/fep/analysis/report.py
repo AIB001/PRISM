@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Union, TYPE_CHECKING
 from datetime import datetime
 
+from . import plots
+
 if TYPE_CHECKING:
     from .analyzer import FEResults
 
@@ -304,166 +306,23 @@ class HTMLReportGenerator:
         """
         Build HTML div placeholders and Plotly JS for lambda-dependent plots.
 
+        Delegates to shared plotting function in plots module.
+
         Parameters
         ----------
         lambda_profiles : dict or None
             As produced by FEPAnalyzer._build_lambda_profiles.
-            Can contain single repeat or multiple repeats:
-            - Single: {"bound": {...}, "unbound": {...}}
-            - Multiple: {"bound": [repeat1, repeat2, ...], "unbound": [repeat1, repeat2, ...]}
         estimator_name : str
             Estimator name (TI, BAR, MBAR).
         plot_suffix : str, optional
-            Suffix to add to plot IDs (for multi-estimator mode to avoid ID conflicts).
+            Suffix to add to plot IDs.
 
         Returns
         -------
         tuple[str, str]
             (dhdl_divs_html, script_tag_html)
         """
-        import json as _json
-
-        if not lambda_profiles:
-            return "", ""
-
-        bound_data = lambda_profiles.get("bound") or {}
-        unbound_data = lambda_profiles.get("unbound") or {}
-
-        # Support both single and multiple repeats
-        # Check if data is a list (multiple repeats) or dict (single repeat)
-        bound_list = bound_data if isinstance(bound_data, list) else [bound_data]
-        unbound_list = unbound_data if isinstance(unbound_data, list) else [unbound_data]
-
-        is_ti = estimator_name.upper() == "TI"
-
-        # Build unique plot IDs
-        bound_plot_id = f"dg-bound-plot-{estimator_name}" if plot_suffix else "dg-bound-plot"
-        unbound_plot_id = f"dg-unbound-plot-{estimator_name}" if plot_suffix else "dg-unbound-plot"
-        dhdl_bound_plot_id = f"dhdl-bound-plot-{estimator_name}" if plot_suffix else "dhdl-bound-plot"
-        dhdl_unbound_plot_id = f"dhdl-unbound-plot-{estimator_name}" if plot_suffix else "dhdl-unbound-plot"
-
-        # dH/dλ divs only for TI
-        dhdl_divs = ""
-        if is_ti:
-            dhdl_divs = f"""
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
-                <div class="plot-container" id="{dhdl_bound_plot_id}" style="min-height:300px;"></div>
-                <div class="plot-container" id="{dhdl_unbound_plot_id}" style="min-height:300px;"></div>
-            </div>"""
-
-        layout_common = {
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(255,255,255,0.8)",
-            "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
-        }
-
-        script_lines = ["<script>"]
-
-        # Colors for multiple repeats
-        repeat_colors = [
-            "rgb(76,175,80)",  # Green
-            "rgb(33,150,243)",  # Blue
-            "rgb(255,152,0)",  # Orange
-            "rgb(156,39,176)",  # Purple
-            "rgb(0,150,136)",  # Teal
-        ]
-
-        def _dg_trace(data: dict, name: str, color: str) -> dict:
-            return {
-                "x": data.get("lambdas", []),
-                "y": data.get("cumulative_dg", []),
-                "name": name,
-                "mode": "lines+markers",
-                "line": {"width": 3, "color": color},
-                "marker": {"size": 6},
-            }
-
-        def _dhdl_trace(data: dict, name: str, color: str) -> dict:
-            return {
-                "x": data.get("lambdas", []),
-                "y": data.get("dhdl", []),
-                "name": name,
-                "mode": "lines+markers",
-                "line": {"width": 2, "color": color},
-                "marker": {"size": 5},
-            }
-
-        # Create traces for all repeats
-        dg_bound_traces = []
-        dg_unbound_traces = []
-        dhdl_bound_traces = []
-        dhdl_unbound_traces = []
-
-        for i, bound in enumerate(bound_list):
-            if not bound:
-                continue
-            repeat_name = f"Repeat {i + 1}" if len(bound_list) > 1 else "Bound Leg"
-            color = repeat_colors[i % len(repeat_colors)]
-            dg_bound_traces.append(_dg_trace(bound, repeat_name, color))
-            if is_ti:
-                dhdl_bound_traces.append(_dhdl_trace(bound, repeat_name, color))
-
-        for i, unbound in enumerate(unbound_list):
-            if not unbound:
-                continue
-            repeat_name = f"Repeat {i + 1}" if len(unbound_list) > 1 else "Unbound Leg"
-            color = repeat_colors[i % len(repeat_colors)]
-            dg_unbound_traces.append(_dg_trace(unbound, repeat_name, color))
-            if is_ti:
-                dhdl_unbound_traces.append(_dhdl_trace(unbound, repeat_name, color))
-
-        bound_layout = {
-            **layout_common,
-            "title": {"text": "Bound Leg ΔG vs λ"},
-            "xaxis": {"title": "λ"},
-            "yaxis": {"title": "ΔG (kcal/mol)"},
-        }
-        unbound_layout = {
-            **layout_common,
-            "title": {"text": "Unbound Leg ΔG vs λ"},
-            "xaxis": {"title": "λ"},
-            "yaxis": {"title": "ΔG (kcal/mol)"},
-        }
-        bound_dhdl_layout = {
-            **layout_common,
-            "title": {"text": "Bound Leg dH/dλ vs λ"},
-            "xaxis": {"title": "λ"},
-            "yaxis": {"title": "dH/dλ (kcal/mol)"},
-        }
-        unbound_dhdl_layout = {
-            **layout_common,
-            "title": {"text": "Unbound Leg dH/dλ vs λ"},
-            "xaxis": {"title": "λ"},
-            "yaxis": {"title": "dH/dλ (kcal/mol)"},
-        }
-
-        # Plot ΔG vs λ
-        if dg_bound_traces and dg_bound_traces[0]["x"]:
-            bl = _json.dumps(bound_layout)
-            script_lines.append(
-                f"Plotly.newPlot('{bound_plot_id}', {_json.dumps(dg_bound_traces)}, {bl}, {{responsive:true}});"
-            )
-        if dg_unbound_traces and dg_unbound_traces[0]["x"]:
-            ul = _json.dumps(unbound_layout)
-            script_lines.append(
-                f"Plotly.newPlot('{unbound_plot_id}', {_json.dumps(dg_unbound_traces)}, {ul}, {{responsive:true}});"
-            )
-
-        # Plot dH/dλ vs λ (TI only)
-        if is_ti:
-            if dhdl_bound_traces and dhdl_bound_traces[0]["x"]:
-                bhl = _json.dumps(bound_dhdl_layout)
-                script_lines.append(
-                    f"Plotly.newPlot('{dhdl_bound_plot_id}', {_json.dumps(dhdl_bound_traces)}, {bhl}, {{responsive:true}});"
-                )
-            if dhdl_unbound_traces and dhdl_unbound_traces[0]["x"]:
-                uhl = _json.dumps(unbound_dhdl_layout)
-                script_lines.append(
-                    f"Plotly.newPlot('{dhdl_unbound_plot_id}', {_json.dumps(dhdl_unbound_traces)}, {uhl}, {{responsive:true}});"
-                )
-
-        script_lines.append("</script>")
-        return dhdl_divs, "\n".join(script_lines)
+        return plots.build_lambda_plots_html(lambda_profiles, estimator_name, plot_suffix)
 
     def _build_repeats_table_html(self) -> str:
         """
@@ -481,66 +340,16 @@ class HTMLReportGenerator:
         if not hasattr(self.results, "repeat_results") or not self.results.repeat_results:
             return ""
 
-        # Build table rows for each repeat
-        rows_html = ""
-        for r in self.results.repeat_results:
-            rows_html += f"""
-                    <tr>
-                        <td>{r["repeat"]}</td>
-                        <td class="value">{r["bound"]:.2f}</td>
-                        <td class="value">{r["unbound"]:.2f}</td>
-                        <td class="value">{r["ddG"]:.2f}</td>
-                    </tr>
-        """
-
-        # Add statistics rows (ave and stderr)
         stats = self.results.metadata.get("repeat_statistics", {})
-        if stats:
-            rows_html += f"""
-                    <tr style="border-top: 2px solid #666; font-weight: bold; background: #e8f5e9;">
-                        <td>ave</td>
-                        <td class="value">{stats.get("bound_mean", 0):.2f}</td>
-                        <td class="value">{stats.get("unbound_mean", 0):.2f}</td>
-                        <td class="value">{stats.get("ddG_mean", 0):.2f}</td>
-                    </tr>
-                    <tr style="font-weight: bold; background: #e8f5e9;">
-                        <td>stderr</td>
-                        <td class="value">{stats.get("bound_stderr", 0):.2f}</td>
-                        <td class="value">{stats.get("unbound_stderr", 0):.2f}</td>
-                        <td class="value">{stats.get("ddG_stderr", 0):.2f}</td>
-                    </tr>
-        """
-
-        # Build complete table HTML (without outer wrapper for side-by-side layout)
-        table_html = f"""
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Repeats</th>
-                            <th>Bound ΔG (kcal/mol)</th>
-                            <th>Unbound ΔG (kcal/mol)</th>
-                            <th>ΔΔG (kcal/mol)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-{rows_html}
-                    </tbody>
-                </table>
-                <p style="margin-top: 15px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                    <strong>📐 Formula:</strong> ΔΔG = Bound - Unbound<br>
-                    <strong>📊 stderr:</strong> Standard error of the mean (σ/√n)<br>
-                    <strong>🔢 n_repeats:</strong> {self.results.n_repeats}
-                </p>
-        """
-
-        return table_html
+        return plots.build_repeats_table_html(
+            self.results.repeat_results,
+            self.results.n_repeats,
+            stats,
+        )
 
     def _build_repeats_outlier_plot_html(self) -> str:
         """
         Build HTML for outlier detection plot across multiple repeats.
-
-        Creates a box plot with individual data points overlaid,
-        similar to FEbuilder's dg-fepout.png visualization.
 
         Returns
         -------
@@ -554,54 +363,7 @@ class HTMLReportGenerator:
         if not hasattr(self.results, "repeat_results") or not self.results.repeat_results:
             return ""
 
-        import json as _json
-
-        # Extract data from repeat_results (exclude ddG from outlier plot)
-        bound_values = [r["bound"] for r in self.results.repeat_results]
-        unbound_values = [r["unbound"] for r in self.results.repeat_results]
-
-        # Build traces for box plots
-        traces = []
-
-        # Helper to create a box plot trace
-        def create_box_scatter_group(values, name, color):
-            box_trace = {
-                "x": [name] * len(values),
-                "y": values,
-                "name": name,
-                "type": "box",
-                "marker": {"color": color},
-                "boxpoints": "outliers",
-                "jitter": 0.3,
-                "pointpos": 0,
-            }
-            traces.append(box_trace)
-
-        # Create box plots for bound and unbound only
-        create_box_scatter_group(bound_values, "Bound", "rgba(76,175,80,0.7)")
-        create_box_scatter_group(unbound_values, "Unbound", "rgba(244,67,54,0.7)")
-
-        layout = {
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(255,255,255,0.8)",
-            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-            "title": {"text": "Repeat Outlier Detection"},
-            "xaxis": {"title": "Measurement Type"},
-            "yaxis": {"title": "ΔG (kcal/mol)"},
-            "showlegend": False,
-            "boxmode": "group",
-        }
-
-        return f"""
-            <div id="repeats-outlier-plot" style="min-height:350px;"></div>
-            <script>
-            Plotly.newPlot('repeats-outlier-plot', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
-            </script>
-            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                <strong>📊 Interpretation:</strong> Box plots show the distribution across repeats.
-                Outliers (points outside 1.5×IQR) are displayed individually.
-            </p>
-        """
+        return plots.build_repeats_outlier_plot_html(self.results.repeat_results)
 
     def _build_time_convergence_html(self, time_conv_data: Optional[Dict]) -> str:
         """
@@ -611,78 +373,13 @@ class HTMLReportGenerator:
         ----------
         time_conv_data : dict or None
             As returned by FEPAnalyzer._compute_time_convergence.
-            Contains 'bound' and 'unbound' lists of {frac, dg, err} dicts.
 
         Returns
         -------
         str
             HTML content (empty string if no data).
         """
-        if not time_conv_data:
-            return """            <div class="alert">
-                <strong>ℹ️ Note:</strong> Time convergence analysis was not performed or data was insufficient.
-            </div>"""
-
-        import json as _json
-
-        bound_pts = time_conv_data.get("bound", [])
-        unbound_pts = time_conv_data.get("unbound", [])
-
-        if not bound_pts and not unbound_pts:
-            return """            <div class="alert">
-                <strong>ℹ️ Note:</strong> Time convergence analysis yielded no data points.
-            </div>"""
-
-        traces = []
-        if bound_pts:
-            x = [p["frac"] for p in bound_pts]
-            y = [p["dg"] for p in bound_pts]
-            err = [p["err"] for p in bound_pts]
-            traces.append(
-                {
-                    "x": x,
-                    "y": y,
-                    "error_y": {"type": "data", "array": err, "visible": True},
-                    "name": "Bound",
-                    "mode": "lines+markers",
-                    "line": {"width": 3, "color": "rgb(76,175,80)"},
-                    "marker": {"size": 8, "symbol": "circle-open"},
-                }
-            )
-        if unbound_pts:
-            x = [p["frac"] for p in unbound_pts]
-            y = [p["dg"] for p in unbound_pts]
-            err = [p["err"] for p in unbound_pts]
-            traces.append(
-                {
-                    "x": x,
-                    "y": y,
-                    "error_y": {"type": "data", "array": err, "visible": True},
-                    "name": "Unbound",
-                    "mode": "lines+markers",
-                    "line": {"width": 3, "color": "rgb(244,67,54)"},
-                    "marker": {"size": 8, "symbol": "circle-open"},
-                }
-            )
-
-        layout = {
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(255,255,255,0.8)",
-            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-            "title": {"text": "Time Convergence of ΔG"},
-            "xaxis": {"title": "Fraction of simulation data"},
-            "yaxis": {"title": "ΔG (kcal/mol)"},
-        }
-
-        return f"""
-            <div id="time-conv-plot" style="min-height:350px;"></div>
-            <script>
-            Plotly.newPlot('time-conv-plot', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
-            </script>
-            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                <strong>📊 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
-                If ΔG is still changing at 100%, more sampling is needed.
-            </p>"""
+        return plots.build_time_convergence_html(time_conv_data)
 
     def _build_bootstrap_html(self, bootstrap_data: Optional[Dict]) -> str:
         """
@@ -698,75 +395,7 @@ class HTMLReportGenerator:
         str
             HTML content.
         """
-        if not bootstrap_data:
-            return """            <div class="alert">
-                <strong>ℹ️ Note:</strong> Bootstrap analysis was not performed or data was insufficient.
-            </div>"""
-
-        import json as _json
-
-        ddG_values = bootstrap_data.get("ddG_values", [])
-        ddG_mean = bootstrap_data.get("ddG_mean", 0.0)
-        ddG_std = bootstrap_data.get("ddG_std", 0.0)
-        ddG_stderr = bootstrap_data.get("ddG_stderr", 0.0)
-        n_bootstrap = bootstrap_data.get("n_bootstrap", 0)
-
-        if not ddG_values:
-            return """            <div class="alert">
-                <strong>ℹ️ Note:</strong> Bootstrap analysis yielded no data.
-            </div>"""
-
-        # Histogram trace
-        hist_trace = {
-            "x": ddG_values,
-            "type": "histogram",
-            "name": "ΔΔG bootstrap",
-            "marker": {"color": "rgba(33,150,243,0.7)", "line": {"color": "rgb(33,150,243)", "width": 1}},
-            "nbinsx": max(5, n_bootstrap // 5),
-        }
-        layout = {
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(255,255,255,0.8)",
-            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-            "title": {"text": "Bootstrap ΔΔG Distribution"},
-            "xaxis": {"title": "ΔΔG (kcal/mol)"},
-            "yaxis": {"title": "Count"},
-            "shapes": [
-                {
-                    "type": "line",
-                    "x0": ddG_mean,
-                    "x1": ddG_mean,
-                    "y0": 0,
-                    "y1": 1,
-                    "xref": "x",
-                    "yref": "paper",
-                    "line": {"color": "red", "width": 2, "dash": "dash"},
-                }
-            ],
-        }
-
-        return f"""
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center;">
-                <div id="bootstrap-hist-plot" style="min-height:300px;"></div>
-                <div>
-                    <table>
-                        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-                        <tbody>
-                            <tr><td><strong>Mean ΔΔG</strong></td><td class="value">{ddG_mean:.3f} kcal/mol</td></tr>
-                            <tr><td><strong>Std Dev</strong></td><td class="value">{ddG_std:.3f} kcal/mol</td></tr>
-                            <tr><td><strong>Stderr</strong></td><td class="value">{ddG_stderr:.3f} kcal/mol</td></tr>
-                            <tr><td><strong>N Bootstrap</strong></td><td class="value">{n_bootstrap}</td></tr>
-                        </tbody>
-                    </table>
-                    <p style="margin-top:10px;font-size:0.85em;color:#666;">
-                        Bootstrap resamples 80% of frames per window, {n_bootstrap} iterations.
-                        Red dashed line = mean.
-                    </p>
-                </div>
-            </div>
-            <script>
-            Plotly.newPlot('bootstrap-hist-plot', [{_json.dumps(hist_trace)}], {_json.dumps(layout)}, {{responsive:true}});
-            </script>"""
+        return plots.build_bootstrap_html(bootstrap_data)
 
     def _build_overlap_matrix_html(self) -> str:
         """
@@ -777,106 +406,12 @@ class HTMLReportGenerator:
         str
             HTML content with overlap matrix plots (empty string if no overlap data).
         """
-        import json as _json
-        import numpy as np
-
-        # Extract overlap matrix from lambda profiles
         lambda_profiles = getattr(self.results, "lambda_profiles", None)
         if not lambda_profiles:
             return ""
 
-        # Get overlap matrices for bound and unbound legs
-        bound_data = lambda_profiles.get("bound", {})
-        unbound_data = lambda_profiles.get("unbound", {})
-
-        # Handle both single repeat and multiple repeats
-        if isinstance(bound_data, list):
-            bound_overlap = bound_data[0].get("overlap_matrix") if bound_data and bound_data[0] else None
-        else:
-            bound_overlap = bound_data.get("overlap_matrix")
-
-        if isinstance(unbound_data, list):
-            unbound_overlap = unbound_data[0].get("overlap_matrix") if unbound_data and unbound_data[0] else None
-        else:
-            unbound_overlap = unbound_data.get("overlap_matrix")
-
-        if bound_overlap is None and unbound_overlap is None:
-            return ""
-
-        # Generate plots
-        plots_html = []
-
-        for leg_name, overlap_matrix in [("Bound", bound_overlap), ("Unbound", unbound_overlap)]:
-            if overlap_matrix is None:
-                continue
-
-            overlap = np.array(overlap_matrix)
-            n_states = overlap.shape[0]
-
-            # Create Plotly heatmap
-            heatmap_data = [
-                {
-                    "z": overlap.tolist(),
-                    "x": [f"λ{i}" for i in range(n_states)],
-                    "y": [f"λ{i}" for i in range(n_states)],
-                    "colorscale": [
-                        [0.0, "rgb(0,0,131)"],
-                        [0.1, "rgb(0,0,255)"],
-                        [0.3, "rgb(0,191,255)"],
-                        [0.5, "rgb(0,255,255)"],
-                        [0.7, "rgb(255,255,0)"],
-                        [0.9, "rgb(255,127,0)"],
-                        [1.0, "rgb(255,0,0)"],
-                    ],
-                    "colorbar": {
-                        "title": "Overlap",
-                        "titleside": "right",
-                        "thickness": 15,
-                    },
-                    "type": "heatmap",
-                }
-            ]
-
-            layout = {
-                "title": {
-                    "text": f"{leg_name} Leg - MBAR Overlap Matrix",
-                    "x": 0.5,
-                    "xanchor": "center",
-                    "font": {"size": 14},
-                },
-                "xaxis": {"title": "Lambda State", "side": "bottom"},
-                "yaxis": {"title": "Lambda State", "side": "left"},
-                "paper_bgcolor": "rgba(0,0,0,0)",
-                "plot_bgcolor": "rgba(0,0,0,0)",
-                "margin": {"l": 60, "r": 60, "t": 50, "b": 50},
-                "width": 500,
-                "height": 500,
-            }
-
-            plot_id = f"overlap-matrix-{leg_name.lower()}-plot"
-
-            plots_html.append(f"""
-                    <div style="text-align:center;">
-                        <div id="{plot_id}" style="min-height:500px;"></div>
-                    </div>
-                    <script>
-                        Plotly.newPlot('{plot_id}', {_json.dumps(heatmap_data)}, {_json.dumps(layout)}, {{responsive:true}});
-                    </script>
-            """)
-
-        if not plots_html:
-            return ""
-
-        return f"""
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
-                {"".join(plots_html)}
-            </div>
-            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                <strong>📊 Interpretation:</strong> Overlap matrix shows the phase space overlap between adjacent lambda windows.
-                Values closer to 1.0 (red) indicate good overlap, while values near 0.0 (blue) suggest poor sampling.
-                Ideally, all off-diagonal elements should be > 0.1 for reliable MBAR estimates.
-            </p>
-        """
+        estimator_name = getattr(self.results, "estimator", "MBAR")
+        return plots.build_overlap_matrix_html(lambda_profiles, estimator_name)
 
 
 class MultiEstimatorReportGenerator:
