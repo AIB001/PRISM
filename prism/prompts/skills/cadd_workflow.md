@@ -439,7 +439,7 @@ build_pmf_system(
     water_model="tip3p",
     box_extension_z=2.0,
     umbrella_time_ns=10.0,
-    umbrella_spacing=0.12,
+    umbrella_spacing=0.05,
 )
 ```
 
@@ -449,7 +449,7 @@ build_pmf_system(
 |-----------|---------|-------|
 | `box_extension_z` | `2.0` nm | Extra Z-axis space for pulling the ligand out |
 | `umbrella_time_ns` | `10.0` ns | Simulation time per umbrella window |
-| `umbrella_spacing` | `0.12` nm | Distance between consecutive umbrella windows |
+| `umbrella_spacing` | `0.05` nm | Distance between consecutive umbrella windows |
 
 #### Build Loop
 
@@ -581,7 +581,7 @@ Use the Bash tool to write this file in the working directory. **Adapt the `stag
     "ligand_forcefield": "gaff2",
     "box_extension_z": 2.0,
     "umbrella_time_ns": 10.0,
-    "umbrella_spacing": 0.12,
+    "umbrella_spacing": 0.05,
     "systems": [
       {
         "chembl_id": "CHEMBL12345",
