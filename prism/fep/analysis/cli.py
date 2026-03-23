@@ -139,9 +139,9 @@ For more information, see: https://github.com/your-repo/prism
         help="Run all estimators (TI, BAR, MBAR) and generate comparison report",
     )
     analysis.add_argument(
-        "--parallel",
+        "--no-progress",
         action="store_true",
-        help="Run estimators in parallel (experimental, may not work on all systems)",
+        help="Disable progress bars (useful for logging to file)",
     )
     analysis.add_argument(
         "--backend",
@@ -286,8 +286,8 @@ def main() -> int:
                 unbound_dir=args.unbound_dir,
                 estimators=estimators,
                 temperature=args.temperature,
-                parallel=args.parallel,
                 backend=args.backend,
+                show_progress=not args.no_progress,
             )
 
             # Run analysis

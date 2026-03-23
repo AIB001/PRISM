@@ -16,9 +16,15 @@ def build_lambda_plots_html(
     lambda_profiles: Optional[Dict[str, Any]],
     estimator_name: str,
     plot_suffix: str = "",
-) -> Tuple[str, str]:
+) -> Tuple[list, str]:
     """
-    Build HTML div placeholders and Plotly JS for lambda-dependent plots.
+    Build 4 separate lambda profile plot divs and Plotly JS.
+
+    Returns 4 plot divs that can be arranged in a 2x2 grid:
+    - dg-bound-plot{suffix}
+    - dg-unbound-plot{suffix}
+    - dhdl-bound-plot{suffix} (only for TI)
+    - dhdl-unbound-plot{suffix} (only for TI)
 
     Parameters
     ----------
@@ -34,11 +40,11 @@ def build_lambda_plots_html(
 
     Returns
     -------
-    tuple[str, str]
-        (dhdl_divs_html, script_tag_html)
+    tuple[list, str]
+        (list of 4 plot div HTML strings, combined script tag)
     """
     if not lambda_profiles:
-        return "", ""
+        return (["<div></div>", "<div></div>", "<div></div>", "<div></div>"], "")
 
     bound_data = lambda_profiles.get("bound") or {}
     unbound_data = lambda_profiles.get("unbound") or {}
@@ -49,41 +55,24 @@ def build_lambda_plots_html(
 
     is_ti = estimator_name.upper() == "TI"
 
-    # Build unique plot IDs
-    bound_plot_id = f"dg-bound-plot-{estimator_name}" if plot_suffix else "dg-bound-plot"
-    unbound_plot_id = f"dg-unbound-plot-{estimator_name}" if plot_suffix else "dg-unbound-plot"
-    dhdl_bound_plot_id = f"dhdl-bound-plot-{estimator_name}" if plot_suffix else "dhdl-bound-plot"
-    dhdl_unbound_plot_id = f"dhdl-unbound-plot-{estimator_name}" if plot_suffix else "dhdl-unbound-plot"
+    # Build unique plot IDs with suffix
+    suffix = f"-{estimator_name}" if plot_suffix else ""
+    bound_plot_id = f"dg-bound-plot{suffix}"
+    unbound_plot_id = f"dg-unbound-plot{suffix}"
+    dhdl_bound_plot_id = f"dhdl-bound-plot{suffix}"
+    dhdl_unbound_plot_id = f"dhdl-unbound-plot{suffix}"
 
-    # dH/dλ divs only for TI
-    dhdl_divs = ""
-    if is_ti:
-        dhdl_divs = f"""
-        <div class="plot-row">
-            <div class="plot-container">
-                <h4>dH/dλ vs λ - Bound Leg</h4>
-                <div id="{dhdl_bound_plot_id}"></div>
-            </div>
-            <div class="plot-container">
-                <h4>dH/dλ vs λ - Unbound Leg</h4>
-                <div id="{dhdl_unbound_plot_id}"></div>
-            </div>
-        </div>
-        """
-
-    html_divs = f"""
-        <div class="plot-row">
-            <div class="plot-container">
-                <h4>ΔG vs λ - Bound Leg</h4>
-                <div id="{bound_plot_id}"></div>
-            </div>
-            <div class="plot-container">
-                <h4>ΔG vs λ - Unbound Leg</h4>
-                <div id="{unbound_plot_id}"></div>
-            </div>
-        </div>
-    {dhdl_divs}
-    """
+    # Build 4 separate plot divs
+    plot_divs = [
+        f'<div id="{bound_plot_id}" class="plot-container" style="min-height:300px;"></div>',
+        f'<div id="{unbound_plot_id}" class="plot-container" style="min-height:300px;"></div>',
+        f'<div id="{dhdl_bound_plot_id}" class="plot-container" style="min-height:300px;"></div>'
+        if is_ti
+        else "<div></div>",
+        f'<div id="{dhdl_unbound_plot_id}" class="plot-container" style="min-height:300px;"></div>'
+        if is_ti
+        else "<div></div>",
+    ]
 
     # Prepare data for Plotly
     bound_dg_traces = []
@@ -153,39 +142,41 @@ def build_lambda_plots_html(
 
     # Build Plotly layouts
     bound_layout = {
-        "title": {"text": "Cumulative ΔG vs λ - Bound Leg", "font": {"size": 14}},
+        "title": {"text": "Bound Leg ΔG vs λ", "font": {"size": 14}},
         "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
         "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
-        "margin": {"l": 60, "r": 30, "t": 40, "b": 50},
+        "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
         "hovermode": "x unified",
     }
 
     unbound_layout = {
-        "title": {"text": "Cumulative ΔG vs λ - Unbound Leg", "font": {"size": 14}},
+        "title": {"text": "Unbound Leg ΔG vs λ", "font": {"size": 14}},
         "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
         "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
-        "margin": {"l": 60, "r": 30, "t": 40, "b": 50},
+        "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
         "hovermode": "x unified",
     }
 
+    # Build script content
     script_content = f"""
         Plotly.newPlot('{bound_plot_id}', {_json.dumps(bound_dg_traces)}, {_json.dumps(bound_layout)}, {{responsive: true}});
         Plotly.newPlot('{unbound_plot_id}', {_json.dumps(unbound_dg_traces)}, {_json.dumps(unbound_layout)}, {{responsive: true}});
     """
 
+    # Add dH/dλ plots for TI
     if is_ti:
         dhdl_bound_layout = {
-            "title": {"text": "dH/dλ vs λ - Bound Leg", "font": {"size": 14}},
+            "title": {"text": "Bound Leg dH/dλ vs λ", "font": {"size": 14}},
             "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
             "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
-            "margin": {"l": 60, "r": 30, "t": 40, "b": 50},
+            "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
             "hovermode": "x unified",
         }
         dhdl_unbound_layout = {
-            "title": {"text": "dH/dλ vs λ - Unbound Leg", "font": {"size": 14}},
+            "title": {"text": "Unbound Leg dH/dλ vs λ", "font": {"size": 14}},
             "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
             "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
-            "margin": {"l": 60, "r": 30, "t": 40, "b": 50},
+            "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
             "hovermode": "x unified",
         }
         script_content += f"""
@@ -193,7 +184,7 @@ def build_lambda_plots_html(
             Plotly.newPlot('{dhdl_unbound_plot_id}', {_json.dumps(dhdl_unbound_traces)}, {_json.dumps(dhdl_unbound_layout)}, {{responsive: true}});
         """
 
-    return html_divs, f"<script>{script_content}</script>"
+    return plot_divs, f"<script>{script_content}</script>"
 
 
 def build_repeats_table_html(

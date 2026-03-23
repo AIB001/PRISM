@@ -80,6 +80,10 @@ class FEResults:
         Number of repeats analyzed
     lambda_profiles : Optional[Dict]
         Lambda-dependent profiles for plotting (dg vs lambda, dhdl vs lambda)
+    time_convergence : Optional[Dict]
+        Time convergence data for report plotting
+    bootstrap : Optional[Dict]
+        Bootstrap resampling results for report plotting
     """
 
     delta_g: float = 0.0
@@ -92,6 +96,8 @@ class FEResults:
     repeat_results: List[Dict[str, float]] = field(default_factory=list)
     n_repeats: int = 1
     lambda_profiles: Optional[Dict[str, Any]] = None
+    time_convergence: Optional[Dict[str, Any]] = None
+    bootstrap: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict:
         """Convert results to dictionary"""
@@ -105,6 +111,9 @@ class FEResults:
             "metadata": self.metadata,
             "repeat_results": self.repeat_results,
             "n_repeats": self.n_repeats,
+            "lambda_profiles": self.lambda_profiles,
+            "time_convergence": self.time_convergence,
+            "bootstrap": self.bootstrap,
         }
 
 
@@ -599,7 +608,7 @@ class FEPMultiEstimatorAnalyzer:
     - Parse XVG files once (shared across all estimators) - major performance optimization
     - Automatic comparison metrics and divergence detection
     - Unified JSON output with all results
-    - Optional parallel execution (disabled by default due to pandas pickling limitations)
+    - Progress bars for long-running operations
 
     Parameters
     ----------
@@ -611,12 +620,10 @@ class FEPMultiEstimatorAnalyzer:
         List of estimator names to run (default: ['TI', 'BAR', 'MBAR'])
     temperature : float, optional
         Simulation temperature in Kelvin (default: 310.0)
-    parallel : bool, optional
-        Whether to run estimators in parallel (default: False).
-        Note: Parallel execution is experimental and may not work on all systems
-        due to pandas DataFrame serialization limitations.
     backend : str, optional
         Analysis backend - only 'alchemlyb' supported for multi-estimator mode
+    show_progress : bool, optional
+        Show progress bars during analysis (default: True)
 
     Examples
     --------
@@ -645,8 +652,8 @@ class FEPMultiEstimatorAnalyzer:
         unbound_dir: Union[str, Path, List[Union[str, Path]]],
         estimators: Optional[list] = None,
         temperature: float = 310.0,
-        parallel: bool = False,
         backend: str = "alchemlyb",
+        show_progress: bool = True,
     ):
         """
         Initialize multi-estimator analyzer
@@ -661,11 +668,10 @@ class FEPMultiEstimatorAnalyzer:
             Estimator names to run (default: ['TI', 'BAR', 'MBAR'])
         temperature : float, optional
             Temperature in Kelvin (default: 310.0)
-        parallel : bool, optional
-            Run estimators in parallel (default: False).
-            Note: Parallel execution is experimental due to pandas serialization limitations.
         backend : str, optional
             Analysis backend (default: 'alchemlyb', only option for multi-estimator)
+        show_progress : bool, optional
+            Show progress bars (default: True)
 
         Raises
         ------
@@ -693,8 +699,8 @@ class FEPMultiEstimatorAnalyzer:
 
         self.estimators = estimators
         self.temperature = temperature
-        self.parallel = parallel
         self.backend = backend
+        self.show_progress = show_progress
 
         # Validate estimators
         for estimator_name in estimators:
@@ -714,8 +720,8 @@ class FEPMultiEstimatorAnalyzer:
         Run analysis with all estimators
 
         This method:
-        1. Parses XVG files once (shared across all estimators)
-        2. Runs each estimator in parallel (or sequentially)
+        1. Parses XVG files for each estimator with progress bars
+        2. Runs each estimator sequentially
         3. Builds comparison metrics
         4. Returns MultiEstimatorResults
 
@@ -738,34 +744,63 @@ class FEPMultiEstimatorAnalyzer:
 
         # Step 1: Parse XVG files for each estimator (different formats required)
         # Note: TI uses dH/dλ format, while BAR/MBAR use u_nk format
-        # We can't truly "parse once, use many" because estimators need different data formats
-        self.logger.info("Parsing XVG files for each estimator...")
-        results = {}
+        self.logger.info("Parsing XVG files...")
 
-        for estimator_name in self.estimators:
-            self.logger.info(f"Parsing data for {estimator_name} estimator...")
+        if self.show_progress:
+            try:
+                from tqdm import tqdm
+
+                estimator_iter = tqdm(self.estimators, desc="Parsing XVG files", unit="estimator")
+            except ImportError:
+                estimator_iter = self.estimators
+        else:
+            estimator_iter = self.estimators
+
+        # Store parsed data for each estimator
+        parsed_data = {}
+
+        for estimator_name in estimator_iter:
+            if self.show_progress and hasattr(estimator_iter, "set_description"):
+                estimator_iter.set_description(f"  {estimator_name}")
 
             # Parse data for this specific estimator
             bound_data_list = []
             unbound_data_list = []
 
+            # Parse bound legs
             for i, bound_dir in enumerate(self.bound_dirs):
                 repeat_label = f"repeat{i + 1}" if len(self.bound_dirs) > 1 else "bound"
-                self.logger.debug(f"Parsing {repeat_label} from {bound_dir}")
+                if self.show_progress and hasattr(estimator_iter, "write"):
+                    estimator_iter.write(f"  Parsing {repeat_label} from {bound_dir}")
+                else:
+                    self.logger.debug(f"Parsing {repeat_label} from {bound_dir}")
                 bdata = parse_leg_data(bound_dir, "bound", estimator_name, self.temperature, gmx, self.logger)
                 bound_data_list.append(bdata)
 
+            # Parse unbound legs
             for i, unbound_dir in enumerate(self.unbound_dirs):
                 repeat_label = f"repeat{i + 1}" if len(self.unbound_dirs) > 1 else "unbound"
-                self.logger.debug(f"Parsing {repeat_label} from {unbound_dir}")
+                if self.show_progress and hasattr(estimator_iter, "write"):
+                    estimator_iter.write(f"  Parsing {repeat_label} from {unbound_dir}")
+                else:
+                    self.logger.debug(f"Parsing {repeat_label} from {unbound_dir}")
                 udata = parse_leg_data(unbound_dir, "unbound", estimator_name, self.temperature, gmx, self.logger)
                 unbound_data_list.append(udata)
 
-            # Run this estimator
+            parsed_data[estimator_name] = (bound_data_list, unbound_data_list)
+
+        # Step 2: Run all estimators
+        results = {}
+        for estimator_name, (bound_data_list, unbound_data_list) in parsed_data.items():
             try:
+                if self.show_progress:
+                    self.logger.info(f"Running {estimator_name} estimator...")
+
                 estimator_result = self._run_single_estimator(estimator_name, bound_data_list, unbound_data_list)
                 results[estimator_name] = estimator_result
-                self.logger.info(f"✓ {estimator_name} completed: ΔG = {estimator_result.delta_g:.3f} kcal/mol")
+
+                if self.show_progress:
+                    self.logger.info(f"✓ {estimator_name} completed: ΔG = {estimator_result.delta_g:.3f} kcal/mol")
             except Exception as exc:
                 self.logger.error(f"✗ {estimator_name} failed: {exc}")
                 # Don't re-raise - continue with other estimators
@@ -777,19 +812,46 @@ class FEPMultiEstimatorAnalyzer:
                 f"Check logs for details. This may indicate incompatible data format."
             )
 
-        # Step 3: Build comparison metrics
+        # Step 3: Compute convergence metrics for each estimator
+        for estimator_name, estimator_result in results.items():
+            bound_data_list, unbound_data_list = parsed_data[estimator_name]
+            estimator_class = self.ESTIMATORS[estimator_name]
+
+            try:
+                estimator_result.time_convergence = compute_time_convergence(
+                    bound_data_list,
+                    unbound_data_list,
+                    estimator_class,
+                    n_points=10,
+                )
+            except Exception as exc:
+                self.logger.warning(f"Time convergence analysis failed for {estimator_name}: {exc}")
+                estimator_result.time_convergence = None
+
+            try:
+                estimator_result.bootstrap = compute_bootstrap(
+                    bound_data_list,
+                    unbound_data_list,
+                    estimator_class,
+                    n_bootstrap=50,
+                    fraction=0.8,
+                )
+            except Exception as exc:
+                self.logger.warning(f"Bootstrap analysis failed for {estimator_name}: {exc}")
+                estimator_result.bootstrap = None
+
+        # Step 4: Build comparison metrics
         comparison = self._build_comparison_metrics(results)
 
-        # Step 4: Build metadata
+        # Step 5: Build metadata
         metadata = {
             "temperature": self.temperature,
             "estimators_used": list(results.keys()),
             "n_estimators": len(results),
-            "parallel_execution": self.parallel,
             "backend": self.backend,
         }
 
-        # Step 5: Store results
+        # Step 6: Store results
         self.results = MultiEstimatorResults(methods=results, comparison=comparison, metadata=metadata)
 
         self.logger.info(f"Multi-estimator analysis complete:")
@@ -799,46 +861,46 @@ class FEPMultiEstimatorAnalyzer:
 
         return self.results
 
-    def _run_estimators_parallel(self, bound_data_list: list, unbound_data_list: list) -> Dict[str, FEResults]:
-        """Run estimators in parallel using ProcessPoolExecutor"""
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-
+    def _run_all_estimators(self, bound_data_list: list, unbound_data_list: list) -> Dict[str, FEResults]:
+        """Run all estimators sequentially with progress bars"""
         results = {}
-        self.logger.info(f"Running {len(self.estimators)} estimators in parallel...")
 
-        with ProcessPoolExecutor(max_workers=len(self.estimators)) as executor:
-            futures = {}
-            for estimator_name in self.estimators:
-                future = executor.submit(self._run_single_estimator, estimator_name, bound_data_list, unbound_data_list)
-                futures[future] = estimator_name
+        if self.show_progress:
+            try:
+                from tqdm import tqdm
 
-            for future in as_completed(futures):
-                estimator_name = futures[future]
-                try:
-                    results[estimator_name] = future.result()
+                estimator_iter = tqdm(self.estimators, desc="Running estimators", unit="estimator")
+            except ImportError:
+                self.logger.warning("tqdm not installed, progress bars disabled. Install with: pip install tqdm")
+                estimator_iter = self.estimators
+        else:
+            estimator_iter = self.estimators
+
+        for estimator_name in estimator_iter:
+            try:
+                if self.show_progress and hasattr(estimator_iter, "__iter__") and not isinstance(estimator_iter, list):
+                    # tqdm is being used
+                    desc = f"  {estimator_name}"
+                    if hasattr(estimator_iter, "set_description"):
+                        estimator_iter.set_description(desc)
+                else:
+                    self.logger.info(f"Running {estimator_name} estimator...")
+
+                results[estimator_name] = self._run_single_estimator(estimator_name, bound_data_list, unbound_data_list)
+
+                if self.show_progress and hasattr(estimator_iter, "__iter__") and not isinstance(estimator_iter, list):
+                    estimator_iter.write(
+                        f"✓ {estimator_name} completed: ΔG = {results[estimator_name].delta_g:.3f} kcal/mol"
+                    )
+                else:
                     self.logger.info(
                         f"✓ {estimator_name} completed: ΔG = {results[estimator_name].delta_g:.3f} kcal/mol"
                     )
-                except Exception as exc:
-                    self.logger.error(f"✗ {estimator_name} failed: {exc}")
-                    # Don't re-raise - continue with other estimators
-
-        if not results:
-            raise RuntimeError("All estimators failed. Check logs for details.")
-
-        return results
-
-    def _run_estimators_sequential(self, bound_data_list: list, unbound_data_list: list) -> Dict[str, FEResults]:
-        """Run estimators sequentially (for debugging or platforms without multiprocessing)"""
-        results = {}
-        self.logger.info(f"Running {len(self.estimators)} estimators sequentially...")
-
-        for estimator_name in self.estimators:
-            try:
-                results[estimator_name] = self._run_single_estimator(estimator_name, bound_data_list, unbound_data_list)
-                self.logger.info(f"✓ {estimator_name} completed: ΔG = {results[estimator_name].delta_g:.3f} kcal/mol")
             except Exception as exc:
-                self.logger.error(f"✗ {estimator_name} failed: {exc}")
+                if self.show_progress and hasattr(estimator_iter, "__iter__") and not isinstance(estimator_iter, list):
+                    estimator_iter.write(f"✗ {estimator_name} failed: {exc}")
+                else:
+                    self.logger.error(f"✗ {estimator_name} failed: {exc}")
 
         if not results:
             raise RuntimeError("All estimators failed. Check logs for details.")
@@ -905,7 +967,7 @@ class FEPMultiEstimatorAnalyzer:
             delta_g_bound=summary["delta_g_bound"],
             delta_g_unbound=summary["delta_g_unbound"],
             delta_g_components={},  # Not implemented yet
-            convergence={},  # Not implemented yet
+            convergence={},
             metadata={
                 "temperature": self.temperature,
                 "estimator": estimator_name,
@@ -915,7 +977,7 @@ class FEPMultiEstimatorAnalyzer:
             },
             repeat_results=summary["repeat_results"],
             n_repeats=summary["n_repeats"],
-            lambda_profiles=lambda_profiles,  # Add lambda profiles for plotting
+            lambda_profiles=lambda_profiles,
         )
 
         return results

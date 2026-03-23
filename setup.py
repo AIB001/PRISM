@@ -46,6 +46,12 @@ extras_require = {
         "mdtraj>=1.9.0",  # Optional for enhanced trajectory analysis
         "scipy>=1.6.0",  # For statistical analysis
     ],
+    "fep": [
+        "alchemlyb>=0.6.0",  # For free energy analysis (TI, BAR, MBAR)
+        "pandas>=1.0.0",  # Required by alchemlyb
+        "plotly>=5.0.0",  # For interactive HTML reports
+        "tqdm>=4.60.0",  # For progress bars
+    ],
     "all": [
         "acpype>=2021.0",
         "openff-toolkit>=0.10.0",
@@ -56,6 +62,9 @@ extras_require = {
         "propka>=3.4.0",
         "mdtraj>=1.9.0",
         "scipy>=1.6.0",
+        "alchemlyb>=0.6.0",
+        "plotly>=5.0.0",
+        "tqdm>=4.60.0",
     ],
 }
 

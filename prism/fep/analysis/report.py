@@ -673,57 +673,145 @@ class MultiEstimatorReportGenerator:
         return tabs_content
 
     def _build_single_estimator_tab(self, estimator_name: str, results: "FEResults", is_default: bool) -> str:
-        """Build content for one estimator tab (reusing HTMLReportGenerator methods)"""
-        # Use HTMLReportGenerator's methods to build plots
-        # This ensures all existing plots are included without code duplication
-        temp_generator = HTMLReportGenerator(results)
+        """
+        Build complete tab content for one estimator
 
-        # Build lambda profile plots
+        Structure must match original HTML:
+        1. Detailed Results (2-column: stats table + box plot)
+        2. Lambda Profiles (4 plots in 2x2 grid)
+        3. Convergence Diagnostics (Time convergence)
+        4. Bootstrap Analysis (2-column: histogram + table)
+        5. Overlap Matrix (placeholder for TI/BAR, real for MBAR)
+        """
+        from . import plots
+
+        # 1. Detailed Results Section (2-column grid)
+        detailed_results = self._build_detailed_results_section(estimator_name, results)
+
+        # 2. Lambda Profiles (4 plots in 2x2 grid)
         lambda_profiles = getattr(results, "lambda_profiles", None)
-        lambda_divs, lambda_scripts = temp_generator._build_lambda_plots_html(
-            lambda_profiles, estimator_name, plot_suffix=True
+        lambda_divs, lambda_scripts = plots.build_lambda_plots_html(lambda_profiles, estimator_name, plot_suffix=True)
+        lambda_section = f"""
+        <div class="card">
+            <h2>📈 Free Energy Profiles (λ-dependent)</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                {lambda_divs[0]}  <!-- dg-bound-plot -->
+                {lambda_divs[1]}  <!-- dg-unbound-plot -->
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+                {lambda_divs[2]}  <!-- dhdl-bound-plot (TI only) -->
+                {lambda_divs[3]}  <!-- dhdl-unbound-plot (TI only) -->
+            </div>
+        </div>
+        {lambda_scripts}
+        """
+
+        # 3. Time Convergence
+        time_conv_html = plots.build_time_convergence_html(
+            getattr(results, "time_convergence", None), plot_suffix=f"-{estimator_name}"
+        )
+        time_conv_section = f"""
+        <div class="card">
+            <h2>📊 Convergence Diagnostics</h2>
+            {time_conv_html}
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                <strong>📊 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
+                If ΔG is still changing at 100%, more sampling is needed.
+            </p>
+        </div>
+        """
+
+        # 4. Bootstrap Analysis (2-column: histogram + table)
+        bootstrap_html = plots.build_bootstrap_html(
+            getattr(results, "bootstrap", None), plot_suffix=f"-{estimator_name}"
+        )
+        bootstrap_section = f"""
+        <div class="card">
+            <h2>🔄 Bootstrap Analysis</h2>
+            {bootstrap_html}
+        </div>
+        """
+
+        # 5. Overlap Matrix (placeholder for TI/BAR, real for MBAR)
+        overlap_section = self._build_overlap_matrix_section(estimator_name, results)
+
+        # Combine all sections in correct order
+        return f"""
+        <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
+            {detailed_results}
+            {lambda_section}
+            {time_conv_section}
+            {bootstrap_section}
+            {overlap_section}
+        </div>
+        """
+
+    def _build_detailed_results_section(self, estimator_name: str, results: "FEResults") -> str:
+        """
+        Build Detailed Results section (2-column grid)
+
+        Left: Multiple Repeats Statistics table
+        Right: Outlier Detection box plot
+        """
+        # Check if we have multiple repeats
+        has_repeats = (
+            hasattr(results, "n_repeats")
+            and hasattr(results, "repeat_results")
+            and results.n_repeats > 1
+            and results.repeat_results
         )
 
-        # Build overlap matrix section (real for MBAR, placeholder for others)
-        if estimator_name == "MBAR":
-            overlap_html = self._build_mbar_overlap_matrix_section(results)
-        else:
-            overlap_html = f"""
-                <div class="card">
-                    <h2>📊 Overlap Matrix ({estimator_name})</h2>
-                    <div class="alert">
-                        <strong>ℹ️ Info:</strong> Overlap matrix visualization is only available for MBAR estimator.
-                        <br>Switch to the <strong>MBAR</strong> tab to view overlap matrix and assess sampling quality.
-                        <br><br>
-                        <em>Why MBAR only?</em><br>
-                        MBAR uses a matrix of overlap weights between all lambda states, while TI and BAR
-                        use local approximations. This makes MBAR more robust but also more computationally expensive.
-                    </div>
-                </div>
-            """
+        if not has_repeats:
+            return ""
 
-        # Build repeat statistics table (if multiple repeats)
-        repeats_html = self._build_repeats_table_for_estimator(results)
+        from . import plots
 
-        # Build outlier plot (if multiple repeats)
-        outlier_html = self._build_repeats_outlier_plot_for_estimator(results)
+        # Build repeats table (left column)
+        stats = results.metadata.get("repeat_statistics", {})
+        repeats_table = plots.build_repeats_table_html(results.repeat_results, results.n_repeats, stats)
+
+        # Build outlier plot (right column)
+        outlier_html = plots.build_repeats_outlier_plot_html(results.repeat_results, plot_suffix=f"-{estimator_name}")
 
         return f"""
-            <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
-                <div class="card">
-                    <h2>📈 Lambda Profiles</h2>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
-                        <div class="plot-container" id="dg-bound-plot-{estimator_name}" style="min-height:300px;"></div>
-                        <div class="plot-container" id="dg-unbound-plot-{estimator_name}" style="min-height:300px;"></div>
-                    </div>
-{lambda_divs}
+        <div class="card">
+            <h2>📋 Detailed Results</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
+                <div>
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        📊 Multiple Repeats Statistics
+                    </h3>
+                    {repeats_table}
                 </div>
-{lambda_scripts}
-{outlier_html}
-{overlap_html}
-{repeats_html}
+                <div>
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        🎯 Outlier Detection
+                    </h3>
+                    {outlier_html}
+                </div>
             </div>
+        </div>
         """
+
+    def _build_overlap_matrix_section(self, estimator_name: str, results: "FEResults") -> str:
+        """
+        Build Overlap Matrix section (single column card)
+
+        MBAR: Shows real overlap matrix plot
+        TI/BAR: Shows placeholder message
+        """
+        if estimator_name == "MBAR":
+            return self._build_mbar_overlap_matrix_section(results)
+        else:
+            return f"""
+            <div class="card">
+                <h2>📊 Overlap Matrix ({estimator_name})</h2>
+                <div class="alert">
+                    <strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>
+                    Switch to <strong>MBAR</strong> tab to view overlap matrix and assess sampling quality.
+                </div>
+            </div>
+            """
 
     def _build_mbar_overlap_matrix_section(self, results: "FEResults") -> str:
         """Build overlap matrix section for MBAR with actual Plotly heatmap"""
