@@ -542,14 +542,7 @@ class MultiEstimatorReportGenerator:
             <h2>🔬 Detailed Analysis by Estimator</h2>
 
             <div class="tab-buttons">
-                {
-            "".join(
-                [
-                    f'<button class="tab-btn" onclick="showEstimatorTab(&apos;{estimator}&apos;)">{estimator}</button>'
-                    for estimator in self.multi_results.methods.keys()
-                ]
-            )
-        }
+                {self._build_tab_buttons()}
             </div>
 
 {estimator_tabs_content}
@@ -563,6 +556,16 @@ class MultiEstimatorReportGenerator:
 </body>
 </html>"""
         return html
+
+    def _build_tab_buttons(self) -> str:
+        """Build tab button HTML for estimator switching"""
+        buttons = []
+        for estimator in self.multi_results.methods.keys():
+            # Use format() to avoid f-string backslash issues
+            buttons.append(
+                '<button class="tab-btn" onclick="showEstimatorTab(\'{est}\')">{est}</button>'.format(est=estimator)
+            )
+        return "".join(buttons)
 
     def _build_warning_banner(self) -> str:
         """Build warning banner if results diverged"""
