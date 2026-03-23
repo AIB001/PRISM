@@ -115,7 +115,7 @@ Machine-readable JSON file with all analysis results:
 
 ```json
 {
-  "delta_g": -2.34,
+  "delta_g": 2.34,
   "delta_g_error": 0.15,
   "delta_g_bound": 5.67,
   "delta_g_unbound": 3.33,

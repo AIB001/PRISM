@@ -262,8 +262,8 @@ class FEPAnalyzer:
             unbound_data = []
             self.raw_data["lambda_profiles"] = None
 
-        # Binding free energy = unbound - bound
-        delta_g = delta_g_unbound - delta_g_bound
+        # Binding free energy = bound - unbound
+        delta_g = delta_g_bound - delta_g_unbound
         delta_g_error = np.sqrt(error_bound**2 + error_unbound**2)
 
         # Step 3: Convergence analysis (if enough data)
@@ -309,7 +309,7 @@ class FEPAnalyzer:
         # Generate synthetic results
         delta_g_bound = -2.5  # kcal/mol
         delta_g_unbound = -4.8  # kcal/mol
-        delta_g = delta_g_unbound - delta_g_bound
+        delta_g = delta_g_bound - delta_g_unbound
         delta_g_error = 0.15  # kcal/mol
 
         self.results = FEResults(
