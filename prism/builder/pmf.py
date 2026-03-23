@@ -32,7 +32,7 @@ class PMFBuilderMixin:
 
         try:
             # Auto-compute box Z extension from pull distance if not user-specified
-            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
+            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.0)
             if self.box_extension == (0.0, 0.0, 2.0):  # default, not user-specified
                 z_ext = pull_distance + 1.0  # pull distance + 1 nm buffer
                 self.box_extension = (0.0, 0.0, z_ext)
@@ -84,7 +84,7 @@ class PMFBuilderMixin:
             # Generate SMD-specific MDP file with custom groups
             pull_rate = self.config.get("pmf", {}).get("pull_rate", 0.01)
             pull_k = self.config.get("pmf", {}).get("pull_k", 1000.0)
-            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
+            pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.0)
             self.mdp_generator.generate_smd_mdp(
                 pull_rate=pull_rate,
                 pull_k=pull_k,
@@ -644,7 +644,7 @@ if __name__ == '__main__':
         # Get pull parameters
         pull_rate = self.config.get("pmf", {}).get("pull_rate", 0.01)
         pull_k = self.config.get("pmf", {}).get("pull_k", 1000.0)
-        pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.6)
+        pull_distance = self.config.get("pmf", {}).get("pull_distance", 3.0)
 
         script_content = f"""#!/bin/bash
 
@@ -781,7 +781,7 @@ fi
         script_path = os.path.join(gmx_smd_dir, "umbrella_run.sh")
 
         # Get umbrella parameters
-        umbrella_spacing = self.config.get("pmf", {}).get("umbrella_spacing", 0.12)
+        umbrella_spacing = self.config.get("pmf", {}).get("umbrella_spacing", 0.05)
         wham_begin = self.config.get("pmf", {}).get("wham_begin", 1000)
         wham_bootstrap = self.config.get("pmf", {}).get("wham_bootstrap", 200)
 
@@ -943,7 +943,7 @@ echo "Running WHAM..."
 gmx wham -it ./umbrella/tpr-files.dat -if ./umbrella/pullf-files.dat \\
     -o ./umbrella/pmf.xvg -hist ./umbrella/histo.xvg \\
     -bsres ./umbrella/pmferror.xvg -nBootstrap $WHAM_BOOTSTRAP \\
-    -bs-method b-hist -b $WHAM_BEGIN -unit kCal
+    -bins 150 -bs-method b-hist -b $WHAM_BEGIN -unit kCal
 
 echo ""
 echo "=============================================="

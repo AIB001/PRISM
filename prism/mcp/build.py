@@ -253,7 +253,7 @@ def register(mcp):
         nterm_met: str = "keep",
         box_extension_z: float = 2.0,
         umbrella_time_ns: float = 10.0,
-        umbrella_spacing: float = 0.12,
+        umbrella_spacing: float = 0.05,
         overwrite: bool = False,
     ) -> str:
         """Build a system for PMF (Potential of Mean Force) calculation.
@@ -297,7 +297,7 @@ def register(mcp):
             nterm_met: N-terminal methionine handling. Default: "keep".
             box_extension_z: Extra Z-axis length (nm) for pulling space. Default: 2.0.
             umbrella_time_ns: Simulation time per umbrella window in ns. Default: 10.0.
-            umbrella_spacing: Distance between umbrella windows in nm. Default: 0.12.
+            umbrella_spacing: Distance between umbrella windows in nm. Default: 0.05.
             overwrite: Overwrite existing files. Default: false.
         """
         logger.info(f"build_pmf_system: {protein_path} + {ligand_path}")

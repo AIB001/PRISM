@@ -312,7 +312,7 @@ Example usage:
         "--umbrella-time", type=float, default=10.0, help="Simulation time per umbrella window in ns (default: 10.0)"
     )
     pmf_group.add_argument(
-        "--umbrella-spacing", type=float, default=0.12, help="Spacing between umbrella windows in nm (default: 0.12)"
+        "--umbrella-spacing", type=float, default=0.05, help="Spacing between umbrella windows in nm (default: 0.05)"
     )
     pmf_group.add_argument(
         "--wham-begin", type=int, default=1000, help="Time in ps to discard for WHAM equilibration (default: 1000)"
@@ -618,7 +618,7 @@ pressure_coupling:
         pmf_overrides = {}
         if args.umbrella_time != 10.0:
             pmf_overrides["umbrella_time_ns"] = args.umbrella_time
-        if args.umbrella_spacing != 0.12:
+        if args.umbrella_spacing != 0.05:
             pmf_overrides["umbrella_spacing"] = args.umbrella_spacing
         if args.wham_begin != 1000:
             pmf_overrides["wham_begin"] = args.wham_begin

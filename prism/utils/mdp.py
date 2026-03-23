@@ -330,7 +330,7 @@ comm-grps               = {tc_grps}
         self,
         pull_rate=0.01,
         pull_k=1000.0,
-        pull_distance=3.6,
+        pull_distance=3.0,
         ref_group="Protein",
         pull_group="LIG",
         pbcatom=None,
@@ -346,7 +346,7 @@ comm-grps               = {tc_grps}
         pull_k : float
             Pull force constant in kJ/mol/nm^2 (default: 1000.0)
         pull_distance : float
-            Total pull distance in nm (default: 5.0 nm)
+            Total pull distance in nm (default: 3.0 nm)
         ref_group : str
             Name of the reference (anchor) pull group (default: 'Protein')
         pull_group : str
