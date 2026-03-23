@@ -122,8 +122,7 @@ For more information, see: https://github.com/your-repo/prism
         type=str,
         choices=["alchemlyb", "gmx_bar"],
         default="alchemlyb",
-        help="Backend for analysis (default: alchemlyb). "
-        "'alchemlyb' supports TI/BAR/MBAR; 'gmx_bar' only supports BAR",
+        help="Backend for analysis (default: alchemlyb). 'alchemlyb' supports TI/BAR/MBAR; 'gmx_bar' only supports BAR",
     )
     analysis.add_argument(
         "--temperature",
@@ -174,7 +173,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
     window_dirs = list(bound_dir.glob("window_*"))
     if not window_dirs:
         raise ValueError(
-            f"No lambda window directories found in {args.bound_dir}. " f"Expected format: window_00, window_01, ..."
+            f"No lambda window directories found in {args.bound_dir}. Expected format: window_00, window_01, ..."
         )
 
     # Check unbound directory
@@ -186,7 +185,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
     window_dirs = list(unbound_dir.glob("window_*"))
     if not window_dirs:
         raise ValueError(
-            f"No lambda window directories found in {args.unbound_dir}. " f"Expected format: window_00, window_01, ..."
+            f"No lambda window directories found in {args.unbound_dir}. Expected format: window_00, window_01, ..."
         )
 
     # Validate temperature

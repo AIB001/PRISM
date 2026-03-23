@@ -51,6 +51,7 @@ Author: PRISM Team
 from .analyzer import FEPAnalyzer, FEResults
 from .xvg_parser import XVGParser
 from .estimators import FEstimator
+from .profiles import build_lambda_profiles, extract_lambda_data
 from .report import HTMLReportGenerator
 from .cli import main
 
@@ -59,6 +60,8 @@ __all__ = [
     "FEResults",
     "XVGParser",
     "FEstimator",
+    "build_lambda_profiles",
+    "extract_lambda_data",
     "HTMLReportGenerator",
     "main",
 ]

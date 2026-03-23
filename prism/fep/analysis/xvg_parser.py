@@ -7,10 +7,62 @@ GROMACS XVG File Parser
 Parses dhdl.xvg files output by GROMACS FEP calculations.
 """
 
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Any
 from pathlib import Path
+import logging
 import numpy as np
 import pandas as pd
+
+
+def find_xvg_file(window_dir: Path) -> Path:
+    """Find the XVG file for a lambda window."""
+    for candidate in ("dhdl.xvg", "prod.xvg", "prod/dhdl.xvg"):
+        candidate_path = window_dir / candidate
+        if candidate_path.exists():
+            return candidate_path
+    raise FileNotFoundError(f"No dhdl.xvg/prod.xvg file found in {window_dir}")
+
+
+def parse_leg_data(
+    leg_dir: Path,
+    leg_name: str,
+    estimator_name: str,
+    temperature: float,
+    gmx_module: Any,
+    logger: logging.Logger,
+) -> List[pd.DataFrame]:
+    """Parse all lambda-window XVG files for one leg."""
+    window_dirs = sorted(leg_dir.glob("window_*"))
+    if not window_dirs:
+        raise FileNotFoundError(
+            f"No lambda window directories found in {leg_dir}. Expected format: window_00, window_01, ..."
+        )
+
+    logger.info(f"Found {len(window_dirs)} lambda windows in {leg_name} leg")
+
+    datasets: List[pd.DataFrame] = []
+    for window_dir in window_dirs:
+        try:
+            xvg_file = find_xvg_file(window_dir)
+        except FileNotFoundError:
+            logger.warning(f"dhdl.xvg/prod.xvg not found in {window_dir}, skipping")
+            continue
+
+        try:
+            if estimator_name == "TI":
+                df = gmx_module.extract_dHdl(xvg_file, T=temperature)
+            else:
+                df = gmx_module.extract_u_nk(xvg_file, T=temperature)
+            datasets.append(df)
+            logger.debug(f"Parsed {xvg_file}: {len(df)} frames")
+        except Exception as exc:
+            logger.error(f"Error parsing {xvg_file}: {exc}")
+            raise
+
+    if not datasets:
+        raise FileNotFoundError(f"No valid dhdl.xvg files found in {leg_dir}")
+
+    return datasets
 
 
 class XVGParser:
@@ -258,7 +310,7 @@ class XVGParser:
 
         return lambdas if lambdas else [0.0]  # Default to lambda=0
 
-    def to_alchemlyb_dataframe(self, temperature: float = 310.0) -> pd.DataFrame:
+    def to_alchemlyb_dataframe(self, _temperature: float = 310.0) -> pd.DataFrame:
         """
         Convert parsed data to alchemlyb DataFrame format
 
