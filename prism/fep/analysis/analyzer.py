@@ -27,6 +27,7 @@ Author: PRISM Team
 
 import json
 import logging
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 from dataclasses import dataclass, field
@@ -67,6 +68,11 @@ class FEResults:
         Convergence diagnostics
     metadata : Dict
         Analysis metadata (temperature, lambda windows, etc.)
+    repeat_results : List[Dict[str, float]]
+        Individual results for each repeat (if multiple repeats analyzed)
+        Format: [{"repeat": 1, "bound": 54.07, "unbound": 49.84, "ddG": 4.23}, ...]
+    n_repeats : int
+        Number of repeats analyzed
     """
 
     delta_g: float = 0.0
@@ -76,6 +82,8 @@ class FEResults:
     delta_g_components: Dict[str, float] = field(default_factory=dict)
     convergence: Dict = field(default_factory=dict)
     metadata: Dict = field(default_factory=dict)
+    repeat_results: List[Dict[str, float]] = field(default_factory=list)
+    n_repeats: int = 1
 
     def to_dict(self) -> Dict:
         """Convert results to dictionary"""
@@ -87,6 +95,8 @@ class FEResults:
             "delta_g_components": self.delta_g_components,
             "convergence": self.convergence,
             "metadata": self.metadata,
+            "repeat_results": self.repeat_results,
+            "n_repeats": self.n_repeats,
         }
 
 
@@ -135,8 +145,8 @@ class FEPAnalyzer:
 
     def __init__(
         self,
-        bound_dir: Union[str, Path],
-        unbound_dir: Union[str, Path],
+        bound_dir: Union[str, Path, List[Union[str, Path]]],
+        unbound_dir: Union[str, Path, List[Union[str, Path]]],
         temperature: float = 310.0,
         estimator: str = "MBAR",
         backend: str = "alchemlyb",
@@ -170,8 +180,21 @@ class FEPAnalyzer:
         ValueError
             If estimator is not available or required dependencies are missing
         """
-        self.bound_dir = Path(bound_dir)
-        self.unbound_dir = Path(unbound_dir)
+        # Support single directory or list of directories (multiple repeats)
+        if isinstance(bound_dir, (list, tuple)):
+            self.bound_dirs = [Path(d) for d in bound_dir]
+        else:
+            self.bound_dirs = [Path(bound_dir)]
+
+        if isinstance(unbound_dir, (list, tuple)):
+            self.unbound_dirs = [Path(d) for d in unbound_dir]
+        else:
+            self.unbound_dirs = [Path(unbound_dir)]
+
+        # For backward compatibility, keep the old attributes
+        self.bound_dir = self.bound_dirs[0]
+        self.unbound_dir = self.unbound_dirs[0]
+
         self.temperature = temperature
         self.estimator_name = estimator.upper()
         self.backend = backend.lower()
@@ -215,6 +238,9 @@ class FEPAnalyzer:
         3. Performs convergence analysis
         4. Decomposes free energy by components
 
+        If multiple repeats are provided (via bound_dir/unbound_dir as lists),
+        all repeats are analyzed and results are averaged.
+
         Returns
         -------
         FEResults
@@ -232,26 +258,102 @@ class FEPAnalyzer:
             return self._analyze_mock()
 
         self.logger.info(f"Starting FEP analysis with {self.backend} backend ({self.estimator_name})")
+        self.logger.info(
+            f"Processing {len(self.bound_dirs)} bound repeats and {len(self.unbound_dirs)} unbound repeats"
+        )
+
+        # Check if we have multiple repeats
+        has_multiple_repeats = len(self.bound_dirs) > 1 or len(self.unbound_dirs) > 1
 
         # Step 1: Parse input files (for alchemlyb) or prepare file lists (for gmx_bar)
         if self.backend == "alchemlyb":
             self.logger.info("Parsing GROMACS output files...")
-            bound_data = self._parse_leg_data(self.bound_dir, "bound")
-            unbound_data = self._parse_leg_data(self.unbound_dir, "unbound")
 
-            # Step 2: Compute free energy differences
-            self.logger.info(f"Computing free energy differences using {self.estimator_name}...")
-            delta_g_bound, error_bound, fitted_bound = self._compute_free_energy_alchemlyb(bound_data)
-            delta_g_unbound, error_unbound, fitted_unbound = self._compute_free_energy_alchemlyb(unbound_data)
+            # Process all repeats
+            bound_results = []
+            unbound_results = []
+            fitted_bounds = []
+            fitted_unbounds = []
+            bound_data_list = []
+            unbound_data_list = []
+
+            for i, bound_dir in enumerate(self.bound_dirs):
+                repeat_label = f"repeat{i+1}" if has_multiple_repeats else "bound"
+                self.logger.debug(f"Processing {repeat_label} from {bound_dir}")
+                bdata = self._parse_leg_data(bound_dir, "bound")
+                bound_data_list.append(bdata)
+                dg, err, fitted = self._compute_free_energy_alchemlyb(bdata)
+                bound_results.append((dg, err))
+                fitted_bounds.append(fitted)
+
+            for i, unbound_dir in enumerate(self.unbound_dirs):
+                repeat_label = f"repeat{i+1}" if has_multiple_repeats else "unbound"
+                self.logger.debug(f"Processing {repeat_label} from {unbound_dir}")
+                udata = self._parse_leg_data(unbound_dir, "unbound")
+                unbound_data_list.append(udata)
+                dg, err, fitted = self._compute_free_energy_alchemlyb(udata)
+                unbound_results.append((dg, err))
+                fitted_unbounds.append(fitted)
+
+            # Compute average and standard deviation
+            delta_g_bound_values = [r[0] for r in bound_results]
+            error_bound_values = [r[1] for r in bound_results]
+            delta_g_unbound_values = [r[0] for r in unbound_results]
+            error_unbound_values = [r[1] for r in unbound_results]
+
+            # Use mean of values and propagate errors
+            delta_g_bound = float(np.mean(delta_g_bound_values))
+            error_bound = float(np.sqrt(np.sum(np.square(error_bound_values))) / len(error_bound_values))
+            delta_g_unbound = float(np.mean(delta_g_unbound_values))
+            error_unbound = float(np.sqrt(np.sum(np.square(error_unbound_values))) / len(error_unbound_values))
 
             # Store fitted models for plotting
-            self.raw_data["fitted_bound"] = fitted_bound
-            self.raw_data["fitted_unbound"] = fitted_unbound
+            self.raw_data["fitted_bound"] = fitted_bounds[0] if len(fitted_bounds) == 1 else fitted_bounds
+            self.raw_data["fitted_unbound"] = fitted_unbounds[0] if len(fitted_unbounds) == 1 else fitted_unbounds
             self.raw_data["lambda_profiles"] = self._build_lambda_profiles(
-                fitted_bound,
-                fitted_unbound,
+                fitted_bounds if has_multiple_repeats else fitted_bounds[0],
+                fitted_unbounds if has_multiple_repeats else fitted_unbounds[0],
                 self.estimator_name,
             )
+
+            # Keep first repeat data for convergence analysis (placeholder)
+            bound_data = bound_data_list[0] if len(bound_data_list) == 1 else bound_data_list
+            unbound_data = unbound_data_list[0] if len(unbound_data_list) == 1 else unbound_data_list
+
+            # Log repeat results if multiple
+            repeat_results = []
+            n_repeats = 1
+            repeat_statistics = {}
+            if has_multiple_repeats:
+                self.logger.info(f"Bound repeats: {delta_g_bound_values}")
+                self.logger.info(f"Unbound repeats: {delta_g_unbound_values}")
+
+                # Save individual repeat results for statistics table
+                n_repeats = len(bound_results)
+                for i in range(n_repeats):
+                    ddG = delta_g_bound_values[i] - delta_g_unbound_values[i]
+                    repeat_results.append(
+                        {
+                            "repeat": i + 1,
+                            "bound": delta_g_bound_values[i],
+                            "unbound": delta_g_unbound_values[i],
+                            "ddG": ddG,
+                        }
+                    )
+
+                # Calculate statistics
+                ddG_values = [r["ddG"] for r in repeat_results]
+                repeat_statistics = {
+                    "bound_mean": float(np.mean(delta_g_bound_values)),
+                    "bound_stderr": float(np.std(delta_g_bound_values, ddof=1) / np.sqrt(len(delta_g_bound_values))),
+                    "unbound_mean": float(np.mean(delta_g_unbound_values)),
+                    "unbound_stderr": float(
+                        np.std(delta_g_unbound_values, ddof=1) / np.sqrt(len(delta_g_unbound_values))
+                    ),
+                    "ddG_mean": float(np.mean(ddG_values)),
+                    "ddG_stderr": float(np.std(ddG_values, ddof=1) / np.sqrt(len(ddG_values))),
+                }
+                self.logger.info(f"Repeat statistics: {repeat_statistics}")
         else:  # gmx_bar backend
             self.logger.info("Computing free energy differences using gmx bar...")
             delta_g_bound, error_bound = self._compute_free_energy_gmx_bar(self.bound_dir, "bound")
@@ -272,6 +374,35 @@ class FEPAnalyzer:
         # Step 4: Energy decomposition (if components available)
         components = self._decompose_energies(bound_data, unbound_data)
 
+        # Count lambda windows correctly
+        if bound_data:
+            # bound_data can be:
+            # - List of lists (multiple repeats): [[df1, df2, ...], [df1, df2, ...], ...]
+            # - List of DataFrames (single repeat): [df1, df2, ...]
+            if isinstance(bound_data, list) and len(bound_data) > 0:
+                # Check if first element is a list (multiple repeats)
+                # or a DataFrame (single repeat)
+                import pandas as pd
+
+                if isinstance(bound_data[0], list):
+                    # Multiple repeats: each element is a list of DataFrames
+                    n_windows = len(bound_data[0])
+                    self.logger.debug(f"Multiple repeats detected: {len(bound_data)} repeats, {n_windows} windows each")
+                elif isinstance(bound_data[0], pd.DataFrame):
+                    # Single repeat: list of DataFrames
+                    n_windows = len(bound_data)
+                    self.logger.debug(f"Single repeat detected: {n_windows} windows")
+                else:
+                    # Unknown structure, count from directory
+                    n_windows = len(list(self.bound_dir.glob("window_*")))
+                    self.logger.debug(f"Unknown data structure, counting from directory: {n_windows} windows")
+            else:
+                n_windows = len(list(self.bound_dir.glob("window_*")))
+                self.logger.debug(f"Empty or non-list bound_data, counting from directory: {n_windows} windows")
+        else:
+            n_windows = len(list(self.bound_dir.glob("window_*")))
+            self.logger.debug(f"No bound_data, counting from directory: {n_windows} windows")
+
         # Store results
         self.results = FEResults(
             delta_g=delta_g,
@@ -284,8 +415,11 @@ class FEPAnalyzer:
                 "temperature": self.temperature,
                 "estimator": self.estimator_name,
                 "backend": self.backend,
-                "n_lambda_windows": len(bound_data) if bound_data else self._count_windows(self.bound_dir),
+                "n_lambda_windows": n_windows,
+                "repeat_statistics": repeat_statistics,
             },
+            repeat_results=repeat_results,
+            n_repeats=n_repeats,
         )
 
         self.logger.info(f"Analysis complete: ΔG = {delta_g:.2f} ± {delta_g_error:.2f} kcal/mol")
@@ -393,7 +527,7 @@ class FEPAnalyzer:
 
         return datasets
 
-    def _compute_free_energy_alchemlyb(self, datasets: List) -> Tuple[float, float]:
+    def _compute_free_energy_alchemlyb(self, datasets: List) -> Tuple[float, float, Any]:
         """
         Compute free energy difference using selected estimator
 
@@ -567,28 +701,41 @@ class FEPAnalyzer:
         fitted_bound: Any,
         fitted_unbound: Any,
         estimator_name: str,
-    ) -> Dict[str, Optional[Dict[str, List[float]]]]:
+    ) -> Dict[str, Any]:
         """
         Build lambda-dependent profiles for bound and unbound legs.
 
         Parameters
         ----------
-        fitted_bound : Any
-            Fitted estimator for bound leg.
-        fitted_unbound : Any
-            Fitted estimator for unbound leg.
+        fitted_bound : Any or list
+            Fitted estimator for bound leg (single or list for multiple repeats).
+        fitted_unbound : Any or list
+            Fitted estimator for unbound leg (single or list for multiple repeats).
         estimator_name : str
             Estimator name (TI, BAR, MBAR).
 
         Returns
         -------
-        Dict[str, Optional[Dict[str, List[float]]]]
+        Dict[str, Any]
             Dictionary with bound/unbound lambda profiles.
+            Returns list of profiles if multiple repeats, otherwise single profile.
         """
         estimator = estimator_name.upper()
+
+        # Handle multiple repeats (list) or single repeat
+        if isinstance(fitted_bound, list):
+            bound_profiles = [self._extract_lambda_data(fb, estimator) for fb in fitted_bound]
+        else:
+            bound_profiles = self._extract_lambda_data(fitted_bound, estimator)
+
+        if isinstance(fitted_unbound, list):
+            unbound_profiles = [self._extract_lambda_data(fu, estimator) for fu in fitted_unbound]
+        else:
+            unbound_profiles = self._extract_lambda_data(fitted_unbound, estimator)
+
         return {
-            "bound": self._extract_lambda_data(fitted_bound, estimator),
-            "unbound": self._extract_lambda_data(fitted_unbound, estimator),
+            "bound": bound_profiles,
+            "unbound": unbound_profiles,
         }
 
     def _extract_lambda_data(self, fitted_model: Any, estimator_name: str) -> Optional[Dict[str, List[float]]]:
@@ -646,15 +793,15 @@ class FEPAnalyzer:
 
         return lambda_data
 
-    def _analyze_convergence(self, bound_data: List, unbound_data: List) -> Dict:  # noqa: ARG002
+    def _analyze_convergence(self, bound_data: Any, unbound_data: Any) -> Dict:  # noqa: ARG002
         """
         Analyze convergence of free energy calculations
 
         Parameters
         ----------
-        bound_data : List
-            Bound leg datasets
-        unbound_data : List
+        bound_data : List or object
+            Bound leg datasets (can be list for multiple repeats)
+        unbound_data : List or object
             Unbound leg datasets (not used in current implementation)
 
         Returns
@@ -662,11 +809,33 @@ class FEPAnalyzer:
         Dict
             Convergence metrics
         """
+        # Handle list of datasets (multiple repeats) - use first repeat
+        if isinstance(bound_data, list):
+            if not bound_data:
+                return {
+                    "hysteresis": None,
+                    "time_convergence": {},
+                    "n_samples": 0,
+                }
+            bound_data = bound_data[0]
+
         convergence = {
             "hysteresis": None,
             "time_convergence": {},
-            "n_samples": sum(len(df) for df in bound_data) if bound_data else 0,
+            "n_samples": 0,
         }
+
+        # Count samples if bound_data is a list of DataFrames
+        if isinstance(bound_data, list):
+            try:
+                convergence["n_samples"] = sum(len(df) for df in bound_data)
+            except (TypeError, AttributeError):
+                convergence["n_samples"] = 0
+        elif hasattr(bound_data, "__len__"):
+            try:
+                convergence["n_samples"] = len(bound_data)
+            except TypeError:
+                convergence["n_samples"] = 0
 
         # Time convergence analysis (subsample by time)
         # TODO: Implement actual convergence analysis
@@ -674,15 +843,15 @@ class FEPAnalyzer:
 
         return convergence
 
-    def _decompose_energies(self, bound_data: List, unbound_data: List) -> Dict[str, float]:  # noqa: ARG002
+    def _decompose_energies(self, bound_data: Any, unbound_data: Any) -> Dict[str, float]:  # noqa: ARG002
         """
         Decompose free energy by components (elec, vdw, etc.)
 
         Parameters
         ----------
-        bound_data : List
-            Bound leg datasets
-        unbound_data : List
+        bound_data : List or object
+            Bound leg datasets (can be list for multiple repeats)
+        unbound_data : List or object
             Unbound leg datasets (not used in current implementation)
 
         Returns
@@ -692,11 +861,29 @@ class FEPAnalyzer:
         """
         components = {}
 
+        # Handle list of datasets (multiple repeats) - use first repeat
+        if isinstance(bound_data, list):
+            if not bound_data:
+                return components
+
+        # Handle list of datasets (multiple repeats) - use first repeat
+        if isinstance(bound_data, list):
+            if not bound_data:
+                return components
+            bound_data = bound_data[0]
+
         # Check if datasets have component columns
-        if bound_data and "dH/dλ" in bound_data[0].columns:
-            # Simple decomposition - just total dH/dλ
-            # Full decomposition would require parsing separate component files
-            components["total"] = self.results.delta_g if self.results else 0.0
+        if bound_data is not None and hasattr(bound_data, "__getitem__") and len(bound_data) > 0:
+            try:
+                # bound_data[0] might fail if it's a pandas DataFrame
+                # Check if bound_data[0] has 'columns' attribute (it's a DataFrame)
+                first_item = bound_data[0] if isinstance(bound_data, list) else bound_data
+                if hasattr(first_item, "columns") and "dH/dλ" in first_item.columns:
+                    # Simple decomposition - just total dH/dλ
+                    # Full decomposition would require parsing separate component files
+                    components["total"] = self.results.delta_g if self.results else 0.0
+            except (AttributeError, TypeError, KeyError, IndexError):
+                pass
 
         return components
 
