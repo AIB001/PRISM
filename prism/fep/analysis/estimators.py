@@ -8,7 +8,7 @@ BAR and MBAR estimators for calculating free energy differences from FEP data.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 import logging
 import re
 import subprocess
@@ -18,8 +18,14 @@ import pandas as pd
 
 def compute_free_energy_alchemlyb(
     estimator_cls: Any, datasets: List[pd.DataFrame], logger: logging.Logger
-) -> Tuple[float, float, Any]:
-    """Fit an alchemlyb estimator and return ΔG/error in kcal/mol."""
+) -> Tuple[float, float, Any, Optional[Any]]:
+    """Fit an alchemlyb estimator and return ΔG/error in kcal/mol.
+
+    Returns
+    -------
+    Tuple[float, float, Any, Optional[Any]]
+        (delta_g_kcal, error_kcal, fitted_estimator, overlap_matrix)
+    """
     combined = pd.concat(datasets)
     fitted = estimator_cls().fit(combined)
 
@@ -33,7 +39,12 @@ def compute_free_energy_alchemlyb(
         error_kcal = 0.0
         logger.warning("Error estimate not available for this estimator")
 
-    return delta_g_kcal, error_kcal, fitted
+    # Extract overlap matrix for MBAR estimator
+    overlap_matrix = None
+    if hasattr(fitted, "overlap_matrix"):
+        overlap_matrix = fitted.overlap_matrix_
+
+    return delta_g_kcal, error_kcal, fitted, overlap_matrix
 
 
 def compute_free_energy_gmx_bar(

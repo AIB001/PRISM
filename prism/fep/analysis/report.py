@@ -142,8 +142,20 @@ class HTMLReportGenerator:
             detailed_results_section = f"""
         <div class="card">
             <h2>📋 Detailed Results</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
+                <div>
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        📊 Multiple Repeats Statistics
+                    </h3>
 {repeats_html}
+                </div>
+                <div>
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        🎯 Outlier Detection
+                    </h3>
 {repeats_outlier_html}
+                </div>
+            </div>
         </div>
 """
 
@@ -174,27 +186,23 @@ class HTMLReportGenerator:
         <div class="card">
             <h2>📊 Summary</h2>
             <div class="summary-grid">
-                <div class="summary-item">
-                    <div class="label">Binding ΔG</div>
-                    <div class="value">{results_dict["delta_g"]:.2f} kcal/mol</div>
+                <div class="summary-item" style="grid-column: span 2; background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);">
+                    <div class="label">ΔΔG Binding (kcal/mol)</div>
+                    <div class="value">{results_dict["delta_g"]:.2f} ± {results_dict["delta_g_error"]:.2f}</div>
                     <div style="font-size: 0.8em; color: #666;">
-                        {f"± {results_dict['delta_g_error']:.2f}" if results_dict["delta_g_error"] == results_dict["delta_g_error"] else "N/A"}
+                        ΔG_bound - ΔG_unbound = {results_dict["delta_g_bound"]:.2f} - {
+            results_dict["delta_g_unbound"]:.2f}
                     </div>
-                </div>
-                <div class="summary-item">
-                    <div class="label">Bound Leg</div>
-                    <div class="value">{results_dict["delta_g_bound"]:.2f}</div>
-                    <div style="font-size: 0.8em; color: #666;">kcal/mol</div>
-                </div>
-                <div class="summary-item">
-                    <div class="label">Unbound Leg</div>
-                    <div class="value">{results_dict["delta_g_unbound"]:.2f}</div>
-                    <div style="font-size: 0.8em; color: #666;">kcal/mol</div>
                 </div>
                 <div class="summary-item">
                     <div class="label">Temperature</div>
                     <div class="value">{temperature:.1f} K</div>
                     <div style="font-size: 0.8em; color: #666;">{temperature - 273.15:.1f} °C</div>
+                </div>
+                <div class="summary-item">
+                    <div class="label">Lambda Windows</div>
+                    <div class="value">{n_lambda_windows}</div>
+                    <div style="font-size: 0.8em; color: #666;">states</div>
                 </div>
             </div>
             <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
@@ -256,6 +264,11 @@ class HTMLReportGenerator:
         <div class="card">
             <h2>🔄 Bootstrap Analysis</h2>
 {bootstrap_html}
+        </div>
+
+        <div class="card">
+            <h2>📊 Overlap Matrix (MBAR)</h2>
+            {self._build_overlap_matrix_html() or '<div class="alert"><strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>Switch to MBAR backend to enable overlap matrix visualization.</div>'}
         </div>
 
         <div class="card">
@@ -483,12 +496,8 @@ class HTMLReportGenerator:
                     </tr>
         """
 
-        # Build complete table HTML
+        # Build complete table HTML (without outer wrapper for side-by-side layout)
         table_html = f"""
-            <div style="margin-top: 30px;">
-                <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
-                    📊 Multiple Repeats Statistics
-                </h3>
                 <table>
                     <thead>
                         <tr>
@@ -507,7 +516,6 @@ class HTMLReportGenerator:
                     <strong>📊 stderr:</strong> Standard error of the mean (σ/√n)<br>
                     <strong>🔢 n_repeats:</strong> {self.results.n_repeats}
                 </p>
-            </div>
         """
 
         return table_html
@@ -533,10 +541,9 @@ class HTMLReportGenerator:
 
         import json as _json
 
-        # Extract data from repeat_results
+        # Extract data from repeat_results (exclude ddG from outlier plot)
         bound_values = [r["bound"] for r in self.results.repeat_results]
         unbound_values = [r["unbound"] for r in self.results.repeat_results]
-        ddg_values = [r["ddG"] for r in self.results.repeat_results]
 
         # Build traces for box plots
         traces = []
@@ -555,10 +562,9 @@ class HTMLReportGenerator:
             }
             traces.append(box_trace)
 
-        # Create three separate box plots
+        # Create box plots for bound and unbound only
         create_box_scatter_group(bound_values, "Bound", "rgba(76,175,80,0.7)")
         create_box_scatter_group(unbound_values, "Unbound", "rgba(244,67,54,0.7)")
-        create_box_scatter_group(ddg_values, "ΔΔG", "rgba(33,150,243,0.7)")
 
         layout = {
             "paper_bgcolor": "rgba(0,0,0,0)",
@@ -746,6 +752,84 @@ class HTMLReportGenerator:
             <script>
             Plotly.newPlot('bootstrap-hist-plot', [{_json.dumps(hist_trace)}], {_json.dumps(layout)}, {{responsive:true}});
             </script>"""
+
+    def _build_overlap_matrix_html(self) -> str:
+        """
+        Build HTML for MBAR overlap matrix visualization.
+
+        Uses matplotlib to generate the overlap matrix plot and embeds it as base64 image.
+
+        Returns
+        -------
+        str
+            HTML content with overlap matrix plots (empty string if no overlap data).
+        """
+        bound_overlap = self.raw_data.get("overlap_matrix_bound")
+        unbound_overlap = self.raw_data.get("overlap_matrix_unbound")
+
+        if bound_overlap is None and unbound_overlap is None:
+            return ""
+
+        try:
+            import io
+            import base64
+            import matplotlib
+
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from alchemlyb.visualisation import plot_mbar_overlap_matrix
+        except ImportError:
+            return """            <div class="alert">
+                <strong>⚠️ Note:</strong> Overlap matrix visualization requires matplotlib.
+                Install with: pip install matplotlib
+            </div>"""
+
+        # Generate plots and convert to base64
+        images_html = []
+
+        for leg_name, overlap_matrix in [("Bound", bound_overlap), ("Unbound", unbound_overlap)]:
+            if overlap_matrix is None:
+                continue
+
+            try:
+                fig, ax = plt.subplots(figsize=(6, 5))
+                plot_mbar_overlap_matrix(overlap_matrix, ax=ax)
+                ax.set_title(f"{leg_name} Leg Overlap Matrix")
+
+                # Convert to base64
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+                buf.seek(0)
+                img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+                plt.close(fig)
+
+                images_html.append(f"""
+                    <div style="text-align:center;">
+                        <img src="data:image/png;base64,{img_base64}"
+                             alt="{leg_name} overlap matrix"
+                             style="max-width:100%;height:auto;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    </div>
+                """)
+            except Exception as exc:
+                images_html.append(f"""
+                    <div class="alert">
+                        <strong>⚠️ Error:</strong> Could not generate {leg_name} overlap plot: {exc}
+                    </div>
+                """)
+
+        if not images_html:
+            return ""
+
+        return f"""
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
+                {"".join(images_html)}
+            </div>
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                <strong>📊 Interpretation:</strong> Overlap matrix shows the phase space overlap between adjacent lambda windows.
+                Values closer to 1.0 (red) indicate good overlap, while values near 0.0 (blue) suggest poor sampling.
+                Ideally, all off-diagonal elements should be > 0.1 for reliable MBAR estimates.
+            </p>
+        """
 
 
 class MultiBackendReportGenerator:

@@ -294,9 +294,11 @@ class FEPAnalyzer:
                     self.logger,
                 )
                 bound_data_list.append(bdata)
-                dg, err, fitted = compute_free_energy_alchemlyb(self.estimator, bdata, self.logger)
+                dg, err, fitted, overlap_m = compute_free_energy_alchemlyb(self.estimator, bdata, self.logger)
                 bound_results.append((dg, err))
                 fitted_bounds.append(fitted)
+                if overlap_m is not None and self.raw_data.get("overlap_matrix_bound") is None:
+                    self.raw_data["overlap_matrix_bound"] = overlap_m
 
             for i, unbound_dir in enumerate(self.unbound_dirs):
                 repeat_label = f"repeat{i + 1}" if has_multiple_repeats else "unbound"
@@ -310,9 +312,11 @@ class FEPAnalyzer:
                     self.logger,
                 )
                 unbound_data_list.append(udata)
-                dg, err, fitted = compute_free_energy_alchemlyb(self.estimator, udata, self.logger)
+                dg, err, fitted, overlap_m = compute_free_energy_alchemlyb(self.estimator, udata, self.logger)
                 unbound_results.append((dg, err))
                 fitted_unbounds.append(fitted)
+                if overlap_m is not None and self.raw_data.get("overlap_matrix_unbound") is None:
+                    self.raw_data["overlap_matrix_unbound"] = overlap_m
 
             summary = summarize_repeat_results(bound_results, unbound_results)
             delta_g_bound = summary["delta_g_bound"]
