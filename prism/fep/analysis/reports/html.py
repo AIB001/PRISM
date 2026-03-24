@@ -254,8 +254,8 @@ class HTMLReportGenerator:
         <div class="card">
             <h2>📈 Free Energy Profiles (λ-dependent)</h2>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                <div class="plot-container" id="dg-bound-plot" style="min-height:300px;"></div>
-                <div class="plot-container" id="dg-unbound-plot" style="min-height:300px;"></div>
+                <div class="plot-container" id="dg-bound-plot" style="min-height:350px;width:100%;overflow:hidden;"></div>
+                <div class="plot-container" id="dg-unbound-plot" style="min-height:350px;width:100%;overflow:hidden;"></div>
             </div>
 {dhdl_divs}
         </div>

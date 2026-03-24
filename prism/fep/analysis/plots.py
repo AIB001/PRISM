@@ -64,12 +64,12 @@ def build_lambda_plots_html(
 
     # Build 4 separate plot divs
     plot_divs = [
-        f'<div id="{bound_plot_id}" class="plot-container" style="min-height:300px;"></div>',
-        f'<div id="{unbound_plot_id}" class="plot-container" style="min-height:300px;"></div>',
-        f'<div id="{dhdl_bound_plot_id}" class="plot-container" style="min-height:300px;"></div>'
+        f'<div id="{bound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>',
+        f'<div id="{unbound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>',
+        f'<div id="{dhdl_bound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>'
         if is_ti
         else "<div></div>",
-        f'<div id="{dhdl_unbound_plot_id}" class="plot-container" style="min-height:300px;"></div>'
+        f'<div id="{dhdl_unbound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>'
         if is_ti
         else "<div></div>",
     ]
@@ -177,6 +177,9 @@ def build_lambda_plots_html(
             "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
             "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
             "hovermode": "x unified",
+            "width": None,  # Auto-width, controlled by container
+            "height": 350,
+            "autosize": True,
         }
         dhdl_unbound_layout = {
             "title": {"text": "Unbound Leg dH/dλ vs λ", "font": {"size": 14}},
@@ -184,6 +187,9 @@ def build_lambda_plots_html(
             "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
             "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
             "hovermode": "x unified",
+            "width": None,  # Auto-width, controlled by container
+            "height": 350,
+            "autosize": True,
         }
         script_content += f"""
             Plotly.newPlot('{dhdl_bound_plot_id}', {_json.dumps(dhdl_bound_traces)}, {_json.dumps(dhdl_bound_layout)}, {{responsive: true}});
