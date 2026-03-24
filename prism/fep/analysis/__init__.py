@@ -10,9 +10,9 @@ and comprehensive HTML report generation.
 Main Components:
 --------------
 - FEPAnalyzer: Main analyzer class for complete FEP workflow
-- GROMACSParser: Parse GROMACS output files (xvg, edr)
-- FreeEnergyEstimator: Compute ΔG using BAR, MBAR, or TI
+- FEPMultiEstimatorAnalyzer: Multi-estimator analysis with comparison
 - HTMLReportGenerator: Generate publication-ready HTML reports
+- MultiEstimatorReportGenerator: Tabbed reports for multiple estimators
 
 Usage:
 ------
@@ -48,27 +48,40 @@ Install:
 Author: PRISM Team
 """
 
-from .analyzer import FEPAnalyzer, FEResults, MultiEstimatorResults, FEPMultiEstimatorAnalyzer
-from .xvg_parser import XVGParser
-from .estimators import FEstimator
-from .profiles import build_lambda_profiles, extract_lambda_data
-from . import plots  # Shared plotting functions
-from .report import HTMLReportGenerator, MultiEstimatorReportGenerator
-from .cli import main
+# Core data models
+from .core import FEResults, MultiEstimatorResults
+
+# Analyzers
+from .analyzers import FEPAnalyzer, FEPMultiEstimatorAnalyzer
+
+# Report generators
+from .reports import (
+    HTMLReportGenerator,
+    MultiEstimatorReportGenerator,
+    MultiBackendReportGenerator,
+)
+
+# Other components
+from . import cli
+from . import plots
+from .core import convergence, estimators, profiles, xvg_parser
 
 __all__ = [
-    "FEPAnalyzer",
+    # Core models
     "FEResults",
     "MultiEstimatorResults",
+    # Analyzers
+    "FEPAnalyzer",
     "FEPMultiEstimatorAnalyzer",
-    "XVGParser",
-    "FEstimator",
-    "build_lambda_profiles",
-    "extract_lambda_data",
-    "plots",  # Shared plotting module
+    # Reports
     "HTMLReportGenerator",
     "MultiEstimatorReportGenerator",
-    "main",
+    "MultiBackendReportGenerator",
+    # Other
+    "cli",
+    "convergence",
+    "estimators",
+    "plots",
+    "profiles",
+    "xvg_parser",
 ]
-
-__version__ = "0.1.0"

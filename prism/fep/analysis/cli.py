@@ -23,8 +23,7 @@ import logging
 import sys
 from pathlib import Path
 
-from prism.fep.analysis.analyzer import FEPAnalyzer, FEPMultiEstimatorAnalyzer
-from prism.fep.analysis.report import MultiEstimatorReportGenerator
+from prism.fep.analysis import FEPAnalyzer, FEPMultiEstimatorAnalyzer, MultiEstimatorReportGenerator
 
 
 def setup_logging(verbose: bool = False) -> None:

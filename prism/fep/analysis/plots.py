@@ -147,6 +147,9 @@ def build_lambda_plots_html(
         "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
         "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
         "hovermode": "x unified",
+        "width": None,  # Auto-width, controlled by container
+        "height": 350,
+        "autosize": True,
     }
 
     unbound_layout = {
@@ -155,6 +158,9 @@ def build_lambda_plots_html(
         "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
         "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
         "hovermode": "x unified",
+        "width": None,  # Auto-width, controlled by container
+        "height": 350,
+        "autosize": True,
     }
 
     # Build script content
