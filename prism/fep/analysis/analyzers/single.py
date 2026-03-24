@@ -99,6 +99,8 @@ class FEPAnalyzer:
         backend: str = "alchemlyb",
         energy_components: Optional[List[str]] = None,
         allow_mock: bool = False,  # For testing without alchemlyb
+        skip_bootstrap: bool = False,
+        skip_time_convergence: bool = False,
     ):
         """
         Initialize FEP analyzer
@@ -119,6 +121,10 @@ class FEPAnalyzer:
             Energy components to analyze
         allow_mock : bool
             Allow mock results for testing (default: False)
+        skip_bootstrap : bool
+            Skip bootstrap error estimation (saves ~10-30 min, default: False)
+        skip_time_convergence : bool
+            Skip time convergence analysis (saves ~5-10 min, default: False)
         """
         self.bound_dir = [Path(bound_dir)] if not isinstance(bound_dir, list) else [Path(d) for d in bound_dir]
         self.unbound_dir = [Path(unbound_dir)] if not isinstance(unbound_dir, list) else [Path(d) for d in unbound_dir]
@@ -127,6 +133,8 @@ class FEPAnalyzer:
         self.backend = backend.lower()
         self.energy_components = energy_components or ["elec", "vdw"]
         self.allow_mock = allow_mock
+        self.skip_bootstrap = skip_bootstrap
+        self.skip_time_convergence = skip_time_convergence
 
         # Validate estimator
         if self.estimator not in self.ESTIMATORS:
@@ -200,13 +208,23 @@ class FEPAnalyzer:
         # Build lambda profiles for plotting
         lambda_profiles = build_lambda_profiles(bound_data_list, unbound_data_list, self.estimator)
 
-        # Compute convergence metrics
-        self.raw_data["time_convergence"] = compute_time_convergence(
-            bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_points=10
-        )
-        self.raw_data["bootstrap"] = compute_bootstrap(
-            bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_bootstrap=50, fraction=0.8
-        )
+        # Compute convergence metrics (optional)
+        if self.skip_time_convergence:
+            self.logger.info("Skipping time convergence analysis")
+            self.raw_data["time_convergence"] = None
+        else:
+            self.raw_data["time_convergence"] = compute_time_convergence(
+                bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_points=10
+            )
+
+        if self.skip_bootstrap:
+            self.logger.info("Skipping bootstrap analysis")
+            self.raw_data["bootstrap"] = None
+        else:
+            self.logger.info("Running bootstrap analysis...")
+            self.raw_data["bootstrap"] = compute_bootstrap(
+                bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_bootstrap=50, fraction=0.8
+            )
 
         # Store results
         self.results = FEResults(

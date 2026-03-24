@@ -97,6 +97,8 @@ class FEPMultiEstimatorAnalyzer:
         temperature: float = 310.0,
         backend: str = "alchemlyb",
         show_progress: bool = True,
+        skip_bootstrap: bool = False,
+        skip_time_convergence: bool = False,
     ):
         """
         Initialize multi-estimator analyzer
@@ -115,6 +117,10 @@ class FEPMultiEstimatorAnalyzer:
             Analysis backend (default: 'alchemlyb', only option for multi-estimator)
         show_progress : bool, optional
             Show progress bars (default: True)
+        skip_bootstrap : bool, optional
+            Skip bootstrap error estimation (saves ~30-60 min, default: False)
+        skip_time_convergence : bool, optional
+            Skip time convergence analysis (saves ~10-15 min, default: False)
 
         Raises
         ------
@@ -138,6 +144,8 @@ class FEPMultiEstimatorAnalyzer:
         self.temperature = temperature
         self.backend = backend
         self.show_progress = show_progress
+        self.skip_bootstrap = skip_bootstrap
+        self.skip_time_convergence = skip_time_convergence
 
         # Validate estimators
         for estimator_name in self.estimators:
@@ -244,32 +252,49 @@ class FEPMultiEstimatorAnalyzer:
             )
 
         # Step 3: Compute convergence metrics for each estimator
+        if self.show_progress:
+            self.logger.info("Computing convergence metrics...")
+
         for estimator_name, estimator_result in results.items():
             bound_data_list, unbound_data_list = parsed_data[estimator_name]
             estimator_class = self.ESTIMATORS[estimator_name]
 
-            try:
-                estimator_result.time_convergence = compute_time_convergence(
-                    bound_data_list,
-                    unbound_data_list,
-                    estimator_class,
-                    n_points=10,
-                )
-            except Exception as exc:
-                self.logger.warning(f"Time convergence analysis failed for {estimator_name}: {exc}")
+            # Time convergence analysis
+            if self.skip_time_convergence:
+                if self.show_progress:
+                    self.logger.info(f"  Skipping time convergence analysis for {estimator_name}")
                 estimator_result.time_convergence = None
+            else:
+                try:
+                    estimator_result.time_convergence = compute_time_convergence(
+                        bound_data_list,
+                        unbound_data_list,
+                        estimator_class,
+                        n_points=10,
+                    )
+                except Exception as exc:
+                    self.logger.warning(f"Time convergence analysis failed for {estimator_name}: {exc}")
+                    estimator_result.time_convergence = None
 
-            try:
-                estimator_result.bootstrap = compute_bootstrap(
-                    bound_data_list,
-                    unbound_data_list,
-                    estimator_class,
-                    n_bootstrap=50,
-                    fraction=0.8,
-                )
-            except Exception as exc:
-                self.logger.warning(f"Bootstrap analysis failed for {estimator_name}: {exc}")
+            # Bootstrap analysis
+            if self.skip_bootstrap:
+                if self.show_progress:
+                    self.logger.info(f"  Skipping bootstrap analysis for {estimator_name}")
                 estimator_result.bootstrap = None
+            else:
+                if self.show_progress:
+                    self.logger.info(f"  Running bootstrap analysis for {estimator_name}...")
+                try:
+                    estimator_result.bootstrap = compute_bootstrap(
+                        bound_data_list,
+                        unbound_data_list,
+                        estimator_class,
+                        n_bootstrap=50,
+                        fraction=0.8,
+                    )
+                except Exception as exc:
+                    self.logger.warning(f"Bootstrap analysis failed for {estimator_name}: {exc}")
+                    estimator_result.bootstrap = None
 
         # Step 4: Build comparison metrics
         comparison = self._build_comparison_metrics(results)

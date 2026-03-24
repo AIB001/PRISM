@@ -128,8 +128,10 @@ def compute_bootstrap(
             n_states = len(all_dfs)
             rows_per_state = len(combined) // n_states if n_states > 0 else len(combined)
 
-            for _ in range(n_bootstrap):
+            for i in range(n_bootstrap):
                 try:
+                    if i > 0 and i % 10 == 0:
+                        logger.info(f"  Bootstrap progress: {i}/{n_bootstrap} iterations")
                     sub_dfs = []
                     idx_start = 0
                     for _ in range(n_states):

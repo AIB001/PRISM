@@ -371,7 +371,7 @@ class MultiEstimatorReportGenerator:
         <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
             {detailed_results}
             {lambda_section}
-            {time_conv_section}
+            {conv_overlap_section}
             {bootstrap_section}
             {overlap_section}
         </div>
