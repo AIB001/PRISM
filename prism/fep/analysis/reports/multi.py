@@ -207,11 +207,18 @@ class MultiEstimatorReportGenerator:
         """Build comparison section with table"""
         rows = ""
         for name, results in self.multi_results.methods.items():
+            # Use repeat-to-repeat stderr if available (more reliable), otherwise use method error
+            if results.n_repeats > 1:
+                repeat_stats = results.metadata.get("repeat_statistics", {})
+                error_value = repeat_stats.get("ddG_stderr", 0.0)
+            else:
+                error_value = results.delta_g_error
+
             rows += f"""
                     <tr>
                         <td><strong>{name}</strong></td>
                         <td class="value">{results.delta_g:.2f}</td>
-                        <td class="value">± {results.delta_g_error:.2f}</td>
+                        <td class="value">± {error_value:.2f}</td>
                         <td class="value">{results.delta_g_bound:.2f}</td>
                         <td class="value">{results.delta_g_unbound:.2f}</td>
                     </tr>
@@ -228,6 +235,10 @@ class MultiEstimatorReportGenerator:
                         <td class="value">-</td>
                     </tr>
         """
+
+        # Determine error type for explanation
+        first_result = list(self.multi_results.methods.values())[0]
+        error_type = "Repeat-to-repeat stderr" if first_result.n_repeats > 1 else "Method error"
 
         return f"""
         <div class="card">
@@ -248,6 +259,11 @@ class MultiEstimatorReportGenerator:
                 </tbody>
             </table>
             <p style="margin-top: 15px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                <strong>💡 Error Type:</strong> {error_type} - {
+                    'Standard error from multiple independent repeats (n={}). '.format(first_result.n_repeats)
+                    if first_result.n_repeats > 1
+                    else 'Method-intrinsic error from MBAR/TI/BAR estimator. '
+                }
                 <strong>💡 Tip:</strong> Click estimator tabs below to see detailed analysis for each method.
                 {
             "<br><strong>⚠️ Agreement:</strong> "
