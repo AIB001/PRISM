@@ -353,10 +353,6 @@ class MultiEstimatorReportGenerator:
                         📈 Time Convergence
                     </h3>
                     {time_conv_html}
-                    <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                        <strong>📊 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
-                        If ΔG is still changing at 100%, more sampling is needed.
-                    </p>
                 </div>
                 <div>
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
