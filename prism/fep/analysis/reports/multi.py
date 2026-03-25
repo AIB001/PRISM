@@ -168,10 +168,14 @@ class MultiEstimatorReportGenerator:
     def _build_tab_buttons(self) -> str:
         """Build tab button HTML for estimator switching"""
         buttons = []
-        for estimator in self.multi_results.methods.keys():
+        for i, estimator in enumerate(self.multi_results.methods.keys()):
+            # Add 'active' class to first button
+            active_class = " active" if i == 0 else ""
             # Use format() to avoid f-string backslash issues
             buttons.append(
-                '<button class="tab-btn" onclick="showEstimatorTab(\'{est}\')">{est}</button>'.format(est=estimator)
+                '<button class="tab-btn{active}" onclick="showEstimatorTab(\'{est}\')">{est}</button>'.format(
+                    active=active_class, est=estimator
+                )
             )
         return "".join(buttons)
 

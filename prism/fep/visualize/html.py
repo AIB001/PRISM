@@ -50,6 +50,21 @@ def visualize_mapping_html(
     config : dict, optional
         FEP configuration dictionary. If provided, displays parameters in collapsible panel.
     """
+    # Auto-filter atoms lists for hybrid topology compatibility
+    # Remove dummy atoms (type starts with 'DUM' and charge=0)
+    # These are atoms that exist in one state but are dummies in the other
+    if atoms_a:
+        original_count_a = len(atoms_a)
+        atoms_a = [atom for atom in atoms_a if not (atom.charge == 0.0 and atom.atom_type.startswith("DUM"))]
+        if len(atoms_a) != original_count_a:
+            print(f"  Filtered atoms_a: {original_count_a} → {len(atoms_a)} (removed dummy atoms)")
+
+    if atoms_b:
+        original_count_b = len(atoms_b)
+        atoms_b = [atom for atom in atoms_b if not (atom.charge == 0.0 and atom.atom_type.startswith("DUM"))]
+        if len(atoms_b) != original_count_b:
+            print(f"  Filtered atoms_b: {original_count_b} → {len(atoms_b)} (removed dummy atoms)")
+
     # Prepare molecules
     mol_a = prepare_mol_with_charges_and_labels(pdb_a, mol2_a, atoms_a)
     mol_b = prepare_mol_with_charges_and_labels(pdb_b, mol2_b, atoms_b)

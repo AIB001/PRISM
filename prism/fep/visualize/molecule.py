@@ -207,42 +207,75 @@ def prepare_mol_with_charges_and_labels(
                 mol_coords.append([pos.x, pos.y, pos.z])
 
             # Match by closest coordinates
+            # OPTIMIZATION: If atoms list has same length as RDKit mol and names are cleaned,
+            # try direct index matching first (more reliable for sorted lists)
             used_atom_indices = set()
-            for mol_idx in range(mol.GetNumAtoms()):
-                mol_coord = mol_coords[mol_idx]
+            direct_match = len(atoms) == mol.GetNumAtoms()
 
-                # Find closest atom in atoms list
-                min_dist = float("inf")
-                best_atom_idx = None
+            if direct_match:
+                # Try direct index matching (faster and more reliable)
+                for mol_idx in range(mol.GetNumAtoms()):
+                    if mol_idx < len(atoms):
+                        atom = atoms[mol_idx]
+                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                        rdkit_atom.SetProp("atomLabel", atom.name)
+                        rdkit_atom.SetProp("name", atom.name)
 
-                for atom_idx, atom_coord in atom_coords.items():
-                    if atom_idx in used_atom_indices:
-                        continue
+                        # Add charge as note
+                        if atom.name in charge_dict:
+                            charge = charge_dict[atom.name]
+                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
 
-                    # Calculate Euclidean distance
-                    dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coord)) ** 0.5
+                        used_atom_indices.add(mol_idx)
+                    else:
+                        # Fallback to coordinate matching if lengths don't match
+                        direct_match = False
+                        break
 
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_atom_idx = atom_idx
+                if not direct_match or len(used_atom_indices) < mol.GetNumAtoms():
+                    # Some atoms failed direct match, fall back to coordinate matching
+                    used_atom_indices.clear()
 
-                # If match found within reasonable tolerance (0.5 Å)
-                if best_atom_idx is not None and min_dist < 0.5:
-                    name = atoms[best_atom_idx].name
-                    rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-                    rdkit_atom.SetProp("atomLabel", name)
-                    rdkit_atom.SetProp("name", name)
+            if not direct_match or len(used_atom_indices) == 0:
+                # Original coordinate-based matching
+                for mol_idx in range(mol.GetNumAtoms()):
+                    mol_coord = mol_coords[mol_idx]
 
-                    # Add charge as note
-                    if name in charge_dict:
-                        charge = charge_dict[name]
-                        rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+                    # Find closest atom in atoms list
+                    min_dist = float("inf")
+                    best_atom_idx = None
 
-                    used_atom_indices.add(best_atom_idx)
-                else:
-                    print(
-                        f"Warning: Could not match RDKit atom {mol_idx} to any atom in list (min_dist={min_dist:.3f})"
-                    )
+                    for atom_idx, atom_coord in atom_coords.items():
+                        if atom_idx in used_atom_indices:
+                            continue
+
+                        # Calculate Euclidean distance
+                        dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coord)) ** 0.5
+
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_atom_idx = atom_idx
+
+                    # If match found within reasonable tolerance (0.5 Å)
+                    if best_atom_idx is not None and min_dist < 0.5:
+                        name = atoms[best_atom_idx].name
+                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                        rdkit_atom.SetProp("atomLabel", name)
+                        rdkit_atom.SetProp("name", name)
+
+                        # Add charge as note
+                        if name in charge_dict:
+                            charge = charge_dict[name]
+                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+
+                        used_atom_indices.add(best_atom_idx)
+                    else:
+                        # Get RDKit atom name for debugging
+                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                        rdkit_name = rdkit_atom.GetProp("name") if rdkit_atom.HasProp("name") else f"Atom{mol_idx}"
+                        print(
+                            f"Warning: Could not match RDKit atom {mol_idx} ({rdkit_name}) to any atom in list (min_dist={min_dist:.3f})"
+                        )
 
             # Try to sanitize for proper bond orders (after matching)
             try:

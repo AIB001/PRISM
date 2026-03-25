@@ -544,10 +544,6 @@ def build_time_convergence_html(
     <script>
     Plotly.newPlot('{plot_id}', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
     </script>
-    <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
-        <strong>📊 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
-        If ΔG is still changing at 100%, more sampling is needed.
-    </p>
     """
 
 

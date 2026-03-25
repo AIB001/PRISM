@@ -472,6 +472,10 @@
         .toggle-buttons input[type="radio"]:checked + .toggle-btn {
             background: #007bff;
             color: white;
+            border-right: 1px solid #0056b3;
+        }
+        .toggle-buttons input[type="radio"]:checked + .toggle-btn:last-child {
+            border-right: none;
         }
 
         /* Legend Content Styles */
