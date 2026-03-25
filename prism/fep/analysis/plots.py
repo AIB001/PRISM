@@ -544,6 +544,10 @@ def build_time_convergence_html(
     <script>
     Plotly.newPlot('{plot_id}', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
     </script>
+    <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+        <strong>📈 Interpretation:</strong> A converged simulation shows a flat ΔG vs. simulation time.
+        If ΔG is still changing at 100%, more sampling is needed.
+    </p>
     """
 
 
@@ -628,13 +632,13 @@ def build_bootstrap_html(
                     <tr><td><strong>N Bootstrap</strong></td><td class="value">{n_bootstrap}</td></tr>
                 </tbody>
             </table>
-            <p style="margin-top:10px;font-size:0.85em;color:#666;">
-                Bootstrap resamples 80% of frames per window, {n_bootstrap} iterations.
-                Red dashed line = mean.
-            </p>
         </div>
     </div>
     <script>
         Plotly.newPlot('{plot_id}', [{_json.dumps(hist_trace)}], {_json.dumps(layout)}, {{responsive:true}});
     </script>
+    <p style="margin-top:10px;font-size:0.85em;color:#666;">
+        Bootstrap resamples 80% of frames per window, {n_bootstrap} iterations.
+        Red dashed line = mean.
+    </p>
     """

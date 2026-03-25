@@ -42,6 +42,8 @@ def visualize_mapping_html(
     ligand_a_name: str = "Ligand A",
     ligand_b_name: str = "Ligand B",
     config: Optional[dict] = None,
+    total_charge_a: Optional[float] = None,
+    total_charge_b: Optional[float] = None,
 ) -> None:
     """Generate interactive HTML visualization of atom mapping using Canvas.
 
@@ -51,17 +53,18 @@ def visualize_mapping_html(
         FEP configuration dictionary. If provided, displays parameters in collapsible panel.
     """
     # Auto-filter atoms lists for hybrid topology compatibility
-    # Remove dummy atoms (type starts with 'DUM' and charge=0)
-    # These are atoms that exist in one state but are dummies in the other
+    # Remove dummy atoms (type starts with 'DUM')
+    # Only filter based on atom_type, not charge or symmetric filtering
+    # RDKit will handle asymmetric atom counts via coordinate matching
     if atoms_a:
         original_count_a = len(atoms_a)
-        atoms_a = [atom for atom in atoms_a if not (atom.charge == 0.0 and atom.atom_type.startswith("DUM"))]
+        atoms_a = [atom for atom in atoms_a if not atom.atom_type.startswith("DUM")]
         if len(atoms_a) != original_count_a:
             print(f"  Filtered atoms_a: {original_count_a} → {len(atoms_a)} (removed dummy atoms)")
 
     if atoms_b:
         original_count_b = len(atoms_b)
-        atoms_b = [atom for atom in atoms_b if not (atom.charge == 0.0 and atom.atom_type.startswith("DUM"))]
+        atoms_b = [atom for atom in atoms_b if not atom.atom_type.startswith("DUM")]
         if len(atoms_b) != original_count_b:
             print(f"  Filtered atoms_b: {original_count_b} → {len(atoms_b)} (removed dummy atoms)")
 
@@ -82,8 +85,10 @@ def visualize_mapping_html(
     canvas_data_b = _prepare_canvas_data(mol_b, atoms_b, mapping, "b")
 
     # Calculate total charges
-    total_charge_a = sum(atom.charge for atom in atoms_a) if atoms_a else 0.0
-    total_charge_b = sum(atom.charge for atom in atoms_b) if atoms_b else 0.0
+    if total_charge_a is None:
+        total_charge_a = sum(atom.charge for atom in atoms_a) if atoms_a else 0.0
+    if total_charge_b is None:
+        total_charge_b = sum(atom.charge for atom in atoms_b) if atoms_b else 0.0
 
     # Build correspondence map
     correspondence = _build_correspondence_map(mapping, canvas_data_a, canvas_data_b)
@@ -557,10 +562,12 @@ def _generate_canvas_html(
                 <tr>
                     <th>Ligand A: {ligand_a_name}</th>
                     <th>Element</th>
+                    <th>Type</th>
                     <th>Charge</th>
                     <th>Classification</th>
                     <th style="border-left: 2px solid #ddd;">Ligand B: {ligand_b_name}</th>
                     <th>Element</th>
+                    <th>Type</th>
                     <th>Charge</th>
                     <th>Classification</th>
                 </tr>

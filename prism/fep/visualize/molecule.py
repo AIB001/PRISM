@@ -195,6 +195,17 @@ def prepare_mol_with_charges_and_labels(
             # because atoms have 3D coordinates, and 2D coords will change positions
             charge_dict = {atom.name: atom.charge for atom in atoms}
 
+            # Create a mapping from base names (without A/B suffix) to full names
+            # This handles cases where hybrid topology atoms have A/B suffixes (e.g., H22A)
+            # but MOL2 files have base names (e.g., H22)
+            base_name_to_full = {}
+            for atom in atoms:
+                base_name = atom.name
+                # Remove trailing A/B suffix (e.g., H22A -> H22, H02B -> H02)
+                if base_name and base_name[-1] in "AB" and base_name[-2].isdigit():
+                    base_name = base_name[:-1]
+                base_name_to_full[base_name] = atom.name
+
             # Build coordinate lookup from atoms parameter
             # atoms have coordinates in Angstroms from GRO (converted from nm)
             atom_coords = {i: atom.coord for i, atom in enumerate(atoms)}
@@ -232,6 +243,58 @@ def prepare_mol_with_charges_and_labels(
                         direct_match = False
                         break
 
+                # Check if all atoms were matched successfully
+                # If some atoms have charges missing, try base name matching
+                if len(used_atom_indices) == mol.GetNumAtoms():
+                    # Verify all atoms have charges
+                    all_have_charges = True
+                    missing_charge_atoms = []
+                    for mol_idx in range(mol.GetNumAtoms()):
+                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                        if not rdkit_atom.HasProp("atomNote"):
+                            all_have_charges = False
+                            rdkit_name = rdkit_atom.GetProp("name") if rdkit_atom.HasProp("name") else f"Atom{mol_idx}"
+                            missing_charge_atoms.append((mol_idx, rdkit_name))
+                            break
+
+                    if not all_have_charges:
+                        # Some atoms lack charges, try to fix with base name matching
+                        print(
+                            f"Direct match succeeded but {len(missing_charge_atoms)} atoms lack charges, trying base name matching..."
+                        )
+                        for mol_idx, rdkit_name in missing_charge_atoms:
+                            rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+
+                            # Extract base name from RDKit atom name
+                            base_name = rdkit_name
+                            if base_name and base_name[-1] in "AB" and base_name[-2].isdigit():
+                                base_name = base_name[:-1]
+
+                            # Check if base name matches any atom in our list
+                            if base_name in base_name_to_full:
+                                full_name = base_name_to_full[base_name]
+                                # Find the atom with this full name
+                                for atom_idx, atom in enumerate(atoms):
+                                    if atom.name == full_name:
+                                        # Add charge as note
+                                        if full_name in charge_dict:
+                                            charge = charge_dict[full_name]
+                                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+                                            print(f"  Fixed charge for {rdkit_name} -> {full_name}: {charge:+.4f}")
+                                        break
+
+                        # If still missing some charges, fall back to coordinate matching
+                        still_missing = []
+                        for mol_idx in range(mol.GetNumAtoms()):
+                            rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                            if not rdkit_atom.HasProp("atomNote"):
+                                still_missing.append(mol_idx)
+
+                        if len(still_missing) > 0:
+                            print(f"Still missing {len(still_missing)} atoms, falling back to coordinate matching")
+                            used_atom_indices.clear()
+                            direct_match = False
+
                 if not direct_match or len(used_atom_indices) < mol.GetNumAtoms():
                     # Some atoms failed direct match, fall back to coordinate matching
                     used_atom_indices.clear()
@@ -256,8 +319,8 @@ def prepare_mol_with_charges_and_labels(
                             min_dist = dist
                             best_atom_idx = atom_idx
 
-                    # If match found within reasonable tolerance (0.5 Å)
-                    if best_atom_idx is not None and min_dist < 0.5:
+                    # If match found within reasonable tolerance (0.6 Å)
+                    if best_atom_idx is not None and min_dist < 0.6:
                         name = atoms[best_atom_idx].name
                         rdkit_atom = mol.GetAtomWithIdx(mol_idx)
                         rdkit_atom.SetProp("atomLabel", name)
@@ -270,12 +333,58 @@ def prepare_mol_with_charges_and_labels(
 
                         used_atom_indices.add(best_atom_idx)
                     else:
-                        # Get RDKit atom name for debugging
+                        # Try to match using base name (without A/B suffix)
                         rdkit_atom = mol.GetAtomWithIdx(mol_idx)
                         rdkit_name = rdkit_atom.GetProp("name") if rdkit_atom.HasProp("name") else f"Atom{mol_idx}"
-                        print(
-                            f"Warning: Could not match RDKit atom {mol_idx} ({rdkit_name}) to any atom in list (min_dist={min_dist:.3f})"
-                        )
+
+                        # Extract base name from RDKit atom name
+                        base_name = rdkit_name
+                        if base_name and base_name[-1] in "AB" and base_name[-2].isdigit():
+                            base_name = base_name[:-1]
+
+                        # Check if base name matches any atom in our list
+                        if base_name in base_name_to_full:
+                            full_name = base_name_to_full[base_name]
+                            # Find the atom with this full name
+                            for atom_idx, atom in enumerate(atoms):
+                                if atom.name == full_name and atom_idx not in used_atom_indices:
+                                    # Verify distance is reasonable
+                                    atom_coord = atom_coords[atom_idx]
+                                    dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coord)) ** 0.5
+
+                                    if dist < 1.0:  # Use 1.0 Å tolerance for base name matching
+                                        rdkit_atom.SetProp("atomLabel", full_name)
+                                        rdkit_atom.SetProp("name", full_name)
+
+                                        # Add charge as note
+                                        if full_name in charge_dict:
+                                            charge = charge_dict[full_name]
+                                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+
+                                        used_atom_indices.add(atom_idx)
+                                        break
+                            else:
+                                # Found base name match but no unused atom with that full name
+                                # This shouldn't happen, but handle gracefully
+                                print(
+                                    f"Warning: Base name match found for {rdkit_name} -> {full_name}, but all atoms with that name are already used"
+                                )
+                        else:
+                            # No match found even with base name
+                            print(
+                                f"Warning: Could not match RDKit atom {mol_idx} ({rdkit_name}) to any atom in list (min_dist={min_dist:.3f})"
+                            )
+
+            # Remove atoms that have no match in the hybrid topology (no 'name' prop)
+            # These are atoms present in the original MOL2 but not in the hybrid topology
+            unmatched = [atom.GetIdx() for atom in mol.GetAtoms() if not atom.HasProp("name")]
+            if unmatched:
+                from rdkit.Chem import RWMol
+
+                rwmol = RWMol(mol)
+                for idx in sorted(unmatched, reverse=True):
+                    rwmol.RemoveAtom(idx)
+                mol = rwmol.GetMol()
 
             # Try to sanitize for proper bond orders (after matching)
             try:

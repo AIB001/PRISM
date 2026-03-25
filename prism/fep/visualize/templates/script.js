@@ -437,11 +437,12 @@
                     html += `
                         <td class="atom-name">${atomA.name}</td>
                         <td>${atomA.element}</td>
+                        <td>${atomA.type}</td>
                         <td class="atom-charge">${atomA.charge.toFixed(4)}</td>
                         <td><span class="classification-badge ${badgeClass}">${classificationLabels[atomA.classification]}</span></td>
                     `;
                 } else {
-                    html += '<td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
+                    html += '<td>—</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
                 }
 
                 // Ligand B columns
@@ -450,11 +451,12 @@
                     html += `
                         <td class="atom-name" style="border-left: 2px solid #ddd;">${atomB.name}</td>
                         <td>${atomB.element}</td>
+                        <td>${atomB.type}</td>
                         <td class="atom-charge">${atomB.charge.toFixed(4)}</td>
                         <td><span class="classification-badge ${badgeClass}">${classificationLabels[atomB.classification]}</span></td>
                     `;
                 } else {
-                    html += '<td style="border-left: 2px solid #ddd;">—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
+                    html += '<td style="border-left: 2px solid #ddd;">—</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
                 }
 
                 html += '</tr>';

@@ -120,3 +120,28 @@ class MultiEstimatorResults:
             "comparison": self.comparison,
             "metadata": self.metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "MultiEstimatorResults":
+        """
+        Reconstruct MultiEstimatorResults from dictionary
+
+        Parameters
+        ----------
+        data : dict
+            Dictionary with 'methods', 'comparison', and 'metadata' keys
+
+        Returns
+        -------
+        MultiEstimatorResults
+            Reconstructed results object
+        """
+        from prism.fep.analysis.core.models import FEResults
+
+        methods = {name: FEResults(**results_dict) for name, results_dict in data["methods"].items()}
+
+        return cls(
+            methods=methods,
+            comparison=data["comparison"],
+            metadata=data["metadata"],
+        )

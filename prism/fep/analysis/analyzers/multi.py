@@ -99,6 +99,7 @@ class FEPMultiEstimatorAnalyzer:
         show_progress: bool = True,
         skip_bootstrap: bool = False,
         skip_time_convergence: bool = False,
+        cache_file: Optional[Union[str, Path]] = None,
     ):
         """
         Initialize multi-estimator analyzer
@@ -121,6 +122,11 @@ class FEPMultiEstimatorAnalyzer:
             Skip bootstrap error estimation (saves ~30-60 min, default: False)
         skip_time_convergence : bool, optional
             Skip time convergence analysis (saves ~10-15 min, default: False)
+        cache_file : str or Path, optional
+            Path to cache file for saving/loading analysis results.
+            If provided and file exists, results will be loaded from cache
+            instead of re-running analysis. After analysis, results will be
+            saved to this file for future use.
 
         Raises
         ------
@@ -146,6 +152,7 @@ class FEPMultiEstimatorAnalyzer:
         self.show_progress = show_progress
         self.skip_bootstrap = skip_bootstrap
         self.skip_time_convergence = skip_time_convergence
+        self.cache_file = Path(cache_file) if cache_file else None
 
         # Validate estimators
         for estimator_name in self.estimators:
@@ -173,16 +180,44 @@ class FEPMultiEstimatorAnalyzer:
         Run analysis with all estimators
 
         This method:
-        1. Parses XVG files for each estimator with progress bars
-        2. Runs each estimator sequentially
-        3. Builds comparison metrics
-        4. Returns MultiEstimatorResults
+        1. Checks for cached results and loads if available
+        2. Parses XVG files for each estimator with progress bars
+        3. Runs each estimator sequentially
+        4. Builds comparison metrics
+        5. Saves results to cache file if specified
+        6. Returns MultiEstimatorResults
 
         Returns
         -------
         MultiEstimatorResults
             Results from all estimators with comparison metrics
         """
+        # Check cache first
+        if self.cache_file and self.cache_file.exists():
+            self.logger.info(f"Loading cached results from {self.cache_file}")
+            try:
+                import json
+
+                with open(self.cache_file, "r") as f:
+                    cache_data = json.load(f)
+
+                # Verify cache matches current configuration
+                cache_metadata = cache_data.get("metadata", {})
+                cache_estimators = cache_metadata.get("estimators_used", [])
+                cache_temp = cache_metadata.get("temperature")
+
+                if set(cache_estimators) == set(self.estimators) and cache_temp == self.temperature:
+                    self.logger.info("Cache matches current configuration - loading results")
+                    self.results = MultiEstimatorResults.from_dict(cache_data)
+                    return self.results
+                else:
+                    self.logger.warning(
+                        f"Cache mismatch: cache has {cache_estimators} @ {cache_temp}K, "
+                        f"current has {self.estimators} @ {self.temperature}K. Re-running analysis."
+                    )
+            except Exception as e:
+                self.logger.warning(f"Failed to load cache: {e}. Re-running analysis.")
+
         # Step 1: Parse XVG files...
         self.logger.info("Parsing XVG files...")
 
@@ -314,6 +349,19 @@ class FEPMultiEstimatorAnalyzer:
         self.logger.info(f"  Estimators: {', '.join(results.keys())}")
         self.logger.info(f"  ΔG range: {comparison['delta_g_range']:.3f} kcal/mol")
         self.logger.info(f"  Agreement: {comparison['agreement']}")
+
+        # Save to cache if specified
+        if self.cache_file:
+            self.logger.info(f"Saving results to cache: {self.cache_file}")
+            try:
+                import json
+
+                self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.cache_file, "w") as f:
+                    json.dump(self.results.to_dict(), f, indent=2)
+                self.logger.info("Cache saved successfully")
+            except Exception as e:
+                self.logger.warning(f"Failed to save cache: {e}")
 
         return self.results
 
