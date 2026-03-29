@@ -214,37 +214,34 @@ class DistanceAtomMapper:
             # For OpenFF/GAFF: skip atom type check, only use distance + element + charge
             pass
 
-        # Step 1: Distance-based matching (greedy, like FEbuilder)
+        # Step 1: Distance-based matching
+        # Build all valid candidates first, then greedily take the globally best
+        # pairs in distance order. This avoids order-dependent mismatches where an
+        # early acceptable match steals a much better partner from a later atom.
         common = []
+        matched_a_indices = set()
         matched_b_indices = set()
+        candidates = []
 
         for atom_a in ligand_a:
             for atom_b in ligand_b:
-                # Skip if already matched
-                if atom_b.index in matched_b_indices:
-                    continue
-
-                # Check distance
                 dist = np.linalg.norm(atom_a.coord - atom_b.coord)
                 if dist > self.dist_cutoff:
                     continue
-
-                # Check element
                 if atom_a.element != atom_b.element:
                     continue
+                if not uses_generic_types and atom_a.atom_type != atom_b.atom_type:
+                    continue
+                candidates.append((dist, atom_a.index, atom_b.index, atom_a, atom_b))
 
-                # Check atom type (skip only for truly generic types like OpenFF's output_X)
-                # GAFF: ca, c3, ha, hc, ... (position-specific, should check)
-                # CGenFF: CA, CB, CG, HA, HB, ... (position-specific, should check)
-                # OpenFF: output_0, output_1, ... (generic, skip check)
-                if not uses_generic_types:
-                    if atom_a.atom_type != atom_b.atom_type:
-                        continue
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
 
-                # Found a match
-                common.append((atom_a, atom_b))
-                matched_b_indices.add(atom_b.index)
-                break  # Greedy: use first match only
+        for _, _, _, atom_a, atom_b in candidates:
+            if atom_a.index in matched_a_indices or atom_b.index in matched_b_indices:
+                continue
+            common.append((atom_a, atom_b))
+            matched_a_indices.add(atom_a.index)
+            matched_b_indices.add(atom_b.index)
 
         # Step 2: Identify transformed atoms
         matched_a_indices = set(atom_a.index for atom_a, _ in common)

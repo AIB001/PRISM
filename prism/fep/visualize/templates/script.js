@@ -514,6 +514,17 @@
             }
         }
 
+        // Toggle Mapping/Build Log panel
+        const logToggle = document.getElementById('log-toggle');
+        const logContent = document.getElementById('log-content');
+        const logToggleIcon = document.getElementById('log-toggle-icon');
+        if (logToggle && logContent && logToggleIcon) {
+            logToggle.addEventListener('click', () => {
+                logContent.classList.toggle('collapsed');
+                logToggleIcon.textContent = logContent.classList.contains('collapsed') ? '▶' : '▼';
+            });
+        }
+
         // Initial draw
         draw();
         renderAtomTable();

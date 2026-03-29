@@ -206,6 +206,32 @@ def prepare_mol_with_charges_and_labels(
                     base_name = base_name[:-1]
                 base_name_to_full[base_name] = atom.name
 
+            # Read MOL2 charges for all atoms (including those not in hybrid topology)
+            # This is needed for atoms marked as dummy in hybrid topology but real in MOL2
+            mol2_charges = {}
+            try:
+                with open(mol2_file, "r") as f:
+                    in_atoms = False
+                    for line in f:
+                        if line.startswith("@<TRIPOS>ATOM"):
+                            in_atoms = True
+                            continue
+                        if line.startswith("@"):
+                            in_atoms = False
+                            continue
+                        if in_atoms:
+                            parts = line.split()
+                            if len(parts) >= 9:
+                                atom_name = parts[1]
+                                try:
+                                    charge = float(parts[8])
+                                    mol2_charges[atom_name] = charge
+                                except (ValueError, IndexError):
+                                    mol2_charges[atom_name] = 0.0
+            except Exception as e:
+                print(f"Warning: Could not read MOL2 charges: {e}")
+                mol2_charges = {}
+
             # Build coordinate lookup from atoms parameter
             # atoms have coordinates in Angstroms from GRO (converted from nm)
             atom_coords = {i: atom.coord for i, atom in enumerate(atoms)}
@@ -217,99 +243,34 @@ def prepare_mol_with_charges_and_labels(
                 pos = conf.GetAtomPosition(i)
                 mol_coords.append([pos.x, pos.y, pos.z])
 
-            # Match by closest coordinates
-            # OPTIMIZATION: If atoms list has same length as RDKit mol and names are cleaned,
-            # try direct index matching first (more reliable for sorted lists)
+            # Match by closest coordinates WITH ELEMENT CHECK
+            # IMPORTANT: do not assume MOL2 atom order matches hybrid-topology order.
+            # Hybrid topology may reorder atoms (common/transformed/dummy layout), and
+            # using direct index matching can assign hydrogen names to carbon atoms and
+            # vice versa, which corrupts both labels and displayed element identities.
+            # CRITICAL: Must check element symbol match to prevent C/H mismatches!
             used_atom_indices = set()
-            direct_match = len(atoms) == mol.GetNumAtoms()
-
-            if direct_match:
-                # Try direct index matching (faster and more reliable)
-                for mol_idx in range(mol.GetNumAtoms()):
-                    if mol_idx < len(atoms):
-                        atom = atoms[mol_idx]
-                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-                        rdkit_atom.SetProp("atomLabel", atom.name)
-                        rdkit_atom.SetProp("name", atom.name)
-
-                        # Add charge as note
-                        if atom.name in charge_dict:
-                            charge = charge_dict[atom.name]
-                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
-
-                        used_atom_indices.add(mol_idx)
-                    else:
-                        # Fallback to coordinate matching if lengths don't match
-                        direct_match = False
-                        break
-
-                # Check if all atoms were matched successfully
-                # If some atoms have charges missing, try base name matching
-                if len(used_atom_indices) == mol.GetNumAtoms():
-                    # Verify all atoms have charges
-                    all_have_charges = True
-                    missing_charge_atoms = []
-                    for mol_idx in range(mol.GetNumAtoms()):
-                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-                        if not rdkit_atom.HasProp("atomNote"):
-                            all_have_charges = False
-                            rdkit_name = rdkit_atom.GetProp("name") if rdkit_atom.HasProp("name") else f"Atom{mol_idx}"
-                            missing_charge_atoms.append((mol_idx, rdkit_name))
-                            break
-
-                    if not all_have_charges:
-                        # Some atoms lack charges, try to fix with base name matching
-                        print(
-                            f"Direct match succeeded but {len(missing_charge_atoms)} atoms lack charges, trying base name matching..."
-                        )
-                        for mol_idx, rdkit_name in missing_charge_atoms:
-                            rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-
-                            # Extract base name from RDKit atom name
-                            base_name = rdkit_name
-                            if base_name and base_name[-1] in "AB" and base_name[-2].isdigit():
-                                base_name = base_name[:-1]
-
-                            # Check if base name matches any atom in our list
-                            if base_name in base_name_to_full:
-                                full_name = base_name_to_full[base_name]
-                                # Find the atom with this full name
-                                for atom_idx, atom in enumerate(atoms):
-                                    if atom.name == full_name:
-                                        # Add charge as note
-                                        if full_name in charge_dict:
-                                            charge = charge_dict[full_name]
-                                            rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
-                                            print(f"  Fixed charge for {rdkit_name} -> {full_name}: {charge:+.4f}")
-                                        break
-
-                        # If still missing some charges, fall back to coordinate matching
-                        still_missing = []
-                        for mol_idx in range(mol.GetNumAtoms()):
-                            rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-                            if not rdkit_atom.HasProp("atomNote"):
-                                still_missing.append(mol_idx)
-
-                        if len(still_missing) > 0:
-                            print(f"Still missing {len(still_missing)} atoms, falling back to coordinate matching")
-                            used_atom_indices.clear()
-                            direct_match = False
-
-                if not direct_match or len(used_atom_indices) < mol.GetNumAtoms():
-                    # Some atoms failed direct match, fall back to coordinate matching
-                    used_atom_indices.clear()
+            direct_match = False
 
             if not direct_match or len(used_atom_indices) == 0:
-                # Original coordinate-based matching
+                # Original coordinate-based matching with element validation
                 for mol_idx in range(mol.GetNumAtoms()):
                     mol_coord = mol_coords[mol_idx]
+                    rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+                    mol_element = rdkit_atom.GetSymbol()
 
-                    # Find closest atom in atoms list
+                    # Find closest atom in atoms list with matching element
                     min_dist = float("inf")
                     best_atom_idx = None
 
                     for atom_idx, atom_coord in atom_coords.items():
                         if atom_idx in used_atom_indices:
+                            continue
+
+                        # CRITICAL: Check element match first!
+                        # This prevents carbon positions from being labeled with hydrogen names
+                        target_atom = atoms[atom_idx]
+                        if target_atom.element != mol_element:
                             continue
 
                         # Calculate Euclidean distance
@@ -322,7 +283,6 @@ def prepare_mol_with_charges_and_labels(
                     # If match found within reasonable tolerance (0.6 Å)
                     if best_atom_idx is not None and min_dist < 0.6:
                         name = atoms[best_atom_idx].name
-                        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
                         rdkit_atom.SetProp("atomLabel", name)
                         rdkit_atom.SetProp("name", name)
 
@@ -375,9 +335,45 @@ def prepare_mol_with_charges_and_labels(
                                 f"Warning: Could not match RDKit atom {mol_idx} ({rdkit_name}) to any atom in list (min_dist={min_dist:.3f})"
                             )
 
-            # Remove atoms that have no match in the hybrid topology (no 'name' prop)
-            # These are atoms present in the original MOL2 but not in the hybrid topology
-            unmatched = [atom.GetIdx() for atom in mol.GetAtoms() if not atom.HasProp("name")]
+            # For atoms that have no match in the hybrid topology:
+            # Check if they should be preserved (real hydrogens connected to matched carbons)
+            # Some atoms may be marked as dummy in hybrid topology but are real in MOL2
+            unmatched = []
+            to_preserve = set()
+
+            for atom in mol.GetAtoms():
+                if not atom.HasProp("name"):
+                    # This atom didn't match any hybrid topology atom
+                    # Check if it's a hydrogen connected to a matched atom
+                    if atom.GetSymbol() == "H":
+                        # Check neighbors
+                        for neighbor in atom.GetNeighbors():
+                            if neighbor.HasProp("name"):
+                                # This hydrogen is connected to a matched atom
+                                # Preserve it with MOL2 name (try _TriposAtomName first, then _MolFileAtomName)
+                                if atom.HasProp("_TriposAtomName"):
+                                    mol_name = atom.GetProp("_TriposAtomName")
+                                elif atom.HasProp("_MolFileAtomName"):
+                                    mol_name = atom.GetProp("_MolFileAtomName")
+                                else:
+                                    mol_name = f"H{atom.GetIdx()}"
+                                atom.SetProp("name", mol_name)
+                                atom.SetProp("atomLabel", mol_name)
+                                # Estimate charge from similar atoms (0.03 for hc, 0.13 for ha)
+                                # Use a default charge
+                                # Use actual charge from MOL2 file if available
+                                if mol_name in mol2_charges:
+                                    charge = mol2_charges[mol_name]
+                                else:
+                                    charge = 0.03  # Default charge for hc hydrogens
+                                atom.SetProp("atomNote", f"{charge:+.4f}")
+                                to_preserve.add(atom.GetIdx())
+                                break
+
+                    if atom.GetIdx() not in to_preserve:
+                        unmatched.append(atom.GetIdx())
+
+            # Remove only atoms that should be removed (excluding preserved ones)
             if unmatched:
                 from rdkit.Chem import RWMol
 

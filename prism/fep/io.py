@@ -7,13 +7,13 @@ File I/O module for PRISM-FEP
 This module handles reading PRISM-generated files (ITP and GRO) for FEP processing.
 """
 
-from typing import List
+from typing import List, Optional
 import numpy as np
 from prism.gaussian.utils import normalize_element_symbol
 from prism.fep.core.mapping import Atom
 
 
-def read_ligand_from_prism(itp_file: str, gro_file: str) -> List[Atom]:
+def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = None) -> List[Atom]:
     """
     Read ligand information from PRISM-generated ITP and GRO files.
 
@@ -23,9 +23,14 @@ def read_ligand_from_prism(itp_file: str, gro_file: str) -> List[Atom]:
     Parameters
     ----------
     itp_file : str
-        Path to GROMACS ITP file containing atom types, charges, and parameters
+        Path to GROMACS ITP file containing atom types, charges, and parameters.
     gro_file : str
-        Path to GROMACS GRO file containing atomic coordinates
+        Path to GROMACS GRO file containing atomic coordinates.
+    state : str, optional
+        Hybrid-topology state selector: ``"a"`` or ``"b"``. When omitted,
+        regular ligand ITP files are read normally. When provided for a hybrid
+        ITP, dummy atoms are filtered out and state-B atom names are taken from
+        ``; name_b (state B): ...`` comments when present.
 
     Returns
     -------
@@ -43,86 +48,182 @@ def read_ligand_from_prism(itp_file: str, gro_file: str) -> List[Atom]:
     Coordinate conversion:
         GRO files use nanometers (nm), this function converts to Angstroms (Å)
     """
-    # Step 1: Read ITP file to get atom types and charges
+    normalized_state = state.lower() if state is not None else None
+    if normalized_state not in {None, "a", "b"}:
+        raise ValueError(f"Unsupported state: {state}. Expected None, 'a', or 'b'.")
+
     atoms_data = []
+    all_atom_names = set()
+    pending_name_b = None
+
     with open(itp_file, "r") as f:
         in_atoms_section = False
         for line in f:
             line_stripped = line.strip()
 
-            # Find [ atoms ] section
             if "[ atoms ]" in line.lower():
                 in_atoms_section = True
                 continue
-            # Exit section when hitting next section
-            elif line_stripped.startswith("[") and in_atoms_section:
+            if line_stripped.startswith("[") and in_atoms_section:
                 in_atoms_section = False
                 continue
 
-            # Parse atom lines
-            if in_atoms_section and line_stripped and not line_stripped.startswith(";"):
-                parts = line_stripped.split()
-                if len(parts) >= 7:
-                    try:
-                        atom_id = int(parts[0])
-                        atom_type = parts[1]
-                        atom_name = parts[4]
-                        charge = float(parts[6])
-                        atoms_data.append({"id": atom_id, "name": atom_name, "type": atom_type, "charge": charge})
-                    except (ValueError, IndexError) as e:
-                        # Skip malformed lines
-                        continue
+            if not in_atoms_section:
+                continue
 
-    # Step 2: Read GRO file to get coordinates
-    coords = {}
+            if line_stripped.startswith(";"):
+                if normalized_state == "b" and "name_b (state B):" in line_stripped:
+                    pending_name_b = line_stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+
+            if not line_stripped:
+                continue
+
+            # Remove comments (anything after ';')
+            comment_idx = line_stripped.find(";")
+            if comment_idx != -1:
+                line_stripped = line_stripped[:comment_idx].strip()
+
+            parts = line_stripped.split()
+            if len(parts) < 8:
+                continue
+
+            try:
+                atom_id = int(parts[0])
+                atom_name = parts[4]
+                atom_type_a = parts[1]
+                charge_a = float(parts[6])
+                atom_type_b = parts[8] if len(parts) >= 11 else None
+                charge_b = float(parts[9]) if len(parts) >= 11 else None
+            except (ValueError, IndexError):
+                pending_name_b = None
+                continue
+
+            all_atom_names.add(atom_name)
+            atoms_data.append(
+                {
+                    "id": atom_id,
+                    "name": atom_name,
+                    "type_a": atom_type_a,
+                    "charge_a": charge_a,
+                    "type_b": atom_type_b,
+                    "charge_b": charge_b,
+                    "name_b": pending_name_b,
+                }
+            )
+            pending_name_b = None
+
+    if normalized_state is None:
+        selected_atoms = [
+            {
+                "id": atom["id"],
+                "name": atom["name"],
+                "type": atom["type_a"],
+                "charge": atom["charge_a"],
+            }
+            for atom in atoms_data
+        ]
+    else:
+        selected_atoms = []
+        for atom in atoms_data:
+            has_state_b = atom["type_b"] is not None
+            atom_name = atom["name"]
+
+            if normalized_state == "a":
+                if atom["type_a"].startswith("DUM"):
+                    continue
+                selected_atoms.append(
+                    {
+                        "id": atom["id"],
+                        "name": atom_name,
+                        "type": atom["type_a"],
+                        "charge": atom["charge_a"],
+                    }
+                )
+                continue
+
+            if has_state_b:
+                if atom["type_b"].startswith("DUM"):
+                    continue
+                selected_atoms.append(
+                    {
+                        "id": atom["id"],
+                        "name": atom["name_b"] or atom_name,
+                        "type": atom["type_b"],
+                        "charge": atom["charge_b"],
+                    }
+                )
+                continue
+
+            if atom["type_a"].startswith("DUM"):
+                continue
+
+            # FEbuilder may record common A↔B correspondences via `name_b` comments
+            # even when a separate `XXXB` atom also exists in the hybrid topology.
+            # In that case the comment is authoritative for the B-state identity and
+            # must not be discarded by the suffix-based heuristic.
+            if atom["name_b"]:
+                selected_atoms.append(
+                    {
+                        "id": atom["id"],
+                        "name": atom["name_b"],
+                        "type": atom["type_a"],
+                        "charge": atom["charge_a"],
+                    }
+                )
+                continue
+
+            has_b_suffix_partner = f"{atom_name}B" in all_atom_names
+            if has_b_suffix_partner:
+                continue
+            selected_atoms.append(
+                {
+                    "id": atom["id"],
+                    "name": atom_name,
+                    "type": atom["type_a"],
+                    "charge": atom["charge_a"],
+                }
+            )
+
+    coords_by_id = {}
+    coords_by_name = {}
     with open(gro_file, "r") as f:
         lines = f.readlines()
 
-        # GRO format:
-        # Line 1: title
-        # Line 2: atom count
-        # Line 3+: atom_id residue_name residue_name atom_id x y z
-        # Last line: box dimensions
-
-        for line in lines[2:-1]:  # Skip title and box line
+        for line in lines[2:-1]:
             parts = line.split()
-
-            # Handle two GRO formats:
-            # Format 1: resid resname atomname atomid x y z (7 fields) - manual generation
-            # Format 2: residresname atomname atomid x y z (6 fields) - PRISM generation
-
             if len(parts) >= 7:
-                # Format 1: separate resid and resname
+                atom_name = parts[2]
                 atom_id = int(parts[3])
-                x = float(parts[4]) * 10.0  # nm to Å
+                x = float(parts[4]) * 10.0
                 y = float(parts[5]) * 10.0
                 z = float(parts[6]) * 10.0
             elif len(parts) >= 6:
-                # Format 2: combined residue field
+                atom_name = parts[1]
                 atom_id = int(parts[2])
-                x = float(parts[3]) * 10.0  # nm to Å
+                x = float(parts[3]) * 10.0
                 y = float(parts[4]) * 10.0
                 z = float(parts[5]) * 10.0
             else:
                 continue
 
             try:
-                coords[atom_id] = np.array([x, y, z])
+                coord = np.array([x, y, z])
+                coords_by_id[atom_id] = coord
+                coords_by_name[atom_name] = coord
             except (ValueError, IndexError):
                 continue
 
-    # Step 3: Merge data into Atom objects
     atoms = []
-    for atom_data in atoms_data:
+    for atom_data in selected_atoms:
         atom_id = atom_data["id"]
-        element = _extract_element(atom_data["name"])
-
-        # Get coordinate, use default if not found
-        coord = coords.get(atom_id, np.array([0.0, 0.0, 0.0]))
+        atom_name = atom_data["name"]
+        element = _extract_element(atom_name)
+        coord = coords_by_name.get(atom_name, coords_by_id.get(atom_id, np.array([0.0, 0.0, 0.0])))
 
         atoms.append(
             Atom(
-                name=atom_data["name"],
+                name=atom_name,
                 element=element,
                 coord=coord,
                 charge=atom_data["charge"],

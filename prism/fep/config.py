@@ -34,18 +34,22 @@ class FEPConfig:
     - fep.yaml: FEP-specific parameters (mapping cutoffs, charge strategies)
     """
 
-    def __init__(self, work_dir: str):
+    def __init__(self, work_dir: str, config_file: str = "config.yaml", fep_file: str = "fep.yaml"):
         """
         Initialize FEP configuration from work directory
 
         Parameters
         ----------
         work_dir : str
-            Working directory containing config.yaml and fep.yaml
+            Working directory containing the config YAML files.
+        config_file : str, optional
+            Filename of the general config YAML (default: ``config.yaml``).
+        fep_file : str, optional
+            Filename of the FEP-specific YAML (default: ``fep.yaml``).
         """
         self.work_dir = Path(work_dir)
-        self.config_yaml = self.work_dir / "config.yaml"
-        self.fep_yaml = self.work_dir / "fep.yaml"
+        self.config_yaml = self.work_dir / config_file
+        self.fep_yaml = self.work_dir / fep_file
 
         # Load configurations
         self.general_config = self._load_yaml(self.config_yaml)

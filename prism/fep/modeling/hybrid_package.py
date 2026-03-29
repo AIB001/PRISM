@@ -334,7 +334,7 @@ class HybridPackageBuilder:
         """
         ref_coords, ref_box = self._parse_gro_atoms(reference_gro)
         mut_coords, _ = self._parse_gro_atoms(mutant_gro) if mutant_gro else ({}, None)
-        hybrid_atoms = self._parse_hybrid_atoms(hybrid_itp_content)
+        hybrid_atoms, correspondence = self._parse_hybrid_atoms(hybrid_itp_content)
 
         lines = [
             "Hybrid ligand structure",
@@ -342,7 +342,7 @@ class HybridPackageBuilder:
         ]
 
         for idx, atom in enumerate(hybrid_atoms, start=1):
-            x, y, z = self._resolve_hybrid_atom_coordinates(atom, ref_coords, mut_coords)
+            x, y, z = self._resolve_hybrid_atom_coordinates(atom, ref_coords, mut_coords, correspondence)
             lines.append(f"{1:5d}{self.molecule_name:<5s}{atom['name']:>5s}{idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}")
 
         lines.append(self._normalize_box_line(ref_box))
@@ -384,20 +384,31 @@ class HybridPackageBuilder:
         box_line = lines[2 + natoms] if len(lines) > 2 + natoms else None
         return coords_by_name, box_line
 
-    def _parse_hybrid_atoms(self, hybrid_itp_content: str) -> list[Dict[str, str]]:
+    def _parse_hybrid_atoms(self, hybrid_itp_content: str) -> tuple[list[Dict[str, str]], Dict[str, str]]:
         """
         Parse [ atoms ] section from hybrid ITP.
 
+        Also extracts FEbuilder correspondence comments.
+
         Returns
         -------
-        list[Dict[str, str]]
-            List of atom dictionaries with keys: name, type, resname
+        tuple[list[Dict[str, str]], Dict[str, str]]
+            (List of atom dictionaries, correspondence map)
+            correspondence map: state A name -> state B name
         """
         atoms = []
+        correspondence = {}
         in_atoms = False
+        pending_correspondence = None
 
         for line in hybrid_itp_content.splitlines():
             stripped = line.strip()
+
+            # Check for FEbuilder correspondence comment
+            if stripped.startswith(";") and "name_b (state B):" in stripped:
+                pending_correspondence = stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+
             if stripped.lower() == "[ atoms ]":
                 in_atoms = True
                 continue
@@ -410,21 +421,28 @@ class HybridPackageBuilder:
             if len(parts) < 5:
                 continue
 
+            atom_name = parts[4]
             atoms.append(
                 {
-                    "name": parts[4],
+                    "name": atom_name,
                     "type": parts[1],
                     "resname": parts[3],
                 }
             )
 
-        return atoms
+            # Record correspondence if available
+            if pending_correspondence:
+                correspondence[atom_name] = pending_correspondence
+                pending_correspondence = None
+
+        return atoms, correspondence
 
     def _resolve_hybrid_atom_coordinates(
         self,
         atom: Dict[str, str],
         ref_coords: Dict[str, list[Dict[str, float]]],
         mut_coords: Dict[str, list[Dict[str, float]]],
+        correspondence: Dict[str, str],
     ) -> tuple[float, float, float]:
         """
         Resolve coordinates for a hybrid atom.
@@ -432,7 +450,23 @@ class HybridPackageBuilder:
         For dual-topology FEP:
         - Real atoms in state A get coordinates from reference
         - Real atoms in state B (DUM_ in state A) get coordinates from mutant
-        - No coordinate offset applied - bonded parameters will guide atoms to correct positions during EM
+        - If FEbuilder correspondence exists, use corresponding atom coordinates from mutant
+
+        Parameters
+        ----------
+        atom : Dict[str, str]
+            Atom dictionary with keys: name, type, resname
+        ref_coords : Dict[str, list[Dict[str, float]]]
+            Reference ligand coordinates (by atom name)
+        mut_coords : Dict[str, list[Dict[str, float]]]
+            Mutant ligand coordinates (by atom name)
+        correspondence : Dict[str, str]
+            FEbuilder correspondence map (state A name -> state B name)
+
+        Returns
+        -------
+        tuple[float, float, float]
+            (x, y, z) coordinates
         """
         atom_name = atom["name"]
         atom_type = atom["type"]
@@ -446,6 +480,16 @@ class HybridPackageBuilder:
         if atom_type.startswith("DUM_") and atom_name in mut_coords and mut_coords[atom_name]:
             coord = mut_coords[atom_name][0]
             return coord["x"], coord["y"], coord["z"]
+
+        # If atom has FEbuilder correspondence, try using corresponding atom from mutant
+        if atom_name in correspondence:
+            corresponding_name_b = correspondence[atom_name]
+            # Try with B suffix (e.g., H08 -> H08B)
+            for suffix in ["", "B"]:
+                candidate_name = f"{corresponding_name_b}{suffix}"
+                if candidate_name in mut_coords and mut_coords[candidate_name]:
+                    coord = mut_coords[candidate_name][0]
+                    return coord["x"], coord["y"], coord["z"]
 
         # Default to origin (should not happen)
         return 0.0, 0.0, 0.0

@@ -44,6 +44,7 @@ def visualize_mapping_html(
     config: Optional[dict] = None,
     total_charge_a: Optional[float] = None,
     total_charge_b: Optional[float] = None,
+    build_log: Optional[str] = None,
 ) -> None:
     """Generate interactive HTML visualization of atom mapping using Canvas.
 
@@ -105,6 +106,7 @@ def visualize_mapping_html(
         config,
         total_charge_a,
         total_charge_b,
+        build_log,
     )
 
     # Save HTML
@@ -182,6 +184,15 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
         element_color = _get_element_color(element)
         radius = _get_atom_radius(element)
 
+        # Get charge: first check atomNote property (for atoms from MOL2), then charge_dict
+        if atom.HasProp("atomNote"):
+            try:
+                charge = float(atom.GetProp("atomNote"))
+            except ValueError:
+                charge = charge_dict.get(name, 0.0)
+        else:
+            charge = charge_dict.get(name, 0.0)
+
         # Center and scale coordinates (RDKit 2D coords are ~1-2 Å units, scale to pixels)
         scale = 30.0
         x = (pos.x - avg_x) * scale
@@ -195,7 +206,7 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
                 "x": float(x),
                 "y": float(y),
                 "radius": radius,
-                "charge": charge_dict.get(name, 0.0),
+                "charge": charge,
                 "type": type_dict.get(name, ""),
                 "classification": classification,
                 "fepColor": fep_color,
@@ -308,6 +319,7 @@ def _generate_canvas_html(
     config: Optional[dict] = None,
     total_charge_a: float = 0.0,
     total_charge_b: float = 0.0,
+    build_log: Optional[str] = None,
 ) -> str:
     """Generate complete HTML with proper Canvas transforms."""
 
@@ -392,6 +404,22 @@ def _generate_canvas_html(
         </div>
         <div class="config-content" id="config-content">
             {"".join(rows)}
+        </div>
+    </div>
+"""
+
+    # Build log section
+    log_section = ""
+    if build_log:
+        escaped_log = build_log.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        log_section = f"""
+    <div class=\"log-panel\">
+        <div class=\"log-header\" id=\"log-toggle\">
+            <div><h3 style=\"display:inline;\">Mapping/Build Log</h3><span class=\"log-note\">(collapsed by default)</span></div>
+            <span class=\"toggle-icon\" id=\"log-toggle-icon\">▶</span>
+        </div>
+        <div class=\"log-content collapsed\" id=\"log-content\">
+            <pre class=\"log-pre\">{escaped_log}</pre>
         </div>
     </div>
 """
@@ -588,6 +616,7 @@ def _generate_canvas_html(
 
 {js_content}
     </script>
+{log_section}
 </div>
 </body>
 </html>"""
