@@ -117,41 +117,10 @@ builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
 5. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
 6. **Memory errors**: Large systems may require more RAM during parameterization
 
-## FEP Module Troubleshooting
+## Module-Specific Documentation
 
-### PNG Generation Fails with RDKit Error
-**Symptom**: `ValueError: Depict error: Substructure match with reference not found`
-
-**Cause**: Multi-point mutations (e.g., 39-8 system) may have too different structures for RDKit alignment
-
-**Solution**: HTML visualization works fine. PNG will generate with warning using default coordinates.
-
-### Gray Atoms in HTML Visualization
-**Symptom**: Some atoms appear gray/uncolored with `classification: "unknown"` and `charge: 0.0`
-
-**Diagnosis**:
-```python
-# Check mapping coverage
-total_a = len(mapping.common) + len(mapping.transformed_a) + len(mapping.surrounding_a)
-total_b = len(mapping.common) + len(mapping.transformed_b) + len(mapping.surrounding_b)
-
-print(f"Ligand A: {total_a}/{len(atoms_a)} classified")
-print(f"Ligand B: {total_b}/{len(atoms_b)} classified")
-```
-
-**Solution**: Usually caused by RDKit hydrogen handling. Verify using PDB files directly (not MOL2) for CHARMM-GUI systems.
-
-### Recommended Test Systems
-- **42-38**: Single-point mutation, high structure similarity ✅ **Recommended**
-- **oMeEtPh-EtPh**: Terminal ethyl methyl transformation
-- **39-8**: Multi-point mutations, may trigger PNG alignment issues
-
-### FEP Testing Checklist
-- [ ] All atoms are classified (no gray atoms in HTML)
-- [ ] Total charges are reasonable (≈0 for neutral molecules)
-- [ ] Mapping coverage: `total = common + transformed + surrounding`
-- [ ] PNG generates successfully (or shows appropriate warning)
-- [ ] HTML shows warning banner if problems detected
+- **FEP Module**: See `prism/fep/CLAUDE.md` for FEP-specific guidelines and troubleshooting
+- **PMF Module**: See `prism/pmf/CLAUDE.md` for PMF-specific guidelines
 
 ## Entry Points
 
@@ -166,43 +135,8 @@ Test data in `test/4xb4/` contains complete protein-ligand example. MDP template
 
 Git commit message format: `[module] description;xxx`. Don't be too long!
 
-## FEbuilder Ligand Conversion (AMBER → CHARMM)
+## Development Notes
 
-### Quick Start
-```bash
-# Environment setup
-conda activate /home/gxf1212/.conda/envs/prism
-pip install -e .  # Enables prism package imports system-wide
-
-# Batch convert all ligands to CHARMM/NAMD format
-python test/modeling/FEbuilder_FF/AMBER/generate_charmm_ff.py
-```
-
-### Process & Implementation
-
-**Conversion Pipeline**: `mol2` → `GAFF` (via antechamber/tleap) → `CHARMM RTF/PRM` (via `AmberToCharmmConverter`)
-
-1. **GAFFForceFieldGenerator** populates `test/modeling/FEbuilder_FF/AMBER/_build/<name>/LIG.amb2gmx/` with GROMACS-format files
-2. **AmberToCharmmConverter** converts GAFF parameters to CHARMM topology (RTF) and parameters (PRM) files
-3. Output: `<name>.rtf`, `<name>.prm`, `<name>.pdb`, `<name>_3D.mol2` in the AMBER directory
-
-### Important: Atom Type Naming for FEP
-
-When converting multiple ligands for FEP (free energy perturbation) calculations, **each molecule gets a unique residue-name prefix** to avoid VMD psfgen type conflicts:
-- Molecule `38.mol2` → types like `38_ca`, `38_c3`, `38_sy` (residue name "38")
-- Molecule `42.mol2` → types like `42_ca`, `42_c3`, `42_sy` (residue name "42")
-
-This prevents "duplicate type key" warnings when loading multiple force field topologies simultaneously in VMD.
-
-**Customization**:
-- Single molecule with custom residue name: `python generate_charmm_ff.py --resname XXX path/to/ligand.mol2`
-- Force regeneration: add `--overwrite` flag (requires AmberTools installed)
-
-📝 关于LSP vs grep：LSP工具更高效：
-  - LSP: 语义理解，直接定位符号定义和引用
-  - grep: 文本搜索，需要人类解读结果
-今后会优先使用LSP工具（mcp__cclsp__系列）or serena来查找符号，这样可以：
-  1. 更准确地找到定义
-  2. 自动跳过注释/字符串中的匹配
-  3. 减少token消耗（直接获取结构化信息）
-  
+- **LSP vs grep**: Prefer LSP tools (mcp__cclsp*) for symbol finding - more accurate, skips comments/strings
+- **Commit messages**: Should reflect all recent changes in the commit
+- **File creation**: Avoid creating files in root directory
