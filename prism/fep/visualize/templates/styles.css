@@ -502,17 +502,15 @@
         .toggle-buttons input[type="radio"] {
             display: none;
         }
-        .toggle-btn {
+        .toggle-buttons .toggle-btn {
             padding: 6px 12px;
             background: #f8f9fa;
             border: none;
             cursor: pointer;
             font-size: 13px;
             transition: all 0.2s;
-            border-right: 1px solid #ddd;
-        }
-        .toggle-btn:last-child {
-            border-right: none;
+            display: inline-block;
+            margin: 0 !important;  /* Override .toolbar label margin-right */
         }
         .toggle-btn:hover {
             background: #e9ecef;
@@ -520,10 +518,8 @@
         .toggle-buttons input[type="radio"]:checked + .toggle-btn {
             background: #007bff;
             color: white;
-            border-right: 1px solid #0056b3;
-        }
-        .toggle-buttons input[type="radio"]:checked + .toggle-btn:last-child {
-            border-right: none;
+            display: inline-block;
+            margin: 0;
         }
 
         /* Legend Content Styles */

@@ -19,7 +19,6 @@ from prism.fep.io import read_ligand_from_prism
 from prism.fep.core.mapping import DistanceAtomMapper
 from prism.fep.visualize import visualize_mapping_png, visualize_mapping_html
 from prism.utils.config import ConfigurationManager
-from conftest import resolve_fep_case_dir
 
 
 @pytest.mark.slow
@@ -197,7 +196,7 @@ def test_charmm_gui_file_structure():
     test_cases = ["39-8", "25-36"]
 
     for case in test_cases:
-        case_dir = resolve_fep_case_dir(case)
+        case_dir = Path(__file__).parent / case
         print(f"\n测试案例: {case}")
 
         for ligand_name in ["39", "8", "25", "36"]:

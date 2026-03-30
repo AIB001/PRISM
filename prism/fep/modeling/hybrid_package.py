@@ -23,14 +23,40 @@ class HybridPackageBuilder:
     and ligand_seed.pdb from reference and mutant ligand directories.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        hybrid_itp_filename: str = "hybrid.itp",
+        hybrid_atomtypes_filename: str = "atomtypes_hybrid.itp",
+        hybrid_forcefield_filename: str = "ff_hybrid.itp",
+        hybrid_posre_filename: str = "posre_hybrid.itp",
+        hybrid_gro_filename: str = "hybrid.gro",
+        molecule_name: str = "HYB",
+    ):
+        """
+        Initialize with customizable filenames.
+
+        Parameters
+        ----------
+        hybrid_itp_filename : str
+            Filename for hybrid ITP file (default: "hybrid.itp")
+        hybrid_atomtypes_filename : str
+            Filename for hybrid atomtypes file (default: "atomtypes_hybrid.itp")
+        hybrid_forcefield_filename : str
+            Filename for hybrid forcefield file (default: "ff_hybrid.itp")
+        hybrid_posre_filename : str
+            Filename for hybrid position restraint file (default: "posre_hybrid.itp")
+        hybrid_gro_filename : str
+            Filename for hybrid GRO file (default: "hybrid.gro")
+        molecule_name : str
+            Molecule name for hybrid topology (default: "HYB")
+        """
         # Filenames for hybrid assets
-        self.hybrid_itp_filename = "hybrid.itp"
-        self.hybrid_atomtypes_filename = "atomtypes_hybrid.itp"
-        self.hybrid_forcefield_filename = "ff_hybrid.itp"
-        self.hybrid_posre_filename = "posre_hybrid.itp"
-        self.hybrid_gro_filename = "hybrid.gro"
-        self.molecule_name = "HYB"
+        self.hybrid_itp_filename = hybrid_itp_filename
+        self.hybrid_atomtypes_filename = hybrid_atomtypes_filename
+        self.hybrid_forcefield_filename = hybrid_forcefield_filename
+        self.hybrid_posre_filename = hybrid_posre_filename
+        self.hybrid_gro_filename = hybrid_gro_filename
+        self.molecule_name = molecule_name
 
     def prepare_hybrid_package_from_components(
         self,
@@ -63,13 +89,29 @@ class HybridPackageBuilder:
 
         # Add bonded sections if needed
         if self._itp_needs_bonded_sections(normalized_itp):
+            # Auto-discover ligand ITP files (handle LIG.amb2gmx/ subdirectory)
+            def _resolve_ligand_itp(ligand_dir: Path) -> str:
+                """Resolve ligand ITP path, handling LIG.amb2gmx/ subdirectory."""
+                # Try direct path
+                direct_path = ligand_dir / "LIG.itp"
+                if direct_path.exists():
+                    return str(direct_path)
+
+                # Try LIG.amb2gmx/LIG.itp (PRISM output structure)
+                amb2gmx_path = ligand_dir / "LIG.amb2gmx" / "LIG.itp"
+                if amb2gmx_path.exists():
+                    return str(amb2gmx_path)
+
+                raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir}")
+
+            ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
+            ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
+
             ITPBuilder.write_complete_hybrid_itp(
                 output_path=str(hybrid_itp_output),
                 hybrid_itp=str(hybrid_itp_output),
-                ligand_a_itp=str(reference_ligand_dir / "LIG.itp"),
-                ligand_b_itp=str(mutant_ligand_dir / "LIG.itp")
-                if mutant_ligand_dir
-                else str(reference_ligand_dir / "LIG.itp"),
+                ligand_a_itp=ligand_a_itp,
+                ligand_b_itp=ligand_b_itp,
                 molecule_name=self.molecule_name,
             )
             normalized_itp = hybrid_itp_output.read_text()
@@ -87,10 +129,23 @@ class HybridPackageBuilder:
         (hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
 
         # Build hybrid GRO file
+        # Auto-discover mutant GRO file (handle LIG.amb2gmx/ subdirectory)
+        mutant_gro = None
+        if mutant_ligand_dir:
+            # Try direct path
+            direct_path = mutant_ligand_dir / "LIG.gro"
+            if direct_path.exists():
+                mutant_gro = direct_path
+            else:
+                # Try LIG.amb2gmx/LIG.gro (PRISM output structure)
+                amb2gmx_path = mutant_ligand_dir / "LIG.amb2gmx" / "LIG.gro"
+                if amb2gmx_path.exists():
+                    mutant_gro = amb2gmx_path
+
         hybrid_gro_content = self._build_hybrid_gro(
             hybrid_itp_content=normalized_itp,
             reference_gro=seed_gro,
-            mutant_gro=(mutant_ligand_dir / "LIG.gro") if mutant_ligand_dir else None,
+            mutant_gro=mutant_gro,
         )
         (hybrid_dir / self.hybrid_gro_filename).write_text(hybrid_gro_content)
 
@@ -98,7 +153,12 @@ class HybridPackageBuilder:
         (hybrid_dir / "ligand_seed.pdb").write_text(self._gro_to_pdb(hybrid_dir / self.hybrid_gro_filename))
 
         # Copy position restraints if available
+        # Auto-discover posre file (handle LIG.amb2gmx/ subdirectory)
         ref_posre = reference_ligand_dir / "posre_LIG.itp"
+        if not ref_posre.exists():
+            # Try LIG.amb2gmx/posre_LIG.itp (PRISM output structure)
+            ref_posre = reference_ligand_dir / "LIG.amb2gmx" / "posre_LIG.itp"
+
         if ref_posre.exists():
             shutil.copy2(ref_posre, hybrid_dir / self.hybrid_posre_filename)
 
@@ -169,9 +229,16 @@ class HybridPackageBuilder:
         for ligand_dir in [reference_ligand_dir, mutant_ligand_dir]:
             if ligand_dir is None:
                 continue
+
+            # Try to find atomtypes_LIG.itp (handle LIG.amb2gmx/ subdirectory)
             atomtypes_file = ligand_dir / "atomtypes_LIG.itp"
             if not atomtypes_file.exists():
+                # Try LIG.amb2gmx/atomtypes_LIG.itp (PRISM output structure)
+                atomtypes_file = ligand_dir / "LIG.amb2gmx" / "atomtypes_LIG.itp"
+
+            if not atomtypes_file.exists():
                 continue
+
             for atomtype_name, line in self._parse_atomtypes_file(atomtypes_file).items():
                 atomtypes.setdefault(atomtype_name, line)
         return atomtypes

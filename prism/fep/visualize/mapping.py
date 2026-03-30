@@ -19,25 +19,49 @@ from .molecule import prepare_mol_with_charges_and_labels
 from .highlight import create_highlight_info
 
 
-def _align_mols_2d(mol_a: Chem.Mol, mol_b: Chem.Mol) -> None:
+def _align_mols_2d(mol_a: Chem.Mol, mol_b: Chem.Mol) -> bool:
     """
     Align 2D depictions to their maximum common structure.
 
     Replicates FEbuilder's align_mols_2d function.
-    """
-    mcs = Chem.rdFMCS.FindMCS(
-        [mol_a, mol_b],
-        atomCompare=rdFMCS.AtomCompare.CompareAny,
-        bondCompare=rdFMCS.BondCompare.CompareAny,
-        ringMatchesRingOnly=True,
-    )
-    core = Chem.MolFromSmarts(mcs.smartsString)
-    _ = AllChem.Compute2DCoords(core)
 
-    for mol in [mol_a, mol_b]:
-        _ = AllChem.Compute2DCoords(mol)
-        _ = AllChem.GenerateDepictionMatching2DStructure(mol, core)
-        _ = AllChem.NormalizeDepiction(mol)
+    Returns
+    -------
+    bool
+        True if alignment succeeded, False if it failed (but coordinates were generated)
+    """
+    try:
+        mcs = Chem.rdFMCS.FindMCS(
+            [mol_a, mol_b],
+            atomCompare=rdFMCS.AtomCompare.CompareAny,
+            bondCompare=rdFMCS.BondCompare.CompareAny,
+            ringMatchesRingOnly=True,
+        )
+        core = Chem.MolFromSmarts(mcs.smartsString)
+        _ = AllChem.Compute2DCoords(core)
+
+        for mol in [mol_a, mol_b]:
+            _ = AllChem.Compute2DCoords(mol)
+            _ = AllChem.GenerateDepictionMatching2DStructure(mol, core)
+            _ = AllChem.NormalizeDepiction(mol)
+
+        return True
+
+    except ValueError as e:
+        # 2D alignment failed - use default coordinates
+        import warnings
+
+        warnings.warn(f"Warning: 2D alignment failed, continuing without alignment: {e}", UserWarning)
+
+        # Fallback: generate default 2D coordinates without alignment
+        for mol in [mol_a, mol_b]:
+            try:
+                _ = AllChem.Compute2DCoords(mol)
+            except Exception:
+                # If even basic coordinate generation fails, skip this molecule
+                pass
+
+        return False
 
 
 def visualize_mapping_png(

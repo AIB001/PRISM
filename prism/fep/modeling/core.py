@@ -69,6 +69,56 @@ class FEPScaffoldBuilder:
         self.hybrid_builder = HybridPackageBuilder()
         self.leg_writer = LegWriter(self.output_dir)
 
+        # Sync hybrid builder filenames with scaffold builder
+        self.hybrid_itp_filename = self.hybrid_builder.hybrid_itp_filename
+        self.hybrid_atomtypes_filename = self.hybrid_builder.hybrid_atomtypes_filename
+        self.hybrid_forcefield_filename = self.hybrid_builder.hybrid_forcefield_filename
+        self.hybrid_posre_filename = self.hybrid_builder.hybrid_posre_filename
+        self.hybrid_gro_filename = self.hybrid_builder.hybrid_gro_filename
+        self.molecule_name = self.hybrid_builder.molecule_name
+
+    def _discover_ligand_dir(self, base_dir: Path) -> Path:
+        """
+        Automatically discover ligand force field directory.
+
+        Search patterns:
+        1. base_dir/*/LIG.itp
+        2. base_dir/*/*.itp
+        3. base_dir/LIG.itp
+
+        Parameters
+        ----------
+        base_dir : Path
+            Base directory to search
+
+        Returns
+        -------
+        Path
+            Path to ligand directory
+
+        Raises
+        ------
+        FileNotFoundError
+            If no ligand ITP file found
+        """
+        # Pattern 1: */LIG.itp
+        itp_files = list(base_dir.glob("*/LIG.itp"))
+        if itp_files:
+            return itp_files[0].parent
+
+        # Pattern 2: */*.itp (any ITP file)
+        itp_files = list(base_dir.glob("*/*.itp"))
+        if itp_files:
+            return itp_files[0].parent
+
+        # Pattern 3: LIG.itp in base_dir
+        if (base_dir / "LIG.itp").exists():
+            return base_dir
+
+        raise FileNotFoundError(
+            f"Cannot find ligand ITP file in {base_dir}. " f"Expected patterns: */LIG.itp, */*.itp, or LIG.itp"
+        )
+
         # Default hybrid asset filenames (used by build() with pre-built hybrid dirs)
         self.hybrid_itp_filename = "LIG.itp"
         self.hybrid_atomtypes_filename = "atomtypes_LIG.itp"
@@ -103,6 +153,7 @@ class FEPScaffoldBuilder:
         hybrid_gro: Optional[str] = None,
         bound_system_dir: Optional[str] = None,
         unbound_system_dir: Optional[str] = None,
+        auto_discover: bool = False,
     ) -> FEPScaffoldLayout:
         """
         Create the scaffold from an existing hybrid ITP plus ligand FF directories.
@@ -126,6 +177,8 @@ class FEPScaffoldBuilder:
             Path to PRISM-built bound system (GMX_PROLIG_MD directory)
         unbound_system_dir : Optional[str]
             Path to PRISM-built unbound system (GMX_PROLIG_MD directory)
+        auto_discover : bool, optional
+            Automatically discover ligand directories (default: False)
 
         Returns
         -------
@@ -134,8 +187,17 @@ class FEPScaffoldBuilder:
         """
         receptor_path = Path(receptor_pdb)
         hybrid_itp_path = Path(hybrid_itp)
-        reference_ligand_path = Path(reference_ligand_dir)
-        mutant_ligand_path = Path(mutant_ligand_dir) if mutant_ligand_dir else None
+
+        # Auto-discover ligand directories if requested
+        if auto_discover:
+            reference_ligand_path = self._discover_ligand_dir(Path(reference_ligand_dir))
+            if mutant_ligand_dir:
+                mutant_ligand_path = self._discover_ligand_dir(Path(mutant_ligand_dir))
+            else:
+                mutant_ligand_path = None
+        else:
+            reference_ligand_path = Path(reference_ligand_dir)
+            mutant_ligand_path = Path(mutant_ligand_dir) if mutant_ligand_dir else None
 
         # Validate inputs
         if not receptor_path.exists():
@@ -157,7 +219,16 @@ class FEPScaffoldBuilder:
         if hybrid_gro:
             seed_gro = Path(hybrid_gro)
         else:
+            # Auto-discover LIG.gro (handle LIG.amb2gmx/ subdirectory)
             seed_gro = reference_ligand_path / "LIG.gro"
+            if not seed_gro.exists():
+                # Try LIG.amb2gmx/LIG.gro (PRISM output structure)
+                seed_gro = reference_ligand_path / "LIG.amb2gmx" / "LIG.gro"
+            if not seed_gro.exists():
+                # Try any */LIG.gro pattern
+                gro_files = list(reference_ligand_path.glob("*/LIG.gro"))
+                if gro_files:
+                    seed_gro = gro_files[0]
 
         if not seed_gro.exists():
             raise FileNotFoundError(f"Seed GRO file not found: {seed_gro}")

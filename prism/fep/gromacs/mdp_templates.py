@@ -170,6 +170,20 @@ def write_fep_mdps(
         if soft_core_sigma == 0.3 and "soft_core_sigma" in fep_cfg:
             soft_core_sigma = fep_cfg["soft_core_sigma"]
 
+    # For decoupled strategy, if total_windows is customized (not default 32),
+    # scale coul_windows and vdw_windows proportionally
+    if lambda_strategy == "decoupled" and lambda_windows != 32:
+        # Default ratio: 12:20 = 3:5 (coul:vdw)
+        default_total = 32
+        coul_ratio = coul_windows / default_total
+        vdw_ratio = vdw_windows / default_total
+
+        # Scale to target total_windows
+        coul_windows = max(1, int(lambda_windows * coul_ratio))
+        vdw_windows = max(1, lambda_windows - coul_windows)  # Ensure exact sum
+
+        print(f"  📊 Lambda windows: {lambda_windows} total → {coul_windows} coul + {vdw_windows} vdw")
+
     # Temperature and pressure
     temp = sim_cfg.get("temperature", prism_config.get("md", {}).get("temperature", 310))
     pressure = sim_cfg.get("pressure", prism_config.get("md", {}).get("pressure", 1.0))

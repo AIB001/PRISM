@@ -64,6 +64,49 @@ output_dir = system.build()
 - **Modularity**: Clean separation between force field generators, system building, and simulation
 - **GPU support**: Optimized GROMACS commands for GPU acceleration
 - **Resume capability**: Check for existing files and resume from checkpoints
+- **Naming consistency**: Follow standardized naming conventions (see `NAMING_CONVENTIONS.md`)
+
+## Standard Naming Conventions
+
+**CRITICAL**: All new code MUST follow the standardized naming conventions defined in `NAMING_CONVENTIONS.md`.
+
+### Key Rules
+
+1. **System Directories**: Always use `GMX_PROLIG_*` prefix
+   - ✅ `GMX_PROLIG_MD/`, `GMX_PROLIG_FEP/`, `GMX_PROLIG_PMF/`
+   - ❌ `FEP_SYSTEM/`, `output/`, `my_system/`
+
+2. **Force Field Directories**: Use `ffgen.get_output_dir_name()` method
+   - ✅ `ff_dir = output_dir / ffgen.get_output_dir_name()`
+   - ❌ `ff_dir = output_dir / "LIG.amb2gmx"`
+
+3. **Test Directories**: Use descriptive, forcefield-specific names
+   - ✅ `gaff_test/`, `openff_test/`, `test_42_38/`
+   - ❌ `gaff2_e2e_test/`, `ligand_42/`, `test_output_final/`
+
+4. **Never hardcode paths**:
+   - ✅ `prism_dir = ligand_output / ffgen.get_output_dir_name()`
+   - ❌ `prism_dir = "output/LIG.amb2gmx"`
+
+### Examples
+
+```python
+# ✅ Correct - Using standardized methods
+ffgen = GAFFForceFieldGenerator(ligand_path="lig.mol2", output_dir="gaff_test")
+ffgen.run()
+prism_dir = Path(ffgen.output_dir) / ffgen.get_output_dir_name()
+
+# ✅ Correct - Standard system naming
+builder = FEPScaffoldBuilder(output_dir="GMX_PROLIG_FEP")
+
+# ❌ Wrong - Hardcoded path
+prism_dir = "gaff_test/LIG.amb2gmx"
+
+# ❌ Wrong - Non-standard naming
+builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
+```
+
+**See `NAMING_CONVENTIONS.md` for complete specification.**
 
 ## Common Issues
 
@@ -73,6 +116,42 @@ output_dir = system.build()
 4. **Ion addition failures**: Ensure system contains water molecules, check GROMACS can find solvent groups
 5. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
 6. **Memory errors**: Large systems may require more RAM during parameterization
+
+## FEP Module Troubleshooting
+
+### PNG Generation Fails with RDKit Error
+**Symptom**: `ValueError: Depict error: Substructure match with reference not found`
+
+**Cause**: Multi-point mutations (e.g., 39-8 system) may have too different structures for RDKit alignment
+
+**Solution**: HTML visualization works fine. PNG will generate with warning using default coordinates.
+
+### Gray Atoms in HTML Visualization
+**Symptom**: Some atoms appear gray/uncolored with `classification: "unknown"` and `charge: 0.0`
+
+**Diagnosis**:
+```python
+# Check mapping coverage
+total_a = len(mapping.common) + len(mapping.transformed_a) + len(mapping.surrounding_a)
+total_b = len(mapping.common) + len(mapping.transformed_b) + len(mapping.surrounding_b)
+
+print(f"Ligand A: {total_a}/{len(atoms_a)} classified")
+print(f"Ligand B: {total_b}/{len(atoms_b)} classified")
+```
+
+**Solution**: Usually caused by RDKit hydrogen handling. Verify using PDB files directly (not MOL2) for CHARMM-GUI systems.
+
+### Recommended Test Systems
+- **42-38**: Single-point mutation, high structure similarity ✅ **Recommended**
+- **oMeEtPh-EtPh**: Terminal ethyl methyl transformation
+- **39-8**: Multi-point mutations, may trigger PNG alignment issues
+
+### FEP Testing Checklist
+- [ ] All atoms are classified (no gray atoms in HTML)
+- [ ] Total charges are reasonable (≈0 for neutral molecules)
+- [ ] Mapping coverage: `total = common + transformed + surrounding`
+- [ ] PNG generates successfully (or shows appropriate warning)
+- [ ] HTML shows warning banner if problems detected
 
 ## Entry Points
 

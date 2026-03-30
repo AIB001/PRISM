@@ -12,7 +12,7 @@ from typing import List, Optional
 from pathlib import Path
 
 
-def pdb_to_mol(pdb_file: str, remove_hs: bool = False) -> "Chem.Mol":
+def pdb_to_mol(pdb_file: str) -> "Chem.Mol":
     """
     Convert PDB file to RDKit Mol object with proper labeling.
 
@@ -20,8 +20,6 @@ def pdb_to_mol(pdb_file: str, remove_hs: bool = False) -> "Chem.Mol":
     ----------
     pdb_file : str
         Path to PDB file
-    remove_hs : bool, optional
-        Whether to remove hydrogens (default: False)
 
     Returns
     -------
@@ -49,13 +47,18 @@ def pdb_to_mol(pdb_file: str, remove_hs: bool = False) -> "Chem.Mol":
         raise FileNotFoundError(f"PDB file not found: {pdb_file}")
 
     # Read PDB file
-    mol = Chem.MolFromPDBFile(pdb_file, removeHs=remove_hs)
+    # IMPORTANT: Use removeHs=False to keep all atoms (including explicit hydrogens)
+    # CHARMM-GUI PDB files already have all hydrogens explicitly defined
+    # We do NOT call Chem.AddHs() because it adds extra implicit hydrogens
+    # that create gray atoms in visualization (names like "Atom32", "Atom33")
+    mol = Chem.MolFromPDBFile(pdb_file, removeHs=False)
     if mol is None:
         raise ValueError(f"Failed to read PDB file: {pdb_file}")
 
-    # Add hydrogens if not removing them
-    if not remove_hs:
-        mol = Chem.AddHs(mol)
+    # DO NOT add hydrogens - CHARMM-GUI files already have all hydrogens
+    # Chem.AddHs() adds implicit hydrogens that don't match the mapping data
+    # if not remove_hs:
+    #     mol = Chem.AddHs(mol)  # <-- REMOVED to fix gray atom bug
 
     # Sanitize: infer bond orders, aromaticity, hybridization
     try:
@@ -410,49 +413,33 @@ def prepare_mol_with_charges_and_labels(
     else:
         mol = pdb_to_mol(pdb_file)
 
-    # Convert to SMILES and back (FEbuilder style - may reorder atoms)
-    try:
-        newmol = Chem.MolFromSmiles(Chem.MolToSmiles(mol))
-        if newmol is None:
-            raise ValueError("Failed to generate SMILES from molecule")
-        newmol = Chem.AddHs(newmol)
-    except Exception as e:
-        raise ValueError(f"Failed to process molecule: {e}")
-
-    # Build mapping between original mol and newmol
-    try:
-        mapping = newmol.GetSubstructMatches(mol)[0]
-    except IndexError:
-        raise ValueError("Failed to map atoms between molecules")
+    # IMPORTANT: For CHARMM-GUI files, skip the SMILES round-trip
+    # The PDB file already has all atoms with correct names and coordinates
+    # SMILES round-trip is only needed for OpenFF/GAFF which use SMILES as input
+    # For CHARMM-GUI, use the PDB molecule directly to preserve atom names
 
     # Build charge lookup from Atom list
     charge_dict = {atom.name: atom.charge for atom in atoms}
 
-    # Add atom labels and charge notes to newmol
-    for atom in newmol.GetAtoms():
-        try:
-            # Get original atom name via mapping
-            orig_idx = mapping.index(atom.GetIdx())
-
-            # Use atom name from atoms parameter (from force field files)
-            # This ensures consistency across different force fields (OpenFF, CGenFF, etc.)
-            name = atoms[orig_idx].name
+    # Add atom labels and charge notes directly to mol (no SMILES round-trip)
+    for atom in mol.GetAtoms():
+        # Get atom name from PDB residue info
+        pdb_info = atom.GetPDBResidueInfo()
+        if pdb_info:
+            name = pdb_info.GetName().strip()
+            # Set labels
             atom.SetProp("atomLabel", name)
             atom.SetProp("name", name)
 
-            # Add charge as note (including hydrogens)
+            # Add charge as note
             if name in charge_dict:
                 charge = charge_dict[name]
-                # Format: +0.1500, -0.3000, etc. (4 decimal places for precision)
                 atom.SetProp("atomNote", f"{charge:+.4f}")
-        except (ValueError, IndexError):
-            # Skip atoms that can't be mapped
-            pass
 
     # Generate 2D coordinates
     try:
-        AllChem.Compute2DCoords(newmol)
+        AllChem.Compute2DCoords(mol)
     except Exception:
         pass  # Keep 3D coords if 2D generation fails
 
-    return newmol
+    return mol
