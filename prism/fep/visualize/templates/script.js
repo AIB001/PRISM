@@ -76,27 +76,127 @@
                 const atom2 = atoms.find(a => a.id === atom2Id);
 
                 if (atom1 && atom2) {
-                    ctx.beginPath();
-                    ctx.moveTo(atom1.x, atom1.y);
-                    ctx.lineTo(atom2.x, atom2.y);
-
-                    // 根据键序设置样式
+                    // 根据键序类型绘制
                     if (bondType === 2) {
-                        ctx.lineWidth = 4;  // DOUBLE: 粗线
+                        // DOUBLE: 双线
+                        drawDoubleBond(atom1, atom2);
                     } else if (bondType === 3) {
-                        ctx.lineWidth = 6;  // TRIPLE: 更粗
+                        // TRIPLE: 三线
+                        drawTripleBond(atom1, atom2);
                     } else if (bondType === 12) {
-                        ctx.lineWidth = 2;
-                        ctx.setLineDash([4, 4]);  // AROMATIC: 虚线
+                        // AROMATIC: Kekulé结构（实线+虚线）
+                        drawAromaticBond(atom1, atom2);
                     } else {
-                        ctx.lineWidth = 2;  // SINGLE: 默认
+                        // SINGLE: 单线
+                        drawSingleBond(atom1, atom2);
                     }
-
-                    ctx.strokeStyle = '#666';
-                    ctx.stroke();
-                    ctx.setLineDash([]);  // 重置
                 }
             });
+        }
+
+        // 绘制单键
+        function drawSingleBond(atom1, atom2) {
+            ctx.beginPath();
+            ctx.moveTo(atom1.x, atom1.y);
+            ctx.lineTo(atom2.x, atom2.y);
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // 绘制双键（两条平行线）
+        function drawDoubleBond(atom1, atom2) {
+            const dx = atom2.x - atom1.x;
+            const dy = atom2.y - atom1.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            if (len === 0) return;
+
+            // 计算法向量（垂直于键方向）
+            const nx = dy / len;
+            const ny = -dx / len;
+            const offset = 2.5;  // 平行线间距
+
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+
+            // 第一条线
+            ctx.beginPath();
+            ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
+            ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
+            ctx.stroke();
+
+            // 第二条线
+            ctx.beginPath();
+            ctx.moveTo(atom1.x - nx * offset, atom1.y - ny * offset);
+            ctx.lineTo(atom2.x - nx * offset, atom2.y - ny * offset);
+            ctx.stroke();
+        }
+
+        // 绘制三键（三条平行线）
+        function drawTripleBond(atom1, atom2) {
+            const dx = atom2.x - atom1.x;
+            const dy = atom2.y - atom1.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            if (len === 0) return;
+
+            // 计算法向量
+            const nx = dy / len;
+            const ny = -dx / len;
+            const offset = 3.5;  // 平行线间距
+
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1.5;
+
+            // 中心线
+            ctx.beginPath();
+            ctx.moveTo(atom1.x, atom1.y);
+            ctx.lineTo(atom2.x, atom2.y);
+            ctx.stroke();
+
+            // 外侧两条线
+            ctx.beginPath();
+            ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
+            ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(atom1.x - nx * offset, atom1.y - ny * offset);
+            ctx.lineTo(atom2.x - nx * offset, atom2.y - ny * offset);
+            ctx.stroke();
+        }
+
+        // 绘制芳香键（Kekulé结构：实线+虚线）
+        function drawAromaticBond(atom1, atom2) {
+            const dx = atom2.x - atom1.x;
+            const dy = atom2.y - atom1.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            if (len === 0) return;
+
+            // 计算法向量
+            const nx = dy / len;
+            const ny = -dx / len;
+            const offset = 2.5;
+
+            // 主实线
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(atom1.x, atom1.y);
+            ctx.lineTo(atom2.x, atom2.y);
+            ctx.stroke();
+
+            // 副虚线（偏移）
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);  // 虚线模式
+            ctx.beginPath();
+            ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
+            ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
+            ctx.stroke();
+            ctx.setLineDash([]);  // 重置
         }
 
         // Draw atoms
