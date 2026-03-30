@@ -8,6 +8,17 @@ PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Pytho
 
 **Documentation Repository**: `/home/gxf1212/data/work/PRISM-Tutorial` - Official documentation and tutorials for PRISM
 
+## Code Search and Navigation
+
+**📝 LSP Tools Preferred**: For code navigation, use LSP tools over grep when available:
+- **LSP tools** (`mcp__cclsp__` series): Semantic understanding, direct symbol location
+  - `mcp__cclsp__find_definition` - Find symbol definitions accurately
+  - `mcp__cclsp__find_references` - Find all symbol references
+  - `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
+  - Benefits: More accurate, skips comments/strings, reduces token usage
+- **Grep**: Text search requiring human interpretation
+- **Fallback**: Use grep when LSP tools are unavailable
+
 ## Quick Start
 
 ### Installation
@@ -140,3 +151,5 @@ Git commit message format: `[module] description;xxx`. Don't be too long!
 - **LSP vs grep**: Prefer LSP tools (mcp__cclsp*) for symbol finding - more accurate, skips comments/strings
 - **Commit messages**: Should reflect all recent changes in the commit
 - **File creation**: Avoid creating files in root directory
+
+不用每次push；TODO完成了就清掉

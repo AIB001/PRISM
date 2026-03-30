@@ -418,23 +418,59 @@ def prepare_mol_with_charges_and_labels(
     # SMILES round-trip is only needed for OpenFF/GAFF which use SMILES as input
     # For CHARMM-GUI, use the PDB molecule directly to preserve atom names
 
-    # Build charge lookup from Atom list
+    # Build charge lookup and coordinate list from Atom list
     charge_dict = {atom.name: atom.charge for atom in atoms}
+    atom_coords = [(atom.coord[0], atom.coord[1], atom.coord[2]) for atom in atoms]
 
-    # Add atom labels and charge notes directly to mol (no SMILES round-trip)
-    for atom in mol.GetAtoms():
-        # Get atom name from PDB residue info
-        pdb_info = atom.GetPDBResidueInfo()
-        if pdb_info:
-            name = pdb_info.GetName().strip()
-            # Set labels
-            atom.SetProp("atomLabel", name)
-            atom.SetProp("name", name)
+    # Match atoms by distance and assign correct names from atoms list
+    # This handles cases where PDB and ITP use different atom naming conventions (e.g., OPLS)
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+
+    conf = mol.GetConformer()
+    used_atom_indices = set()
+
+    for mol_idx in range(mol.GetNumAtoms()):
+        rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+        mol_coord = conf.GetAtomPosition(mol_idx)
+        mol_coord_tuple = (mol_coord.x, mol_coord.y, mol_coord.z)
+
+        # Find closest atom from the atoms list
+        min_dist = float("inf")
+        best_atom_idx = None
+        for atom_idx, atom_coord in enumerate(atom_coords):
+            if atom_idx in used_atom_indices:
+                continue
+            dist = sum((a - b) ** 2 for a, b in zip(mol_coord_tuple, atom_coord)) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                best_atom_idx = atom_idx
+
+        # Match if distance is reasonable (< 1.0 Å)
+        if best_atom_idx is not None and min_dist < 1.0:
+            atom = atoms[best_atom_idx]
+            name = atom.name
+            rdkit_atom.SetProp("atomLabel", name)
+            rdkit_atom.SetProp("name", name)
 
             # Add charge as note
             if name in charge_dict:
                 charge = charge_dict[name]
-                atom.SetProp("atomNote", f"{charge:+.4f}")
+                rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+
+            used_atom_indices.add(best_atom_idx)
+        else:
+            # No match found - use PDB name as fallback
+            pdb_info = rdkit_atom.GetPDBResidueInfo()
+            if pdb_info:
+                name = pdb_info.GetName().strip()
+                rdkit_atom.SetProp("atomLabel", name)
+                rdkit_atom.SetProp("name", name)
+
+                # Try to look up charge with PDB name
+                if name in charge_dict:
+                    charge = charge_dict[name]
+                    rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
 
     # Generate 2D coordinates
     try:
