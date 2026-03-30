@@ -355,7 +355,8 @@ def _generate_canvas_html(
             "working_dir": "Working directory for this FEP calculation",
         }
 
-        fep_cfg = config.get("fep", {}).get("mapping", {})
+        # Support both config structures: config["fep"]["mapping"] or config["mapping"]
+        fep_cfg = config.get("fep", {}).get("mapping", {}) or config.get("mapping", {})
         case_info = config.get("case", {})
 
         def make_item(label, value, key, unit=""):
