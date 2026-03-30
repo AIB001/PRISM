@@ -3,9 +3,9 @@
 
 forcefield:
   # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
-  type: cgenff
+  type: gaff2
   # Force field specific parameters
-  params: {}  # CGenFF uses pre-generated files
+  params: {}  # GAFF2 uses AM1-BCC charges
 
 mapping:
   dist_cutoff: 0.6
