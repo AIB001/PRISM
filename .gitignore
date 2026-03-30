@@ -79,6 +79,7 @@ Thumbs.db
 
 # Claude Code
 .claude/
+!.claude/skills/  # Keep skills documentation in git
 
 # Empty cache directory
 cache/

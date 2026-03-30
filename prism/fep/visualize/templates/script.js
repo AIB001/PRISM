@@ -66,16 +66,35 @@
 
         // Draw bonds
         function drawBonds(atoms, bonds, offsetX, offsetY) {
-            bonds.forEach(([id1, id2]) => {
-                const atom1 = atoms.find(a => a.id === id1);
-                const atom2 = atoms.find(a => a.id === id2);
+            bonds.forEach(bond => {
+                // 兼容旧格式：数组 [id1, id2]
+                const atom1Id = bond.atom1 || bond[0];
+                const atom2Id = bond.atom2 || bond[1];
+                const bondType = bond.type || 1;  // 默认单键
+
+                const atom1 = atoms.find(a => a.id === atom1Id);
+                const atom2 = atoms.find(a => a.id === atom2Id);
+
                 if (atom1 && atom2) {
                     ctx.beginPath();
                     ctx.moveTo(atom1.x, atom1.y);
                     ctx.lineTo(atom2.x, atom2.y);
+
+                    // 根据键序设置样式
+                    if (bondType === 2) {
+                        ctx.lineWidth = 4;  // DOUBLE: 粗线
+                    } else if (bondType === 3) {
+                        ctx.lineWidth = 6;  // TRIPLE: 更粗
+                    } else if (bondType === 12) {
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([4, 4]);  // AROMATIC: 虚线
+                    } else {
+                        ctx.lineWidth = 2;  // SINGLE: 默认
+                    }
+
                     ctx.strokeStyle = '#666';
-                    ctx.lineWidth = 2;
                     ctx.stroke();
+                    ctx.setLineDash([]);  // 重置
                 }
             });
         }

@@ -152,6 +152,80 @@ def assign_bond_orders_from_mol2(
     return pdb_mol
 
 
+def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None) -> Optional[str]:
+    """
+    自动检测与PDB文件对应的MOL2文件。
+
+    搜索策略：
+    1. 相同目录下，同名但扩展名为.mol2的文件
+    2. 相同目录下，basename + "_3D.mol2" 的文件
+    3. 处理特殊basename（如 "39_matched" -> "39"）
+    4. 父目录中搜索同名文件
+    5. 搜索指定目录中的匹配文件
+
+    Parameters
+    ----------
+    pdb_file : str
+        PDB文件路径
+    search_dir : str, optional
+        额外的搜索目录
+
+    Returns
+    -------
+    str or None
+        找到的MOL2文件路径，或None
+
+    Examples
+    --------
+    >>> auto_detect_mol2("/path/to/39.pdb")
+    "/path/to/39_3D.mol2"
+    >>> auto_detect_mol2("/path/to/output/39_matched.pdb")
+    "/path/to/39_3D.mol2"
+    """
+    from pathlib import Path
+
+    pdb_path = Path(pdb_file)
+    search_paths = []
+    parent_dir = pdb_path.parent
+
+    # 策略1: 同目录同名.mol2
+    search_paths.append(pdb_path.with_suffix(".mol2"))
+
+    # 策略2: 同目录 basename_3D.mol2
+    search_paths.append(parent_dir / f"{pdb_path.stem}_3D.mol2")
+
+    # 策略3: 处理特殊basename（如 "39_matched" -> "39"）
+    # 移除常见后缀：_matched, _aligned, _processed 等
+    basename = pdb_path.stem
+    for suffix in ["_matched", "_aligned", "_processed", "_generated"]:
+        if basename.endswith(suffix):
+            base_stem = basename[: -len(suffix)]
+            # 在当前目录和父目录中搜索
+            search_paths.append(parent_dir / f"{base_stem}.mol2")
+            search_paths.append(parent_dir / f"{base_stem}_3D.mol2")
+            search_paths.append(parent_dir.parent / f"{base_stem}.mol2")
+            search_paths.append(parent_dir.parent / f"{base_stem}_3D.mol2")
+            break
+
+    # 策略4: 父目录中搜索同名文件
+    if parent_dir != parent_dir.parent:
+        search_paths.append(parent_dir.parent / f"{pdb_path.stem}.mol2")
+        search_paths.append(parent_dir.parent / f"{pdb_path.stem}_3D.mol2")
+
+    # 策略5: 额外搜索目录
+    if search_dir:
+        search_dir = Path(search_dir)
+        search_paths.append(search_dir / f"{pdb_path.stem}.mol2")
+        search_paths.append(search_dir / f"{pdb_path.stem}_3D.mol2")
+
+    # 返回第一个存在的文件
+    for path in search_paths:
+        if path.exists():
+            return str(path)
+
+    return None
+
+
 def prepare_mol_with_charges_and_labels(
     pdb_file: str,
     mol2_file: Optional[str],
@@ -184,6 +258,12 @@ def prepare_mol_with_charges_and_labels(
         from rdkit.Chem import AllChem
     except ImportError as e:
         raise ImportError("RDKit is required. Install with: conda install -c conda-forge rdkit") from e
+
+    # Step 0: Auto-detect MOL2 file if not provided
+    if mol2_file is None:
+        detected_mol2 = auto_detect_mol2(pdb_file)
+        if detected_mol2:
+            mol2_file = detected_mol2
 
     # Step 1: Read molecule from best available source
     if mol2_file is not None and Path(mol2_file).exists():
@@ -377,13 +457,20 @@ def prepare_mol_with_charges_and_labels(
                         unmatched.append(atom.GetIdx())
 
             # Remove only atoms that should be removed (excluding preserved ones)
-            if unmatched:
+            # But only remove if we successfully matched some atoms
+            if unmatched and len(unmatched) < mol.GetNumAtoms():
                 from rdkit.Chem import RWMol
 
                 rwmol = RWMol(mol)
                 for idx in sorted(unmatched, reverse=True):
                     rwmol.RemoveAtom(idx)
                 mol = rwmol.GetMol()
+            elif unmatched:
+                # All atoms are unmatched - distance matching completely failed
+                # This means coordinates don't match between MOL2 and atoms list
+                # Don't use the MOL2 molecule directly - instead raise exception to fall through
+                # to PDB + MOL2 bond order approach
+                raise ValueError("Distance matching failed - all atoms unmatched")
 
             # Try to sanitize for proper bond orders (after matching)
             try:

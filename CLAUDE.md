@@ -17,7 +17,8 @@ PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Pytho
   - `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
   - Benefits: More accurate, skips comments/strings, reduces token usage
 - **Grep**: Text search requiring human interpretation
-- **Fallback**: Use grep when LSP tools are unavailable
+- **Availability**: LSP tools available in Claude Code tool context only
+- **Fallback**: Use `Grep` tool when LSP tools are unavailable
 
 ## Quick Start
 

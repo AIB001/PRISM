@@ -220,12 +220,20 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
             }
         )
 
-    # Build bonds list
+    # Build bonds list with bond order information
     bonds = []
     for bond in mol.GetBonds():
         atom1_idx = bond.GetBeginAtomIdx()
         atom2_idx = bond.GetEndAtomIdx()
-        bonds.append([f"{mol_id.upper()}{atom1_idx + 1}", f"{mol_id.upper()}{atom2_idx + 1}"])
+        bond_type = int(bond.GetBondType())  # 1=SINGLE, 2=DOUBLE, 3=TRIPLE, 12=AROMATIC
+        bonds.append(
+            {
+                "atom1": f"{mol_id.upper()}{atom1_idx + 1}",
+                "atom2": f"{mol_id.upper()}{atom2_idx + 1}",
+                "type": bond_type,
+                "typeName": bond.GetBondType().name,  # "SINGLE", "DOUBLE", etc.
+            }
+        )
 
     # Count unclassified atoms
     unclassified_count = sum(1 for atom in atoms_data if atom["classification"] == "unknown")
