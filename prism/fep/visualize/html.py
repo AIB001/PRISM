@@ -91,6 +91,11 @@ def visualize_mapping_html(
     if total_charge_b is None:
         total_charge_b = sum(atom.charge for atom in atoms_b) if atoms_b else 0.0
 
+    # Count unclassified atoms
+    unclassified_a = canvas_data_a.get("unclassified_count", 0)
+    unclassified_b = canvas_data_b.get("unclassified_count", 0)
+    total_unclassified = unclassified_a + unclassified_b
+
     # Build correspondence map
     correspondence = _build_correspondence_map(mapping, canvas_data_a, canvas_data_b)
 
@@ -107,6 +112,7 @@ def visualize_mapping_html(
         total_charge_a,
         total_charge_b,
         build_log,
+        total_unclassified,
     )
 
     # Save HTML
@@ -221,7 +227,10 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
         atom2_idx = bond.GetEndAtomIdx()
         bonds.append([f"{mol_id.upper()}{atom1_idx + 1}", f"{mol_id.upper()}{atom2_idx + 1}"])
 
-    return {"atoms": atoms_data, "bonds": bonds}
+    # Count unclassified atoms
+    unclassified_count = sum(1 for atom in atoms_data if atom["classification"] == "unknown")
+
+    return {"atoms": atoms_data, "bonds": bonds, "unclassified_count": unclassified_count}
 
 
 def _get_classification_color(classification: str) -> str:
@@ -320,6 +329,7 @@ def _generate_canvas_html(
     total_charge_a: float = 0.0,
     total_charge_b: float = 0.0,
     build_log: Optional[str] = None,
+    total_unclassified: int = 0,
 ) -> str:
     """Generate complete HTML with proper Canvas transforms."""
 
@@ -435,6 +445,19 @@ def _generate_canvas_html(
     css_content = _load_template("styles.css")
     js_content = _load_template("script.js")
 
+    # Build warning banner if there are unclassified atoms
+    warning_banner = ""
+    if total_unclassified > 0:
+        warning_banner = f"""
+    <div class="warning-banner">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-content">
+            <strong>Warning: {total_unclassified} unclassified atom(s) detected</strong>
+            <span class="warning-detail">Some atoms could not be mapped and appear gray. This may indicate issues with atom mapping or coordinate matching.</span>
+        </div>
+    </div>
+"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -450,7 +473,7 @@ def _generate_canvas_html(
     <div class="header">
         <h1>{title}</h1>
     </div>
-
+{warning_banner}
     <div class="toolbar">
         <h3 class="toolbar-title">Display Options</h3>
         <div class="toolbar-content">
