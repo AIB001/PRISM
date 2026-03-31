@@ -52,6 +52,8 @@ from prism.fep.io import read_ligand_from_prism
 from prism.fep.config import FEPConfig
 import json
 
+from test_utils import FEPTestPaths
+
 
 def test_oMeEtPh_EtPh_fep_mapping():
     """
@@ -59,11 +61,11 @@ def test_oMeEtPh_EtPh_fep_mapping():
 
     Force field configuration is read from fep.yaml
     """
-    # Test data directory
-    test_dir = Path("/data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/oMeEtPh-EtPh")
+    paths = FEPTestPaths("oMeEtPh-EtPh")
+    test_dir = paths.system_dir
 
-    mol2_a = test_dir / "oMeEtPh.mol2"
-    mol2_b = test_dir / "EtPh.mol2"
+    mol2_a = paths.input_dir / "oMeEtPh.mol2"
+    mol2_b = paths.input_dir / "EtPh.mol2"
 
     print(f"\n{'='*70}")
     print(f"FEP Mapping Test: oMeEtPh → EtPh")
@@ -102,8 +104,7 @@ def test_oMeEtPh_EtPh_fep_mapping():
     # Step 1: Generate force fields
     print(f"\n[Step 1] Generating {ff_type.upper()} force fields...")
 
-    # Use existing output directories (e.g., gaff_test_output, openff_test_output)
-    output_base_dir = test_dir / f"{ff_type}_test_output"
+    output_base_dir = paths.get_forcefield_dir(ff_type)
     output_base_dir.mkdir(exist_ok=True)
 
     output_dir_a = output_base_dir / f"{ff_type}_oMeEtPh"
@@ -183,8 +184,8 @@ def test_oMeEtPh_EtPh_fep_mapping():
     try:
         visualize_mapping_png(
             mapping=mapping,
-            pdb_a=str(test_dir / "oMeEtPh.pdb"),
-            pdb_b=str(test_dir / "EtPh.pdb"),
+            pdb_a=str(paths.input_dir / "oMeEtPh.pdb"),
+            pdb_b=str(paths.input_dir / "EtPh.pdb"),
             mol2_a=str(mol2_a),
             mol2_b=str(mol2_b),
             output_path=png_file,
@@ -201,8 +202,8 @@ def test_oMeEtPh_EtPh_fep_mapping():
 
         visualize_mapping_html(
             mapping=mapping,
-            pdb_a=str(test_dir / "oMeEtPh.pdb"),
-            pdb_b=str(test_dir / "EtPh.pdb"),
+            pdb_a=str(paths.input_dir / "oMeEtPh.pdb"),
+            pdb_b=str(paths.input_dir / "EtPh.pdb"),
             mol2_a=str(mol2_a),
             mol2_b=str(mol2_b),
             atoms_a=lig_a,
