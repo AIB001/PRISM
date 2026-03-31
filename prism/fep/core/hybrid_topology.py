@@ -2,14 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Hybrid Topology Construction Module
-
-Builds hybrid topologies with A/B state parameters for GROMACS FEP calculations.
-GROMACS uses single-topology approach with typeB/chargeB encoding.
+Hybrid topology construction for GROMACS single-topology FEP.
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from .mapping import AtomMapping, normalize_charge_reception, Atom
 from ..atomic import get_atomic_mass
 
@@ -55,6 +52,39 @@ class HybridAtom:
     mass: float = 0.0
     mass_b: Optional[float] = None
     name_b: Optional[str] = None
+
+
+@dataclass
+class LigandTopologyInput:
+    """
+    Canonical topology-parameter view for one ligand state.
+
+    The builder historically accepted loosely structured dictionaries. This
+    dataclass preserves that flexibility while giving the rest of the module a
+    single, explicit internal schema.
+    """
+
+    masses: Dict[str, float]
+    bonds: List[Any]
+    pairs: List[Any]
+    angles: List[Any]
+    dihedrals: List[Any]
+    impropers: List[Any]
+
+    @classmethod
+    def from_mapping(cls, data: Optional[Union["LigandTopologyInput", Dict[str, Any]]]) -> "LigandTopologyInput":
+        """Normalize legacy dict inputs into the canonical topology schema."""
+        if isinstance(data, cls):
+            return data
+        mapping = data or {}
+        return cls(
+            masses=dict(mapping.get("masses", {})),
+            bonds=list(mapping.get("bonds", [])),
+            pairs=list(mapping.get("pairs", [])),
+            angles=list(mapping.get("angles", [])),
+            dihedrals=list(mapping.get("dihedrals", [])),
+            impropers=list(mapping.get("impropers", [])),
+        )
 
 
 class HybridTopologyBuilder:
@@ -108,7 +138,12 @@ class HybridTopologyBuilder:
         self.hybrid_atoms = []
 
     def build(
-        self, mapping: AtomMapping, params_a: Dict, params_b: Dict, atoms_a: List, atoms_b: List
+        self,
+        mapping: AtomMapping,
+        params_a: Union[LigandTopologyInput, Dict[str, Any]],
+        params_b: Union[LigandTopologyInput, Dict[str, Any]],
+        atoms_a: List,
+        atoms_b: List,
     ) -> List[HybridAtom]:
         """
         Build hybrid topology with charge redistribution
@@ -117,11 +152,10 @@ class HybridTopologyBuilder:
         ----------
         mapping : AtomMapping
             Atom mapping classification
-        params_a : Dict
-            Force field parameters for ligand A
-            Contains 'masses', 'bonds', 'angles', 'dihedrals', etc.
-        params_b : Dict
-            Force field parameters for ligand B
+        params_a : LigandTopologyInput or Dict
+            Force field parameters for ligand A.
+        params_b : LigandTopologyInput or Dict
+            Force field parameters for ligand B.
         atoms_a : List[Atom]
             Original atoms from ligand A (for charge calculation)
         atoms_b : List[Atom]
@@ -135,9 +169,12 @@ class HybridTopologyBuilder:
         self.hybrid_atoms = []
         index = 1  # GROMACS uses 1-based indexing
 
+        params_a = LigandTopologyInput.from_mapping(params_a)
+        params_b = LigandTopologyInput.from_mapping(params_b)
+
         # Get mass dictionaries
-        masses_a = params_a.get("masses", {})
-        masses_b = params_b.get("masses", {})
+        masses_a = params_a.masses
+        masses_b = params_b.masses
 
         # 1. Common atoms (shared structure, same or similar charges)
         for atom_a, atom_b in mapping.common:

@@ -51,7 +51,7 @@ class FEPMultiEstimatorAnalyzer:
 
     Features:
     ---------
-    - Parse XVG files once (shared across all estimators) - major performance optimization
+    - Organized per-estimator parsing using a shared leg/repeat traversal pattern
     - Automatic comparison metrics and divergence detection
     - Unified JSON output with all results
     - Progress bars for long-running operations
@@ -181,7 +181,7 @@ class FEPMultiEstimatorAnalyzer:
 
         This method:
         1. Checks for cached results and loads if available
-        2. Parses XVG files for each estimator with progress bars
+        2. Parses estimator-specific data representations for each leg
         3. Runs each estimator sequentially
         4. Builds comparison metrics
         5. Saves results to cache file if specified
@@ -218,7 +218,8 @@ class FEPMultiEstimatorAnalyzer:
             except Exception as e:
                 self.logger.warning(f"Failed to load cache: {e}. Re-running analysis.")
 
-        # Step 1: Parse XVG files...
+        # Step 1: Parse XVG files into estimator-specific datasets.
+        # TI consumes dH/dlambda series, while BAR/MBAR consume u_nk matrices.
         self.logger.info("Parsing XVG files...")
 
         if self.show_progress:
@@ -231,7 +232,8 @@ class FEPMultiEstimatorAnalyzer:
         else:
             estimator_iter = self.estimators
 
-        # Store parsed data for each estimator
+        # Store parsed data by estimator. The parsing pass is estimator-specific
+        # because alchemlyb exposes different GROMACS extractors for TI vs BAR/MBAR.
         parsed_data = {}
 
         for estimator_name in estimator_iter:

@@ -68,14 +68,17 @@ class FEPScaffoldBuilder:
         # Initialize sub-builders
         self.hybrid_builder = HybridPackageBuilder()
         self.leg_writer = LegWriter(self.output_dir)
+        self._sync_hybrid_assets()
 
-        # Sync hybrid builder filenames with scaffold builder
+    def _sync_hybrid_assets(self) -> None:
+        """Mirror hybrid-package naming onto the scaffold builder and leg writer."""
         self.hybrid_itp_filename = self.hybrid_builder.hybrid_itp_filename
         self.hybrid_atomtypes_filename = self.hybrid_builder.hybrid_atomtypes_filename
         self.hybrid_forcefield_filename = self.hybrid_builder.hybrid_forcefield_filename
         self.hybrid_posre_filename = self.hybrid_builder.hybrid_posre_filename
         self.hybrid_gro_filename = self.hybrid_builder.hybrid_gro_filename
         self.molecule_name = self.hybrid_builder.molecule_name
+        self.leg_writer.molecule_name = self.molecule_name
 
     def _discover_ligand_dir(self, base_dir: Path) -> Path:
         """
@@ -118,14 +121,6 @@ class FEPScaffoldBuilder:
         raise FileNotFoundError(
             f"Cannot find ligand ITP file in {base_dir}. " f"Expected patterns: */LIG.itp, */*.itp, or LIG.itp"
         )
-
-        # Default hybrid asset filenames (used by build() with pre-built hybrid dirs)
-        self.hybrid_itp_filename = "LIG.itp"
-        self.hybrid_atomtypes_filename = "atomtypes_LIG.itp"
-        self.hybrid_forcefield_filename = "ff_hybrid.itp"
-        self.hybrid_posre_filename = "posre_LIG.itp"
-        self.hybrid_gro_filename = "LIG.gro"
-        self.molecule_name = "LIG"
 
     def build(self, receptor_pdb: str, hybrid_ligand_dir: str) -> FEPScaffoldLayout:
         """Create the FEP workspace scaffold."""
@@ -243,13 +238,7 @@ class FEPScaffoldBuilder:
         )
 
         # Update naming to hybrid outputs for topology/script/template generation
-        self.hybrid_itp_filename = self.hybrid_builder.hybrid_itp_filename
-        self.hybrid_atomtypes_filename = self.hybrid_builder.hybrid_atomtypes_filename
-        self.hybrid_forcefield_filename = self.hybrid_builder.hybrid_forcefield_filename
-        self.hybrid_posre_filename = self.hybrid_builder.hybrid_posre_filename
-        self.hybrid_gro_filename = self.hybrid_builder.hybrid_gro_filename
-        self.molecule_name = self.hybrid_builder.molecule_name
-        self.leg_writer.molecule_name = self.molecule_name
+        self._sync_hybrid_assets()
 
         ligand_seed_pdb = layout.hybrid_dir / "ligand_seed.pdb"
 

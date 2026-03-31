@@ -7,8 +7,9 @@ File I/O module for PRISM-FEP
 This module handles reading PRISM-generated files (ITP and GRO) for FEP processing.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
+import re
 from prism.gaussian.utils import normalize_element_symbol
 from prism.fep.core.mapping import Atom
 
@@ -52,138 +53,8 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
     if normalized_state not in {None, "a", "b"}:
         raise ValueError(f"Unsupported state: {state}. Expected None, 'a', or 'b'.")
 
-    atoms_data = []
-    all_atom_names = set()
-    pending_name_b = None
-
-    with open(itp_file, "r") as f:
-        in_atoms_section = False
-        for line in f:
-            line_stripped = line.strip()
-
-            if "[ atoms ]" in line.lower():
-                in_atoms_section = True
-                continue
-            if line_stripped.startswith("[") and in_atoms_section:
-                in_atoms_section = False
-                continue
-
-            if not in_atoms_section:
-                continue
-
-            if line_stripped.startswith(";"):
-                if normalized_state == "b" and "name_b (state B):" in line_stripped:
-                    pending_name_b = line_stripped.split("name_b (state B):", 1)[1].strip()
-                continue
-
-            if not line_stripped:
-                continue
-
-            # Remove comments (anything after ';')
-            comment_idx = line_stripped.find(";")
-            if comment_idx != -1:
-                line_stripped = line_stripped[:comment_idx].strip()
-
-            parts = line_stripped.split()
-            if len(parts) < 8:
-                continue
-
-            try:
-                atom_id = int(parts[0])
-                atom_name = parts[4]
-                atom_type_a = parts[1]
-                charge_a = float(parts[6])
-                atom_type_b = parts[8] if len(parts) >= 11 else None
-                charge_b = float(parts[9]) if len(parts) >= 11 else None
-            except (ValueError, IndexError):
-                pending_name_b = None
-                continue
-
-            all_atom_names.add(atom_name)
-            atoms_data.append(
-                {
-                    "id": atom_id,
-                    "name": atom_name,
-                    "type_a": atom_type_a,
-                    "charge_a": charge_a,
-                    "type_b": atom_type_b,
-                    "charge_b": charge_b,
-                    "name_b": pending_name_b,
-                }
-            )
-            pending_name_b = None
-
-    if normalized_state is None:
-        selected_atoms = [
-            {
-                "id": atom["id"],
-                "name": atom["name"],
-                "type": atom["type_a"],
-                "charge": atom["charge_a"],
-            }
-            for atom in atoms_data
-        ]
-    else:
-        selected_atoms = []
-        for atom in atoms_data:
-            has_state_b = atom["type_b"] is not None
-            atom_name = atom["name"]
-
-            if normalized_state == "a":
-                if atom["type_a"].startswith("DUM"):
-                    continue
-                selected_atoms.append(
-                    {
-                        "id": atom["id"],
-                        "name": atom_name,
-                        "type": atom["type_a"],
-                        "charge": atom["charge_a"],
-                    }
-                )
-                continue
-
-            if has_state_b:
-                if atom["type_b"].startswith("DUM"):
-                    continue
-                selected_atoms.append(
-                    {
-                        "id": atom["id"],
-                        "name": atom["name_b"] or atom_name,
-                        "type": atom["type_b"],
-                        "charge": atom["charge_b"],
-                    }
-                )
-                continue
-
-            if atom["type_a"].startswith("DUM"):
-                continue
-
-            # FEbuilder may record common A↔B correspondences via `name_b` comments
-            # even when a separate `XXXB` atom also exists in the hybrid topology.
-            # In that case the comment is authoritative for the B-state identity and
-            # must not be discarded by the suffix-based heuristic.
-            if atom["name_b"]:
-                selected_atoms.append(
-                    {
-                        "id": atom["id"],
-                        "name": atom["name_b"],
-                        "type": atom["type_a"],
-                        "charge": atom["charge_a"],
-                    }
-                )
-                continue
-
-            has_b_suffix_partner = f"{atom_name}B" in all_atom_names
-            if has_b_suffix_partner:
-                continue
-            selected_atoms.append(
-                {
-                    "id": atom["id"],
-                    "name": atom_name,
-                    "type": atom["type_a"],
-                    "charge": atom["charge_a"],
-                }
-            )
+    atoms_data = _parse_itp_atoms(itp_file, capture_state_b_names=normalized_state == "b")
+    selected_atoms = _select_state_atoms(atoms_data, normalized_state)
 
     coords_by_id = {}
     coords_by_name = {}
@@ -271,6 +142,139 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
         )
 
     return atoms
+
+
+def _parse_itp_atoms(itp_file: str, capture_state_b_names: bool = False) -> List[Dict[str, Any]]:
+    """Parse the ``[ atoms ]`` block of a ligand ITP into a neutral intermediate form."""
+    atoms_data: List[Dict[str, Any]] = []
+    pending_name_b = None
+
+    with open(itp_file, "r") as handle:
+        in_atoms_section = False
+        for line in handle:
+            line_stripped = line.strip()
+
+            if "[ atoms ]" in line.lower():
+                in_atoms_section = True
+                continue
+            if line_stripped.startswith("[") and in_atoms_section:
+                in_atoms_section = False
+                continue
+            if not in_atoms_section:
+                continue
+
+            if line_stripped.startswith(";"):
+                if capture_state_b_names and "name_b (state B):" in line_stripped:
+                    pending_name_b = line_stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+            if not line_stripped:
+                continue
+
+            comment_idx = line_stripped.find(";")
+            if comment_idx != -1:
+                line_stripped = line_stripped[:comment_idx].strip()
+
+            parts = line_stripped.split()
+            if len(parts) < 8:
+                continue
+
+            try:
+                atom_record = {
+                    "id": int(parts[0]),
+                    "name": parts[4],
+                    "type_a": parts[1],
+                    "charge_a": float(parts[6]),
+                    "type_b": parts[8] if len(parts) >= 11 else None,
+                    "charge_b": float(parts[9]) if len(parts) >= 11 else None,
+                    "name_b": pending_name_b,
+                }
+            except (ValueError, IndexError):
+                pending_name_b = None
+                continue
+
+            atoms_data.append(atom_record)
+            pending_name_b = None
+
+    return atoms_data
+
+
+def _select_state_atoms(atoms_data: List[Dict[str, Any]], state: Optional[str]) -> List[Dict[str, Any]]:
+    """Project parsed hybrid-ITP atoms onto a requested state representation."""
+    if state is None:
+        return [
+            {
+                "id": atom["id"],
+                "name": atom["name"],
+                "type": atom["type_a"],
+                "charge": atom["charge_a"],
+            }
+            for atom in atoms_data
+        ]
+
+    all_atom_names = {atom["name"] for atom in atoms_data}
+    selected_atoms: List[Dict[str, Any]] = []
+
+    for atom in atoms_data:
+        atom_name = atom["name"]
+        atom_type_a = atom["type_a"]
+        atom_type_b = atom["type_b"]
+
+        if state == "a":
+            if atom_type_a.startswith("DUM"):
+                continue
+            selected_atoms.append(
+                {
+                    "id": atom["id"],
+                    "name": atom_name,
+                    "type": atom_type_a,
+                    "charge": atom["charge_a"],
+                }
+            )
+            continue
+
+        if atom_type_b is not None:
+            if atom_type_b.startswith("DUM"):
+                continue
+            selected_atoms.append(
+                {
+                    "id": atom["id"],
+                    "name": atom["name_b"] or atom_name,
+                    "type": atom_type_b,
+                    "charge": atom["charge_b"],
+                }
+            )
+            continue
+
+        if atom_type_a.startswith("DUM"):
+            continue
+
+        # FEbuilder may store the B-state identity in comments even when a
+        # separate `XXXB` atom exists in the hybrid topology. That explicit
+        # comment should win over the suffix heuristic.
+        if atom["name_b"]:
+            selected_atoms.append(
+                {
+                    "id": atom["id"],
+                    "name": atom["name_b"],
+                    "type": atom_type_a,
+                    "charge": atom["charge_a"],
+                }
+            )
+            continue
+
+        if f"{atom_name}B" in all_atom_names:
+            continue
+
+        selected_atoms.append(
+            {
+                "id": atom["id"],
+                "name": atom_name,
+                "type": atom_type_a,
+                "charge": atom["charge_a"],
+            }
+        )
+
+    return selected_atoms
 
 
 def _extract_element(atom_name: str) -> str:
@@ -524,3 +528,307 @@ def write_ligand_to_pdb(atoms: List[Atom], output_pdb: str, residue_name: str = 
 
         f.write("TER\n")
         f.write("END\n")
+
+
+def read_hybrid_topology_dual(
+    itp_file: str, gro_file: str, mol2_file: str = None, mol2_file_b: str = None
+) -> Tuple[List[Atom], List[Atom], Dict[str, str]]:
+    """
+    Read hybrid topology file and return atoms for both states A and B.
+
+    This function reads hybrid topology files (from FEbuilder or PRISM FEP)
+    and returns separate atom lists for state A and state B, along with
+    the correspondence mapping between them.
+
+    Parameters
+    ----------
+    itp_file : str
+        Path to hybrid ITP file
+    gro_file : str
+        Path to GRO file with coordinates
+    mol2_file : str, optional
+        Path to state A MOL2 file to determine atom order (for correct matching)
+    mol2_file_b : str, optional
+        Path to state B MOL2 file to avoid naming conflicts during renaming
+
+    Returns
+    -------
+    Tuple[List[Atom], List[Atom], Dict[str, str]]
+        (atoms_state_a, atoms_state_b, correspondence_map)
+        correspondence_map maps state A atom names to state B atom names
+
+    Notes
+    -----
+    ITP file format for hybrid topologies:
+        nr type resnr residue atom cgnr charge mass typeB chargeB massB
+
+    FEbuilder correspondence comments:
+        ; name_b (state B): H06
+
+    This function is useful for:
+    - Testing hybrid topology generation
+    - Visualizing dual-state mappings
+    - Analyzing FEbuilder output
+    """
+    # Step 1: Read ITP file
+    all_atom_data = []  # List of (atom_data_a, atom_data_b_or_None, has_state_b_data)
+    correspondence_map = {}  # FEbuilder correspondence: state A name → state B name
+    pending_name_b = None
+
+    with open(itp_file, "r") as f:
+        in_atoms_section = False
+        for line in f:
+            line_stripped = line.strip()
+
+            # Find [ atoms ] section
+            if "[ atoms ]" in line.lower():
+                in_atoms_section = True
+                continue
+            # Exit section when hitting next section
+            elif line_stripped.startswith("[") and in_atoms_section:
+                in_atoms_section = False
+                continue
+
+            # Check for FEbuilder correspondence comment
+            if line_stripped.startswith(";") and "name_b (state B):" in line_stripped:
+                # Extract the state B atom name
+                # Format: ; name_b (state B): H06
+                pending_name_b = line_stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+
+            # Parse atom lines
+            if in_atoms_section and line_stripped and not line_stripped.startswith(";"):
+                parts = line_stripped.split()
+
+                # Minimum: nr type resnr residue atom cgnr charge mass (8 columns)
+                if len(parts) >= 8:
+                    try:
+                        atom_id = int(parts[0])
+                        atom_type_a = parts[1]
+                        atom_name = parts[4]
+                        charge_a = float(parts[6])
+                        mass_a = float(parts[7])
+
+                        # Record FEbuilder correspondence if available
+                        if pending_name_b:
+                            correspondence_map[atom_name] = pending_name_b
+                            pending_name_b = None
+
+                        atom_data_a = {
+                            "id": atom_id,
+                            "name": atom_name,
+                            "type": atom_type_a,
+                            "charge": charge_a,
+                            "mass": mass_a,
+                        }
+
+                        # State B data (if available)
+                        # Format: nr type resnr residue atom cgnr charge mass typeB chargeB massB
+                        if len(parts) >= 11:
+                            atom_type_b = parts[8]
+                            charge_b = float(parts[9])
+                            mass_b = float(parts[10])
+
+                            atom_data_b = {
+                                "id": atom_id,
+                                "name": atom_name,
+                                "type": atom_type_b,
+                                "charge": charge_b,
+                                "mass": mass_b,
+                            }
+                            all_atom_data.append((atom_data_a, atom_data_b, True))
+                        else:
+                            all_atom_data.append((atom_data_a, None, False))
+                    except (ValueError, IndexError):
+                        pending_name_b = None
+                        continue
+
+    # Second pass: build atoms_data_a and atoms_data_b
+    atoms_data_a = []
+    atoms_data_b = []
+
+    # Build a set of all atom names for checking
+    all_atom_names = set(data_a["name"] for data_a, _, _ in all_atom_data)
+
+    for atom_data_a, atom_data_b, has_state_b_data in all_atom_data:
+        atom_name = atom_data_a["name"]
+
+        # State A: add non-dummy atoms
+        if not atom_data_a["type"].startswith("DUM"):
+            atoms_data_a.append(atom_data_a)
+
+        # State B logic
+        if has_state_b_data:
+            # Has explicit state B data: use it
+            if not atom_data_b["type"].startswith("DUM"):
+                atoms_data_b.append(atom_data_b)
+        else:
+            # No explicit state B data: check if there's a corresponding "atomB" entry
+            # If yes, this atom is state A only (don't add to state B)
+            # If no, this atom is common (add to state B)
+            has_b_suffix = f"{atom_name}B" in all_atom_names
+            if not has_b_suffix and not atom_data_a["type"].startswith("DUM"):
+                # No corresponding B suffix atom, so this is a common atom
+                atoms_data_b.append(atom_data_a)
+
+    # Step 2: Read GRO file to get coordinates
+    # Use atom name as key (not atom_id) because hybrid topology has separate atoms for A/B states
+    coords_by_name = {}
+    coords_by_id = {}
+    with open(gro_file, "r") as f:
+        lines = f.readlines()
+
+        for line in lines[2:-1]:  # Skip title and box line
+            parts = line.split()
+
+            if len(parts) >= 6:
+                # Format: resid resname atomname atomid x y z
+                atom_name = parts[1]
+                atom_id = int(parts[2]) if len(parts) > 2 else None
+                x = float(parts[3]) * 10.0  # nm to Å
+                y = float(parts[4]) * 10.0
+                z = float(parts[5]) * 10.0
+
+                try:
+                    coord = np.array([x, y, z])
+                    coords_by_name[atom_name] = coord
+                    if atom_id is not None:
+                        coords_by_id[atom_id] = coord
+                except (ValueError, IndexError):
+                    continue
+
+    # Step 2.5: If MOL2 files are provided, read atom order for sorting
+    # Also read MOL2 atom names to avoid naming conflicts during renaming
+    mol2_order = None
+    mol2_atom_names = set()  # Track MOL2 atom names from both states to avoid conflicts
+    if mol2_file:
+        mol2_order = []
+        # Read state A MOL2 file
+        with open(mol2_file, "r") as f:
+            in_atoms = False
+            for line in f:
+                if line.startswith("@<TRIPOS>ATOM"):
+                    in_atoms = True
+                    continue
+                if line.startswith("@"):
+                    in_atoms = False
+                    continue
+                if in_atoms:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        atom_name = parts[1]
+                        mol2_order.append(atom_name)
+                        mol2_atom_names.add(atom_name)
+
+        # Read state B MOL2 file if provided
+        if mol2_file_b:
+            with open(mol2_file_b, "r") as f:
+                in_atoms = False
+                for line in f:
+                    if line.startswith("@<TRIPOS>ATOM"):
+                        in_atoms = True
+                        continue
+                    if line.startswith("@"):
+                        in_atoms = False
+                        continue
+                    if in_atoms:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            atom_name = parts[1]
+                            mol2_atom_names.add(atom_name)
+
+    # Step 3: Create Atom objects for both states
+    atoms_a = []
+    atoms_b = []
+
+    # Sort by MOL2 order if available, otherwise by original ID
+    if mol2_order:
+        # Create a mapping from atom name (without A/B suffix) to position in MOL2
+        mol2_pos = {}
+        for i, name in enumerate(mol2_order):
+            mol2_pos[name] = i
+
+        # Sort atoms by their position in MOL2 file
+        def get_mol2_position(atom_name):
+            # Remove A/B suffix
+            name_clean = re.sub(r"([AB])(\d*)$", "", atom_name) if atom_name and atom_name[-1] in "AB" else atom_name
+            return mol2_pos.get(name_clean, 999)  # Put unknown atoms at the end
+
+        atoms_data_a.sort(key=lambda x: get_mol2_position(x["name"]))
+        atoms_data_b.sort(key=lambda x: get_mol2_position(x["name"]))
+    else:
+        # Sort by original atom ID
+        atoms_data_a.sort(key=lambda x: x["id"])
+        atoms_data_b.sort(key=lambda x: x["id"])
+
+    # Create state A atoms
+    for atom_data in atoms_data_a:
+        atom_name = atom_data["name"]
+        atom_id = atom_data["id"]
+
+        # Get coordinates: try name first, then ID
+        coord = coords_by_name.get(atom_name, coords_by_id.get(atom_id, np.array([0.0, 0.0, 0.0])))
+
+        atoms_a.append(
+            Atom(
+                name=atom_name,
+                element=_extract_element(atom_name),
+                coord=coord,
+                charge=atom_data["charge"],
+                atom_type=atom_data["type"],
+                index=atom_data["id"],
+            )
+        )
+
+    # Create state B atoms
+    # Build reverse correspondence map: state B name → state A name
+    # Also handle B-suffix variants (e.g., H08B -> H08)
+    # IMPORTANT: Avoid naming conflicts with MOL2 atom names
+    reverse_correspondence = {}
+    for name_a, name_b in correspondence_map.items():
+        # Only add mapping if it doesn't conflict with MOL2 atom names
+        # If MOL2 has the same name, keep the original hybrid topology name
+        if name_b not in mol2_atom_names:
+            reverse_correspondence[name_b] = name_a
+        # Also map B-suffix version if applicable
+        if not name_b.endswith("B"):
+            name_b_b = f"{name_b}B"
+            if name_b_b not in mol2_atom_names:
+                reverse_correspondence[name_b_b] = name_a
+
+    for atom_data in atoms_data_b:
+        atom_name = atom_data["name"]
+        atom_id = atom_data["id"]
+
+        # Check if this atom has a FEbuilder correspondence
+        # If so, rename it to use the state A name for easier matching
+        # BUT only if it doesn't conflict with MOL2 atom names
+        display_name = atom_name
+        if atom_name in reverse_correspondence:
+            display_name = reverse_correspondence[atom_name]
+        elif atom_name.endswith("B"):
+            # Heuristic: if atom name ends with B (e.g., H09B, H10B)
+            # and the base name (e.g., H09, H10) is in correspondence map as state A
+            # then rename it to match the state A name
+            # BUT only if the base name doesn't exist in MOL2
+            base_name = atom_name[:-1]  # Remove B suffix
+            if base_name in correspondence_map and base_name not in mol2_atom_names:
+                display_name = base_name
+
+        # Get coordinates: try display name first, then original name, then ID
+        coord = coords_by_name.get(
+            display_name, coords_by_name.get(atom_name, coords_by_id.get(atom_id, np.array([0.0, 0.0, 0.0])))
+        )
+
+        atoms_b.append(
+            Atom(
+                name=display_name,  # Use state A name for correspondence atoms (if no conflict)
+                element=_extract_element(display_name),
+                coord=coord,
+                charge=atom_data["charge"],
+                atom_type=atom_data["type"],
+                index=atom_data["id"],
+            )
+        )
+
+    return atoms_a, atoms_b, correspondence_map

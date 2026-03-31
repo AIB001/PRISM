@@ -9,10 +9,54 @@ Supports both:
 - New YAML-based config.yaml + fep.yaml architecture
 """
 
+import yaml
 import configparser
 from pathlib import Path
 from typing import Dict, Any
-import yaml
+
+
+DEFAULT_MAPPING_PARAMS = {
+    "dist_cutoff": 0.6,
+    "charge_cutoff": 0.05,
+    "charge_common": "mean",
+    "charge_reception": "surround",
+}
+
+DEFAULT_SIMULATION_PARAMS = {
+    "equilibration_nvt_time_ps": 500,
+    "equilibration_npt_time_ps": 500,
+    "production_time_ns": 5.0,
+    "dt": 0.002,
+    "temperature": 310,
+    "pressure": 1.0,
+}
+
+DEFAULT_SOFT_CORE_PARAMS = {"alpha": 0.5, "sigma": 0.3}
+
+DEFAULT_LAMBDA_PARAMS = {
+    "strategy": "decoupled",
+    "distribution": "nonlinear",
+    "windows": 32,
+    "coul_windows": 12,
+    "vdw_windows": 20,
+}
+
+DEFAULT_ELECTROSTATICS_PARAMS = {"rcoulomb": 1.0}
+DEFAULT_VDW_PARAMS = {"rvdw": 1.0}
+DEFAULT_OUTPUT_PARAMS = {
+    "trajectory_interval_ps": 500,
+    "energy_interval_ps": 10,
+    "log_interval_ps": 10,
+}
+
+DEFAULT_LEGACY_PARAMS = {
+    "dist_cutoff": 0.6,
+    "charge_cutoff": 0.05,
+    "charge_common": "mean",
+    "charge_reception": "surround",
+    "recharge_hydrogen": False,
+    "distance": 10,
+}
 
 
 def normalize_charge_reception(value: Any) -> str:
@@ -56,11 +100,15 @@ class FEPConfig:
         self.fep_config = self._load_yaml(self.fep_yaml)
 
     def _load_yaml(self, yaml_file: Path) -> Dict[str, Any]:
-        """Load YAML file"""
+        """Load YAML file."""
         if yaml_file.exists():
             with open(yaml_file) as f:
                 return yaml.safe_load(f) or {}
         return {}
+
+    def _merged_fep_section(self, section: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge one FEP YAML section with its canonical defaults."""
+        return {**defaults, **self.fep_config.get(section, {})}
 
     def get_forcefield_type(self) -> str:
         """Get force field type from config.yaml"""
@@ -76,10 +124,7 @@ class FEPConfig:
 
         Returns dict with keys: dist_cutoff, charge_cutoff, charge_common, charge_reception
         """
-        defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "surround"}
-        mapping_config = self.fep_config.get("mapping", {})
-        # Merge with defaults
-        params = {**defaults, **mapping_config}
+        params = self._merged_fep_section("mapping", DEFAULT_MAPPING_PARAMS)
         params["charge_reception"] = normalize_charge_reception(params.get("charge_reception"))
         return params
 
@@ -102,15 +147,7 @@ class FEPConfig:
         - temperature: Temperature in K
         - pressure: Pressure in bar
         """
-        defaults = {
-            "equilibration_nvt_time_ps": 500,
-            "equilibration_npt_time_ps": 500,
-            "production_time_ns": 5.0,
-            "dt": 0.002,
-            "temperature": 310,
-            "pressure": 1.0,
-        }
-        return {**defaults, **self.fep_config.get("simulation", {})}
+        return self._merged_fep_section("simulation", DEFAULT_SIMULATION_PARAMS)
 
     def get_soft_core_params(self) -> Dict[str, float]:
         """
@@ -120,8 +157,7 @@ class FEPConfig:
         - alpha: Soft-core alpha parameter (0.3-0.5 recommended)
         - sigma: Soft-core sigma parameter in nm
         """
-        defaults = {"alpha": 0.5, "sigma": 0.3}
-        return {**defaults, **self.fep_config.get("soft_core", {})}
+        return self._merged_fep_section("soft_core", DEFAULT_SOFT_CORE_PARAMS)
 
     def get_lambda_params(self) -> Dict[str, Any]:
         """
@@ -136,15 +172,8 @@ class FEPConfig:
         - custom_coul_lambdas: Optional custom coul lambda array
         - custom_vdw_lambdas: Optional custom vdw lambda array
         """
-        defaults = {
-            "strategy": "decoupled",
-            "distribution": "nonlinear",
-            "windows": 32,
-            "coul_windows": 12,
-            "vdw_windows": 20,
-        }
         lambda_config = self.fep_config.get("lambda", {})
-        params = {**defaults, **lambda_config}
+        params = self._merged_fep_section("lambda", DEFAULT_LAMBDA_PARAMS)
 
         # Handle custom lambda arrays
         if "custom_coul_lambdas" in lambda_config:
@@ -161,8 +190,7 @@ class FEPConfig:
         Returns dict with keys:
         - rcoulomb: Coulomb cutoff in nm
         """
-        defaults = {"rcoulomb": 1.0}
-        return {**defaults, **self.fep_config.get("electrostatics", {})}
+        return self._merged_fep_section("electrostatics", DEFAULT_ELECTROSTATICS_PARAMS)
 
     def get_vdw_params(self) -> Dict[str, Any]:
         """
@@ -171,8 +199,7 @@ class FEPConfig:
         Returns dict with keys:
         - rvdw: VDW cutoff in nm
         """
-        defaults = {"rvdw": 1.0}
-        return {**defaults, **self.fep_config.get("vdw", {})}
+        return self._merged_fep_section("vdw", DEFAULT_VDW_PARAMS)
 
     def get_output_params(self) -> Dict[str, Any]:
         """
@@ -183,12 +210,7 @@ class FEPConfig:
         - energy_interval_ps: Energy output interval in ps
         - log_interval_ps: Log output interval in ps
         """
-        defaults = {
-            "trajectory_interval_ps": 500,
-            "energy_interval_ps": 10,
-            "log_interval_ps": 10,
-        }
-        return {**defaults, **self.fep_config.get("output", {})}
+        return self._merged_fep_section("output", DEFAULT_OUTPUT_PARAMS)
 
     def get_all_mdp_params(self) -> Dict[str, Any]:
         """
@@ -198,6 +220,19 @@ class FEPConfig:
         """
         return {
             "simulation": self.get_simulation_params(),
+            "electrostatics": self.get_electrostatics_params(),
+            "vdw": self.get_vdw_params(),
+            "output": self.get_output_params(),
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return the canonical merged FEP configuration view."""
+        return {
+            "forcefield": {"type": self.get_forcefield_type(), "params": self.get_forcefield_params()},
+            "mapping": self.get_mapping_params(),
+            "simulation": self.get_simulation_params(),
+            "soft_core": self.get_soft_core_params(),
+            "lambda": self.get_lambda_params(),
             "electrostatics": self.get_electrostatics_params(),
             "vdw": self.get_vdw_params(),
             "output": self.get_output_params(),
@@ -252,15 +287,7 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    # Default values
-    params = {
-        "dist_cutoff": 0.6,
-        "charge_cutoff": 0.05,
-        "charge_common": "mean",
-        "charge_reception": "surround",
-        "recharge_hydrogen": False,
-        "distance": 10,  # Solvation distance
-    }
+    params = dict(DEFAULT_LEGACY_PARAMS)
 
     # Read [Model] section
     if "Model" in config:

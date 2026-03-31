@@ -1092,7 +1092,7 @@ fi
 
             # Read ligand atoms from ITP and GRO files
             from ..fep.io import read_ligand_from_prism
-            from ..fep.core.hybrid_topology import HybridTopologyBuilder
+            from ..fep.core.hybrid_topology import HybridTopologyBuilder, LigandTopologyInput
 
             # Debug: Check if files exist
             ref_itp = os.path.join(ref_ff_dir, "LIG.itp")
@@ -1105,8 +1105,6 @@ fi
             print(f"    ref_gro exists: {os.path.exists(ref_gro)} - {ref_gro}")
             print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
             print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
-
-            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_gro)
 
             ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_gro)
 
@@ -1127,8 +1125,22 @@ fi
             ref_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(ref_ff_dir, "LIG.itp")).read_text())
             mut_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(mut_ff_dir, "LIG.itp")).read_text())
 
-            params_a = {"masses": {}, "bonds": ref_itp_data["sections"].get("bonds", [])}
-            params_b = {"masses": {}, "bonds": mut_itp_data["sections"].get("bonds", [])}
+            params_a = LigandTopologyInput(
+                masses={},
+                bonds=ref_itp_data["sections"].get("bonds", []),
+                pairs=ref_itp_data["sections"].get("pairs", []),
+                angles=ref_itp_data["sections"].get("angles", []),
+                dihedrals=ref_itp_data["sections"].get("dihedrals", []),
+                impropers=ref_itp_data["sections"].get("impropers", []),
+            )
+            params_b = LigandTopologyInput(
+                masses={},
+                bonds=mut_itp_data["sections"].get("bonds", []),
+                pairs=mut_itp_data["sections"].get("pairs", []),
+                angles=mut_itp_data["sections"].get("angles", []),
+                dihedrals=mut_itp_data["sections"].get("dihedrals", []),
+                impropers=mut_itp_data["sections"].get("impropers", []),
+            )
 
             hybrid_atoms = hybrid_builder.build(mapping, params_a, params_b, ref_atoms, mut_atoms)
 

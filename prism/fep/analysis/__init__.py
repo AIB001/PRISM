@@ -51,22 +51,22 @@ Author: PRISM Team
 # Core data models
 from .core import FEResults, MultiEstimatorResults
 
-# Analyzers
-from .analyzers import FEPAnalyzer, FEPMultiEstimatorAnalyzer
-
-# Report generators
-from .reports import (
+# Stable public API
+from .api import (
+    FEPAnalyzer,
+    FEPMultiEstimatorAnalyzer,
     HTMLReportGenerator,
-    MultiEstimatorReportGenerator,
     MultiBackendReportGenerator,
+    MultiEstimatorReportGenerator,
+    FEstimator,
+    XVGParser,
+    find_xvg_file,
+    parse_leg_data,
 )
 
-# Other components
-from . import cli
-from . import plots
+# Compatibility exports for existing internal callers/tests
+from . import cli, plots
 from .core import convergence, estimators, profiles, xvg_parser
-from .estimators import FEstimator
-from .xvg_parser import XVGParser, find_xvg_file, parse_leg_data
 
 __all__ = [
     # Core models
