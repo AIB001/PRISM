@@ -13,6 +13,31 @@ const plotConfig = {
     }
 };
 
+function buildAxisStyle(title) {
+    return {
+        title: {
+            text: `<b>${title}</b>`,
+            font: { size: 16, color: '#222' }
+        },
+        tickfont: { size: 14, color: '#333' },
+        gridcolor: '#e0e0e0',
+        zeroline: false
+    };
+}
+
+function buildBaseLayout(title, xTitle, yTitle, extra = {}) {
+    return Object.assign({
+        title: { text: `<b>${title}</b>`, font: { size: 16, color: '#222' } },
+        xaxis: buildAxisStyle(xTitle),
+        yaxis: buildAxisStyle(yTitle),
+        plot_bgcolor: 'rgba(255,255,255,0.8)',
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        margin: { l: 78, r: 30, t: 52, b: 62 },
+        font: { family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif', size: 14, color: '#333' },
+        autosize: true
+    }, extra);
+}
+
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', function() {
     // Animate cards on scroll
@@ -114,16 +139,11 @@ function generateComparisonPlot(containerId, data) {
         textfont: { size: 12, color: '#333' }
     };
 
-    const layout = {
-        title: { text: 'Binding Free Energy (ΔG) Comparison', font: { size: 16, color: '#333' } },
-        xaxis: { title: 'Backend / Estimator', tickangle: -45 },
-        yaxis: { title: 'ΔG (kcal/mol)', gridcolor: '#e0e0e0' },
-        plot_bgcolor: 'rgba(255,255,255,0.8)',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        font: { family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif' },
-        margin: { l: 60, r: 30, t: 50, b: 100 },
+    const layout = buildBaseLayout('Binding Free Energy (ΔG) Comparison', 'Backend / Estimator', 'ΔG (kcal/mol)', {
+        margin: { l: 78, r: 30, t: 52, b: 100 },
         showlegend: false
-    };
+    });
+    layout.xaxis.tickangle = -45;
 
     Plotly.newPlot(containerId, [trace], layout, plotConfig);
 }
@@ -146,19 +166,11 @@ function generateOverlapMatrix(containerId, matrix, lambdaValues) {
         hovertemplate: '<b>λ %{x}</b> → <b>λ %{y}</b><br>Overlap: %{z:.3f}<extra></extra>'
     }];
 
-    const layout = {
-        title: {
-            text: 'Lambda State Overlap Matrix',
-            font: { size: 16, color: '#333' }
-        },
-        xaxis: { title: 'Lambda λ', gridcolor: '#e0e0e0' },
-        yaxis: { title: 'Lambda λ', gridcolor: '#e0e0e0' },
-        plot_bgcolor: 'rgba(255,255,255,0.8)',
-        paper_bgcolor: 'rgba(0,0,0,0)',
-        margin: { l: 60, r: 30, t: 50, b: 50 },
-        width: 500,
-        height: 500
-    };
+    const layout = buildBaseLayout('Lambda State Overlap Matrix', 'Lambda λ', 'Lambda λ', {
+        margin: { l: 78, r: 60, t: 52, b: 62 },
+        height: 420,
+        hovermode: 'closest'
+    });
 
     Plotly.newPlot(containerId, data, layout, plotConfig);
 }
@@ -192,12 +204,17 @@ function showEstimatorTab(estimatorId) {
 
     // Refresh Plotly charts in visible tab (if any)
     // This ensures charts resize properly when tab becomes visible
-    if (targetTab) {
-        const plotDivs = targetTab.querySelectorAll('[id*="plot"]');
-        plotDivs.forEach(div => {
-            if (div.data && div.data.length > 0) {
-                Plotly.Plots.resize(div);
-            }
-        });
+    if (targetTab && window.Plotly) {
+        window.setTimeout(() => {
+            const plotDivs = targetTab.querySelectorAll('.js-plotly-plot, [id*="plot"], [id*="time-conv"], [id*="bootstrap-hist"], [id*="overlap-matrix"]');
+            plotDivs.forEach(div => {
+                try {
+                    Plotly.Plots.resize(div);
+                    Plotly.relayout(div, { autosize: true });
+                } catch (err) {
+                    // Ignore non-plot containers.
+                }
+            });
+        }, 80);
     }
 }

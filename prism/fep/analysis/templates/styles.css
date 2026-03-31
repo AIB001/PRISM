@@ -120,6 +120,39 @@ tr:hover {
     background: white;
     border-radius: 8px;
     min-height: 400px;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.compact-plot {
+    margin-top: 0;
+    padding: 8px;
+    height: 380px;
+    min-height: 380px;
+}
+
+.equal-grid {
+    display: grid;
+    gap: 20px;
+    align-items: start;
+}
+
+.equal-grid.two-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.equal-grid.one-col {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.equal-grid > * {
+    min-width: 0;
+    width: 100%;
+}
+
+.equal-grid.align-center {
+    align-items: center;
 }
 
 .alert {

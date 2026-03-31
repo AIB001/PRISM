@@ -147,14 +147,14 @@ class HTMLReportGenerator:
             detailed_results_section = f"""
         <div class="card">
             <h2>📋 Detailed Results</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
-                <div>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
                         📊 Multiple Repeats Statistics
                     </h3>
 {repeats_html}
                 </div>
-                <div>
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
                         🎯 Outlier Detection
                     </h3>
@@ -253,38 +253,38 @@ class HTMLReportGenerator:
 
         <div class="card">
             <h2>📈 Free Energy Profiles (λ-dependent)</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                <div class="plot-container" id="dg-bound-plot" style="min-height:350px;width:100%;overflow:hidden;"></div>
-                <div class="plot-container" id="dg-unbound-plot" style="min-height:350px;width:100%;overflow:hidden;"></div>
+            <div class="equal-grid two-col">
+                <div class="plot-container compact-plot" id="dg-bound-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>
+                <div class="plot-container compact-plot" id="dg-unbound-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>
             </div>
 {dhdl_divs}
         </div>
 {lambda_plot_script}
 
         <div class="card">
-            <h2>📊 Convergence Diagnostics & Overlap</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
-                <div>
+            <h2>📊 Overlap Matrix (MBAR)</h2>
+            {
+                self._build_overlap_matrix_html()
+                or '<div class="alert"><strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>Switch to MBAR backend to enable overlap matrix visualization.</div>'
+            }
+        </div>
+
+        <div class="card">
+            <h2>📊 Diagnostics</h2>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
                         📈 Time Convergence
                     </h3>
 {time_conv_html}
                 </div>
-                <div>
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
-                        📊 Overlap Matrix (MBAR)
+                        🔄 Bootstrap Analysis
                     </h3>
-                    {
-                        self._build_overlap_matrix_html()
-                        or '<div class="alert"><strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>Switch to MBAR backend to enable overlap matrix visualization.</div>'
-                    }
+{bootstrap_html}
                 </div>
             </div>
-        </div>
-
-        <div class="card">
-            <h2>🔄 Bootstrap Analysis</h2>
-{bootstrap_html}
         </div>
 
         <div class="card">

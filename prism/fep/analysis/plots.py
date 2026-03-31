@@ -12,6 +12,44 @@ from typing import Optional, Dict, Any, Tuple
 import json as _json
 
 
+def _axis_style(title: str) -> Dict[str, Any]:
+    """Return a consistent Plotly axis style."""
+    return {
+        "title": {"text": f"<b>{title}</b>", "font": {"size": 16, "color": "#222"}},
+        "showgrid": True,
+        "gridcolor": "#e0e0e0",
+        "zeroline": False,
+        "tickfont": {"size": 14, "color": "#333"},
+    }
+
+
+def _base_layout(
+    title: str,
+    xaxis_title: str,
+    yaxis_title: str,
+    *,
+    height: int,
+    margin: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
+    """Return a shared Plotly layout with larger, bolder labels."""
+    return {
+        "title": {"text": f"<b>{title}</b>", "font": {"size": 16, "color": "#222"}},
+        "xaxis": _axis_style(xaxis_title),
+        "yaxis": _axis_style(yaxis_title),
+        "paper_bgcolor": "rgba(0,0,0,0)",
+        "plot_bgcolor": "rgba(255,255,255,0.8)",
+        "margin": margin or {"l": 88, "r": 72, "t": 56, "b": 78},
+        "hovermode": "x unified",
+        "autosize": True,
+        "height": height,
+        "font": {
+            "family": '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+            "size": 14,
+            "color": "#333",
+        },
+    }
+
+
 def build_lambda_plots_html(
     lambda_profiles: Optional[Dict[str, Any]],
     estimator_name: str,
@@ -64,12 +102,12 @@ def build_lambda_plots_html(
 
     # Build 4 separate plot divs
     plot_divs = [
-        f'<div id="{bound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>',
-        f'<div id="{unbound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>',
-        f'<div id="{dhdl_bound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>'
+        f'<div id="{bound_plot_id}" class="plot-container compact-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>',
+        f'<div id="{unbound_plot_id}" class="plot-container compact-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>',
+        f'<div id="{dhdl_bound_plot_id}" class="plot-container compact-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>'
         if is_ti
         else "<div></div>",
-        f'<div id="{dhdl_unbound_plot_id}" class="plot-container" style="min-height:350px;width:100%;overflow:hidden;"></div>'
+        f'<div id="{dhdl_unbound_plot_id}" class="plot-container compact-plot" style="height:380px;min-height:380px;width:100%;overflow:hidden;"></div>'
         if is_ti
         else "<div></div>",
     ]
@@ -141,27 +179,20 @@ def build_lambda_plots_html(
             )
 
     # Build Plotly layouts
-    bound_layout = {
-        "title": {"text": "Bound Leg ΔG vs λ", "font": {"size": 14}},
-        "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
-        "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
-        "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
-        "hovermode": "x unified",
-        "width": None,  # Auto-width, controlled by container
-        "height": 350,
-        "autosize": True,
-    }
-
-    unbound_layout = {
-        "title": {"text": "Unbound Leg ΔG vs λ", "font": {"size": 14}},
-        "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
-        "yaxis": {"title": "ΔG (kcal/mol)", "showgrid": True, "zeroline": False},
-        "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
-        "hovermode": "x unified",
-        "width": None,  # Auto-width, controlled by container
-        "height": 350,
-        "autosize": True,
-    }
+    bound_layout = _base_layout(
+        "Bound Leg ΔG vs λ",
+        "λ",
+        "ΔG (kcal/mol)",
+        height=380,
+        margin={"l": 90, "r": 70, "t": 56, "b": 86},
+    )
+    unbound_layout = _base_layout(
+        "Unbound Leg ΔG vs λ",
+        "λ",
+        "ΔG (kcal/mol)",
+        height=380,
+        margin={"l": 90, "r": 70, "t": 56, "b": 86},
+    )
 
     # Build script content
     script_content = f"""
@@ -172,24 +203,22 @@ def build_lambda_plots_html(
     # Add dH/dλ plots for TI
     if is_ti:
         dhdl_bound_layout = {
-            "title": {"text": "Bound Leg dH/dλ vs λ", "font": {"size": 14}},
-            "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
-            "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
-            "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
-            "hovermode": "x unified",
-            "width": None,  # Auto-width, controlled by container
-            "height": 350,
-            "autosize": True,
+            **_base_layout(
+                "Bound Leg dH/dλ vs λ",
+                "λ",
+                "dH/dλ (kcal/mol)",
+                height=380,
+                margin={"l": 90, "r": 70, "t": 56, "b": 86},
+            )
         }
         dhdl_unbound_layout = {
-            "title": {"text": "Unbound Leg dH/dλ vs λ", "font": {"size": 14}},
-            "xaxis": {"title": "λ", "showgrid": True, "zeroline": False},
-            "yaxis": {"title": "dH/dλ (kcal/mol)", "showgrid": True, "zeroline": False},
-            "margin": {"l": 60, "r": 30, "t": 45, "b": 50},
-            "hovermode": "x unified",
-            "width": None,  # Auto-width, controlled by container
-            "height": 350,
-            "autosize": True,
+            **_base_layout(
+                "Unbound Leg dH/dλ vs λ",
+                "λ",
+                "dH/dλ (kcal/mol)",
+                height=380,
+                margin={"l": 90, "r": 70, "t": 56, "b": 86},
+            )
         }
         script_content += f"""
             Plotly.newPlot('{dhdl_bound_plot_id}', {_json.dumps(dhdl_bound_traces)}, {_json.dumps(dhdl_bound_layout)}, {{responsive: true}});
@@ -316,12 +345,7 @@ def build_repeats_outlier_plot_html(
     traces.append(create_box_scatter_group(unbound_values, "Unbound", "rgba(244,67,54,0.7)"))
 
     layout = {
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(255,255,255,0.8)",
-        "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-        "title": {"text": "Repeat Outlier Detection"},
-        "xaxis": {"title": "Measurement Type"},
-        "yaxis": {"title": "ΔG (kcal/mol)"},
+        **_base_layout("Repeat Outlier Detection", "Measurement Type", "ΔG (kcal/mol)", height=340),
         "showlegend": False,
         "boxmode": "group",
     }
@@ -396,8 +420,8 @@ def build_overlap_matrix_html(
         heatmap_data = [
             {
                 "z": overlap.tolist(),
-                "x": [f"λ{i}" for i in range(n_states)],
-                "y": [f"λ{i}" for i in range(n_states)],
+                "x": list(range(n_states)),
+                "y": list(range(n_states)),
                 "colorscale": [
                     [0.0, "rgb(0,0,131)"],
                     [0.1, "rgb(0,0,255)"],
@@ -408,39 +432,39 @@ def build_overlap_matrix_html(
                     [1.0, "rgb(255,0,0)"],
                 ],
                 "colorbar": {
-                    "title": "Overlap",
-                    "titleside": "right",
+                    "title": {"text": "<b>Overlap</b>", "font": {"size": 15, "color": "#222"}},
                     "thickness": 15,
                 },
                 "type": "heatmap",
+                "hovertemplate": "<b>%{x}</b> -> <b>%{y}</b><br>Overlap: %{z:.3f}<extra></extra>",
             }
         ]
 
-        layout = {
-            "title": {
-                "text": f"{leg_name} Leg - MBAR Overlap Matrix",
-                "x": 0.5,
-                "xanchor": "center",
-                "font": {"size": 14},
-            },
-            "xaxis": {"title": "Lambda State", "side": "bottom"},
-            "yaxis": {"title": "Lambda State", "side": "left"},
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(0,0,0,0)",
-            "margin": {"l": 60, "r": 60, "t": 50, "b": 50},
-            "width": 500,
-            "height": 500,
-        }
-
+        suffix_token = plot_suffix.lstrip("-")
         plot_id = (
-            f"overlap-matrix-{leg_name.lower()}-{plot_suffix}"
-            if plot_suffix
+            f"overlap-matrix-{leg_name.lower()}-{suffix_token}"
+            if suffix_token
             else f"overlap-matrix-{leg_name.lower()}-plot"
         )
 
+        layout = {
+            **_base_layout(f"{leg_name} Leg - MBAR Overlap Matrix", "λ State", "λ State", height=520),
+            "margin": {"l": 92, "r": 132, "t": 56, "b": 86},
+            "hovermode": "closest",
+            "yaxis": {
+                **_axis_style("λ State"),
+                "scaleanchor": "x",
+                "constrain": "domain",
+            },
+            "xaxis": {
+                **_axis_style("λ State"),
+                "constrain": "domain",
+            },
+        }
+
         plots_html.append(f"""
-        <div style="text-align:center;">
-            <div id="{plot_id}" style="min-height:500px;"></div>
+        <div style="text-align:center;min-width:0;width:100%;">
+            <div id="{plot_id}" class="plot-container overlap-plot" style="height:520px;min-height:520px;width:100%;"></div>
         </div>
         <script>
             Plotly.newPlot('{plot_id}', {_json.dumps(heatmap_data)}, {_json.dumps(layout)}, {{responsive:true}});
@@ -451,7 +475,7 @@ def build_overlap_matrix_html(
         return ""
 
     return f"""
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
+    <div class="equal-grid two-col" style="margin-top:0;">
         {"".join(plots_html)}
     </div>
     <p style="margin-top: 10px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
@@ -495,7 +519,8 @@ def build_time_convergence_html(
         <strong>ℹ️ Note:</strong> Time convergence analysis yielded no data points.
     </div>"""
 
-    plot_id = f"time-conv-{plot_suffix}" if plot_suffix else "time-conv-plot"
+    suffix_token = plot_suffix.lstrip("-")
+    plot_id = f"time-conv-{suffix_token}" if suffix_token else "time-conv-plot"
 
     traces = []
     if bound_pts:
@@ -530,17 +555,20 @@ def build_time_convergence_html(
             }
         )
 
-    layout = {
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(255,255,255,0.8)",
-        "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-        "title": {"text": "Time Convergence of ΔG"},
-        "xaxis": {"title": "Fraction of simulation data"},
-        "yaxis": {"title": "ΔG (kcal/mol)"},
+    layout = _base_layout("Time Convergence of ΔG", "Fraction of simulation data", "ΔG (kcal/mol)", height=320)
+    layout["margin"] = {"l": 88, "r": 118, "t": 56, "b": 78}
+    layout["legend"] = {
+        "x": 1.03,
+        "y": 1.0,
+        "xanchor": "left",
+        "yanchor": "top",
+        "bgcolor": "rgba(255,255,255,0.88)",
+        "bordercolor": "rgba(0,0,0,0.08)",
+        "borderwidth": 1,
     }
 
     return f"""
-    <div id="{plot_id}" style="min-height:350px;"></div>
+    <div id="{plot_id}" class="plot-container" style="min-height:320px;width:100%;"></div>
     <script>
     Plotly.newPlot('{plot_id}', {_json.dumps(traces)}, {_json.dumps(layout)}, {{responsive:true}});
     </script>
@@ -587,7 +615,8 @@ def build_bootstrap_html(
         <strong>ℹ️ Note:</strong> Bootstrap analysis yielded no data.
     </div>"""
 
-    plot_id = f"bootstrap-hist-{plot_suffix}" if plot_suffix else "bootstrap-hist-plot"
+    suffix_token = plot_suffix.lstrip("-")
+    plot_id = f"bootstrap-hist-{suffix_token}" if suffix_token else "bootstrap-hist-plot"
 
     # Histogram trace
     hist_trace = {
@@ -599,12 +628,7 @@ def build_bootstrap_html(
     }
 
     layout = {
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor": "rgba(255,255,255,0.8)",
-        "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
-        "title": {"text": "Bootstrap ΔΔG Distribution"},
-        "xaxis": {"title": "ΔΔG (kcal/mol)"},
-        "yaxis": {"title": "Count"},
+        **_base_layout("Bootstrap ΔΔG Distribution", "ΔΔG (kcal/mol)", "Count", height=300),
         "shapes": [
             {
                 "type": "line",
@@ -620,19 +644,17 @@ def build_bootstrap_html(
     }
 
     return f"""
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center;">
-        <div id="{plot_id}" style="min-height:300px;"></div>
-        <div>
-            <table>
-                <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-                <tbody>
-                    <tr><td><strong>Mean ΔΔG</strong></td><td class="value">{ddG_mean:.3f} kcal/mol</td></tr>
-                    <tr><td><strong>Std Dev</strong></td><td class="value">{ddG_std:.3f} kcal/mol</td></tr>
-                    <tr><td><strong>Stderr</strong></td><td class="value">{ddG_stderr:.3f} kcal/mol</td></tr>
-                    <tr><td><strong>N Bootstrap</strong></td><td class="value">{n_bootstrap}</td></tr>
-                </tbody>
-            </table>
-        </div>
+    <div id="{plot_id}" class="plot-container" style="min-height:300px;width:100%;"></div>
+    <div style="margin-top:14px;min-width:0;width:100%;">
+        <table>
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>
+                <tr><td><strong>Mean ΔΔG</strong></td><td class="value">{ddG_mean:.3f} kcal/mol</td></tr>
+                <tr><td><strong>Std Dev</strong></td><td class="value">{ddG_std:.3f} kcal/mol</td></tr>
+                <tr><td><strong>Stderr</strong></td><td class="value">{ddG_stderr:.3f} kcal/mol</td></tr>
+                <tr><td><strong>N Bootstrap</strong></td><td class="value">{n_bootstrap}</td></tr>
+            </tbody>
+        </table>
     </div>
     <script>
         Plotly.newPlot('{plot_id}', [{_json.dumps(hist_trace)}], {_json.dumps(layout)}, {{responsive:true}});

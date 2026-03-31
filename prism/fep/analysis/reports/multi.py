@@ -320,11 +320,11 @@ class MultiEstimatorReportGenerator:
         lambda_section = f"""
         <div class="card">
             <h2>📈 Free Energy Profiles (λ-dependent)</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="equal-grid two-col">
                 {lambda_divs[0]}  <!-- dg-bound-plot -->
                 {lambda_divs[1]}  <!-- dg-unbound-plot -->
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+            <div class="equal-grid two-col" style="margin-top:16px;">
                 {lambda_divs[2]}  <!-- dhdl-bound-plot (TI only) -->
                 {lambda_divs[3]}  <!-- dhdl-unbound-plot (TI only) -->
             </div>
@@ -332,14 +332,41 @@ class MultiEstimatorReportGenerator:
         {lambda_scripts}
         """
 
-        # 3. Time Convergence + Overlap Matrix (2-column layout)
+        # 3. Time Convergence + Bootstrap Analysis (2-column layout)
         time_conv_html = plots.build_time_convergence_html(
             getattr(results, "time_convergence", None), plot_suffix=f"-{estimator_name}"
         )
+        bootstrap_html = plots.build_bootstrap_html(
+            getattr(results, "bootstrap", None), plot_suffix=f"-{estimator_name}"
+        )
 
-        # Build overlap matrix HTML
+        diagnostics_section = f"""
+        <div class="card">
+            <h2>📊 Diagnostics</h2>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        📈 Time Convergence
+                    </h3>
+                    {time_conv_html}
+                </div>
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        🔄 Bootstrap Analysis
+                    </h3>
+                    {bootstrap_html}
+                </div>
+            </div>
+        </div>
+        """
+
+        # 4. Overlap Matrix
         if estimator_name == "MBAR":
-            overlap_html = self._build_mbar_overlap_matrix_content(results)
+            overlap_html = plots.build_overlap_matrix_html(
+                getattr(results, "lambda_profiles", None),
+                estimator_name,
+                plot_suffix=f"-{estimator_name}",
+            ) or self._build_overlap_matrix_placeholder("MBAR")
         else:
             overlap_html = """
             <div class="alert">
@@ -348,48 +375,20 @@ class MultiEstimatorReportGenerator:
             </div>
             """
 
-        conv_overlap_section = f"""
+        overlap_section = f"""
         <div class="card">
-            <h2>📊 Convergence Diagnostics & Overlap</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
-                <div>
-                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
-                        📈 Time Convergence
-                    </h3>
-                    {time_conv_html}
-                </div>
-                <div>
-                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
-                        📊 Overlap Matrix ({estimator_name})
-                    </h3>
-                    {overlap_html}
-                </div>
-            </div>
+            <h2>📊 Overlap Matrix ({estimator_name})</h2>
+            {overlap_html}
         </div>
         """
-
-        # 4. Bootstrap Analysis (2-column: histogram + table)
-        bootstrap_html = plots.build_bootstrap_html(
-            getattr(results, "bootstrap", None), plot_suffix=f"-{estimator_name}"
-        )
-        bootstrap_section = f"""
-        <div class="card">
-            <h2>🔄 Bootstrap Analysis</h2>
-            {bootstrap_html}
-        </div>
-        """
-
-        # 5. Overlap Matrix section (now merged with convergence - kept for compatibility but will be empty)
-        overlap_section = ""
 
         # Combine all sections in correct order
         return f"""
         <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
             {detailed_results}
             {lambda_section}
-            {conv_overlap_section}
-            {bootstrap_section}
             {overlap_section}
+            {diagnostics_section}
         </div>
         """
 
@@ -421,14 +420,14 @@ class MultiEstimatorReportGenerator:
         return f"""
         <div class="card">
             <h2>📋 Detailed Results</h2>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;">
-                <div>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
                         📊 Multiple Repeats Statistics
                     </h3>
                     {repeats_table}
                 </div>
-                <div>
+                <div style="min-width:0;width:100%;">
                     <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
                         🎯 Outlier Detection
                     </h3>
@@ -436,90 +435,6 @@ class MultiEstimatorReportGenerator:
                 </div>
             </div>
         </div>
-        """
-
-    def _build_mbar_overlap_matrix_content(self, results: "FEResults") -> str:
-        """
-        Build overlap matrix content for MBAR (without outer card div)
-
-        Returns just the plot and interpretation text for embedding in 2-column layout
-        """
-        import numpy as np
-
-        # Extract overlap matrix from lambda profiles
-        lambda_profiles = getattr(results, "lambda_profiles", None)
-        if not lambda_profiles:
-            return self._build_overlap_matrix_placeholder("MBAR")
-
-        # Get bound leg overlap matrix (use first repeat if multiple)
-        bound_data = lambda_profiles.get("bound", {})
-        if isinstance(bound_data, list):
-            if not bound_data or not bound_data[0]:
-                return self._build_overlap_matrix_placeholder("MBAR")
-            overlap_matrix = bound_data[0].get("overlap_matrix")
-        else:
-            overlap_matrix = bound_data.get("overlap_matrix")
-
-        if not overlap_matrix:
-            return self._build_overlap_matrix_placeholder("MBAR")
-
-        # Convert to numpy array
-        overlap = np.array(overlap_matrix)
-        n_states = overlap.shape[0]
-
-        # Create Plotly heatmap
-        heatmap_data = [
-            {
-                "z": overlap.tolist(),
-                "x": [f"λ{i}" for i in range(n_states)],
-                "y": [f"λ{i}" for i in range(n_states)],
-                "colorscale": [
-                    [0.0, "rgb(0,0,131)"],
-                    [0.1, "rgb(0,0,255)"],
-                    [0.3, "rgb(0,191,255)"],
-                    [0.5, "rgb(0,255,255)"],
-                    [0.7, "rgb(255,255,0)"],
-                    [0.9, "rgb(255,127,0)"],
-                    [1.0, "rgb(255,0,0)"],
-                ],
-                "colorbar": {
-                    "title": "Overlap",
-                    "titleside": "right",
-                    "thickness": 15,
-                },
-                "type": "heatmap",
-                "reversescale": False,
-            }
-        ]
-
-        layout = {
-            "title": {
-                "text": "MBAR Overlap Matrix - Phase Space Overlap Between Lambda States",
-                "x": 0.5,
-                "xanchor": "center",
-                "font": {"size": 14},
-            },
-            "xaxis": {"title": "Lambda State", "side": "bottom"},
-            "yaxis": {"title": "Lambda State", "side": "left"},
-            "paper_bgcolor": "rgba(0,0,0,0)",
-            "plot_bgcolor": "rgba(0,0,0,0)",
-            "margin": {"l": 60, "r": 60, "t": 50, "b": 50},
-            "width": 500,
-            "height": 500,
-        }
-
-        plot_id = f"mbar-overlap-matrix-plot-{id(results)}"
-
-        return f"""
-                    <div id="{plot_id}" style="min-height:500px;"></div>
-                    <p style="margin-top:15px;font-size:0.9em;color:#666;">
-                        <strong>📊 Interpretation:</strong> Overlap matrix shows the phase space overlap between adjacent lambda windows.
-                        <br>Values closer to 1.0 (red) indicate good overlap, while values near 0.0 (blue) suggest poor sampling.
-                        <br>Ideally, all off-diagonal elements should be > 0.1 for reliable MBAR estimates.
-                    </p>
-                <script>
-                    Plotly.newPlot('{plot_id}', {heatmap_data}, {layout}, {{responsive: true, displayModeBar: false}});
-                </script>
         """
 
     def _build_overlap_matrix_section(self, estimator_name: str, results: "FEResults") -> str:
