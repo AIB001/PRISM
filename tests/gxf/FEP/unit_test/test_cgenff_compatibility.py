@@ -13,6 +13,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 from conftest import resolve_fep_case_dir
 
 

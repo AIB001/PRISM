@@ -39,6 +39,15 @@
 | 运行模式 | λ-REMD (`gmx mdrun -multidir -replex`) 与非交换多窗口 |
 | 分析基线 | `calculate.sh` 收集 `dhdl.xvg` + `gmx bar` 输出 `summary.dat` |
 
+**执行层设计约束**：
+| 项 | 方案 |
+|----|------|
+| 配置入口 | `execution.mode = standard|repex` |
+| 建模目录 | 不分叉；继续使用同一套 `bound/window_*` 与 `unbound/window_*` |
+| MDP 模板 | 不分叉；RE 只影响生产阶段执行脚本 |
+| 分析 | 不分叉；最终仍读取每个窗口下的 `dhdl.xvg` |
+| 资源参数 | 保留 `num_gpus`、`parallel_windows`、`omp_threads`、`use_gpu_pme`；不把 `mpirun/gmx_mpi/replex` 等高级参数做成正式配置 |
+
 **详细设计文档**（本文档姊妹篇）：
 | 文档 | 内容要点 |
 |------|----------|

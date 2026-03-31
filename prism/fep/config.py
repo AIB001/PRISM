@@ -48,6 +48,13 @@ DEFAULT_OUTPUT_PARAMS = {
     "energy_interval_ps": 10,
     "log_interval_ps": 10,
 }
+DEFAULT_EXECUTION_PARAMS = {
+    "mode": "standard",
+    "num_gpus": None,
+    "parallel_windows": None,
+    "omp_threads": 14,
+    "use_gpu_pme": True,
+}
 
 DEFAULT_LEGACY_PARAMS = {
     "dist_cutoff": 0.6,
@@ -212,6 +219,26 @@ class FEPConfig:
         """
         return self._merged_fep_section("output", DEFAULT_OUTPUT_PARAMS)
 
+    def get_execution_params(self) -> Dict[str, Any]:
+        """
+        Get execution-layer parameters from fep.yaml.
+
+        These settings only affect generated run scripts. They do not change
+        topology generation, MDP generation, or analysis.
+
+        Returns dict with keys:
+        - mode: Execution mode ('standard' or 'repex')
+        - num_gpus: Total GPUs available to the generated scripts
+        - parallel_windows: Number of concurrent windows in standard mode
+        - omp_threads: OpenMP threads per worker/rank
+        - use_gpu_pme: Whether to request GPU PME in mdrun commands
+        """
+        params = self._merged_fep_section("execution", DEFAULT_EXECUTION_PARAMS)
+        params["mode"] = str(params.get("mode", "standard")).strip().lower()
+        if params["mode"] not in {"standard", "repex"}:
+            raise ValueError(f"Invalid execution.mode: {params['mode']}")
+        return params
+
     def get_all_mdp_params(self) -> Dict[str, Any]:
         """
         Get all parameters needed for write_fep_mdps()
@@ -236,6 +263,7 @@ class FEPConfig:
             "electrostatics": self.get_electrostatics_params(),
             "vdw": self.get_vdw_params(),
             "output": self.get_output_params(),
+            "execution": self.get_execution_params(),
         }
 
     def __repr__(self):

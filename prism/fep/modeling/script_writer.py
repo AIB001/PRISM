@@ -28,6 +28,236 @@ from pathlib import Path
 from typing import Optional
 
 
+def _detect_num_gpus(exec_config: dict) -> int:
+    """Resolve the total GPU count for generated scripts."""
+    num_gpus_config = exec_config.get("num_gpus")
+    if num_gpus_config is not None:
+        return int(num_gpus_config)
+
+    import os
+
+    cuda_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if cuda_devices:
+        return len([gpu for gpu in cuda_devices.split(",") if gpu.strip()])
+    return 1
+
+
+def _get_execution_settings(config: Optional[dict]) -> dict:
+    """Normalize execution-layer settings used by script generation."""
+    config = config or {}
+    exec_config = dict(config.get("execution", {}))
+    fep_config = dict(config.get("fep", {}))
+
+    num_gpus = _detect_num_gpus(exec_config)
+    mode = str(exec_config.get("mode", "standard")).strip().lower()
+    if mode not in {"standard", "repex"}:
+        raise ValueError(f"Unsupported execution.mode: {mode}")
+
+    parallel_windows = exec_config.get("parallel_windows", num_gpus)
+    if parallel_windows is None:
+        parallel_windows = num_gpus
+    parallel_windows = max(1, int(parallel_windows))
+
+    return {
+        "mode": mode,
+        "use_gpu_pme": bool(exec_config.get("use_gpu_pme", True)),
+        "num_gpus": max(1, int(num_gpus)),
+        "parallel_windows": parallel_windows,
+        "omp_threads": int(exec_config.get("omp_threads", 14)),
+        "replicas": int(fep_config.get("replicas", 1)),
+    }
+
+
+def _write_leg_execution_scripts(
+    leg_dir: Path,
+    execution_mode: str,
+    *,
+    use_gpu_pme: bool,
+    num_gpus: int,
+    parallel_windows: int,
+    omp_threads: int,
+) -> None:
+    """Generate per-leg production helper scripts for standard and repex modes."""
+    pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
+    standard_script = leg_dir / "run_prod_standard.sh"
+    repex_script = leg_dir / "run_prod_repex.sh"
+
+    standard_content = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+MDP_DIR="${{LEG_DIR}}/mdps"
+BUILD_DIR="${{LEG_DIR}}/build"
+
+if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
+    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
+else
+    MDRUN_NSTEPS_ARG=""
+fi
+
+echo "Production mode: standard"
+echo "Concurrent windows: {parallel_windows}"
+echo "Configured GPUs: {num_gpus}"
+
+JOB_COUNT=0
+for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
+    lambda_name=$(basename "${{lambda_mdp}}" .mdp)
+    lambda_idx="${{lambda_name#prod_}}"
+    window_dir="${{LEG_DIR}}/window_${{lambda_idx}}"
+    mkdir -p "${{window_dir}}"
+
+    if [ -f "${{window_dir}}/prod.gro" ]; then
+        echo "  ${{lambda_name}}: already completed"
+        continue
+    fi
+
+    if [ {parallel_windows} -gt 1 ]; then
+        running_jobs=$(find "${{LEG_DIR}}" -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
+        while [ "${{running_jobs}}" -ge {parallel_windows} ]; do
+            sleep 1
+            running_jobs=$(find "${{LEG_DIR}}" -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
+        done
+    fi
+
+    if [ {num_gpus} -gt 1 ]; then
+        gpu_id=$((JOB_COUNT % {num_gpus}))
+    else
+        gpu_id=0
+    fi
+
+    run_window() {{
+        local lambda_idx="$1"
+        local lambda_name="$2"
+        local lambda_mdp="$3"
+        local window_dir="$4"
+        local gpu_id="$5"
+
+        export CUDA_VISIBLE_DEVICES="${{gpu_id}}"
+        export OMP_NUM_THREADS={omp_threads}
+
+        echo "$$" > "${{LEG_DIR}}/.run_${{lambda_idx}}"
+        trap 'rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"' EXIT
+
+        if [ -f "${{window_dir}}/npt_short.gro" ]; then
+            echo "  ${{lambda_name}}: NPT short already completed"
+        elif [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
+            echo "  ${{lambda_name}}: resuming NPT short"
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+        else
+            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/nvt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 10
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+        fi
+
+        if [ -f "${{window_dir}}/prod.gro" ]; then
+            echo "  ${{lambda_name}}: production already completed"
+        elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
+            echo "  ${{lambda_name}}: resuming production"
+            gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+        else
+            echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}}"
+            if [ ! -f "${{window_dir}}/prod.tpr" ]; then
+                gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 10
+            fi
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
+                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+        fi
+
+        rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
+        trap - EXIT
+        echo "  ${{lambda_name}}: ✓ Complete"
+    }}
+
+    if [ {parallel_windows} -gt 1 ]; then
+        run_window "${{lambda_idx}}" "${{lambda_name}}" "${{lambda_mdp}}" "${{window_dir}}" "${{gpu_id}}" &
+        JOB_COUNT=$((JOB_COUNT + 1))
+    else
+        run_window "${{lambda_idx}}" "${{lambda_name}}" "${{lambda_mdp}}" "${{window_dir}}" "${{gpu_id}}"
+    fi
+done
+
+if [ {parallel_windows} -gt 1 ]; then
+    echo "Waiting for all windows to complete..."
+    wait
+fi
+"""
+
+    repex_content = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+LEG_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+MDP_DIR="${{LEG_DIR}}/mdps"
+BUILD_DIR="${{LEG_DIR}}/build"
+
+if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
+    MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
+else
+    MDRUN_NSTEPS_ARG=""
+fi
+
+NUM_GPUS={num_gpus}
+export OMP_NUM_THREADS={omp_threads}
+
+window_dirs=()
+for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
+    lambda_name=$(basename "${{lambda_mdp}}" .mdp)
+    lambda_idx="${{lambda_name#prod_}}"
+    window_dir="${{LEG_DIR}}/window_${{lambda_idx}}"
+    window_dirs+=("${{window_dir}}")
+    mkdir -p "${{window_dir}}"
+
+    if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
+        if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
+            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/nvt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 10
+        fi
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+    fi
+
+    if [ ! -f "${{window_dir}}/prod.tpr" ]; then
+        gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 10
+    fi
+done
+
+num_windows="${{#window_dirs[@]}}"
+if [ "${{num_windows}}" -eq 0 ]; then
+    echo "Error: no prod_*.mdp files found in $MDP_DIR"
+    exit 1
+fi
+
+gpu_ids=$(seq 0 $((NUM_GPUS - 1)) | awk '{{printf "%s", $0}}')
+window_cpi="${{window_dirs[0]}}/prod.cpt"
+cpi_args=()
+if [ -f "${{window_cpi}}" ]; then
+    cpi_args=(-cpi prod.cpt)
+fi
+
+echo "Production mode: repex"
+echo "Replica-exchange windows: ${{num_windows}}"
+echo "Configured GPUs: $NUM_GPUS"
+echo "GPU id string: $gpu_ids"
+
+mpirun -oversubscribe -np "${{num_windows}}" \\
+    gmx_mpi mdrun -v -deffnm prod -nb gpu -bonded gpu {pme_gpu_flag} -replex 1000 \\
+    -multidir "${{window_dirs[@]}}" -gpu_id "${{gpu_ids}}" -pin on -dhdl dhdl \\
+    "${{cpi_args[@]}}" ${{MDRUN_NSTEPS_ARG}}
+"""
+
+    for path, content in ((standard_script, standard_content), (repex_script, repex_content)):
+        with open(path, "w") as handle:
+            handle.write(content)
+        path.chmod(0o755)
+
+    mode_file = leg_dir / "run_prod.sh"
+    mode_file.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f'exec "$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)/run_prod_{execution_mode}.sh" "$@"\n'
+    )
+    mode_file.chmod(0o755)
+
+
 def write_root_scripts(layout, config: Optional[dict] = None) -> None:
     """
     Write root-level run_fep.sh master script.
@@ -49,16 +279,30 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
     ---------------------
     execution.use_gpu_pme : bool
         Enable GPU PME (default: True)
+    execution.mode : str
+        Production execution mode: ``standard`` (independent windows) or
+        ``repex`` (lambda replica exchange via ``gmx_mpi -multidir``)
     execution.num_gpus : int
         Number of GPUs available (default: 1)
     execution.parallel_windows : int
-        Number of concurrent lambda windows (default: 1, set to >1 for parallel execution)
+        Number of concurrent lambda windows in ``standard`` mode. In ``repex``
+        mode, all configured GPUs are assigned to one multidir production job.
     execution.omp_threads : int
         OpenMP threads per GPU (default: 14)
     fep.replicas : int
         Number of replica runs for error estimation (default: 1)
         When >1, creates bound1, bound2, ... and unbound1, unbound2, ... directories
     """
+    settings = _get_execution_settings(config)
+    for leg_dir in (layout.bound_dir, layout.unbound_dir):
+        _write_leg_execution_scripts(
+            leg_dir,
+            settings["mode"],
+            use_gpu_pme=settings["use_gpu_pme"],
+            num_gpus=settings["num_gpus"],
+            parallel_windows=settings["parallel_windows"],
+            omp_threads=settings["omp_threads"],
+        )
     write_fep_master_script(layout.root, config)
 
 
@@ -74,39 +318,13 @@ def write_fep_master_script(fep_dir: Path, config: Optional[dict] = None) -> Non
     config : dict, optional
         Configuration dictionary with GPU settings
     """
-    # Get GPU and parallel settings from config
-    config = config or {}
-    exec_config = config.get("execution", {})
-    fep_config = config.get("fep", {})
-
-    # Default settings for FEP calculations
-    # - Auto-detect num_gpus from environment if available, else use 1
-    # - Use num_gpus as default for parallel_windows (one window per GPU)
-    # - This gives good parallel performance by default
-    use_gpu_pme = exec_config.get("use_gpu_pme", True)
-    num_gpus_config = exec_config.get("num_gpus")
-    omp_threads = exec_config.get("omp_threads", 14)
-    replicas = fep_config.get("replicas", 1)  # Number of replica runs
-
-    # Auto-detect number of GPUs if not specified
-    if num_gpus_config is None:
-        # Try to detect from CUDA_VISIBLE_DEVICES or nvidia-smi
-        import os
-
-        cuda_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        if cuda_devices:
-            # Count GPUs in CUDA_VISIBLE_DEVICES (comma-separated)
-            num_gpus = len(cuda_devices.split(","))
-        else:
-            # Fallback to single GPU
-            num_gpus = 1
-    else:
-        num_gpus = num_gpus_config
-
-    # Default to parallel execution if multiple GPUs available
-    parallel_windows = exec_config.get("parallel_windows", num_gpus)
-
-    # Build GPU PME flag for mdrun commands
+    settings = _get_execution_settings(config)
+    execution_mode = settings["mode"]
+    use_gpu_pme = settings["use_gpu_pme"]
+    num_gpus = settings["num_gpus"]
+    parallel_windows = settings["parallel_windows"]
+    omp_threads = settings["omp_threads"]
+    replicas = settings["replicas"]
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
 
     script_path = fep_dir / "run_fep.sh"
@@ -123,6 +341,13 @@ if [ -n "${{PRISM_MDRUN_NSTEPS:-}}" ]; then
     MDRUN_NSTEPS_ARG="-nsteps ${{PRISM_MDRUN_NSTEPS}}"
 else
     MDRUN_NSTEPS_ARG=""
+fi
+
+EXECUTION_MODE="${{PRISM_FEP_MODE:-{execution_mode}}}"
+if [[ "${{EXECUTION_MODE}}" != "standard" && "${{EXECUTION_MODE}}" != "repex" ]]; then
+    echo "Error: unsupported execution mode '${{EXECUTION_MODE}}'"
+    echo "Supported modes: standard, repex"
+    exit 1
 fi
 
 # Function to run a single leg
@@ -208,112 +433,12 @@ run_leg() {{
         gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v
     fi
 
-    # FEP production runs for each lambda window
     echo "Running FEP production for all lambda windows..."
-    JOB_COUNT=0
-    for lambda_mdp in ${{MDP_DIR}}/prod_*.mdp; do
-        lambda_name=$(basename ${{lambda_mdp}} .mdp)
-        lambda_idx=$(echo ${{lambda_name}} | sed 's/prod_//')
-        window_dir="window_${{lambda_idx}}"
-
-        mkdir -p "${{window_dir}}"
-
-        # Check if already completed
-        if [ -f "${{window_dir}}/prod.gro" ]; then
-            echo "  ${{lambda_name}}: already completed"
-            continue
-        fi
-
-        # Parallel execution: wait if too many jobs already started
-        if [ {parallel_windows} -gt 1 ]; then
-            # Count running jobs by checking .run files
-            running_jobs=$(find . -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
-            while [ ${{running_jobs}} -ge {parallel_windows} ]; do
-                sleep 1
-                running_jobs=$(find . -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
-            done
-        fi
-
-        # Assign GPU (round-robin for multi-GPU)
-        if [ {num_gpus} -gt 1 ]; then
-            gpu_id=$((JOB_COUNT % {num_gpus}))
-            export CUDA_VISIBLE_DEVICES=$gpu_id
-            export OMP_NUM_THREADS={omp_threads}
-            echo "  ${{lambda_name}}: starting on GPU ${{gpu_id}} (job ${{JOB_COUNT}})"
-        else
-            echo "  ${{lambda_name}}: starting"
-        fi
-
-        # Run in background if parallel
-        if [ {parallel_windows} -gt 1 ]; then
-            (
-                # Mark job as running
-                echo "$$" > .run_${{lambda_idx}}
-
-                # Per-window NPT short equilibration
-                if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
-                    if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
-                        gmx grompp -f ${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 10 >/dev/null 2>&1
-                    fi
-                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} > "${{window_dir}}/npt_short.log" 2>&1
-                fi
-
-                # Production run
-                if [ ! -f "${{window_dir}}/prod.gro" ]; then
-                    if [ ! -f "${{window_dir}}/prod.tpr" ]; then
-                        gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 10 >/dev/null 2>&1
-                    fi
-                    gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} > "${{window_dir}}/prod.log" 2>&1
-                fi
-
-                # Mark job as completed
-                rm -f .run_${{lambda_idx}}
-
-                echo "  ${{lambda_name}}: ✓ Complete"
-            ) &
-            JOB_COUNT=$((JOB_COUNT + 1))
-        else
-            # Sequential execution
-            # Per-window NPT short equilibration
-            if [ -f "${{window_dir}}/npt_short.gro" ]; then
-                echo "  ${{lambda_name}}: NPT short already completed"
-            elif [ -f "${{window_dir}}/npt_short.tpr" ]; then
-                if [ -f "${{window_dir}}/npt_short.cpt" ]; then
-                    echo "  ${{lambda_name}}: NPT short resuming from checkpoint"
-                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
-                else
-                    echo "  ${{lambda_name}}: NPT short TPR exists without checkpoint, continuing from TPR"
-                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-                fi
-            else
-                echo "  ${{lambda_name}}: starting NPT short equilibration"
-                gmx grompp -f ${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp -c ${{BUILD_DIR}}/npt.gro -r ${{BUILD_DIR}}/npt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o "${{window_dir}}/npt_short.tpr" -maxwarn 10
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-            fi
-
-            # Production run
-            if [ -f "${{window_dir}}/prod.gro" ]; then
-                echo "  ${{lambda_name}}: production already completed"
-            elif [ -f "${{window_dir}}/prod.tpr" ]; then
-                if [ -f "${{window_dir}}/prod.cpt" ]; then
-                    echo "  ${{lambda_name}}: production resuming from checkpoint"
-                    gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
-                else
-                    echo "  ${{lambda_name}}: production TPR exists without checkpoint, continuing from TPR"
-                    gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-                fi
-            else
-                echo "  ${{lambda_name}}: starting production"
-                gmx grompp -f ${{lambda_mdp}} -c "${{window_dir}}/npt_short.gro" -p topol.top -o "${{window_dir}}/prod.tpr" -maxwarn 10
-                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
-            fi
-        fi
-    done
-
-    # Wait for all background jobs to complete
-    if [ {parallel_windows} -gt 1 ]; then
-        echo "Waiting for all windows to complete..."
-        wait
+    echo "Execution mode: ${{EXECUTION_MODE}}"
+    if [ "${{EXECUTION_MODE}}" = "repex" ]; then
+        ./run_prod_repex.sh
+    else
+        ./run_prod_standard.sh
     fi
 
     # Clean up intermediate step PDB files
@@ -394,6 +519,7 @@ if [ $# -eq 0 ]; then
     echo ""
     echo "Environment variables:"
     echo "  PRISM_MDRUN_NSTEPS - Limit production steps (testing only, DO NOT use for production)"
+    echo "  PRISM_FEP_MODE     - Override execution mode (standard or repex)"
     exit 1
 fi
 
