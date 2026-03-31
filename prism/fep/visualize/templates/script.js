@@ -561,7 +561,8 @@
                         <td><span class="classification-badge ${badgeClass}">${classificationLabels[atomA.classification]}</span></td>
                     `;
                 } else {
-                    html += '<td>—</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
+                    const missingLabelA = type === 'transformed_b' ? 'Not present' : 'Not mapped';
+                    html += `<td>Not present</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-missing">${missingLabelA}</span></td>`;
                 }
 
                 // Ligand B columns
@@ -575,7 +576,8 @@
                         <td><span class="classification-badge ${badgeClass}">${classificationLabels[atomB.classification]}</span></td>
                     `;
                 } else {
-                    html += '<td style="border-left: 2px solid #ddd;">—</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-transformed">—</span></td>';
+                    const missingLabelB = type === 'transformed_a' ? 'Not present' : 'Not mapped';
+                    html += `<td style="border-left: 2px solid #ddd;">Not present</td><td>—</td><td>—</td><td>—</td><td><span class="classification-badge badge-missing">${missingLabelB}</span></td>`;
                 }
 
                 html += '</tr>';

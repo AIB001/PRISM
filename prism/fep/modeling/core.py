@@ -464,11 +464,15 @@ class FEPScaffoldBuilder:
         # Write placeholder coordinate file
         placeholder_gro = leg_dir / "input" / "conf.gro"
         if not placeholder_gro.exists():
-            with open(placeholder_gro, "w") as f:
-                f.write("Placeholder system\n")
-                f.write("1\n")
-                f.write("    1HYB     C1    1   0.000   0.000   0.000\n")
-                f.write("   5.00000   5.00000   5.00000\n")
+            hybrid_gro = layout.hybrid_dir / self.hybrid_gro_filename
+            if leg_name == "unbound" and hybrid_gro.exists():
+                shutil.copy2(hybrid_gro, placeholder_gro)
+            else:
+                with open(placeholder_gro, "w") as f:
+                    f.write("Placeholder system\n")
+                    f.write("1\n")
+                    f.write("    1HYB     C1    1   0.000   0.000   0.000\n")
+                    f.write("   5.00000   5.00000   5.00000\n")
 
     def _write_manifest(
         self,
@@ -515,8 +519,11 @@ class FEPScaffoldBuilder:
     def _write_unbound_topology(self, topol_path: Path) -> None:
         """Write unbound leg topology template."""
         content = "; PRISM-FEP unbound topology template\n"
+        defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
+        if defaults_path.exists():
+            content += '#include "../common/hybrid/defaults_hybrid.itp"\n'
         if ff_path.exists():
             content += f'#include "../common/hybrid/{self.hybrid_forcefield_filename}"\n'
         elif atomtypes_path.exists():
@@ -529,8 +536,14 @@ class FEPScaffoldBuilder:
     def _write_bound_topology_template(self, topol_path: Path) -> None:
         """Write bound leg topology template."""
         content = "; PRISM-FEP bound topology template\n"
+        defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
+        ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
-        if atomtypes_path.exists():
+        if defaults_path.exists():
+            content += '#include "../common/hybrid/defaults_hybrid.itp"\n'
+        if ff_path.exists():
+            content += f'#include "../common/hybrid/{self.hybrid_forcefield_filename}"\n'
+        elif atomtypes_path.exists():
             content += f'#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
         content += f'#include "../common/hybrid/{self.hybrid_itp_filename}"\n\n'
         content += "[ system ]\nBound FEP leg\n\n"

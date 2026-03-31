@@ -898,13 +898,13 @@ prism analyze --xvg dhdl.xvg --method bar
 - ✓ PRISM 标准参数全部应用
 - ✓ FEP 特定参数正确配置
 
-### 9.3 FEP Scaffold 生成 - 完整系统构建 ✅
+### 9.3 FEP Scaffold 生成 - 目录与脚本产物验证完成，完整 MD-ready 系统仍需继续验证 ⚠️
 
-**状态**: 完全实现并验证
+**状态**: scaffold 生成已实现并验证；完整溶剂化体系的逐窗 `grompp/mdrun` 级验证尚未完成
 
 **功能**:
 - 创建完整的 FEP 目录结构（bound/unbound legs）
-- 自动构建完整的 MD 系统（蛋白质 + 配体 + 溶剂 + 离子）
+- 可接收 PRISM 预构建的完整 MD 系统（蛋白质 + 配体 + 溶剂 + 离子）
 - 生成 hybrid ligand 拓扑文件
 - 生成所有必要的 MDP 文件
 - 生成可执行的运行脚本
@@ -913,12 +913,12 @@ prism analyze --xvg dhdl.xvg --method bar
 
 **验证结果**:
 - ✓ 目录结构完整
-- ✓ 完整的溶剂化系统（bound: 蛋白质+配体+水+离子，unbound: 配体+水+离子）
 - ✓ Hybrid ligand 拓扑正确集成
 - ✓ 拓扑文件引用 hybrid ligand
 - ✓ 运行脚本可执行
 - ✓ Window 目录结构正确（build/ + window_XX/）
 - ✓ Per-window NPT 正确配置
+- ⚠️ scaffold-only 路径目前只保证占位/拼装产物正确，不应表述为“完整溶剂化系统已逐窗验证”
 
 ### 9.4 Charge Redistribution - 电荷重分配机制 ✅
 
@@ -940,7 +940,7 @@ prism analyze --xvg dhdl.xvg --method bar
 **状态**: 完全实现并验证
 
 **功能**:
-- Canvas 渲染的 2D 分子结构
+- Canvas 渲染的 2D 分子结构（共享画布）
 - FEP 分类着色（common、transformed、surrounding）
 - 元素着色模式
 - 交互式缩放、平移
@@ -952,15 +952,21 @@ prism analyze --xvg dhdl.xvg --method bar
 - ✓ 交互功能正常
 - ✓ PNG 导出功能正常
 
-### 9.6 完整测试覆盖 ✅
+### 9.6 测试覆盖 - 重点回归已通过，端到端 MD 级验证仍需补充 ⚠️
 
-**状态**: 全部通过
+**状态**: focused 回归通过；完整系统构建与逐窗运行的验证尚未全部闭环
 
 **测试文件**:
 - `test_lambda_comprehensive.py` - Lambda schedule 综合测试
 - `test_framework.py` - FEP 框架测试（24/24 通过）
 - `test_fep_workflow.py` - 完整工作流测试
 - `test_complete_system_build.py` - 系统构建测试
+- `tests/test_fep_mapping_coordinate_sources.py` - 坐标源与对齐回归测试
+- `tests/test_fep_mapping_quality.py` - 跨力场映射质量与配体对一致性测试
+
+**说明**:
+- `test_complete_system_build.py` 当前并不能代表所有 scaffold 输出都已经完成 `grompp/mdrun` 级验证
+- 当前更可靠的结论是：配体映射、HTML 可视化、脚本生成、hybrid/scaffold 产物已通过 focused regression
 
 ### 9.7 一键式工作流
 

@@ -693,6 +693,19 @@ class PRISMBuilder(PMFBuilderMixin):
         # Clean the protein
         cleaner.clean_pdb(self.protein_path, cleaned_pdb)
 
+        # Some prepared receptors keep non-canonical terminal cap atoms
+        # (e.g. CAY/CY/OY or CAT/NT) on standard amino-acid residue names.
+        # Strip them immediately so downstream pdbfixer/pdb2gmx sees a
+        # canonical protein backbone.
+        from prism.utils.cleaner import fix_terminal_atoms
+
+        fix_terminal_atoms(
+            cleaned_pdb,
+            cleaned_pdb,
+            force_field=self.forcefield["name"] if self.forcefield else None,
+            verbose=True,
+        )
+
         # Post-process: Fix terminal hydrogen names for AMBER compatibility
         self._fix_hydrogen_names(cleaned_pdb)
 
@@ -1106,9 +1119,21 @@ fi
             print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
             print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
 
-            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_gro)
+            ref_coord_source = self.ligand_paths[0] if self.ligand_paths else ref_gro
+            if not os.path.exists(ref_coord_source):
+                ref_coord_source = ref_gro
 
-            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_gro)
+            mut_coord_source = self.mutant_ligand or mut_gro
+            if not os.path.exists(mut_coord_source):
+                mut_coord_source = mut_gro
+
+            print("  Mapping coordinate sources:")
+            print(f"    Reference coords: {ref_coord_source}")
+            print(f"    Mutant coords:    {mut_coord_source}")
+
+            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_coord_source)
+
+            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_coord_source)
 
             # Perform atom mapping
             from ..fep.core.mapping import DistanceAtomMapper

@@ -28,6 +28,7 @@ class HybridPackageBuilder:
         hybrid_itp_filename: str = "hybrid.itp",
         hybrid_atomtypes_filename: str = "atomtypes_hybrid.itp",
         hybrid_forcefield_filename: str = "ff_hybrid.itp",
+        hybrid_defaults_filename: str = "defaults_hybrid.itp",
         hybrid_posre_filename: str = "posre_hybrid.itp",
         hybrid_gro_filename: str = "hybrid.gro",
         molecule_name: str = "HYB",
@@ -43,6 +44,8 @@ class HybridPackageBuilder:
             Filename for hybrid atomtypes file (default: "atomtypes_hybrid.itp")
         hybrid_forcefield_filename : str
             Filename for hybrid forcefield file (default: "ff_hybrid.itp")
+        hybrid_defaults_filename : str
+            Filename for hybrid defaults file (default: "defaults_hybrid.itp")
         hybrid_posre_filename : str
             Filename for hybrid position restraint file (default: "posre_hybrid.itp")
         hybrid_gro_filename : str
@@ -54,6 +57,7 @@ class HybridPackageBuilder:
         self.hybrid_itp_filename = hybrid_itp_filename
         self.hybrid_atomtypes_filename = hybrid_atomtypes_filename
         self.hybrid_forcefield_filename = hybrid_forcefield_filename
+        self.hybrid_defaults_filename = hybrid_defaults_filename
         self.hybrid_posre_filename = hybrid_posre_filename
         self.hybrid_gro_filename = hybrid_gro_filename
         self.molecule_name = molecule_name
@@ -121,10 +125,13 @@ class HybridPackageBuilder:
         atomtypes_content = self._build_hybrid_atomtypes_itp(normalized_itp, atomtypes)
         (hybrid_dir / self.hybrid_atomtypes_filename).write_text(atomtypes_content)
 
-        # Build force field file WITHOUT [ defaults ] block
-        # Note: ff_hybrid.itp will be included in the main topology which
-        # already has a [ defaults ] block from the protein force field.
-        # Including [ defaults ] here would cause "Found a second defaults directive" error.
+        defaults_block = self._extract_defaults_block(reference_ligand_dir, mutant_ligand_dir)
+        (hybrid_dir / self.hybrid_defaults_filename).write_text(defaults_block)
+
+        # Build force field file WITHOUT [ defaults ] block.
+        # The standalone unbound topology includes defaults_hybrid.itp before
+        # this file; PRISM-built bound/unbound topologies already carry the
+        # forcefield defaults and only need atomtypes here.
         ff_hybrid = f'#include "{self.hybrid_atomtypes_filename}"\n'
         (hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
 

@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-完整的 FEP 建模流程测试：42-38 系统（支持多种力场）
+42-38 系统 FEP 映射与 scaffold 测试（支持多种力场）
 
 测试流程：
 1. 使用指定力场（GAFF2/CHARMM）参数化两个配体
 2. 执行原子映射
-3. 搭建完整 FEP 系统
+3. 搭建 FEP scaffold
 4. 生成 Mapping HTML 可视化
 5. 验证输出文件
 
@@ -34,6 +34,20 @@ from test_utils import FEPTestPaths, get_system_config
 from prism.forcefield.gaff import GAFFForceFieldGenerator
 
 
+def resolve_prism_ligand_dir(base_dir: Path) -> Path:
+    """Resolve a PRISM ligand directory regardless of backend naming."""
+    candidates = [
+        base_dir / "LIG.amb2gmx",
+        base_dir / "LIG.charmm2gmx",
+        base_dir / "gromacs",
+        base_dir,
+    ]
+    for candidate in candidates:
+        if (candidate / "LIG.itp").exists():
+            return candidate
+    raise FileNotFoundError(f"Could not find PRISM ligand directory under {base_dir}")
+
+
 def setup_cgenff_ligands(paths: FEPTestPaths, output_base: Path):
     """
     设置 CGenFF 配体（使用预生成的文件）
@@ -46,9 +60,14 @@ def setup_cgenff_ligands(paths: FEPTestPaths, output_base: Path):
     ligand_a_id = system_config["ligand_b"]  # 42
     ligand_b_id = system_config["ligand_a"]  # 38
 
-    # CGenFF ligand directories (original CHARMM-GUI structure)
-    lig_42_charmm_dir = paths.system_dir / ligand_a_id / "gromacs"
-    lig_38_charmm_dir = paths.system_dir / ligand_b_id / "gromacs"
+    # Prefer the normalized PRISM-style output if it already exists.
+    lig_42_charmm_dir = paths.system_dir / "cgenff" / ligand_a_id / "LIG.charmm2gmx"
+    lig_38_charmm_dir = paths.system_dir / "cgenff" / ligand_b_id / "LIG.charmm2gmx"
+
+    if not lig_42_charmm_dir.exists():
+        lig_42_charmm_dir = paths.system_dir / ligand_a_id / "gromacs"
+    if not lig_38_charmm_dir.exists():
+        lig_38_charmm_dir = paths.system_dir / ligand_b_id / "gromacs"
 
     if not lig_42_charmm_dir.exists():
         raise FileNotFoundError(f"CHARMM files not found: {lig_42_charmm_dir}")
@@ -62,9 +81,13 @@ def setup_cgenff_ligands(paths: FEPTestPaths, output_base: Path):
     lig_42_output.mkdir(parents=True, exist_ok=True)
     lig_38_output.mkdir(parents=True, exist_ok=True)
 
-    # 链接到 gromacs 目录（模拟 LIG.amb2gmx 结构）
-    (lig_42_output / "LIG.amb2gmx").symlink_to(lig_42_charmm_dir)
-    (lig_38_output / "LIG.amb2gmx").symlink_to(lig_38_charmm_dir)
+    # 如果源目录已经位于标准输出目录中，直接复用；否则创建符号链接。
+    target_42 = lig_42_output / lig_42_charmm_dir.name
+    target_38 = lig_38_output / lig_38_charmm_dir.name
+    if lig_42_charmm_dir.parent != lig_42_output and not target_42.exists():
+        target_42.symlink_to(lig_42_charmm_dir)
+    if lig_38_charmm_dir.parent != lig_38_output and not target_38.exists():
+        target_38.symlink_to(lig_38_charmm_dir)
 
     print(f"  ✓ CHARMM 配体 {ligand_a_id}: {lig_42_output}")
     print(f"  ✓ CHARMM 配体 {ligand_b_id}: {lig_38_output}")
@@ -130,17 +153,17 @@ def generate_mapping_html(
     ligand_b_id = system_config["ligand_a"]  # 38
 
     # 读取配体数据（返回 List[Atom]）
-    prism_dir_42 = lig_42_output / "LIG.amb2gmx"
-    prism_dir_38 = lig_38_output / "LIG.amb2gmx"
+    prism_dir_42 = resolve_prism_ligand_dir(lig_42_output)
+    prism_dir_38 = resolve_prism_ligand_dir(lig_38_output)
 
     atoms_a = read_ligand_from_prism(
         itp_file=str(prism_dir_42 / "LIG.itp"),
-        gro_file=str(prism_dir_42 / "LIG.gro"),
+        gro_file=str(paths.get_pdb_file(ligand_a_id)),
     )
 
     atoms_b = read_ligand_from_prism(
         itp_file=str(prism_dir_38 / "LIG.itp"),
-        gro_file=str(prism_dir_38 / "LIG.gro"),
+        gro_file=str(paths.get_pdb_file(ligand_b_id)),
     )
 
     print(f"  ✓ 配体 {ligand_a_id}: {len(atoms_a)} 原子")
@@ -152,23 +175,13 @@ def generate_mapping_html(
     mol2_a = paths.get_mol2_file(ligand_a_id)
     mol2_b = paths.get_mol2_file(ligand_b_id)
 
-    # 根据力场类型选择输入文件
-    if forcefield_type == "cgenff":
-        # CGenFF 使用 PDB
-        if not pdb_a.exists():
-            pdb_a = None
-        if not pdb_b.exists():
-            pdb_b = None
+    # HTML 渲染始终使用对齐后的 PDB 坐标；若有 MOL2，则额外用于键级恢复。
+    if not pdb_a.exists() or not pdb_b.exists():
+        raise FileNotFoundError("Aligned PDB coordinates are required for HTML visualization")
+    if not mol2_a.exists():
         mol2_a = None
+    if not mol2_b.exists():
         mol2_b = None
-    else:
-        # GAFF2 使用 MOL2
-        if not mol2_a.exists():
-            mol2_a = None
-        if not mol2_b.exists():
-            mol2_b = None
-        pdb_a = None
-        pdb_b = None
 
     # 生成 HTML
     html_path = output_dir / "42-38_mapping.html"
@@ -192,7 +205,7 @@ def generate_mapping_html(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FEP 端到端测试")
+    parser = argparse.ArgumentParser(description="FEP 映射与 scaffold 测试")
     parser.add_argument("--forcefield", choices=["gaff2", "cgenff"], default="gaff2", help="力场类型（默认: gaff2）")
     parser.add_argument("--html", action="store_true", help="生成 Mapping HTML 可视化")
 
@@ -201,6 +214,8 @@ def main():
     # Initialize test paths
     paths = FEPTestPaths("42-38")
     system_config = get_system_config("42-38")
+    ligand_a_id = system_config["ligand_b"]  # 42
+    ligand_b_id = system_config["ligand_a"]  # 38
 
     # 输出目录
     ligand_output_base = paths.get_forcefield_dir(args.forcefield)
@@ -211,7 +226,7 @@ def main():
         shutil.rmtree(fep_output)
 
     print("=" * 70)
-    print(f"42-38 系统 FEP 端到端测试 ({args.forcefield.upper()})")
+    print(f"42-38 系统 FEP 映射与 scaffold 测试 ({args.forcefield.upper()})")
     print("=" * 70)
 
     # ========================================================================
@@ -229,17 +244,17 @@ def main():
 
     from prism.fep.io import read_ligand_from_prism
 
-    prism_dir_42 = ligand_42_output / "LIG.amb2gmx"
-    prism_dir_38 = ligand_38_output / "LIG.amb2gmx"
+    prism_dir_42 = resolve_prism_ligand_dir(ligand_42_output)
+    prism_dir_38 = resolve_prism_ligand_dir(ligand_38_output)
 
     atoms_42 = read_ligand_from_prism(
         itp_file=str(prism_dir_42 / "LIG.itp"),
-        gro_file=str(prism_dir_42 / "LIG.gro"),
+        gro_file=str(paths.get_pdb_file(ligand_a_id)),
     )
 
     atoms_38 = read_ligand_from_prism(
         itp_file=str(prism_dir_38 / "LIG.itp"),
-        gro_file=str(prism_dir_38 / "LIG.gro"),
+        gro_file=str(paths.get_pdb_file(ligand_b_id)),
     )
 
     print(f"  ✓ 配体 42: {len(atoms_42)} 原子")
@@ -264,29 +279,64 @@ def main():
     print(f"  ✓ Common: {len(mapping.common)}")
     print(f"  ✓ Transformed (42): {len(mapping.transformed_a)}")
     print(f"  ✓ Transformed (38): {len(mapping.transformed_b)}")
+    print(f"  ✓ Surrounding (42): {len(mapping.surrounding_a)}")
+    print(f"  ✓ Surrounding (38): {len(mapping.surrounding_b)}")
 
     # 验证映射结果
     expected_common = system_config.get("expected_common")
-    if expected_common and abs(len(mapping.common) - expected_common) <= 2:
-        print(f"  ✓ 映射结果符合预期 (~{expected_common} common)")
+    if expected_common:
+        if abs(len(mapping.common) - expected_common) <= 2:
+            print(f"  ✓ 映射结果符合预期 (~{expected_common} common)")
+        else:
+            raise AssertionError(
+                f"映射结果异常：common={len(mapping.common)}，预期约为 {expected_common}。"
+                "这通常说明映射使用了未对齐的坐标。"
+            )
 
     # ========================================================================
-    # 步骤 5: 搭建 FEP 系统
+    # 步骤 5: 搭建 FEP scaffold
     # ========================================================================
-    print("\n[4/6] 搭建 FEP 系统...")
+    print("\n[4/6] 搭建 FEP scaffold...")
 
     from prism.fep.modeling.core import FEPScaffoldBuilder
     import tempfile
 
     # 生成混合拓扑
+    from prism.fep.core.hybrid_topology import HybridTopologyBuilder, LigandTopologyInput
     from prism.fep.gromacs.itp_builder import ITPBuilder
+
+    hybrid_atoms_builder = HybridTopologyBuilder(charge_strategy="mean", charge_reception="surround")
+    ref_itp_data = ITPBuilder._parse_source_itp((prism_dir_42 / "LIG.itp").read_text())
+    mut_itp_data = ITPBuilder._parse_source_itp((prism_dir_38 / "LIG.itp").read_text())
+
+    params_a = LigandTopologyInput(
+        masses={},
+        bonds=ref_itp_data["sections"].get("bonds", []),
+        pairs=ref_itp_data["sections"].get("pairs", []),
+        angles=ref_itp_data["sections"].get("angles", []),
+        dihedrals=ref_itp_data["sections"].get("dihedrals", []),
+        impropers=ref_itp_data["sections"].get("impropers", []),
+    )
+    params_b = LigandTopologyInput(
+        masses={},
+        bonds=mut_itp_data["sections"].get("bonds", []),
+        pairs=mut_itp_data["sections"].get("pairs", []),
+        angles=mut_itp_data["sections"].get("angles", []),
+        dihedrals=mut_itp_data["sections"].get("dihedrals", []),
+        impropers=mut_itp_data["sections"].get("impropers", []),
+    )
+    hybrid_atoms = hybrid_atoms_builder.build(mapping, params_a, params_b, atoms_42, atoms_38)
+
+    atoms_only_itp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".itp", delete=False)
+    atoms_only_itp_path = atoms_only_itp_file.name
+    ITPBuilder(hybrid_atoms, {}).write_itp(atoms_only_itp_path, molecule_name="HYB")
 
     hybrid_itp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".itp", delete=False)
     hybrid_itp_path = hybrid_itp_file.name
 
     ITPBuilder.write_complete_hybrid_itp(
         output_path=hybrid_itp_path,
-        hybrid_itp=str(hybrid_itp_path),
+        hybrid_itp=str(atoms_only_itp_path),
         ligand_a_itp=str(prism_dir_42 / "LIG.itp"),
         ligand_b_itp=str(prism_dir_38 / "LIG.itp"),
         molecule_name="HYB",
@@ -305,11 +355,11 @@ def main():
     layout = builder.build_from_components(
         receptor_pdb=str(receptor_pdb),
         hybrid_itp=hybrid_itp_path,
-        reference_ligand_dir=str(ligand_42_output),
-        mutant_ligand_dir=str(ligand_38_output),
+        reference_ligand_dir=str(prism_dir_42),
+        mutant_ligand_dir=str(prism_dir_38),
     )
 
-    print(f"  ✓ FEP 系统搭建完成: {layout.root}")
+    print(f"  ✓ FEP scaffold 搭建完成: {layout.root}")
 
     # ========================================================================
     # 步骤 6: 生成 HTML（可选）
@@ -323,13 +373,15 @@ def main():
     # 总结
     # ========================================================================
     print("\n" + "=" * 70)
-    print("✅ FEP 系统搭建成功！")
-    print(f"\nFEP 系统目录: {layout.root}")
+    print("✅ FEP 映射与 scaffold 测试通过！")
+    print(f"\nFEP scaffold 目录: {layout.root}")
     print(f"\n运行 FEP 计算:")
     print(f"  cd {layout.root} && bash run_fep.sh all")
+    print("  注意：这里验证的是配体映射质量与 scaffold 产物，不等同于完整 solvated MD-ready 系统已逐窗实跑验证。")
     print("=" * 70)
 
     # 清理临时文件
+    Path(atoms_only_itp_path).unlink(missing_ok=True)
     Path(hybrid_itp_path).unlink(missing_ok=True)
 
     return 0

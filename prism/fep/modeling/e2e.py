@@ -22,6 +22,8 @@ def build_fep_system_from_prism_ligands(
     mutant_ligand_dir: str,
     output_dir: str = "fep_output",
     hybrid_itp: Optional[str] = None,
+    reference_coord_file: Optional[str] = None,
+    mutant_coord_file: Optional[str] = None,
     lambda_windows: int = 32,
     lambda_strategy: str = "decoupled",
     dist_cutoff: float = 0.6,
@@ -101,8 +103,8 @@ def build_fep_system_from_prism_ligands(
     itp_ref, gro_ref = _resolve_prism_ligand_dir(reference_ligand_dir)
     itp_mut, gro_mut = _resolve_prism_ligand_dir(mutant_ligand_dir)
 
-    lig_ref = read_ligand_from_prism(itp_file=itp_ref, gro_file=gro_ref)
-    lig_mut = read_ligand_from_prism(itp_file=itp_mut, gro_file=gro_mut)
+    lig_ref = read_ligand_from_prism(itp_file=itp_ref, gro_file=reference_coord_file or gro_ref)
+    lig_mut = read_ligand_from_prism(itp_file=itp_mut, gro_file=mutant_coord_file or gro_mut)
     print(f"  ✓ Reference: {len(lig_ref)} atoms")
     print(f"  ✓ Mutant: {len(lig_mut)} atoms")
 

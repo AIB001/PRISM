@@ -155,6 +155,11 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
         "SD",
         "SG",
     }
+    # Some prepared receptor PDBs contain extra terminal capping atoms while
+    # keeping the residue name as a standard amino acid. Those atoms are not
+    # recognized by pdb2gmx and must be removed before topology generation.
+    FIRST_RESIDUE_EXTRA_ATOMS = {"CAY", "CY", "OY", "HY1", "HY2", "HY3"}
+    LAST_RESIDUE_EXTRA_ATOMS = {"CAT", "NT", "HNT", "HT1", "HT2", "HT3"}
 
     all_lines = []
     with open(pdb_file, "r") as f:
@@ -174,6 +179,41 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
             if res_id not in residues:
                 residues[res_id] = []
             residues[res_id].append({"line": line, "index": i, "atom": atom_name, "res_name": res_name})
+
+    # Track residue order per chain so we can strip non-canonical terminal cap atoms.
+    chain_residue_order = {}
+    for res_id in residues.keys():
+        chain = res_id.split(":")[0]
+        chain_residue_order.setdefault(chain, []).append(res_id)
+
+    extra_skip_indices = set()
+    extra_fix_messages = []
+    for chain, ordered_res_ids in chain_residue_order.items():
+        first_res_id = ordered_res_ids[0]
+        last_res_id = ordered_res_ids[-1]
+
+        first_removed = [
+            atom_info["atom"] for atom_info in residues[first_res_id] if atom_info["atom"] in FIRST_RESIDUE_EXTRA_ATOMS
+        ]
+        last_removed = [
+            atom_info["atom"] for atom_info in residues[last_res_id] if atom_info["atom"] in LAST_RESIDUE_EXTRA_ATOMS
+        ]
+
+        for atom_info in residues[first_res_id]:
+            if atom_info["atom"] in FIRST_RESIDUE_EXTRA_ATOMS:
+                extra_skip_indices.add(atom_info["index"])
+        for atom_info in residues[last_res_id]:
+            if atom_info["atom"] in LAST_RESIDUE_EXTRA_ATOMS:
+                extra_skip_indices.add(atom_info["index"])
+
+        if first_removed:
+            extra_fix_messages.append(
+                f"  Removed non-canonical N-terminal cap atoms in {first_res_id}: {', '.join(first_removed)}"
+            )
+        if last_removed:
+            extra_fix_messages.append(
+                f"  Removed non-canonical C-terminal cap atoms in {last_res_id}: {', '.join(last_removed)}"
+            )
 
     # Second pass: identify C-terminal residues needing fixes
     c_terminal_residues = {}  # res_id -> {c_index, skip_indices, o_line}
@@ -259,7 +299,7 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
             }
 
     # Third pass: reconstruct file with corrected terminal residues
-    skip_indices = set()
+    skip_indices = set(extra_skip_indices)
     insert_map = {}  # index -> lines_to_insert (may be multiple lines)
     fixed_count = 0
 
@@ -297,9 +337,11 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
                         f.write(terminal_line)
 
     if verbose:
+        for message in extra_fix_messages:
+            print(message)
         if fixed_count > 0:
             print(f"\nFixed {fixed_count} C-terminal residues with misplaced oxygen atoms")
-        else:
+        elif not extra_fix_messages:
             print("No terminal atom issues found")
 
     return output_file

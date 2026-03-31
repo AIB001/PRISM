@@ -369,9 +369,13 @@ def _generate_canvas_html(
         rows = []
 
         # Working directory (never highlight as non-default) - First
-        wd = os.getcwd()
-        if case_info.get("path"):
-            wd = os.path.join(wd, case_info["path"])
+        wd = (
+            case_info.get("working_dir")
+            or case_info.get("output_dir")
+            or case_info.get("path")
+            or config.get("working_dir")
+            or os.getcwd()
+        )
         # Force default style for working directory
         rows.append(
             f'<div class="config-row full-width"><div class="config-item" title="{tooltips["working_dir"]}"><span class="param-label">Working Directory:</span><span class="param-value">{wd}</span></div></div>'
@@ -572,7 +576,7 @@ def _generate_canvas_html(
                     </div>
                 </div>
                 <div class="toolbar-row">
-                    <strong>Controls:</strong> Drag to pan | Scroll to zoom (independent control for each molecule) | Hover for atom info
+                    <strong>Controls:</strong> Drag to pan | Scroll to zoom | Hover for atom info
                 </div>
             </div>
             <div class="toolbar-right">
