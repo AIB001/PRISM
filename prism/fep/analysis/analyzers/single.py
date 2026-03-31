@@ -23,6 +23,7 @@ Example Usage:
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -126,8 +127,8 @@ class FEPAnalyzer:
         skip_time_convergence : bool
             Skip time convergence analysis (saves ~5-10 min, default: False)
         """
-        self.bound_dir = [Path(bound_dir)] if not isinstance(bound_dir, list) else [Path(d) for d in bound_dir]
-        self.unbound_dir = [Path(unbound_dir)] if not isinstance(unbound_dir, list) else [Path(d) for d in unbound_dir]
+        self.bound_dirs = [Path(bound_dir)] if not isinstance(bound_dir, list) else [Path(d) for d in bound_dir]
+        self.unbound_dirs = [Path(unbound_dir)] if not isinstance(unbound_dir, list) else [Path(d) for d in unbound_dir]
         self.temperature = temperature
         self.estimator = estimator.upper()
         self.backend = backend.lower()
@@ -135,6 +136,9 @@ class FEPAnalyzer:
         self.allow_mock = allow_mock
         self.skip_bootstrap = skip_bootstrap
         self.skip_time_convergence = skip_time_convergence
+
+        if len(self.bound_dirs) != len(self.unbound_dirs):
+            raise ValueError("Number of bound and unbound directories must match")
 
         # Validate estimator
         if self.estimator not in self.ESTIMATORS:
@@ -168,91 +172,128 @@ class FEPAnalyzer:
             self.logger.warning("Using mock results (alchemlyb not available)")
             return self._analyze_mock()
 
-        # Parse data files
-        bound_data_list = []
-        unbound_data_list = []
+        try:
+            estimator_cls = self.ESTIMATORS[self.estimator]
 
-        for i, bound_dir in enumerate(self.bound_dirs):
-            repeat_label = f"repeat{i + 1}" if len(self.bound_dirs) > 1 else "bound"
-            self.logger.debug(f"Parsing {repeat_label} from {bound_dir}")
-            bdata = parse_leg_data(bound_dir, "bound", self.estimator, self.temperature, gmx, self.logger)
-            bound_data_list.append(bdata)
+            # Parse data files
+            bound_data_list = []
+            unbound_data_list = []
 
-        for i, unbound_dir in enumerate(self.unbound_dirs):
-            repeat_label = f"repeat{i + 1}" if len(self.unbound_dirs) > 1 else "unbound"
-            self.logger.debug(f"Parsing {repeat_label} from {unbound_dir}")
-            udata = parse_leg_data(unbound_dir, "unbound", self.estimator, self.temperature, gmx, self.logger)
-            unbound_data_list.append(udata)
+            for i, bound_dir in enumerate(self.bound_dirs):
+                repeat_label = f"repeat{i + 1}" if len(self.bound_dirs) > 1 else "bound"
+                self.logger.debug(f"Parsing {repeat_label} from {bound_dir}")
+                bdata = parse_leg_data(bound_dir, "bound", self.estimator, self.temperature, gmx, self.logger)
+                bound_data_list.append(bdata)
 
-        # Compute free energies
-        if self.backend == "gmx_bar":
-            delta_g_bound, delta_g_unbound, delta_g_error = compute_free_energy_gmx_bar(
-                bound_data_list, unbound_data_list, self.temperature, gmx
+            for i, unbound_dir in enumerate(self.unbound_dirs):
+                repeat_label = f"repeat{i + 1}" if len(self.unbound_dirs) > 1 else "unbound"
+                self.logger.debug(f"Parsing {repeat_label} from {unbound_dir}")
+                udata = parse_leg_data(unbound_dir, "unbound", self.estimator, self.temperature, gmx, self.logger)
+                unbound_data_list.append(udata)
+
+            # Compute free energies per repeat
+            bound_results = []
+            unbound_results = []
+            fitted_bounds = []
+            fitted_unbounds = []
+
+            if self.backend == "gmx_bar":
+                for bound_dir in self.bound_dirs:
+                    bound_results.append(compute_free_energy_gmx_bar(bound_dir, "bound", self.temperature, self.logger))
+                for unbound_dir in self.unbound_dirs:
+                    unbound_results.append(
+                        compute_free_energy_gmx_bar(unbound_dir, "unbound", self.temperature, self.logger)
+                    )
+            else:
+                for bdata in bound_data_list:
+                    dg, err, fitted, _overlap = compute_free_energy_alchemlyb(estimator_cls, bdata, self.logger)
+                    bound_results.append((dg, err))
+                    fitted_bounds.append(fitted)
+                for udata in unbound_data_list:
+                    dg, err, fitted, _overlap = compute_free_energy_alchemlyb(estimator_cls, udata, self.logger)
+                    unbound_results.append((dg, err))
+                    fitted_unbounds.append(fitted)
+
+            # Build repeat statistics and final binding free energy
+            summary = summarize_repeat_results(bound_results, unbound_results)
+            delta_g_bound = summary["delta_g_bound"]
+            delta_g_unbound = summary["delta_g_unbound"]
+            delta_g_error = math.sqrt(summary["error_bound"] ** 2 + summary["error_unbound"] ** 2)
+            delta_g = delta_g_bound - delta_g_unbound
+
+            self.logger.info(f"FEP Analysis Results ({self.estimator}):")
+            self.logger.info(f"  ΔG_bound   = {delta_g_bound:.3f} kcal/mol")
+            self.logger.info(f"  ΔG_unbound = {delta_g_unbound:.3f} kcal/mol")
+            self.logger.info(f"  ΔΔG_bind   = {delta_g:.3f} ± {delta_g_error:.3f} kcal/mol")
+
+            # Build lambda profiles for plotting
+            lambda_profiles = (
+                None
+                if self.backend == "gmx_bar"
+                else build_lambda_profiles(fitted_bounds, fitted_unbounds, self.estimator)
             )
-        else:
-            delta_g_bound, delta_g_unbound, delta_g_error = compute_free_energy_alchemlyb(
-                bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator]
+
+            # Compute convergence metrics (optional)
+            if self.backend == "gmx_bar" or self.skip_time_convergence:
+                self.logger.info("Skipping time convergence analysis")
+                self.raw_data["time_convergence"] = None
+            else:
+                self.raw_data["time_convergence"] = compute_time_convergence(
+                    bound_data_list, unbound_data_list, estimator_cls, n_points=10
+                )
+
+            if self.backend == "gmx_bar" or self.skip_bootstrap:
+                self.logger.info("Skipping bootstrap analysis")
+                self.raw_data["bootstrap"] = None
+            else:
+                self.logger.info("Running bootstrap analysis...")
+                self.raw_data["bootstrap"] = compute_bootstrap(
+                    bound_data_list,
+                    unbound_data_list,
+                    estimator_cls,
+                    n_bootstrap=50,
+                    fraction=0.8,
+                )
+
+            self.raw_data["lambda_profiles"] = lambda_profiles
+
+            # Store results
+            self.results = FEResults(
+                delta_g=delta_g,
+                delta_g_error=delta_g_error,
+                delta_g_bound=summary["delta_g_bound"],
+                delta_g_unbound=summary["delta_g_unbound"],
+                delta_g_components=self._build_energy_decomposition(),
+                convergence=self._build_convergence_summary(),
+                metadata={
+                    "temperature": self.temperature,
+                    "estimator": self.estimator,
+                    "backend": self.backend,
+                    "n_lambda_windows": self._count_lambda_windows(bound_data_list),
+                    "repeat_statistics": summary.get("repeat_statistics", {}),
+                },
+                repeat_results=summary["repeat_results"],
+                n_repeats=summary["n_repeats"],
+                lambda_profiles=lambda_profiles,
+                time_convergence=self.raw_data["time_convergence"],
+                bootstrap=self.raw_data["bootstrap"],
             )
 
-        # Calculate final binding free energy
-        delta_g = delta_g_bound - delta_g_unbound
-
-        self.logger.info(f"FEP Analysis Results ({self.estimator}):")
-        self.logger.info(f"  ΔG_bound   = {delta_g_bound:.3f} kcal/mol")
-        self.logger.info(f"  ΔG_unbound = {delta_g_unbound:.3f} kcal/mol")
-        self.logger.info(f"  ΔΔG_bind   = {delta_g:.3f} ± {delta_g_error:.3f} kcal/mol")
-
-        # Build repeat statistics (if multiple repeats)
-        summary = summarize_repeat_results(bound_data_list, unbound_data_list, delta_g)
-
-        # Build lambda profiles for plotting
-        lambda_profiles = build_lambda_profiles(bound_data_list, unbound_data_list, self.estimator)
-
-        # Compute convergence metrics (optional)
-        if self.skip_time_convergence:
-            self.logger.info("Skipping time convergence analysis")
-            self.raw_data["time_convergence"] = None
-        else:
-            self.raw_data["time_convergence"] = compute_time_convergence(
-                bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_points=10
-            )
-
-        if self.skip_bootstrap:
-            self.logger.info("Skipping bootstrap analysis")
-            self.raw_data["bootstrap"] = None
-        else:
-            self.logger.info("Running bootstrap analysis...")
-            self.raw_data["bootstrap"] = compute_bootstrap(
-                bound_data_list, unbound_data_list, self.ESTIMATORS[self.estimator], n_bootstrap=50, fraction=0.8
-            )
-
-        # Store results
-        self.results = FEResults(
-            delta_g=delta_g,
-            delta_g_error=delta_g_error,
-            delta_g_bound=summary["delta_g_bound"],
-            delta_g_unbound=summary["delta_g_unbound"],
-            delta_g_components=self._build_energy_decomposition(),
-            convergence=self._build_convergence_summary(),
-            metadata={
-                "temperature": self.temperature,
-                "estimator": self.estimator,
-                "backend": self.backend,
-                "n_lambda_windows": self._count_lambda_windows(bound_data_list),
-                "repeat_statistics": summary.get("statistics", {}),
-            },
-            repeat_results=summary["repeat_results"],
-            n_repeats=summary["n_repeats"],
-            lambda_profiles=lambda_profiles,
-            time_convergence=self.raw_data["time_convergence"],
-            bootstrap=self.raw_data["bootstrap"],
-        )
-
-        return self.results
+            return self.results
+        except Exception as exc:
+            if self.allow_mock:
+                self.logger.warning(f"Analysis failed; falling back to mock results: {exc}")
+                return self._analyze_mock()
+            raise
 
     def _analyze_mock(self) -> FEResults:
         """Generate mock results for testing"""
-        return FEResults(
+        self.raw_data = {
+            "lambda_profiles": None,
+            "time_convergence": None,
+            "bootstrap": None,
+        }
+        self.results = FEResults(
             delta_g=4.23,
             delta_g_error=0.15,
             delta_g_bound=54.07,
@@ -271,6 +312,7 @@ class FEPAnalyzer:
             time_convergence=None,
             bootstrap=None,
         )
+        return self.results
 
     def _build_convergence_summary(self) -> Dict[str, Any]:
         """Build convergence summary dictionary"""
@@ -336,13 +378,13 @@ class FEPAnalyzer:
         Path
             Path to generated report
         """
-        from ..report import HTMLReportGenerator
+        from ..reports import HTMLReportGenerator
 
         if self.results is None:
             raise RuntimeError("No results to generate report. Run analyze() first.")
 
-        generator = HTMLReportGenerator(self.results)
-        generator.save(output_path)
+        generator = HTMLReportGenerator(self.results, raw_data=self.raw_data)
+        generator.generate(output_path)
 
         self.logger.info(f"HTML report saved to: {output_path}")
         return Path(output_path)

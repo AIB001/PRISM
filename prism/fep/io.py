@@ -187,6 +187,7 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
 
     coords_by_id = {}
     coords_by_name = {}
+    elements_by_id = {}  # Store element symbols from PDB/GRO file
 
     # Auto-detect file format: PDB or GRO
     with open(gro_file, "r") as f:
@@ -201,6 +202,9 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
                 if line.startswith("ATOM") or line.startswith("HETATM"):
                     atom_name = line[12:16].strip()
                     atom_id = int(line[6:11].strip())
+                    # Extract element symbol from PDB atom name (more reliable than ITP)
+                    # Standard PDB: element is first 1-2 chars of atom name (right-justified)
+                    element_symbol = _extract_element(atom_name)
                     x = float(line[30:38].strip())
                     y = float(line[38:46].strip())
                     z = float(line[46:54].strip())
@@ -209,6 +213,8 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
                         coord = np.array([x, y, z])
                         coords_by_id[atom_id] = coord
                         coords_by_name[atom_name] = coord
+                        # Store element from PDB atom name
+                        elements_by_id[atom_id] = element_symbol
                     except (ValueError, IndexError):
                         continue
     else:
@@ -244,7 +250,13 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
     for atom_data in selected_atoms:
         atom_id = atom_data["id"]
         atom_name = atom_data["name"]
-        element = _extract_element(atom_name)
+
+        # Priority: Use element from PDB file, then extract from ITP name
+        if atom_id in elements_by_id:
+            element = elements_by_id[atom_id]
+        else:
+            element = _extract_element(atom_name)
+
         coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name, np.array([0.0, 0.0, 0.0])))
 
         atoms.append(

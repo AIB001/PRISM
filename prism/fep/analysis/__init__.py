@@ -65,6 +65,8 @@ from .reports import (
 from . import cli
 from . import plots
 from .core import convergence, estimators, profiles, xvg_parser
+from .estimators import FEstimator
+from .xvg_parser import XVGParser, find_xvg_file, parse_leg_data
 
 __all__ = [
     # Core models
@@ -80,8 +82,12 @@ __all__ = [
     # Other
     "cli",
     "convergence",
+    "FEstimator",
+    "find_xvg_file",
     "estimators",
     "plots",
     "profiles",
+    "parse_leg_data",
+    "XVGParser",
     "xvg_parser",
 ]

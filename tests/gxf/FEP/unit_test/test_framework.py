@@ -210,9 +210,9 @@ class TestMethodNotImplemented:
         assert [atom.name for atom in mapping_unique.transformed_a] == ["C2"]
 
     def test_xvg_parser_parse_not_implemented(self):
-        """Test that XVGParser.parse raises NotImplementedError"""
+        """XVGParser.parse should raise FileNotFoundError for missing input."""
         parser = XVGParser()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(FileNotFoundError):
             parser.parse("test.xvg")
 
     def test_festimator_bar_not_implemented(self):

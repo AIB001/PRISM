@@ -51,7 +51,7 @@ def compute_free_energy_gmx_bar(
     leg_dir: Path, leg_name: str, temperature: float, logger: logging.Logger
 ) -> Tuple[float, float]:
     """Run gmx bar and parse the reported ΔG/error in kcal/mol."""
-    from prism.fep.analysis.xvg_parser import find_xvg_file
+    from .xvg_parser import find_xvg_file
 
     xvg_files = []
     for window_dir in sorted(leg_dir.glob("window_*")):
