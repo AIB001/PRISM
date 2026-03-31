@@ -72,10 +72,38 @@ class TopologyProcessorMixin:
         # Use -ff and -water flags if force field info is provided
         # This is more reliable than interactive menu indexing
         if ff_info and "dir" in ff_info:
-            # Remove .ff extension from directory name for -ff flag
-            ff_name = ff_info["dir"].replace(".ff", "")
-            command.extend(["-ff", ff_name])
-            print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
+            # Copy force field to working directory to avoid GMXLIB search path conflicts
+            # When multiple force fields with the same name exist in GMXLIB,
+            # GROMACS cannot determine which one to use.
+            import shutil
+
+            ff_path = Path(ff_info["dir"])
+            if not ff_path.is_absolute():
+                # Relative path - use as-is
+                ff_name = str(ff_path).replace(".ff", "")
+                command.extend(["-ff", ff_name])
+                print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
+            else:
+                # Absolute path - copy to working directory
+                ff_basename = ff_path.name  # e.g., "amber14sb.ff"
+                local_ff_dir = self.model_dir / ff_basename
+                if not local_ff_dir.exists():
+                    try:
+                        shutil.copytree(ff_path, local_ff_dir)
+                        print(f"Copied force field to working directory: {local_ff_dir}")
+                    except Exception as e:
+                        print_warning(f"Failed to copy force field: {e}")
+                        # Fallback: use original path
+                        ff_name = str(ff_path).replace(".ff", "")
+                        command.extend(["-ff", ff_name])
+                        print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
+                        ff_basename = None
+
+                if ff_basename:
+                    # Use local copy (without .ff extension)
+                    ff_name = ff_basename.replace(".ff", "")
+                    command.extend(["-ff", ff_name])
+                    print(f"Using force field: {ff_name} (local copy)")
         else:
             print(f"DEBUG: Force field index = {ff_idx} (interactive menu)")
 
@@ -144,6 +172,28 @@ class TopologyProcessorMixin:
             input_lines.extend(["1"] * histidine_count)
 
         input_text = "\n".join(input_lines) + "\n" if input_lines else None
+
+        # Handle force field selection to avoid GROMACS search path conflicts
+        # When multiple force fields with the same name exist (e.g., in both GMXLIB
+        # and GROMACS installation), using -ff parameter causes errors.
+        # Solution: Don't use -ff parameter, let GROMACS auto-select from GMXLIB first.
+        if ff_info and "dir" in ff_info:
+            # Remove -ff parameter and its value from command
+            filtered_command = []
+            i = 0
+            while i < len(command):
+                if command[i] == "-ff" and i + 1 < len(command):
+                    # Skip both -ff and its value
+                    i += 2
+                    continue
+                filtered_command.append(command[i])
+                i += 1
+            command = filtered_command
+
+            # Add force field index to interactive input (GMXLIB entries come first)
+            input_lines = [str(ff_idx)] + input_lines
+            print(f"Using force field selection by index (GMXLIB searched before GROMACS installation)")
+            input_text = "\n".join(input_lines) + "\n"
 
         self._run_command(command, str(self.model_dir), input_str=input_text)
 

@@ -5,6 +5,7 @@
 Base class for SystemBuilder with common utilities.
 """
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -80,7 +81,9 @@ class SystemBuilderBase:
             self.model_dir = self.output_dir / "GMX_PROLIG_MD"
         self.model_dir.mkdir(exist_ok=True)
 
-    def _run_command(self, command: list, work_dir: str, input_str: Optional[str] = None) -> Tuple[str, str]:
+    def _run_command(
+        self, command: list, work_dir: str, input_str: Optional[str] = None, env: Optional[dict] = None
+    ) -> Tuple[str, str]:
         """
         Executes a shell command and handles errors.
 
@@ -88,6 +91,7 @@ class SystemBuilderBase:
             command: The command to execute as a list of strings.
             work_dir: The directory in which to run the command.
             input_str: A string to be passed to the command's stdin.
+            env: Optional dictionary of environment variables to set.
 
         Returns:
             A tuple containing the stdout and stderr of the command.
@@ -98,8 +102,19 @@ class SystemBuilderBase:
         cmd_str = " ".join(map(str, command))
         print(f"Executing in {work_dir}: {cmd_str}")
 
+        # Prepare environment
+        cmd_env = os.environ.copy()
+        if env:
+            cmd_env.update(env)
+
         process = subprocess.Popen(
-            command, cwd=work_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            command,
+            cwd=work_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=cmd_env,
         )
         stdout, stderr = process.communicate(input=input_str)
 
