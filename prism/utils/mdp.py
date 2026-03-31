@@ -6,6 +6,7 @@ PRISM MDP Generator - Generate MDP files for MD simulations
 """
 
 import os
+from typing import Dict, Optional, List
 
 # Import color utilities
 try:
@@ -650,3 +651,123 @@ pull-nstfout            = 500
         print(f"  - NVT equilibration: {number(sim_config['equilibration_nvt_time_ps'])} ps")
         print(f"  - NPT equilibration: {number(sim_config['equilibration_npt_time_ps'])} ps")
         print(f"  - Production: {number(sim_config['production_time_ns'])} ns")
+
+
+# ---------------------------------------------------------------------------
+# MDP File Parsing Utilities
+# ---------------------------------------------------------------------------
+
+
+def parse_mdp_file(mdp_file: str) -> Dict[str, str]:
+    """
+    Parse MDP file and return dictionary of parameters.
+
+    This function reads a GROMACS MDP file and extracts all parameter
+    assignments, returning them as a dictionary.
+
+    Parameters
+    ----------
+    mdp_file : str
+        Path to MDP file
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary mapping parameter names to their values
+
+    Notes
+    -----
+    MDP file format:
+    - Lines starting with ';' are comments (ignored)
+    - Empty lines are ignored
+    - Parameters are assigned as: parameter_name = value
+    - Whitespace around '=' is optional
+
+    Examples
+    --------
+    >>> params = parse_mdp_file("em.mdp")
+    >>> params["integrator"]
+    'md'
+    >>> params["nsteps"]
+    '5000'
+    """
+    params = {}
+
+    with open(mdp_file, "r") as f:
+        for line in f:
+            # Strip comments
+            if ";" in line:
+                line = line.split(";")[0]
+
+            line = line.strip()
+            if not line:
+                continue
+
+            # Split on '=' and clean up
+            if "=" in line:
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                params[key] = value
+
+    return params
+
+
+def get_mdp_parameter(mdp_file: str, parameter_name: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Get a specific parameter value from an MDP file.
+
+    This is a convenience function for quickly extracting a single
+    parameter value from an MDP file.
+
+    Parameters
+    ----------
+    mdp_file : str
+        Path to MDP file
+    parameter_name : str
+        Name of the parameter to look up (e.g., 'integrator', 'nsteps')
+    default : str, optional
+        Default value to return if parameter not found (default: None)
+
+    Returns
+    -------
+    Optional[str]
+        Parameter value if found, otherwise default
+
+    Examples
+    --------
+    >>> get_mdp_parameter("em.mdp", "integrator")
+    'md'
+    >>> get_mdp_parameter("em.mdp", "nonexistent", default="steep")
+    'steep'
+    """
+    params = parse_mdp_file(mdp_file)
+    return params.get(parameter_name, default)
+
+
+def find_mdp_parameters(mdp_file: str, parameter_names: List[str]) -> Dict[str, Optional[str]]:
+    """
+    Find multiple parameters in an MDP file.
+
+    This is useful for validating that specific parameters are set
+    correctly in an MDP file.
+
+    Parameters
+    ----------
+    mdp_file : str
+        Path to MDP file
+    parameter_names : List[str]
+        List of parameter names to look up
+
+    Returns
+    -------
+    Dict[str, Optional[str]]
+        Dictionary mapping parameter names to their values (or None if not found)
+
+    Examples
+    --------
+    >>> find_mdp_parameters("em.mdp", ["integrator", "nsteps", "undefined"])
+    {'integrator': 'md', 'nsteps': '5000', 'undefined': None}
+    """
+    params = parse_mdp_file(mdp_file)
+    return {name: params.get(name, None) for name in parameter_names}

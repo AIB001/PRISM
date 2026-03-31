@@ -187,39 +187,65 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
 
     coords_by_id = {}
     coords_by_name = {}
+
+    # Auto-detect file format: PDB or GRO
     with open(gro_file, "r") as f:
-        lines = f.readlines()
+        first_line = f.readline().strip()
 
-        for line in lines[2:-1]:
-            parts = line.split()
-            if len(parts) >= 7:
-                atom_name = parts[2]
-                atom_id = int(parts[3])
-                x = float(parts[4]) * 10.0
-                y = float(parts[5]) * 10.0
-                z = float(parts[6]) * 10.0
-            elif len(parts) >= 6:
-                atom_name = parts[1]
-                atom_id = int(parts[2])
-                x = float(parts[3]) * 10.0
-                y = float(parts[4]) * 10.0
-                z = float(parts[5]) * 10.0
-            else:
-                continue
+    is_pdb = first_line.startswith("ATOM") or first_line.startswith("HETATM") or first_line.startswith("REMARK")
 
-            try:
-                coord = np.array([x, y, z])
-                coords_by_id[atom_id] = coord
-                coords_by_name[atom_name] = coord
-            except (ValueError, IndexError):
-                continue
+    if is_pdb:
+        # Read PDB format (fixed column widths)
+        with open(gro_file, "r") as f:
+            for line in f:
+                if line.startswith("ATOM") or line.startswith("HETATM"):
+                    atom_name = line[12:16].strip()
+                    atom_id = int(line[6:11].strip())
+                    x = float(line[30:38].strip())
+                    y = float(line[38:46].strip())
+                    z = float(line[46:54].strip())
+
+                    try:
+                        coord = np.array([x, y, z])
+                        coords_by_id[atom_id] = coord
+                        coords_by_name[atom_name] = coord
+                    except (ValueError, IndexError):
+                        continue
+    else:
+        # Read GRO format (whitespace-separated)
+        with open(gro_file, "r") as f:
+            lines = f.readlines()
+
+            for line in lines[2:-1]:
+                parts = line.split()
+                if len(parts) >= 7:
+                    atom_name = parts[2]
+                    atom_id = int(parts[3])
+                    x = float(parts[4]) * 10.0
+                    y = float(parts[5]) * 10.0
+                    z = float(parts[6]) * 10.0
+                elif len(parts) >= 6:
+                    atom_name = parts[1]
+                    atom_id = int(parts[2])
+                    x = float(parts[3]) * 10.0
+                    y = float(parts[4]) * 10.0
+                    z = float(parts[5]) * 10.0
+                else:
+                    continue
+
+                try:
+                    coord = np.array([x, y, z])
+                    coords_by_id[atom_id] = coord
+                    coords_by_name[atom_name] = coord
+                except (ValueError, IndexError):
+                    continue
 
     atoms = []
     for atom_data in selected_atoms:
         atom_id = atom_data["id"]
         atom_name = atom_data["name"]
         element = _extract_element(atom_name)
-        coord = coords_by_name.get(atom_name, coords_by_id.get(atom_id, np.array([0.0, 0.0, 0.0])))
+        coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name, np.array([0.0, 0.0, 0.0])))
 
         atoms.append(
             Atom(
@@ -433,3 +459,56 @@ def read_rtf_for_fep(rtf_file: str, pdb_file: str) -> List[Atom]:
                 )
 
     return atoms
+
+
+def write_ligand_to_pdb(atoms: List[Atom], output_pdb: str, residue_name: str = "LIG") -> None:
+    """
+    Write Atom objects to PDB format file.
+
+    This function is the counterpart to read_ligand_from_prism(), converting
+    Atom objects back to PDB format for visualization (HTML/PNG) or other uses.
+
+    Parameters
+    ----------
+    atoms : List[Atom]
+        List of Atom objects to write
+    output_pdb : str
+        Path to output PDB file
+    residue_name : str, optional
+        Residue name to use in PDB file (default: "LIG")
+
+    Notes
+    -----
+    PDB ATOM record format (columns):
+        1-6:   "ATOM" (record name)
+        7-11:  Atom serial number
+        13-16: Atom name
+        17:    Alternate location (blank)
+        18-20: Residue name (right-justified)
+        22:    Chain identifier (blank)
+        23-26: Residue sequence number
+        27:    Insertion code (blank)
+        31-38: X coordinate (Å, right-justified, 8.3 format)
+        39-46: Y coordinate (Å, right-justified, 8.3 format)
+        47-54: Z coordinate (Å, right-justified, 8.3 format)
+        55-60: Occupancy (default 1.00)
+        61-66: Temperature factor (default 0.00)
+
+    Examples
+    --------
+    >>> atoms = read_ligand_from_prism("LIG.itp", "LIG.gro")
+    >>> write_ligand_to_pdb(atoms, "output.pdb")
+    """
+    with open(output_pdb, "w") as f:
+        f.write("REMARK  Generated from PRISM atoms\n")
+
+        for i, atom in enumerate(atoms, 1):
+            x, y, z = atom.coord
+            # Match original PDB format: "ATOM      1  N   LIG L   1      ..."
+            # Chain identifier is the first letter of residue name (not 'A')
+            chain_id = residue_name[0] if residue_name else "A"
+            line = f"ATOM  {i:5d}  {atom.name:<4s}{residue_name:>3s} {chain_id}   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00      {residue_name} \n"
+            f.write(line)
+
+        f.write("TER\n")
+        f.write("END\n")

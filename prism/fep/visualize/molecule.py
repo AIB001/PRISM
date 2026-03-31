@@ -496,7 +496,11 @@ def prepare_mol_with_charges_and_labels(
 
     # Fallback: Use PDB + MOL2 for bond orders (original CGenFF workflow)
     if mol2_file is not None:
-        mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+        try:
+            mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+        except Exception as e:
+            print(f"Warning: Bond order assignment from MOL2 failed, falling back to PDB-only: {e}")
+            mol = pdb_to_mol(pdb_file)
     else:
         mol = pdb_to_mol(pdb_file)
 

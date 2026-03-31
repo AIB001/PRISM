@@ -522,6 +522,9 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         # Create position restraints file
         self._create_position_restraints(os.path.join(self.lig_ff_dir, "LIG.gro"))
 
+        # Normalize total charge to nearest integer
+        self._normalize_charges()
+
         print("Standardization complete")
 
     def _standardize_gro(self, source_gro, target_gro):
@@ -680,6 +683,163 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
             print("Temporary files removed")
+
+    def _normalize_charges(self):
+        """
+        校正OPLS配体的总电荷到最接近的整数。
+
+        LigParGen生成的电荷总和不一定是整数（例如-0.0001）。
+        本方法根据误差大小采用两种策略：
+        1. 小误差（< 0.01）：将误差分配给电荷绝对值最大的原子
+        2. 大误差（≥ 0.01）：按比例缩放所有原子电荷
+
+        这样可以保持总电荷为整数，同时最小化对电荷分布的影响。
+        """
+        itp_path = os.path.join(self.lig_ff_dir, "LIG.itp")
+        if not os.path.exists(itp_path):
+            return
+
+        # 解析ITP文件中的原子电荷
+        atoms = []
+        with open(itp_path, "r") as f:
+            in_atom_section = False
+            for line in f:
+                if line.startswith("[ atoms ]"):
+                    in_atom_section = True
+                    continue
+                if in_atom_section:
+                    if line.startswith("["):
+                        # 进入新的section，退出
+                        break
+                    line = line.strip()
+                    if not line or line.startswith(";"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 7:
+                        try:
+                            nr = int(parts[0])
+                            atom_type = parts[1]
+                            resnr = int(parts[2])
+                            residue = parts[3]
+                            atom_name = parts[4]
+                            cgnr = int(parts[5])
+                            charge = float(parts[6])
+                            mass = float(parts[7])
+                            atoms.append(
+                                {
+                                    "nr": nr,
+                                    "type": atom_type,
+                                    "resnr": resnr,
+                                    "residue": residue,
+                                    "name": atom_name,
+                                    "cgnr": cgnr,
+                                    "charge": charge,
+                                    "mass": mass,
+                                    "line_start": line,
+                                }
+                            )
+                        except (ValueError, IndexError) as e:
+                            # 解析失败，跳过此行
+                            continue
+
+        if not atoms:
+            print("  Warning: No atoms found in ITP file, skipping charge normalization")
+            return
+
+        # 计算当前总电荷
+        current_total = sum(atom["charge"] for atom in atoms)
+
+        # 确定期望电荷（四舍五入到最接近的整数）
+        target_charge = round(current_total)
+
+        # 如果总电荷已经是整数（误差小于1e-10），不需要校正
+        if abs(current_total - target_charge) < 1e-10:
+            print(f"  Total charge is already integer: {current_total:.6f}")
+            return
+
+        # 计算需要校正的量
+        charge_error = target_charge - current_total
+        print(f"  Normalizing charges: {current_total:.6f} → {target_charge:.6f} (Δ = {charge_error:+.6f})")
+
+        # 根据误差大小选择策略
+        if abs(charge_error) < 0.01:
+            # 策略1：小误差，分配给电荷绝对值最大的原子
+            # 这样可以最小化对整体电荷分布的影响
+            max_charge_atom = max(atoms, key=lambda a: abs(a["charge"]))
+            max_charge_atom["charge"] += charge_error
+            print(
+                f"  Applied small correction to atom {max_charge_atom['name']} "
+                f"(charge: {max_charge_atom['charge'] - charge_error:.6f} → "
+                f"{max_charge_atom['charge']:.6f})"
+            )
+        else:
+            # 策略2：大误差，按比例缩放所有原子电荷
+            # 这样保持电荷分布的相对关系
+            scale_factor = target_charge / current_total
+            for atom in atoms:
+                atom["charge"] *= scale_factor
+            print(f"  Applied proportional scaling (factor: {scale_factor:.6f}) to all atoms")
+
+        # 重写ITP文件
+        with open(itp_path, "r") as f:
+            lines = f.readlines()
+
+        # 替换原子行
+        atom_dict = {atom["nr"]: atom for atom in atoms}
+        new_lines = []
+        in_atom_section = False
+
+        for line in lines:
+            if line.strip().startswith("[ atoms ]"):
+                in_atom_section = True
+                new_lines.append(line)
+            elif in_atom_section:
+                if line.strip().startswith("["):
+                    # 进入新的section
+                    in_atom_section = False
+                    new_lines.append(line)
+                elif line.strip() and not line.strip().startswith(";"):
+                    # 这是原子行，尝试替换
+                    parts = line.split()
+                    if len(parts) >= 8:
+                        try:
+                            nr = int(parts[0])
+                            if nr in atom_dict:
+                                atom = atom_dict[nr]
+                                # 重建行，保持原始格式
+                                new_line = (
+                                    f"{atom['nr']:>6}  "
+                                    f"{atom['type']:<10}  "
+                                    f"{atom['resnr']:>4}  "
+                                    f"{atom['residue']:<5}  "
+                                    f"{atom['name']:<5}  "
+                                    f"{atom['cgnr']:>4}  "
+                                    f"{atom['charge']:>8.6f}  "
+                                    f"{atom['mass']:>8.3f}\n"
+                                )
+                                new_lines.append(new_line)
+                                continue
+                        except (ValueError, IndexError):
+                            pass
+                    # 保留原始行
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+
+        # 写回文件
+        with open(itp_path, "w") as f:
+            f.writelines(new_lines)
+
+        # 验证校正后的总电荷
+        verified_total = sum(atom["charge"] for atom in atoms)
+        print(f"  ✓ Verified total charge: {verified_total:.6f}")
+
+        # 检查是否成功校正到整数
+        if abs(verified_total - target_charge) > 1e-6:
+            print(
+                f"  ⚠ Warning: Charge normalization may have issues "
+                f"(target: {target_charge:.6f}, actual: {verified_total:.6f})"
+            )
 
 
 if __name__ == "__main__":

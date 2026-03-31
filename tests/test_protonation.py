@@ -4,16 +4,7 @@ import pytest
 import shutil
 from unittest.mock import patch, MagicMock
 
-
-# ---------------------------------------------------------------------------
-# Helper: build a minimal PDB ATOM line (80 chars, fixed-width)
-# ---------------------------------------------------------------------------
-def _atom_line(serial, name, resname, chain, resseq, x=0.0, y=0.0, z=0.0):
-    """Build a correctly formatted PDB ATOM record."""
-    return (
-        f"ATOM  {serial:5d} {name:<4s} {resname:<3s} {chain}{resseq:4d}    "
-        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {name[0]:>2s}  \n"
-    )
+from prism.utils.pdb_utils import _atom_line
 
 
 def _make_protonator(ph=7.0, verbose=False):

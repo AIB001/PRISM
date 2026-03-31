@@ -9,8 +9,9 @@ GROMACS uses single-topology approach with typeB/chargeB encoding.
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional
-from .mapping import AtomMapping, normalize_charge_reception
+from typing import List, Dict, Optional, Union
+from .mapping import AtomMapping, normalize_charge_reception, Atom
+from ..atomic import get_atomic_mass
 
 
 @dataclass
@@ -265,19 +266,16 @@ class HybridTopologyBuilder:
             Original atoms from ligand B
         """
         # Calculate original total charges
-        original_charge_a = sum(atom.charge for atom in atoms_a)
-        original_charge_b = sum(atom.charge for atom in atoms_b)
+        original_charge_a = calculate_total_charge(atoms_a)
+        original_charge_b = calculate_total_charge(atoms_b)
 
         # Calculate current total charges from hybrid atoms
         # State A: sum of all state_a_charge (transformed B atoms contribute 0)
-        current_charge_a = sum(atom.state_a_charge for atom in self.hybrid_atoms)
+        current_charge_a = calculate_hybrid_charge_state_a(self.hybrid_atoms)
 
         # State B: sum of state_b_charge (or state_a_charge if state_b is None)
         # For transformed A atoms, state_b_charge should be 0 (dummy)
-        current_charge_b = sum(
-            atom.state_b_charge if atom.state_b_charge is not None else atom.state_a_charge
-            for atom in self.hybrid_atoms
-        )
+        current_charge_b = calculate_hybrid_charge_state_b(self.hybrid_atoms)
 
         # Calculate calibration needed
         calibration_a = original_charge_a - current_charge_a
@@ -450,7 +448,9 @@ class HybridTopologyBuilder:
 
     def _get_default_mass(self, element: str) -> float:
         """
-        Get default atomic mass for element
+        Get default atomic mass for element.
+
+        Delegates to get_atomic_mass() from prism.fep.atomic module.
 
         Parameters
         ----------
@@ -462,17 +462,95 @@ class HybridTopologyBuilder:
         float
             Atomic mass in amu
         """
-        # Standard atomic masses
-        masses = {
-            "H": 1.008,
-            "C": 12.011,
-            "N": 14.007,
-            "O": 15.999,
-            "F": 18.998,
-            "P": 30.974,
-            "S": 32.065,
-            "Cl": 35.453,
-            "Br": 79.904,
-            "I": 126.904,
-        }
-        return masses.get(element, 12.011)  # Default to carbon if unknown
+        return get_atomic_mass(element)
+
+
+# ---------------------------------------------------------------------------
+# Module-level utility functions for charge calculations
+# ---------------------------------------------------------------------------
+
+
+def calculate_total_charge(atoms: List[Union[Atom, HybridAtom]]) -> float:
+    """
+    Calculate total charge from a list of atoms.
+
+    For Atom objects (original ligand), uses atom.charge.
+    For HybridAtom objects (hybrid topology), uses state_a_charge.
+
+    Parameters
+    ----------
+    atoms : List[Union[Atom, HybridAtom]]
+        List of Atom or HybridAtom objects
+
+    Returns
+    -------
+    float
+        Total charge
+
+    Examples
+    --------
+    >>> from prism.fep.io import read_ligand_from_prism
+    >>> atoms = read_ligand_from_prism("LIG.itp", "LIG.gro")
+    >>> total = calculate_total_charge(atoms)
+    """
+    if not atoms:
+        return 0.0
+
+    # Check if first atom is HybridAtom (has state_a_charge attribute)
+    if hasattr(atoms[0], "state_a_charge"):
+        return sum(atom.state_a_charge for atom in atoms)
+    else:
+        return sum(atom.charge for atom in atoms)
+
+
+def calculate_hybrid_charge_state_a(hybrid_atoms: List[HybridAtom]) -> float:
+    """
+    Calculate total charge for state A from hybrid topology.
+
+    State A includes all atoms with their state_a_charge.
+    Transformed B atoms contribute 0 (they are dummy in state A).
+
+    Parameters
+    ----------
+    hybrid_atoms : List[HybridAtom]
+        List of HybridAtom objects
+
+    Returns
+    -------
+    float
+        Total charge for state A
+
+    Examples
+    --------
+    >>> builder = HybridTopologyBuilder()
+    >>> hybrid_atoms = builder.build(mapping, params_a, params_b, atoms_a, atoms_b)
+    >>> charge_a = calculate_hybrid_charge_state_a(hybrid_atoms)
+    """
+    return sum(atom.state_a_charge for atom in hybrid_atoms)
+
+
+def calculate_hybrid_charge_state_b(hybrid_atoms: List[HybridAtom]) -> float:
+    """
+    Calculate total charge for state B from hybrid topology.
+
+    State B uses state_b_charge if available, otherwise falls back to
+    state_a_charge (for common atoms without typeB/chargeB).
+    Transformed A atoms contribute 0 (they are dummy in state B).
+
+    Parameters
+    ----------
+    hybrid_atoms : List[HybridAtom]
+        List of HybridAtom objects
+
+    Returns
+    -------
+    float
+        Total charge for state B
+
+    Examples
+    --------
+    >>> builder = HybridTopologyBuilder()
+    >>> hybrid_atoms = builder.build(mapping, params_a, params_b, atoms_a, atoms_b)
+    >>> charge_b = calculate_hybrid_charge_state_b(hybrid_atoms)
+    """
+    return sum(atom.state_b_charge if atom.state_b_charge is not None else atom.state_a_charge for atom in hybrid_atoms)
