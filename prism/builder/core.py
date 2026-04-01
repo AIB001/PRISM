@@ -1105,8 +1105,8 @@ fi
             self._build_standard_system(bound_output, use_protein=True)
             bound_system_dir = os.path.join(bound_output, "GMX_PROLIG_MD")
 
-            # Save reference ligand FF directory from bound system
-            ref_ff_dir = self.lig_ff_dirs[0] if isinstance(self.lig_ff_dirs, list) else self.lig_ff_dirs
+            # Save reference ligand FF directory from the freshly built bound system
+            ref_ff_dir = self._resolve_generated_ligand_ff_dir(bound_output)
             print_success(f"Bound system built: {bound_system_dir}")
             print(f"  Reference ligand FF: {ref_ff_dir}")
 
@@ -1432,6 +1432,7 @@ fi
         original_output = self.output_dir
         original_protein = self.protein_path
         original_ligand_paths = self.ligand_paths
+        original_lig_ff_dirs = list(self.lig_ff_dirs)
 
         # Convert ligand paths to absolute paths BEFORE changing output_dir
         # to avoid path resolution issues
@@ -1467,17 +1468,18 @@ fi
         self.output_dir = original_output
         self.protein_path = original_protein
         self.ligand_paths = original_ligand_paths
+        self.lig_ff_dirs = original_lig_ff_dirs
         self.system_builder.output_dir = Path(original_output)
         self.system_builder.model_dir = Path(original_output) / "GMX_PROLIG_MD"
         self.mdp_generator.output_dir = original_output
 
     def _build_ligand_only_system(self, output_dir: str, box_size: tuple = None):
-        """Build ligand-only system (no protein) for unbound FEP leg
+        """Build ligand-only system (no protein) for unbound FEP leg.
 
         Parameters
         ----------
         output_dir : str
-            Output directory for the system
+            Output directory for the system.
         box_size : tuple, optional
             Box size (x, y, z) in nm. If provided, uses this exact box size.
             If None, uses box_distance parameter to create box around ligand.
@@ -1485,60 +1487,44 @@ fi
         from pathlib import Path
         import shutil
 
-        # Step 1: Generate ligand force field in unbound directory
-        print_step(1, 5, f"Generating ligand force field for unbound system")
+        print_step(1, 5, "Generating ligand force field for unbound system")
 
-        # Save original state
         original_output = self.output_dir
         self.output_dir = output_dir
-
-        # Generate ligand FF
         self.generate_ligand_forcefield()
-
-        # Restore
         self.output_dir = original_output
 
-        # Step 2: Create model directory
         model_dir = Path(output_dir) / "GMX_PROLIG_MD"
         model_dir.mkdir(exist_ok=True, parents=True)
 
-        # Step 3: Get ligand structure and topology from newly generated FF
         ligand_ff_dir = Path(self.lig_ff_dirs[0])
         ligand_gro = ligand_ff_dir / "LIG.gro"
-        ligand_itp = ligand_ff_dir / "LIG.itp"
-
         if not ligand_gro.exists():
             raise FileNotFoundError(f"Ligand structure not found: {ligand_gro}")
 
-        # Step 4: Create topology file for ligand-only system
         print_step(2, 5, "Creating ligand-only topology")
         topol_path = model_dir / "topol.top"
-
-        # Read the effective force field selection from the resolved builder state
         ff_name = self.forcefield["name"]
         water_model = self.water_model["name"]
+        ligand_rel_dir = f"../{ligand_ff_dir.name}"
 
         with open(topol_path, "w") as f:
-            f.write(f"; Ligand-only topology for FEP unbound leg\n")
+            f.write("; Ligand-only topology for FEP unbound leg\n")
             f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
-            f.write(f'#include "../LIG.amb2gmx/atomtypes_LIG.itp"\n')
-            f.write(f'#include "../LIG.amb2gmx/LIG.itp"\n')
+            f.write(f'#include "{ligand_rel_dir}/atomtypes_LIG.itp"\n')
+            f.write(f'#include "{ligand_rel_dir}/LIG.itp"\n')
             f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
             f.write(f'#include "{ff_name}.ff/ions.itp"\n\n')
-            f.write(f"[ system ]\n")
-            f.write(f"Ligand in water\n\n")
-            f.write(f"[ molecules ]\n")
-            f.write(f"LIG    1\n")
+            f.write("[ system ]\n")
+            f.write("Ligand in water\n\n")
+            f.write("[ molecules ]\n")
+            f.write("LIG    1\n")
 
-        # Step 5: Copy ligand structure
         shutil.copy(ligand_gro, model_dir / "lig.gro")
 
-        # Step 6: Create box
         print_step(3, 5, "Creating simulation box")
         boxed_gro = model_dir / "lig_newbox.gro"
-
         if box_size:
-            # Use specified box size (for matching bound system)
             print(f"  Using specified box size: {box_size[0]:.3f} x {box_size[1]:.3f} x {box_size[2]:.3f} nm")
             self.system_builder._run_command(
                 [
@@ -1559,7 +1545,6 @@ fi
                 work_dir=str(model_dir),
             )
         else:
-            # Use box_distance parameter (default behavior)
             box_distance = self.config.get("system", {}).get("box_distance", 1.5)
             self.system_builder._run_command(
                 [
@@ -1578,62 +1563,10 @@ fi
                 work_dir=str(model_dir),
             )
 
-        # Step 7: Solvate
         print_step(4, 5, "Solvating system")
         solvated_gro = self.system_builder._solvate(str(boxed_gro), str(topol_path))
 
-        # Step 8: Add ions
         print_step(5, 5, "Adding ions")
-        self.system_builder._add_ions(solvated_gro, str(topol_path))
-
-        print_success(f"Ligand-only system built in {model_dir}")
-        ff_name = self.forcefield["name"]
-        water_model = self.water_model["name"]
-
-        with open(topol_path, "w") as f:
-            f.write(f"; Ligand-only topology for FEP unbound leg\n")
-            f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
-            f.write(f'#include "../LIG.amb2gmx/atomtypes_LIG.itp"\n')
-            f.write(f'#include "../LIG.amb2gmx/LIG.itp"\n')
-            f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
-            f.write(f'#include "{ff_name}.ff/ions.itp"\n\n')
-            f.write(f"[ system ]\n")
-            f.write(f"Ligand in water\n\n")
-            f.write(f"[ molecules ]\n")
-            f.write(f"LIG    1\n")
-
-        # Step 5: Copy ligand structure
-        import shutil
-
-        shutil.copy(ligand_gro, model_dir / "lig.gro")
-
-        # Step 6: Create box
-        print_step(3, 4, "Creating simulation box")
-        boxed_gro = model_dir / "lig_newbox.gro"
-        box_distance = self.config.get("system", {}).get("box_distance", 1.5)
-
-        self.system_builder._run_command(
-            [
-                self.system_builder.gmx_command,
-                "editconf",
-                "-f",
-                str(model_dir / "lig.gro"),
-                "-o",
-                str(boxed_gro),
-                "-bt",
-                "cubic",
-                "-d",
-                str(box_distance),
-                "-c",
-            ],
-            work_dir=str(model_dir),
-        )
-
-        # Step 7: Solvate
-        print_step(4, 4, "Solvating and adions")
-        solvated_gro = self.system_builder._solvate(str(boxed_gro), str(topol_path))
-
-        # Step 8: Add ions
         self.system_builder._add_ions(solvated_gro, str(topol_path))
 
         print_success(f"Ligand-only system built in {model_dir}")
