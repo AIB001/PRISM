@@ -7,20 +7,23 @@ This file provides guidance for Claude Code when working with FEP (Free Energy P
 PRISM-FEP implements free energy perturbation calculations for relative binding free energies between similar ligands.
 
 **Key Features**:
-- Automated atom mapping via DistanceAtomMapper
-- Hybrid topology generation (A-state + B-state)
-- Lambda window setup for alchemical transformation
-- Integration with PRISM force field system
-- HTML visualization for mapping verification
+- Automated atom mapping via DistanceAtomMapper (with configurable distance/charge cutoffs)
+- Hybrid topology generation (A-state + B-state parameters)
+- Lambda window setup for alchemical transformation (standard + repex modes)
+- Multi-force field support: GAFF, CGenFF, OpenFF, OPLS-AA
+- HTML visualization with bond order rendering and quality checks
+- MOL2 coordinate file support with unified PDB/MOL2/GRO handling
+- Repeat-exchange (lambda replica exchange) script generation
 
 ## Architecture
 
 **Core Modules**:
-- `prism/fep/core/` - Core FEP workflow (scaffold builder, mapping)
-- `prism/fep/modeling/` - Hybrid topology generation
+- `prism/fep/core/` - Atom mapping and hybrid topology data structures
+- `prism/fep/modeling/` - FEP system building and workflow orchestration
 - `prism/fep/gromacs/` - GROMACS integration and MDP templates
-- `prism/fep/visualize/` - HTML/PNG visualization
-- `prism/fep/io.py` - File I/O for hybrid topologies
+- `prism/fep/visualize/` - HTML/PNG visualization with quality checks
+- `prism/fep/io.py` - Unified PDB/MOL2/GRO coordinate handling
+- `prism/fep/config.py` - YAML configuration management
 
 **Entry Points**:
 - CLI: `prism protein.pdb ref.mol2 --fep --mutant mut.mol2`
@@ -62,6 +65,24 @@ Key rules for FEP:
 
 **Verification**: Check atom type, charge, and position differences. Extra transformed atoms are usually legitimate.
 
+### Multi-Force Field Support
+**Supported Force Fields**:
+- **GAFF/CGenFF**: Position-specific atom types (ca, c3, ha, hc) - full matching
+- **OpenFF**: Generic types (output_0, output_1) - distance + element + charge only
+- **OPLS-AA**: Sequential types (opls_800, opls_801) - distance + element + charge only
+
+**Implementation**: `DistanceAtomMapper._should_ignore_atom_type()` auto-detects force field type
+
+### MOL2 Coordinate Support
+**Feature**: Unified PDB/MOL2/GRO coordinate handling via `_load_structure_coordinates()`
+
+**Benefits**:
+- Use original ligand coordinates (MOL2/PDB) instead of GRO for better accuracy
+- Automatic element symbol extraction from MOL2 atom names
+- Fallback to GRO if MOL2 unavailable
+
+**Code location**: `prism/fep/io.py::_load_structure_coordinates()`
+
 ## Testing
 
 ### Recommended Test Systems
@@ -75,6 +96,33 @@ Key rules for FEP:
 - [ ] Mapping coverage: `total = common + transformed + surrounding`
 - [ ] PNG generates (or shows appropriate warning)
 - [ ] HTML shows warning banner if problems detected
+- [ ] Bond orders rendered correctly for aromatic rings
+- [ ] Repeat-exchange scripts generated if repex mode enabled
+
+### Repeat-Exchange Mode
+**Feature**: Lambda replica exchange via `gmx_mpi -multidir`
+
+**Configuration**:
+```yaml
+fep:
+  mode: repex  # or 'standard'
+```
+
+**Generated scripts**:
+- `run_prod_standard.sh` - Sequential lambda windows
+- `run_prod_repex.sh` - Parallel replica exchange
+
+**Code location**: `prism/fep/modeling/script_writer.py::write_production_scripts()`
+
+### Bond Order Visualization
+**Feature**: Professional bond order rendering for aromatic rings and conjugated systems
+
+**Implementation**:
+- Uses MOL2 file as bond order template
+- RDKit MCS matching to assign bond orders
+- Falls back to RDKit sanitization if MOL2 unavailable
+
+**Code location**: `prism/fep/visualize/molecule.py::assign_bond_orders_from_mol2()`
 
 ### Test Scripts
 ```bash
@@ -134,3 +182,12 @@ grep '"classification": "unknown"' output/mapping.html  # Should return 0
 - `NAMING_CONVENTIONS.md` - Standardized naming conventions
 - `README.md` - Module overview and API reference
 - `CLAUDE.md` (root) - General PRISM instructions
+- `.claude/skills/fep-mapping.md` - Atom mapping algorithm verification guide
+- `.claude/skills/fep-visualization.md` - HTML visualization verification guide
+
+## Module-Specific Documentation
+
+- `prism/fep/core/CLAUDE.md` - Atom mapping and hybrid topology details
+- `prism/fep/visualize/CLAUDE.md` - Visualization implementation and troubleshooting
+- `prism/fep/modeling/CLAUDE.md` - FEP system building workflow
+- `prism/fep/gromacs/CLAUDE.md` - GROMACS integration and MDP templates
