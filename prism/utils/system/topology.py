@@ -173,28 +173,6 @@ class TopologyProcessorMixin:
 
         input_text = "\n".join(input_lines) + "\n" if input_lines else None
 
-        # Handle force field selection to avoid GROMACS search path conflicts
-        # When multiple force fields with the same name exist (e.g., in both GMXLIB
-        # and GROMACS installation), using -ff parameter causes errors.
-        # Solution: Don't use -ff parameter, let GROMACS auto-select from GMXLIB first.
-        if ff_info and "dir" in ff_info:
-            # Remove -ff parameter and its value from command
-            filtered_command = []
-            i = 0
-            while i < len(command):
-                if command[i] == "-ff" and i + 1 < len(command):
-                    # Skip both -ff and its value
-                    i += 2
-                    continue
-                filtered_command.append(command[i])
-                i += 1
-            command = filtered_command
-
-            # Add force field index to interactive input (GMXLIB entries come first)
-            input_lines = [str(ff_idx)] + input_lines
-            print(f"Using force field selection by index (GMXLIB searched before GROMACS installation)")
-            input_text = "\n".join(input_lines) + "\n"
-
         self._run_command(command, str(self.model_dir), input_str=input_text)
 
         # Check if pdb2gmx already handled metals (any ion topology exists)
