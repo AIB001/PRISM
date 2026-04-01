@@ -1130,7 +1130,7 @@ fi
             # Generate mutant ligand FF in _build directory
             mut_ff_output = os.path.join(fep_output, "_build/mutant_ligand_ff")
             self._generate_mutant_ligand_ff(self.mutant_ligand, mut_ff_output)
-            mut_ff_dir = os.path.join(mut_ff_output, "LIG.amb2gmx")
+            mut_ff_dir = self._resolve_generated_ligand_ff_dir(mut_ff_output)
 
             # Build hybrid topology using ITPBuilder
             hybrid_output = os.path.join(fep_output, "common/hybrid")
@@ -1264,9 +1264,9 @@ fi
 
             # Also clean up any files in output_dir root (outside GMX_PROLIG_FEP)
             cleanup_items = [
-                os.path.join(self.output_dir, "LIG.amb2gmx"),
                 os.path.join(self.output_dir, "mdps"),
             ]
+            cleanup_items.extend(str(path) for path in Path(self.output_dir).glob("LIG.*") if path.is_dir())
 
             for item in cleanup_items:
                 if os.path.exists(item):
@@ -1503,7 +1503,7 @@ fi
         model_dir.mkdir(exist_ok=True, parents=True)
 
         # Step 3: Get ligand structure and topology from newly generated FF
-        ligand_ff_dir = Path(output_dir) / "LIG.amb2gmx"
+        ligand_ff_dir = Path(self.lig_ff_dirs[0])
         ligand_gro = ligand_ff_dir / "LIG.gro"
         ligand_itp = ligand_ff_dir / "LIG.itp"
 
@@ -1514,9 +1514,9 @@ fi
         print_step(2, 5, "Creating ligand-only topology")
         topol_path = model_dir / "topol.top"
 
-        # Read force field info from config
-        ff_name = self.config.get("protein", {}).get("forcefield", "amber99sb")
-        water_model = self.config.get("protein", {}).get("water_model", "tip3p")
+        # Read the effective force field selection from the resolved builder state
+        ff_name = self.forcefield["name"]
+        water_model = self.water_model["name"]
 
         with open(topol_path, "w") as f:
             f.write(f"; Ligand-only topology for FEP unbound leg\n")
@@ -1587,8 +1587,8 @@ fi
         self.system_builder._add_ions(solvated_gro, str(topol_path))
 
         print_success(f"Ligand-only system built in {model_dir}")
-        ff_name = self.config.get("protein", {}).get("forcefield", "amber99sb")
-        water_model = self.config.get("protein", {}).get("water_model", "tip3p")
+        ff_name = self.forcefield["name"]
+        water_model = self.water_model["name"]
 
         with open(topol_path, "w") as f:
             f.write(f"; Ligand-only topology for FEP unbound leg\n")
@@ -1637,6 +1637,15 @@ fi
         self.system_builder._add_ions(solvated_gro, str(topol_path))
 
         print_success(f"Ligand-only system built in {model_dir}")
+
+    def _resolve_generated_ligand_ff_dir(self, output_dir: str) -> str:
+        """Return the generated ligand force-field directory for the current ligand FF."""
+        ff_dirs = [path for path in Path(output_dir).glob("LIG.*") if path.is_dir()]
+        if len(ff_dirs) != 1:
+            raise FileNotFoundError(
+                f"Expected exactly one generated ligand FF dir in {output_dir}, found {len(ff_dirs)}"
+            )
+        return str(ff_dirs[0])
 
     def _generate_mutant_ligand_ff(self, mutant_ligand: str, output_dir: str):
         """Generate force field for mutant ligand"""
