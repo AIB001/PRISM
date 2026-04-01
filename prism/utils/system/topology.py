@@ -72,38 +72,22 @@ class TopologyProcessorMixin:
         # Use -ff and -water flags if force field info is provided
         # This is more reliable than interactive menu indexing
         if ff_info and "dir" in ff_info:
-            # Copy force field to working directory to avoid GMXLIB search path conflicts
-            # When multiple force fields with the same name exist in GMXLIB,
-            # GROMACS cannot determine which one to use.
+            # Copy the explicitly selected force field into the working directory
+            # so pdb2gmx resolves exactly one match for -ff.
             import shutil
 
-            ff_path = Path(ff_info["dir"])
-            if not ff_path.is_absolute():
-                # Relative path - use as-is
-                ff_name = str(ff_path).replace(".ff", "")
-                command.extend(["-ff", ff_name])
-                print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
-            else:
-                # Absolute path - copy to working directory
-                ff_basename = ff_path.name  # e.g., "amber14sb.ff"
-                local_ff_dir = self.model_dir / ff_basename
-                if not local_ff_dir.exists():
-                    try:
-                        shutil.copytree(ff_path, local_ff_dir)
-                        print(f"Copied force field to working directory: {local_ff_dir}")
-                    except Exception as e:
-                        print_warning(f"Failed to copy force field: {e}")
-                        # Fallback: use original path
-                        ff_name = str(ff_path).replace(".ff", "")
-                        command.extend(["-ff", ff_name])
-                        print(f"Using force field: {ff_name} (from {ff_info.get('path', 'N/A')})")
-                        ff_basename = None
+            ff_source = ff_info.get("path") or ff_info["dir"]
+            ff_path = Path(ff_source)
+            ff_basename = ff_path.name
+            local_ff_dir = self.model_dir / ff_basename
 
-                if ff_basename:
-                    # Use local copy (without .ff extension)
-                    ff_name = ff_basename.replace(".ff", "")
-                    command.extend(["-ff", ff_name])
-                    print(f"Using force field: {ff_name} (local copy)")
+            if ff_path.is_absolute() and not local_ff_dir.exists():
+                shutil.copytree(ff_path, local_ff_dir)
+                print(f"Copied force field to working directory: {local_ff_dir}")
+
+            ff_name = ff_basename.replace(".ff", "")
+            command.extend(["-ff", ff_name])
+            print(f"Using force field: {ff_name} (from {ff_source})")
         else:
             print(f"DEBUG: Force field index = {ff_idx} (interactive menu)")
 
