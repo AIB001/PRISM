@@ -1,10 +1,10 @@
 ---
-name: fep-mapping-viz
-description: FEP hybrid topology atom mapping 与可视化验证（联合检查）
+name: fep-visualization
+description: FEP hybrid topology 可视化验证
 type: fep
 ---
 
-# FEP Mapping 与可视化验证
+# FEP 可视化验证
 
 ## 📝 Code Search and Navigation
 
@@ -19,14 +19,9 @@ type: fep
 
 ## 核心职责
 
-检查 PRISM FEP 模块的 hybrid topology 构建和 atom mapping 算法，并通过 HTML 可视化相互验证结果一致性。确保 DistanceAtomMapper 算法与 FEbuilder 一致，且可视化正确反映分类结果。
+通过 HTML 可视化验证 PRISM FEP 模块的 atom mapping 结果。确保可视化正确反映 mapping 算法的分类结果，并使用 playwright MCP 检查真实渲染。
 
 ## 关联性
-
-**Mapping 算法 → 可视化**：
-- DistanceAtomMapper 产生分类（common/transformed/surrounding）
-- HTML 可视化展示这些分类
-- **必须一致**：mapping 说 common，HTML 必须显示 common
 
 **可视化 → Mapping 验证**：
 - HTML 是算法结果的"眼睛"
@@ -35,189 +30,7 @@ type: fep
 
 ## 关键检查点
 
-### 1. Mapping 算法验证
-
-**DistanceAtomMapper 7 步算法**（必须与 FEbuilder 一致）：
-1. 距离筛选：`dist < dist_cutoff`
-2. 元素匹配：`atom_a.element == atom_b.element`
-3. 类型匹配：`atom_a.type == atom_b.type`（OpenFF/OPLS 除外）
-4. 电荷匹配：`abs(atom_a.charge - atom_b.charge) < charge_cutoff`
-5. 确定 common pairs
-6. 确定 transformed（unique atoms）
-7. 确定 surrounding（同位置但电荷/类型不同）
-
-**配置来源优先级**（从高到低）：
-1. **YAML 配置**：`fep.yaml` 的 `mapping` 部分
-2. **FEPConfig 默认值**：`dist_cutoff=0.6, charge_cutoff=0.05, charge_common="mean"`
-3. **DistanceAtomMapper 默认值**：与 FEPConfig 相同
-
-**实际默认值**（代码中）：
-- `dist_cutoff`: **0.6** Å（不是 1.0！）
-- `charge_cutoff`: **0.05** e（不是 0.3！）
-- `charge_common`: **"mean"**（不是 "ref"！）
-
-**注意**：测试用例可能使用不同的值（如 `fep_ref.yaml` 中 `dist_cutoff=1.0`），但这是**测试配置**，不是代码默认值。
-
-**代码路径**：
-- 算法实现：`prism/fep/core/mapping.py::DistanceAtomMapper.map()` (line 179+)
-- 配置读取：`prism/fep/config.py::FEPConfig.get_mapping_params()` (line 73-84)
-- YAML 解析：`prism/fep/config.py::FEPConfig.__init__()` (line 37-56)
-- FEbuilder 参考：`/home/gxf1212/data2/work/make_hybrid_top/FEbuilder/src/FEbuilder/setup/make_hybrid.py`
-
-**检查命令**：
-```bash
-cd tests/gxf/FEP/unit_test/oMeEtPh-EtPh
-
-# 1. 查看实际配置值（从 YAML）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-cat fep_ref.yaml
-# 应该看到：dist_cutoff: 1.0, charge_cutoff: 0.06, charge_common: ref
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-
-# 2. 验证配置读取
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-python -c "
-from prism.fep.config import FEPConfig
-cfg = FEPConfig('.', config_file='config_gaff.yaml', fep_file='fep_ref.yaml')
-params = cfg.get_mapping_params()
-print('Actual params:', params)
-# 输出：dist_cutoff=1.0, charge_cutoff=0.06, charge_common='ref'
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-"
-
-# 3. 运行 mapping 并检查分类数量
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-python tests/gxf/FEP/unit_test/test_gaff_fep_mapping.py
-
-# 4. 检查日志输出
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# 应该看到：
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# Common: 17, TransA: 4, TransB: 1, SurrA: 0, SurrB: 0  (REF 模式)
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# Common: 17, TransA: 4, TransB: 1, SurrA: 0, SurrB: 0  (MUT 模式)
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# Common: 17, TransA: 4, TransB: 1, SurrA: 0, SurrB: 0  (MEAN 模式)
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# Common: 4, TransA: 4, TransB: 1, SurrA: 13, SurrB: 13  (NONE 模式)
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-```
-
-**常见问题**：
-- ❌ "common 数量左右不一致" → 算法 bug 或坐标匹配问题
-- ❌ "乙基末端甲基的 3 个氢对不上" → 检查 YAML 中的 `dist_cutoff` 值和坐标
-- ❌ "C1/C2 本应 common 的侧链碳没被识别" → 检查原子类型匹配
-- ❌ "为什么用了不同的 cutoff 值" → 检查是哪个 YAML 文件（fep_ref.yaml vs fep_mut.yaml）
+### 1. 可视化验证
 
 ### 2. 可视化验证
 
