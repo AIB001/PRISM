@@ -285,6 +285,39 @@ class PRISMBuilder(PMFBuilderMixin):
         # Extract configuration values
         self.overwrite = self.config["general"]["overwrite"]
 
+        # Load FEP-specific configuration file if provided
+        if self.fep_config and os.path.exists(self.fep_config):
+            import yaml
+
+            print(f"Loading FEP configuration from: {self.fep_config}")
+            with open(self.fep_config, "r") as f:
+                fep_config_data = yaml.safe_load(f)
+
+            # Merge FEP config into main config (under 'fep' key)
+            if "fep" not in self.config:
+                self.config["fep"] = {}
+            self.config["fep"].update(fep_config_data)
+
+            # Also merge config sections to top level for write_fep_mdps
+            # This allows write_fep_mdps to find production_time_ns, rcoulomb, etc.
+            for section in ["simulation", "electrostatics", "vdw", "output"]:
+                if section in fep_config_data:
+                    if section not in self.config:
+                        self.config[section] = {}
+                    self.config[section].update(fep_config_data[section])
+                    if section == "simulation":
+                        prod_time = self.config["simulation"].get("production_time_ns", "NOT SET")
+                        print(f"  ✓ Loaded simulation config: production_time_ns={prod_time} ns")
+
+            # Also merge execution config at top level if present
+            if "execution" in fep_config_data:
+                if "execution" not in self.config:
+                    self.config["execution"] = {}
+                self.config["execution"].update(fep_config_data["execution"])
+                print(f"  ✓ Loaded execution config: mode={self.config['execution'].get('mode', 'standard')}")
+                print(f"  ✓ GPU configuration: num_gpus={self.config['execution'].get('num_gpus', 1)}")
+                print(f"  ✓ Parallel windows: {self.config['execution'].get('parallel_windows', 1)}")
+
         # Extract FEP configuration from config file (if available)
         fep_cfg = self.config.get("fep", {})
         if fep_cfg:
