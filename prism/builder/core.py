@@ -1503,9 +1503,75 @@ fi
             raise FileNotFoundError(f"Ligand structure not found: {ligand_gro}")
 
         print_step(2, 5, "Creating ligand-only topology")
-        topol_path = model_dir / "topol.top"
+
+        # Copy force field to working directory (same as bound system)
         ff_name = self.forcefield["name"]
         water_model = self.water_model["name"]
+        ff_idx = self.forcefield.get("index")
+        ff_info = None
+        use_ions_itp = "ions.itp"  # Default to old-style
+
+        if ff_idx and self.gromacs_env:
+            # Get force field info from environment
+            if ff_idx in self.gromacs_env.force_fields:
+                ff_info = self.gromacs_env.force_fields[ff_idx]
+
+        if ff_info and "dir" in ff_info:
+            import shutil
+            from pathlib import Path
+
+            ff_basename = ff_info["dir"]
+            local_ff_dir = Path(model_dir) / ff_basename
+
+            ff_path = Path(ff_info.get("path", ""))
+            if not ff_path.exists() or not ff_path.is_dir():
+                print(f"Warning: Force field path not found: {ff_path}")
+                print(f"Using force field from system search paths: {ff_name}")
+            else:
+                # Validate force field completeness (support both old and new force field structures)
+                required_files = ["forcefield.itp", "ffbonded.itp", "ffnonbonded.itp"]
+
+                # Check for ion files (support both old and new force field structures)
+                water_specific_ions = f"ions_{water_model}.itp"
+                if (ff_path / water_specific_ions).exists():
+                    required_files.append(water_specific_ions)
+                    use_ions_itp = water_specific_ions
+                elif (ff_path / "ions.itp").exists():
+                    # Old-style force field with generic ions.itp
+                    required_files.append("ions.itp")
+                    use_ions_itp = "ions.itp"
+                else:
+                    # No ion file found - will raise error below
+                    use_ions_itp = None
+
+                missing = [f for f in required_files if not (ff_path / f).exists()]
+                if missing:
+                    raise RuntimeError(
+                        f"Force field is incomplete: {ff_info['name']}\n"
+                        f"Missing files: {', '.join(missing)}\n"
+                        f"Force field path: {ff_path}\n"
+                        f"Source: {ff_info.get('source', 'unknown')}\n"
+                        f"Please check your force field installation."
+                    )
+
+                # Copy if not exists, or validate and replace if incomplete
+                need_copy = not local_ff_dir.exists()
+                if not need_copy and self.overwrite:
+                    missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
+                    if missing_local:
+                        print(f"Existing force field copy is incomplete, replacing...")
+                        shutil.rmtree(local_ff_dir)
+                        need_copy = True
+
+                if need_copy:
+                    shutil.copytree(ff_path, local_ff_dir)
+                    source_str = ff_info.get("source", ff_path)
+                    print(f"Copied force field to working directory: {local_ff_dir}")
+                    print(f"  Source: {source_str}")
+                else:
+                    print(f"Using existing force field copy: {local_ff_dir}")
+
+        topol_path = model_dir / "topol.top"
         ligand_rel_dir = f"../{ligand_ff_dir.name}"
 
         with open(topol_path, "w") as f:
@@ -1514,7 +1580,7 @@ fi
             f.write(f'#include "{ligand_rel_dir}/atomtypes_LIG.itp"\n')
             f.write(f'#include "{ligand_rel_dir}/LIG.itp"\n')
             f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
-            f.write(f'#include "{ff_name}.ff/ions.itp"\n\n')
+            f.write(f'#include "{ff_name}.ff/{use_ions_itp}"\n\n')
             f.write("[ system ]\n")
             f.write("Ligand in water\n\n")
             f.write("[ molecules ]\n")

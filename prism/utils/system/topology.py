@@ -76,18 +76,71 @@ class TopologyProcessorMixin:
             # so pdb2gmx resolves exactly one match for -ff.
             import shutil
 
-            ff_source = ff_info.get("path") or ff_info["dir"]
-            ff_path = Path(ff_source)
-            ff_basename = ff_path.name
+            ff_name = ff_info["dir"].replace(".ff", "")
+            ff_basename = ff_info["dir"]
             local_ff_dir = self.model_dir / ff_basename
 
-            if ff_path.is_absolute() and not local_ff_dir.exists():
-                shutil.copytree(ff_path, local_ff_dir)
-                print(f"Copied force field to working directory: {local_ff_dir}")
+            ff_path = Path(ff_info.get("path", ""))
+            if not ff_path.exists() or not ff_path.is_dir():
+                print(f"Warning: Force field path not found: {ff_path}")
+                print(f"Using force field from system search paths: {ff_name}")
+            else:
+                # Validate force field completeness before copying
+                required_files = ["forcefield.itp", "ffbonded.itp", "ffnonbonded.itp"]
 
-            ff_name = ff_basename.replace(".ff", "")
+                # Check for ion files (support both old and new force field structures)
+                # New: ions_tip3p.itp, ions_spce.itp (water-model-specific)
+                # Old: ions.itp (generic)
+                has_ions = False
+                if water_info and "name" in water_info:
+                    water_name = water_info["name"]
+                    water_specific_ions = f"ions_{water_name}.itp"
+                    if (ff_path / water_specific_ions).exists():
+                        required_files.append(water_specific_ions)
+                        has_ions = True
+                    elif (ff_path / "ions.itp").exists():
+                        # Old-style force field with generic ions.itp
+                        required_files.append("ions.itp")
+                        has_ions = True
+                        print(f"  Using old-style ion file: ions.itp (for {water_name})")
+                elif (ff_path / "ions.itp").exists():
+                    # No water model specified, but ions.itp exists
+                    required_files.append("ions.itp")
+                    has_ions = True
+
+                if not has_ions:
+                    print(f"  Warning: No ion file found for water model {water_info.get('name', 'unknown')}")
+
+                missing = [f for f in required_files if not (ff_path / f).exists()]
+                if missing:
+                    raise RuntimeError(
+                        f"Force field is incomplete: {ff_info['name']}\n"
+                        f"Missing files: {', '.join(missing)}\n"
+                        f"Force field path: {ff_path}\n"
+                        f"Source: {ff_info.get('source', 'unknown')}\n"
+                        f"Please check your force field installation."
+                    )
+
+                # Copy if not exists, or validate and replace if incomplete
+                need_copy = not local_ff_dir.exists()
+                if not need_copy and self.overwrite:
+                    # Check if existing copy is complete
+                    missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
+                    if missing_local:
+                        print(f"Existing force field copy is incomplete, replacing...")
+                        shutil.rmtree(local_ff_dir)
+                        need_copy = True
+
+                if need_copy:
+                    shutil.copytree(ff_path, local_ff_dir)
+                    source_str = ff_info.get("source", ff_path)
+                    print(f"Copied force field to working directory: {local_ff_dir}")
+                    print(f"  Source: {source_str}")
+                else:
+                    print(f"Using existing force field copy: {local_ff_dir}")
+
             command.extend(["-ff", ff_name])
-            print(f"Using force field: {ff_name} (from {ff_source})")
+            print(f"Using force field: {ff_name}")
         else:
             print(f"DEBUG: Force field index = {ff_idx} (interactive menu)")
 
