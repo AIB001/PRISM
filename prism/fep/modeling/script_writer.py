@@ -63,7 +63,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
         "use_gpu_pme": bool(exec_config.get("use_gpu_pme", True)),
         "num_gpus": max(1, int(num_gpus)),
         "parallel_windows": parallel_windows,
-        "omp_threads": int(exec_config.get("omp_threads", 14)),
+        "omp_threads": int(exec_config.get("omp_threads", 8)),  # GPU optimization: -ntmpi 1 -ntomp 8
         "replicas": int(fep_config.get("replicas", 1)),
     }
 
@@ -133,7 +133,6 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         local gpu_id="$5"
 
         export CUDA_VISIBLE_DEVICES="${{gpu_id}}"
-        export OMP_NUM_THREADS={omp_threads}
 
         echo "$$" > "${{LEG_DIR}}/.run_${{lambda_idx}}"
         trap 'rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"' EXIT
@@ -198,7 +197,6 @@ else
 fi
 
 NUM_GPUS={num_gpus}
-export OMP_NUM_THREADS={omp_threads}
 
 window_dirs=()
 for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
