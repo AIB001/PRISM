@@ -64,6 +64,7 @@ class FEPScaffoldBuilder:
         self.lambda_strategy = lambda_strategy
         self.lambda_distribution = lambda_distribution
         self.overwrite = overwrite
+        self.replicas = max(1, int(self.config.get("fep", {}).get("replicas", 1)))
 
         # Initialize sub-builders
         self.hybrid_builder = HybridPackageBuilder()
@@ -134,6 +135,7 @@ class FEPScaffoldBuilder:
         ligand_seed_pdb = layout.common_dir / "hybrid" / "ligand_seed.pdb"
         self._write_bound_leg(layout, receptor_path, ligand_seed_pdb)
         self._write_unbound_leg(layout, ligand_seed_pdb)
+        self._replicate_repeat_layout(layout)
         script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(layout, receptor_path, hybrid_dir)
 
@@ -254,6 +256,7 @@ class FEPScaffoldBuilder:
             self._write_unbound_leg(layout, ligand_seed_pdb)
 
         # Write scripts and manifest
+        self._replicate_repeat_layout(layout)
         script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(
             layout,
@@ -331,8 +334,10 @@ class FEPScaffoldBuilder:
         common_dir = root / "common"
         hybrid_dir = common_dir / "hybrid"
         protein_dir = common_dir / "protein"
-        bound_dir = root / "bound"
-        unbound_dir = root / "unbound"
+        bound_root = root / "bound"
+        unbound_root = root / "unbound"
+        bound_dir = bound_root / "repeat1"
+        unbound_dir = unbound_root / "repeat1"
 
         for directory in [hybrid_dir, protein_dir, bound_dir / "input", unbound_dir / "input"]:
             directory.mkdir(parents=True, exist_ok=True)
@@ -345,6 +350,19 @@ class FEPScaffoldBuilder:
             bound_dir=bound_dir,
             unbound_dir=unbound_dir,
         )
+
+    def _replicate_repeat_layout(self, layout: FEPScaffoldLayout) -> None:
+        """Clone repeat1 into repeat2..N when multiple repeats are requested."""
+        if self.replicas <= 1:
+            return
+
+        for leg_name, seed_dir in (("bound", layout.bound_dir), ("unbound", layout.unbound_dir)):
+            leg_root = layout.root / leg_name
+            for replica_idx in range(2, self.replicas + 1):
+                replica_dir = leg_root / f"repeat{replica_idx}"
+                if replica_dir.exists():
+                    continue
+                shutil.copytree(seed_dir, replica_dir)
 
     def _copy_common_assets(self, receptor_path: Path, hybrid_dir: Path, layout: FEPScaffoldLayout) -> None:
         """Copy receptor and hybrid ligand assets to common directory."""

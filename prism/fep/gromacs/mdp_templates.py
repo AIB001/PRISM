@@ -396,7 +396,12 @@ compressibility     = {npt_config.get('compressibility', 4.5e-5)}
 pbc                 = xyz
 
 ; Velocity generation
-gen_vel             = no
+; Regenerate velocities for each lambda window instead of reusing the
+; leg-level checkpoint. Dummy-state atoms can carry incompatible velocities
+; when they are turned on at high lambda.
+gen_vel             = yes
+gen_temp            = {temp}
+gen_seed            = -1
 
 ; Constraints
 ; For hybrid topologies, use standard constraints with increased LINCS accuracy
@@ -423,8 +428,79 @@ lincs-warnangle         = 30
     tau_p = md_config.get("tau_p", 2.0)
     compressibility = md_config.get("compressibility", 4.5e-5)
 
-    # Generate per-window NPT short MDPs with lambda-specific parameters
+    # Generate per-window lambda-specific relaxation MDPs.
+    # A short EM stage is required before per-window MD for the end-state windows:
+    # the bound leg can contain transformed B-state atoms that are geometrically
+    # reasonable in the shared build structure, but still need lambda-specific
+    # relaxation before constrained dynamics starts.
     for index, lambda_value in enumerate(lambda_values):
+        em_short_mdp = f"""; {leg_name} EM Short - Per-Window Lambda Relaxation (Window {index:02d})
+define              = -DPOSRES
+integrator          = steep
+emtol               = 1000.0
+emstep              = 0.01
+nsteps              = 20000
+
+; Output control
+nstxout             = 0
+nstvout             = 0
+nstfout             = 0
+nstlog              = {log_interval}
+nstenergy           = {energy_interval}
+nstxout-compressed  = 0
+
+; Free energy parameters
+free-energy              = yes
+init-lambda-state        = {index}
+delta-lambda             = 0
+calc-lambda-neighbors    = -1
+nstdhdl                  = 100
+separate-dhdl-file       = yes
+
+; Lambda schedules (strategy: {schedule['strategy']})
+coul-lambdas             = {schedule['coul_lambdas']}
+vdw-lambdas              = {schedule['vdw_lambdas']}
+bonded-lambdas           = {schedule['bonded_lambdas']}
+mass-lambdas             = {schedule['mass_lambdas']}
+
+; Soft-core parameters
+sc-alpha                 = 0.5
+sc-power                 = 1
+sc-sigma                 = 0.5
+sc-coul                  = yes
+
+; Neighbor searching
+cutoff-scheme       = Verlet
+ns_type             = grid
+nstlist             = 80
+rcoulomb            = {rcoulomb}
+rvdw                = {rvdw}
+table-extension     = 2.0
+
+; Electrostatics
+coulombtype         = {coulombtype}
+pme_order           = {pme_order}
+fourierspacing      = {fourierspacing}
+
+; VDW
+vdwtype             = Cut-off
+DispCorr            = EnerPres
+
+; Periodic boundary conditions
+pbc                 = xyz
+
+; No thermostat/barostat during the lambda-specific minimization
+tcoupl              = no
+pcoupl              = no
+gen_vel             = no
+
+; Constraints
+constraints             = none
+
+; Lambda window {index}: nominal lambda = {lambda_value}
+"""
+        (output_path / f"em_short_{index:02d}.mdp").write_text(em_short_mdp)
+
         npt_short_mdp = f"""; {leg_name} NPT Short - Per-Window NPT Equilibration (Window {index:02d})
 define              = -DPOSRES
 integrator          = md
@@ -490,18 +566,21 @@ tau_t               = {tau_t}
 ref_t               = {temp}
 
 ; Pressure coupling
-; Use C-rescale for stability during per-window NPT short at intermediate lambda states
-pcoupl              = C-rescale
-pcoupltype          = isotropic
-tau_p               = 1.0
-ref_p               = {pressure}
-compressibility     = {compressibility}
+; The box has already been equilibrated in the leg-level NPT stage.
+; Per-window short relaxation only needs to relax lambda-specific contacts.
+; Keeping pressure coupling on here can destabilize end-state windows.
+pcoupl              = no
+refcoord_scaling    = com
 
 ; Periodic boundary conditions
 pbc                 = xyz
 
 ; Velocity generation
-gen_vel             = no
+; Re-sample velocities for each lambda window to avoid carrying dummy-state
+; velocities from the leg-level checkpoint into high-lambda windows.
+gen_vel             = yes
+gen_temp            = {temp}
+gen_seed            = -1
 
 ; Constraints
 ; For hybrid topologies, use standard constraints with increased LINCS accuracy

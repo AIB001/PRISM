@@ -120,6 +120,43 @@ else
     MDRUN_NSTEPS_ARG=""
 fi
 
+check_em_short() {{
+    local window_dir="$1"
+    local lambda_name="$2"
+    local em_log="${{window_dir}}/em_short.log"
+
+    if [ ! -f "${{em_log}}" ]; then
+        echo "Error: ${{lambda_name}} missing em_short.log"
+        return 1
+    fi
+
+    local max_force
+    max_force=$(python - "${{em_log}}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(errors="ignore")
+match = re.search(r"Maximum force\\s*=\\s*([0-9.eE+-]+)", text)
+print(match.group(1) if match else "")
+PY
+)
+
+    if [ -z "${{max_force}}" ]; then
+        echo "Error: ${{lambda_name}} em_short maximum force not found"
+        return 1
+    fi
+
+    python - "${{max_force}}" <<'PY'
+import sys
+sys.exit(0 if float(sys.argv[1]) <= 1000.0 else 1)
+PY
+    if [ $? -ne 0 ]; then
+        echo "Error: ${{lambda_name}} em_short did not converge (Fmax=${{max_force}})"
+        return 1
+    fi
+}}
+
 echo "Production mode: standard"
 echo "Concurrent windows: {parallel_windows}"
 echo "Configured GPUs: {num_gpus}"
@@ -165,26 +202,47 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
 
         if [ -f "${{window_dir}}/npt_short.gro" ]; then
             echo "  ${{lambda_name}}: NPT short already completed"
+        elif [ -f "${{window_dir}}/em_short.gro" ]; then
+            echo "  ${{lambda_name}}: lambda-specific EM already completed"
+            if [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
+                echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}}"
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            else
+                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+                gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
+            fi
+        elif [ -f "${{window_dir}}/em_short.tpr" ]; then
+            echo "  ${{lambda_name}}: resuming lambda-specific EM"
+            gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+            check_em_short "${{window_dir}}" "${{lambda_name}}"
+            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
         elif [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
             echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}}"
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
+            echo "  ${{lambda_name}}: starting lambda-specific EM"
+            gmx grompp -f "${{MDP_DIR}}/em_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/em_short.tpr" -maxwarn 20
+            gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+            check_em_short "${{window_dir}}" "${{lambda_name}}"
             echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
-            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/npt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
+            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         if [ -f "${{window_dir}}/prod.gro" ]; then
             echo "  ${{lambda_name}}: production already completed"
         elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
             echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}}"
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
             echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}}"
             if [ ! -f "${{window_dir}}/prod.tpr" ]; then
                 gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 20
             fi
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
@@ -202,7 +260,16 @@ done
 
 if [ {parallel_windows} -gt 1 ]; then
     echo "Waiting for all windows to complete..."
-    wait
+    failure=0
+    for job in $(jobs -p); do
+        if ! wait "${{job}}"; then
+            failure=1
+        fi
+    done
+    if [ "${{failure}}" -ne 0 ]; then
+        echo "Error: one or more lambda windows failed."
+        exit 1
+    fi
 fi
 """
 
@@ -219,6 +286,43 @@ else
     MDRUN_NSTEPS_ARG=""
 fi
 
+check_em_short() {{
+    local window_dir="$1"
+    local lambda_name="$2"
+    local em_log="${{window_dir}}/em_short.log"
+
+    if [ ! -f "${{em_log}}" ]; then
+        echo "Error: ${{lambda_name}} missing em_short.log"
+        return 1
+    fi
+
+    local max_force
+    max_force=$(python - "${{em_log}}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(errors="ignore")
+match = re.search(r"Maximum force\\s*=\\s*([0-9.eE+-]+)", text)
+print(match.group(1) if match else "")
+PY
+)
+
+    if [ -z "${{max_force}}" ]; then
+        echo "Error: ${{lambda_name}} em_short maximum force not found"
+        return 1
+    fi
+
+    python - "${{max_force}}" <<'PY'
+import sys
+sys.exit(0 if float(sys.argv[1]) <= 1000.0 else 1)
+PY
+    if [ $? -ne 0 ]; then
+        echo "Error: ${{lambda_name}} em_short did not converge (Fmax=${{max_force}})"
+        return 1
+    fi
+}}
+
 NUM_GPUS={num_gpus}
 
 window_dirs=()
@@ -230,10 +334,17 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
     mkdir -p "${{window_dir}}"
 
     if [ ! -f "${{window_dir}}/npt_short.gro" ]; then
-        if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
-            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/npt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
+        if [ ! -f "${{window_dir}}/em_short.gro" ]; then
+            if [ ! -f "${{window_dir}}/em_short.tpr" ]; then
+                gmx grompp -f "${{MDP_DIR}}/em_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/em_short.tpr" -maxwarn 20
+            fi
+            gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+            check_em_short "${{window_dir}}" "${{lambda_name}}"
         fi
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
+        if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
+            gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
+        fi
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
     fi
 
     if [ ! -f "${{window_dir}}/prod.tpr" ]; then
@@ -260,7 +371,7 @@ echo "Configured GPUs: $NUM_GPUS"
 echo "GPU id string: $gpu_ids"
 
 mpirun -oversubscribe -np "${{num_windows}}" \\
-    gmx_mpi mdrun -v -deffnm prod -nb gpu -bonded gpu {pme_gpu_flag} -replex 1000 \\
+    gmx_mpi mdrun -v -deffnm prod -nb gpu -bonded gpu {pme_gpu_flag} -pin on -replex 1000 \\
     -multidir "${{window_dirs[@]}}" -gpu_id "${{gpu_ids}}" -pin on -dhdl dhdl \\
     "${{cpi_args[@]}}" ${{MDRUN_NSTEPS_ARG}}
 """
@@ -402,19 +513,48 @@ if [[ "${{EXECUTION_MODE}}" != "standard" && "${{EXECUTION_MODE}}" != "repex" ]]
     exit 1
 fi
 
-# Function to run a single leg
-run_leg() {{
-    local leg_name=$1
-    local leg_dir="${{FEP_DIR}}/${{leg_name}}"
+# Resolve a run target to its on-disk leg directory.
+resolve_leg_dir() {{
+    local target="$1"
 
-    if [ ! -d "${{leg_dir}}" ]; then
-        echo "Error: Leg directory not found: ${{leg_dir}}"
-        return 1
+    if [ -d "${{FEP_DIR}}/${{target}}" ]; then
+        printf '%s\\n' "${{FEP_DIR}}/${{target}}"
+        return 0
     fi
+
+    if [[ "${{target}}" =~ ^(bound|unbound)([0-9]+)$ ]]; then
+        local leg="${{BASH_REMATCH[1]}}"
+        local replica_idx="${{BASH_REMATCH[2]}}"
+        local nested_dir="${{FEP_DIR}}/${{leg}}/repeat${{replica_idx}}"
+        if [ -d "${{nested_dir}}" ]; then
+            printf '%s\\n' "${{nested_dir}}"
+            return 0
+        fi
+    fi
+
+    if [[ "${{target}}" =~ ^(bound|unbound)$ ]]; then
+        local nested_dir="${{FEP_DIR}}/${{target}}/repeat1"
+        if [ -d "${{nested_dir}}" ]; then
+            printf '%s\\n' "${{nested_dir}}"
+            return 0
+        fi
+    fi
+
+    return 1
+}}
+
+# Function to run a single leg / repeat target
+run_leg() {{
+    local target_name="$1"
+    local leg_dir
+    leg_dir=$(resolve_leg_dir "${{target_name}}") || {{
+        echo "Error: Leg directory not found for target: ${{target_name}}"
+        return 1
+    }}
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                    PRISM-FEP ${{leg_name}} LEG                                   ║"
+    echo "║                    PRISM-FEP ${{target_name}} LEG                                   ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo ""
 
@@ -458,12 +598,12 @@ run_leg() {{
         echo "NVT checkpoint found, resuming on GPU..."
         (
             cd ${{BUILD_DIR}}
-            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi nvt.cpt -v
+            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi nvt.cpt -v
         )
     else
         echo "Running NVT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v
     fi
 
     # NPT equilibration (must run to completion)
@@ -475,7 +615,7 @@ run_leg() {{
             echo "NPT checkpoint found, resuming on GPU..."
             (
                 cd ${{BUILD_DIR}}
-                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi npt.cpt -v
+                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi npt.cpt -v
             )
         else
             # NPT TPR exists but no checkpoint - previous run failed, clean up and restart
@@ -483,12 +623,12 @@ run_leg() {{
             rm -f ${{BUILD_DIR}}/npt.* 2>/dev/null || true
             echo "Running NPT equilibration..."
             gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v
         fi
     else
         echo "Running NPT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v
     fi
 
     echo "Running FEP production for all lambda windows..."
@@ -505,7 +645,7 @@ run_leg() {{
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                    ${{leg_name}} LEG COMPLETE                                   ║"
+    echo "║                    ${{target_name}} LEG COMPLETE                                   ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
 
     cd "${{FEP_DIR}}"
@@ -558,11 +698,11 @@ if [ $# -eq 0 ]; then
     echo "Usage: $0 <target> [target ...]"
     echo ""
     echo "Target specifications:"
-    echo "  bound           - Run all bound replicas (bound1, bound2, ...)"
-    echo "  unbound         - Run all unbound replicas (unbound1, unbound2, ...)"
+    echo "  bound           - Run all bound replicas (bound/repeat1, bound/repeat2, ...)"
+    echo "  unbound         - Run all unbound replicas (unbound/repeat1, unbound/repeat2, ...)"
     echo "  all             - Run all bound and unbound replicas"
     echo "  bound1          - Run specific replica"
-    echo "  bound1-3        - Run range of replicas (bound1, bound2, bound3)"
+    echo "  bound1-3        - Run range of replicas (bound/repeat1, bound/repeat2, bound/repeat3)"
     echo "  unbound1-2      - Run range of replicas"
     echo "  bound1,unbound2 - Mix different legs and replicas"
     echo "  bound1-3,unbound1-2 - Mix ranges"
@@ -570,9 +710,9 @@ if [ $# -eq 0 ]; then
     echo "Configuration:"
     echo "  Replicas configured: ${{REPLICAS}}"
     if [ ${{REPLICAS}} -gt 1 ]; then
-        echo "  Available: bound1..bound${{REPLICAS}}, unbound1..unbound${{REPLICAS}}"
+        echo "  Available on disk: bound/repeat1..repeat${{REPLICAS}}, unbound/repeat1..repeat${{REPLICAS}}"
     else
-        echo "  Available: bound, unbound"
+        echo "  Available on disk: bound/repeat1, unbound/repeat1"
     fi
     echo ""
     echo "Environment variables:"
@@ -608,7 +748,7 @@ fi
 
 # Run all requested targets
 for target in "${{all_targets[@]}}"; do
-    if [ -d "${{FEP_DIR}}/${{target}}" ]; then
+    if resolve_leg_dir "${{target}}" >/dev/null; then
         run_leg "${{target}}"
     else
         echo "⚠️  Warning: Directory ${{target}} not found, skipping..."
