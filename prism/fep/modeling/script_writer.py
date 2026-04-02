@@ -24,6 +24,7 @@ For production FEP calculations:
 WARNING: Results obtained with PRISM_MDRUN_NSTEPS set are NOT valid for publication!
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -95,7 +96,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
 
 def _write_leg_execution_scripts(
     leg_dir: Path,
-    execution_mode: str,
+    execution_mode: str,  # noqa: ARG001
     *,
     use_gpu_pme: bool,
     num_gpus: int,
@@ -157,10 +158,12 @@ PY
     fi
 }}
 
+
 echo "Production mode: standard"
 echo "Concurrent windows: {parallel_windows}"
 echo "Configured GPUs: {num_gpus}"
 echo "OpenMP threads per GPU: {omp_threads}"
+echo "CPU affinity: enabled (each GPU gets dedicated CPU cores)"
 
 JOB_COUNT=0
 for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
@@ -196,6 +199,7 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         local gpu_id="$5"
 
         export CUDA_VISIBLE_DEVICES="${{gpu_id}}"
+        local cpu_offset=$((gpu_id * {omp_threads}))
 
         echo "$$" > "${{LEG_DIR}}/.run_${{lambda_idx}}"
         trap 'rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"' EXIT
@@ -205,44 +209,44 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         elif [ -f "${{window_dir}}/em_short.gro" ]; then
             echo "  ${{lambda_name}}: lambda-specific EM already completed"
             if [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
-                echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}}"
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
             else
-                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
                 gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
             fi
         elif [ -f "${{window_dir}}/em_short.tpr" ]; then
             echo "  ${{lambda_name}}: resuming lambda-specific EM"
             gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
             check_em_short "${{window_dir}}" "${{lambda_name}}"
-            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
             gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
         elif [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
-            echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}}"
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
             echo "  ${{lambda_name}}: starting lambda-specific EM"
             gmx grompp -f "${{MDP_DIR}}/em_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/em_short.tpr" -maxwarn 20
             gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
             check_em_short "${{window_dir}}" "${{lambda_name}}"
-            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
+            echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
             gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         if [ -f "${{window_dir}}/prod.gro" ]; then
             echo "  ${{lambda_name}}: production already completed"
         elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
-            echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}}"
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
-            echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}}"
+            echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
             if [ ! -f "${{window_dir}}/prod.tpr" ]; then
                 gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 20
             fi
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
@@ -381,14 +385,6 @@ mpirun -oversubscribe -np "${{num_windows}}" \\
             handle.write(content)
         path.chmod(0o755)
 
-    mode_file = leg_dir / "run_prod.sh"
-    mode_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        f'exec "$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)/run_prod_{execution_mode}.sh" "$@"\n'
-    )
-    mode_file.chmod(0o755)
-
 
 def write_root_scripts(layout, config: Optional[dict] = None) -> None:
     """
@@ -466,7 +462,33 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
             parallel_windows=settings["parallel_windows"],
             omp_threads=settings["omp_threads"],
         )
+    _propagate_leg_scripts_to_repeats(layout)
     write_fep_master_script(layout.root, config)
+
+
+def _propagate_leg_scripts_to_repeats(layout) -> None:
+    """Make per-repeat production scripts available in repeat2..N.
+
+    repeat1 owns the real generated scripts. Other repeats can safely reuse them
+    because the scripts resolve their working directory from the repeat they are
+    executed in, while the static script content is identical across repeats.
+    """
+    script_names = ("run_prod_standard.sh", "run_prod_repex.sh")
+    for leg_root in (layout.root / "bound", layout.root / "unbound"):
+        repeat1 = leg_root / "repeat1"
+        if not repeat1.exists():
+            continue
+        for repeat_dir in sorted(leg_root.glob("repeat*")):
+            if repeat_dir.name == "repeat1" or not repeat_dir.is_dir():
+                continue
+            for script_name in script_names:
+                source = repeat1 / script_name
+                if not source.exists():
+                    continue
+                target = repeat_dir / script_name
+                if target.exists() or target.is_symlink():
+                    continue
+                target.symlink_to(os.path.relpath(source, repeat_dir))
 
 
 def write_fep_master_script(fep_dir: Path, config: Optional[dict] = None) -> None:
@@ -759,9 +781,7 @@ echo ""
 echo "✓ All requested FEP calculations completed."
 """
 
-    with open(script_path, "w") as f:
-        f.write(script_content)
-
+    script_path.write_text(script_content)
     script_path.chmod(0o755)
 
 
@@ -802,109 +822,92 @@ def write_fep_slurm_script(
     """
     script_path = leg_dir / "submit.slurm.sh"
 
-    with open(script_path, "w") as f:
-        f.write("#!/bin/bash\n")
-        f.write(f"#SBATCH -J {job_name}_{leg_name}\n")
-        f.write(f"#SBATCH -p {partition}\n")
-        f.write(f"#SBATCH --time={time}\n")
-        f.write(f"#SBATCH --nodes={nodes}\n")
-        f.write(f"#SBATCH --ntasks={ntasks}\n")
-        f.write(f"#SBATCH --cpus-per-task={cpus_per_task}\n")
-        f.write(f"#SBATCH --gres=gpu:{gpus}\n\n")
+    script_content = f"""#!/bin/bash
+#SBATCH -J {job_name}_{leg_name}
+#SBATCH -p {partition}
+#SBATCH --time={time}
+#SBATCH --nodes={nodes}
+#SBATCH --ntasks={ntasks}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --gres=gpu:{gpus}
 
-        f.write(f"# FEP {leg_name} leg SLURM submission script\n\n")
-        f.write("# Load GROMACS module (adjust for your cluster)\n")
-        f.write("# module load gromacs/2023.2\n\n")
+# FEP {leg_name} leg SLURM submission script
 
-        f.write("# Set OpenMP threads to match SLURM allocation\n")
-        f.write("export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n\n")
+# Load GROMACS module (adjust for your cluster)
+# module load gromacs/2023.2
 
-        f.write("# Set number of lambda windows\n")
-        f.write("NUM_WINDOWS=21\n\n")
+# Set OpenMP threads to match SLURM allocation
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-        f.write('echo "Start time: $(date)"\n')
-        f.write('echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"\n')
-        f.write('echo "hostname: $(hostname)"\n')
-        f.write('echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"\n')
-        f.write('echo "Job directory: $(pwd)"\n\n')
+# Set number of lambda windows
+NUM_WINDOWS=21
 
-        f.write("# Energy Minimization\n")
-        f.write("echo 'Starting energy minimization...'\n")
-        f.write("for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do\n")
-        f.write("    if [ ! -f lambda_$i/em.gro ]; then\n")
-        f.write(
-            "        gmx grompp -f lambda_$i/em.mdp -c conf.gro -r conf.gro -p topol.top -o lambda_$i/em.tpr -maxwarn 3\n"
-        )
-        f.write("        gmx mdrun -s lambda_$i/em.tpr -deffnm lambda_$i/em -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK\n")
-        f.write("    fi\n")
-        f.write("done\n")
-        f.write("echo 'Energy minimization completed.'\n\n")
+echo "Start time: $(date)"
+echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
+echo "hostname: $(hostname)"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+echo "Job directory: $(pwd)"
 
-        f.write("# NVT Equilibration\n")
-        f.write("echo 'Starting NVT equilibration...'\n")
-        f.write("for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do\n")
-        f.write("    if [ ! -f lambda_$i/nvt.gro ]; then\n")
-        f.write(
-            "        gmx grompp -f lambda_$i/nvt.mdp -c lambda_$i/em.gro -r lambda_$i/em.gro -p topol.top -o lambda_$i/nvt.tpr -maxwarn 2\n"
-        )
-        f.write(
-            "        gmx mdrun -s lambda_$i/nvt.tpr -deffnm lambda_$i/nvt -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0\n"
-        )
-        f.write("    fi\n")
-        f.write("done\n")
-        f.write("echo 'NVT equilibration completed.'\n\n")
+# Energy Minimization
+echo 'Starting energy minimization...'
+for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do
+    if [ ! -f lambda_$i/em.gro ]; then
+        gmx grompp -f lambda_$i/em.mdp -c conf.gro -r conf.gro -p topol.top -o lambda_$i/em.tpr -maxwarn 3
+        gmx mdrun -s lambda_$i/em.tpr -deffnm lambda_$i/em -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK
+    fi
+done
+echo 'Energy minimization completed.'
 
-        f.write("# NPT Equilibration (short)\n")
-        f.write("echo 'Starting NPT equilibration (short)...'\n")
-        f.write("for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do\n")
-        f.write("    if [ -f lambda_$i/npt_short.mdp ]; then\n")
-        f.write("        if [ ! -f lambda_$i/npt_short.gro ]; then\n")
-        f.write(
-            "            gmx grompp -f lambda_$i/npt_short.mdp -c lambda_$i/nvt.gro -r lambda_$i/nvt.gro -p topol.top -o lambda_$i/npt_short.tpr -maxwarn 2\n"
-        )
-        f.write(
-            "            gmx mdrun -s lambda_$i/npt_short.tpr -deffnm lambda_$i/npt_short -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0\n"
-        )
-        f.write("        fi\n")
-        f.write("    fi\n")
-        f.write("done\n")
-        f.write("echo 'NPT equilibration (short) completed.'\n\n")
+# NVT Equilibration
+echo 'Starting NVT equilibration...'
+for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do
+    if [ ! -f lambda_$i/nvt.gro ]; then
+        gmx grompp -f lambda_$i/nvt.mdp -c lambda_$i/em.gro -r lambda_$i/em.gro -p topol.top -o lambda_$i/nvt.tpr -maxwarn 2
+        gmx mdrun -s lambda_$i/nvt.tpr -deffnm lambda_$i/nvt -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0
+    fi
+done
+echo 'NVT equilibration completed.'
 
-        f.write("# NPT Equilibration\n")
-        f.write("echo 'Starting NPT equilibration...'\n")
-        f.write("for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do\n")
-        f.write("    if [ ! -f lambda_$i/npt.gro ]; then\n")
-        f.write("        # Use npt_short.gro if available, otherwise nvt.gro\n")
-        f.write("        if [ -f lambda_$i/npt_short.gro ]; then\n")
-        f.write("            INPUT_GRO=lambda_$i/npt_short.gro\n")
-        f.write("        else\n")
-        f.write("            INPUT_GRO=lambda_$i/nvt.gro\n")
-        f.write("        fi\n")
-        f.write(
-            "        gmx grompp -f lambda_$i/npt.mdp -c $INPUT_GRO -r $INPUT_GRO -p topol.top -o lambda_$i/npt.tpr -maxwarn 2\n"
-        )
-        f.write(
-            "        gmx mdrun -s lambda_$i/npt.tpr -deffnm lambda_$i/npt -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0\n"
-        )
-        f.write("    fi\n")
-        f.write("done\n")
-        f.write("echo 'NPT equilibration completed.'\n\n")
+# NPT Equilibration (short)
+echo 'Starting NPT equilibration (short)...'
+for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do
+    if [ -f lambda_$i/npt_short.mdp ]; then
+        if [ ! -f lambda_$i/npt_short.gro ]; then
+            gmx grompp -f lambda_$i/npt_short.mdp -c lambda_$i/nvt.gro -r lambda_$i/nvt.gro -p topol.top -o lambda_$i/npt_short.tpr -maxwarn 2
+            gmx mdrun -s lambda_$i/npt_short.tpr -deffnm lambda_$i/npt_short -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0
+        fi
+    fi
+done
+echo 'NPT equilibration (short) completed.'
 
-        f.write("# Production MD\n")
-        f.write("echo 'Starting production MD...'\n")
-        f.write("for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do\n")
-        f.write("    if [ ! -f lambda_$i/prod.gro ]; then\n")
-        f.write(
-            "        gmx grompp -f lambda_$i/prod.mdp -c lambda_$i/npt.gro -r lambda_$i/npt.gro -p topol.top -o lambda_$i/prod.tpr -maxwarn 2\n"
-        )
-        f.write(
-            "        gmx mdrun -s lambda_$i/prod.tpr -deffnm lambda_$i/prod -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0\n"
-        )
-        f.write("    fi\n")
-        f.write("done\n")
-        f.write("echo 'Production MD completed.'\n\n")
+# NPT Equilibration
+echo 'Starting NPT equilibration...'
+for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do
+    if [ ! -f lambda_$i/npt.gro ]; then
+        # Use npt_short.gro if available, otherwise nvt.gro
+        if [ -f lambda_$i/npt_short.gro ]; then
+            INPUT_GRO=lambda_$i/npt_short.gro
+        else
+            INPUT_GRO=lambda_$i/nvt.gro
+        fi
+        gmx grompp -f lambda_$i/npt.mdp -c $INPUT_GRO -r $INPUT_GRO -p topol.top -o lambda_$i/npt.tpr -maxwarn 2
+        gmx mdrun -s lambda_$i/npt.tpr -deffnm lambda_$i/npt -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0
+    fi
+done
+echo 'NPT equilibration completed.'
 
-        f.write('echo "End time: $(date)"\n')
-        f.write(f"echo 'All FEP calculations for {leg_name} leg completed.'\n")
+# Production MD
+echo 'Starting production MD...'
+for i in $(seq -f '%02g' 0 $((NUM_WINDOWS-1))); do
+    if [ ! -f lambda_$i/prod.gro ]; then
+        gmx grompp -f lambda_$i/prod.mdp -c lambda_$i/npt.gro -r lambda_$i/npt.gro -p topol.top -o lambda_$i/prod.tpr -maxwarn 2
+        gmx mdrun -s lambda_$i/prod.tpr -deffnm lambda_$i/prod -ntmpi 1 -ntomp $SLURM_CPUS_PER_TASK -nb gpu -bonded gpu -pme gpu -gpu_id 0
+    fi
+done
+echo 'Production MD completed.'
 
+echo "End time: $(date)"
+echo 'All FEP calculations for {leg_name} leg completed.'
+"""
+    script_path.write_text(script_content)
     script_path.chmod(0o755)
