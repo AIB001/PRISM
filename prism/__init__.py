@@ -5,6 +5,8 @@
 PRISM - Protein Receptor Interaction Simulation Modeler
 
 A comprehensive tool for building protein-ligand systems for molecular dynamics simulations.
+
+**Note**: PRISMSystem class is deprecated. Use PRISMBuilder directly for new code.
 """
 
 import os
@@ -20,7 +22,7 @@ __version__ = "1.2.0"
 __author__ = "PRISM Development Team"
 
 from .builder import PRISMBuilder
-from .core import PRISMSystem
+from .core import PRISMSystem  # Deprecated - use PRISMBuilder directly
 from .sim import model
 from .analysis import IntegratedProteinLigandAnalyzer as TrajAnalysis
 
@@ -48,7 +50,13 @@ except ImportError:
 # High-level API functions
 def system(protein_path, ligand_path, config=None, **kwargs):
     """
-    Create a protein-ligand system for MD simulation.
+    **DEPRECATED**: Create a protein-ligand system for MD simulation.
+
+    This function is deprecated. Use PRISMBuilder directly:
+
+        >>> from prism.builder.core import PRISMBuilder
+        >>> builder = PRISMBuilder(protein_path, ligand_path, **kwargs)
+        >>> builder.run()
 
     Parameters:
     -----------
@@ -64,27 +72,31 @@ def system(protein_path, ligand_path, config=None, **kwargs):
     Returns:
     --------
     PRISMSystem
-        A system object with methods to build and run simulations
+        A deprecated system object. Use PRISMBuilder instead.
 
     Examples:
     ---------
     >>> import prism as pm
-    >>> system = pm.system("protein.pdb", "ligand.mol2")
+    >>> system = pm.system("protein.pdb", "ligand.mol2")  # Deprecated
     >>> system.build()
-    >>> system.generate_mdp_files()
 
-    >>> # With custom configuration
-    >>> system = pm.system("protein.pdb", "ligand.sdf",
-    ...                    config="config.yaml",
-    ...                    ligand_forcefield="openff")
-    >>> system.build()
+    >>> # Recommended new approach:
+    >>> from prism.builder.core import PRISMBuilder
+    >>> builder = PRISMBuilder("protein.pdb", "ligand.mol2")
+    >>> builder.run()
     """
     return PRISMSystem(protein_path, ligand_path, config=config, **kwargs)
 
 
 def build_system(protein_path, ligand_path, output_dir="prism_output", **kwargs):
     """
-    Build a complete protein-ligand system (one-step function).
+    **DEPRECATED**: Build a complete protein-ligand system (one-step function).
+
+    This function is deprecated. Use PRISMBuilder directly:
+
+        >>> from prism.builder.core import PRISMBuilder
+        >>> builder = PRISMBuilder(protein_path, ligand_path, output_dir=output_dir, **kwargs)
+        >>> output_dir = builder.run()
 
     Parameters:
     -----------
@@ -105,13 +117,12 @@ def build_system(protein_path, ligand_path, output_dir="prism_output", **kwargs)
     Examples:
     ---------
     >>> import prism as pm
-    >>> output_path = pm.build_system("protein.pdb", "ligand.mol2")
+    >>> output_path = pm.build_system("protein.pdb", "ligand.mol2")  # Deprecated
 
-    >>> # With custom force fields
-    >>> output_path = pm.build_system("protein.pdb", "ligand.mol2",
-    ...                               forcefield="amber99sb-ildn",
-    ...                               water_model="tip4p",
-    ...                               ligand_forcefield="openff")
+    >>> # Recommended new approach:
+    >>> from prism.builder.core import PRISMBuilder
+    >>> builder = PRISMBuilder("protein.pdb", "ligand.mol2")
+    >>> output_path = builder.run()
     """
     system_obj = PRISMSystem(protein_path, ligand_path, output_dir=output_dir, **kwargs)
     return system_obj.build()

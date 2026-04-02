@@ -343,6 +343,29 @@ class LegWriter:
                     break
             content = "\n".join(lines) + "\n"
 
+        # Strip the ligand-specific [ atomtypes ] block that PRISM inserts for the
+        # original ligand. The hybrid package already contributes a merged atomtype
+        # include, so keeping both definitions triggers duplicate-atomtype warnings
+        # in the bound leg grompp check.
+        content = self._remove_top_level_atomtypes_block(content)
+
+        # Ensure the hybrid topology include still exists after topology cleanup.
+        if hybrid_include not in content:
+            lines = content.splitlines()
+            insert_idx = -1
+            for i, line in enumerate(lines):
+                if line.strip() == '#include "../common/hybrid/ff_hybrid.itp"':
+                    insert_idx = i + 1
+                    break
+            if insert_idx == -1:
+                for i, line in enumerate(lines):
+                    if "forcefield.itp" in line or "force_field.itp" in line:
+                        insert_idx = i + 1
+                        break
+            if insert_idx != -1:
+                lines.insert(insert_idx, hybrid_include)
+                content = "\n".join(lines) + "\n"
+
         # Replace LIG with HYB in molecules section
         content = re.sub(
             r"^(\s*)LIG(\s+\d+.*?)$",
@@ -380,6 +403,29 @@ class LegWriter:
                 content = "\n".join(lines) + "\n"
 
         target_top.write_text(content)
+
+    def _remove_top_level_atomtypes_block(self, content: str) -> str:
+        """Remove a standalone top-level [ atomtypes ] block from a copied topology."""
+        lines = content.splitlines()
+        cleaned = []
+        in_atomtypes = False
+
+        for line in lines:
+            stripped = line.strip().lower()
+            if stripped == "[ atomtypes ]":
+                in_atomtypes = True
+                continue
+            if in_atomtypes and (
+                stripped.startswith("#include") or (stripped.startswith("[") and stripped != "[ atomtypes ]")
+            ):
+                in_atomtypes = False
+                cleaned.append(line)
+                continue
+            if in_atomtypes:
+                continue
+            cleaned.append(line)
+
+        return "\n".join(cleaned).rstrip() + "\n"
 
     def sync_unbound_molecules_with_conf(self, topol_path: Path, conf_gro_path: Path) -> None:
         """

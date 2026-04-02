@@ -154,8 +154,9 @@ class SolvationProcessorMixin:
         if ions_cfg.get("concentration", 0) > 0:
             genion_cmd.extend(["-conc", str(ions_cfg["concentration"])])
 
-        # Provide "SOL" (the typical name for water) as input to stdin
-        stdout, _ = self._run_command(genion_cmd, str(self.model_dir), input_str="SOL")
+        # Provide the solvent group selection with a trailing newline so
+        # genion consumes the interactive choice instead of waiting for Enter.
+        stdout, _ = self._run_command(genion_cmd, str(self.model_dir), input_str="SOL\n")
 
         # --- CRITICAL STEP: Parse genion output and fix topology ---
         self._update_topology_molecules(topol_top, stdout)

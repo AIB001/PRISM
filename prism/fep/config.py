@@ -52,7 +52,8 @@ DEFAULT_EXECUTION_PARAMS = {
     "mode": "standard",
     "num_gpus": None,
     "parallel_windows": None,
-    "omp_threads": 14,
+    "total_cpus": None,
+    "omp_threads": None,
     "use_gpu_pme": True,
 }
 

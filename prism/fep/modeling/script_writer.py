@@ -43,7 +43,13 @@ def _detect_num_gpus(exec_config: dict) -> int:
 
 
 def _get_execution_settings(config: Optional[dict]) -> dict:
-    """Normalize execution-layer settings used by script generation."""
+    """Normalize execution-layer settings used by script generation.
+
+    Resource allocation strategy:
+    1. If execution.total_cpus is set: omp_threads = total_cpus // num_gpus
+    2. If execution.omp_threads is set: use that value directly (manual override)
+    3. Otherwise: auto-detect from system or use default
+    """
     config = config or {}
     exec_config = dict(config.get("execution", {}))
     fep_config = dict(config.get("fep", {}))
@@ -58,12 +64,31 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
         parallel_windows = num_gpus
     parallel_windows = max(1, int(parallel_windows))
 
+    # Calculate omp_threads from total_cpus if available.
+    # Standard mode runs one window per active GPU/process, so divide by the
+    # effective concurrent window count. Replica exchange uses one shared job
+    # across the configured GPUs, so divide by the GPU count.
+    total_cpus = exec_config.get("total_cpus")
+    if total_cpus is not None:
+        if mode == "standard":
+            divisor = max(1, min(int(num_gpus), int(parallel_windows)))
+        else:
+            divisor = max(1, int(num_gpus))
+        omp_threads = max(1, int(total_cpus) // divisor)
+    elif exec_config.get("omp_threads"):
+        # Manual override
+        omp_threads = int(exec_config.get("omp_threads"))
+    else:
+        # Default fallback
+        omp_threads = 8
+
     return {
         "mode": mode,
         "use_gpu_pme": bool(exec_config.get("use_gpu_pme", True)),
         "num_gpus": max(1, int(num_gpus)),
         "parallel_windows": parallel_windows,
-        "omp_threads": int(exec_config.get("omp_threads", 8)),  # GPU optimization: -ntmpi 1 -ntomp 8
+        "omp_threads": omp_threads,
+        "total_cpus": total_cpus,  # For logging/validation
         "replicas": int(fep_config.get("replicas", 1)),
     }
 
@@ -98,6 +123,7 @@ fi
 echo "Production mode: standard"
 echo "Concurrent windows: {parallel_windows}"
 echo "Configured GPUs: {num_gpus}"
+echo "OpenMP threads per GPU: {omp_threads}"
 
 JOB_COUNT=0
 for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
@@ -151,8 +177,8 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         if [ -f "${{window_dir}}/prod.gro" ]; then
             echo "  ${{lambda_name}}: production already completed"
         elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
-            echo "  ${{lambda_name}}: resuming production"
-            gmx mdrun -deffnm "${{window_dir}}/prod" -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}}"
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
             echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}}"
             if [ ! -f "${{window_dir}}/prod.tpr" ]; then
@@ -272,21 +298,52 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
 
     Configuration Options
     ---------------------
+    execution.total_cpus : int
+        Total number of CPU cores available. When set, OpenMP threads per GPU
+        is automatically calculated as: total_cpus // num_gpus
+        Example: 40 total CPUs with 4 GPUs → 10 threads per GPU
+    execution.num_gpus : int
+        Number of GPUs available (default: 1, or from CUDA_VISIBLE_DEVICES)
+    execution.omp_threads : int
+        OpenMP threads per GPU (manual override). If total_cpus is set, this
+        is ignored and auto-calculated instead. If neither is set, defaults to 8.
+    execution.parallel_windows : int
+        Number of concurrent lambda windows in ``standard`` mode (default: num_gpus)
     execution.use_gpu_pme : bool
         Enable GPU PME (default: True)
     execution.mode : str
         Production execution mode: ``standard`` (independent windows) or
         ``repex`` (lambda replica exchange via ``gmx_mpi -multidir``)
-    execution.num_gpus : int
-        Number of GPUs available (default: 1)
-    execution.parallel_windows : int
-        Number of concurrent lambda windows in ``standard`` mode. In ``repex``
-        mode, all configured GPUs are assigned to one multidir production job.
-    execution.omp_threads : int
-        OpenMP threads per GPU (default: 8)
     fep.replicas : int
         Number of replica runs for error estimation (default: 1)
         When >1, creates bound1, bound2, ... and unbound1, unbound2, ... directories
+
+    Examples
+    --------
+    Example 1: Auto-calculate threads from total CPUs
+    >>> config = {
+    ...     "execution": {
+    ...         "total_cpus": 40,  # Total CPU cores
+    ...         "num_gpus": 4,     # 4 GPUs
+    ...         # omp_threads will be auto-calculated as 40//4 = 10
+    ...     }
+    ... }
+
+    Example 2: Manual thread specification
+    >>> config = {
+    ...     "execution": {
+    ...         "omp_threads": 12,  # Explicit value
+    ...         "num_gpus": 4,
+    ...     }
+    ... }
+
+    Example 3: Default configuration
+    >>> config = {
+    ...     "execution": {
+    ...         "num_gpus": 4,
+    ...         # Uses default omp_threads=8
+    ...     }
+    ... }
     """
     settings = _get_execution_settings(config)
     for leg_dir in (layout.bound_dir, layout.unbound_dir):

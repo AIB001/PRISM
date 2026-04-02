@@ -8,7 +8,6 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Dict, List, Optional, Tuple
 
 
 GITHUB_URLS = {
@@ -53,7 +52,9 @@ def _find_package_location(package):
     try:
         result = subprocess.run(
             [_find_python(), "-m", "pip", "show", package],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             return None
@@ -79,9 +80,14 @@ def _find_module_file(package, module_path):
     # Try editable install (source directory)
     try:
         result = subprocess.run(
-            [_find_python(), "-c",
-             "import {pkg}; import os; print(os.path.dirname({pkg}.__file__))".format(pkg=package)],
-            capture_output=True, text=True, timeout=10,
+            [
+                _find_python(),
+                "-c",
+                "import {pkg}; import os; print(os.path.dirname({pkg}.__file__))".format(pkg=package),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             pkg_dir = result.stdout.strip()
@@ -152,9 +158,7 @@ def detect_servers():
     prism_server = _find_module_file("prism", "mcp_server.py")
     if not prism_server:
         # Fallback: look relative to this file
-        prism_server = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "mcp_server.py"
-        )
+        prism_server = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")
     if os.path.isfile(prism_server):
         servers["prism"] = {
             "type": "stdio",
@@ -232,7 +236,8 @@ def setup_cadd_agent():
     # --- Copy resource templates to current directory ---
     resources_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "prompts", "resources",
+        "prompts",
+        "resources",
     )
     cwd = os.getcwd()
 

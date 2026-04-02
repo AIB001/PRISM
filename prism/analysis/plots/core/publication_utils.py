@@ -247,6 +247,47 @@ def setup_publication_figure(
     return fig, ax
 
 
+def setup_publication_subplots(
+    nrows: int = 1,
+    ncols: int = 1,
+    figsize: Optional[Tuple[float, float]] = None,
+    panel_type: str = "single",
+    style_type: str = "default",
+    **kwargs,
+):
+    """
+    Create publication-ready subplot grids with the shared PRISM style.
+
+    Parameters
+    ----------
+    nrows : int
+        Number of subplot rows.
+    ncols : int
+        Number of subplot columns.
+    figsize : tuple, optional
+        Figure size in inches. If None, uses the standard size for panel_type.
+    panel_type : str
+        Panel type for standard sizing.
+    style_type : str
+        Publication style preset.
+    **kwargs : dict
+        Extra keyword arguments passed to ``plt.subplots``.
+
+    Returns
+    -------
+    tuple
+        ``(figure, axes)`` returned by ``plt.subplots``.
+    """
+    if figsize is None:
+        figsize = get_standard_figsize(panel_type)
+
+    plt.style.use("default")
+    with plt.rc_context(get_publication_style(style_type)):
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, **kwargs)
+
+    return fig, axes
+
+
 def apply_publication_style(style_type: str = "default"):
     """
     Apply publication style globally to all matplotlib figures.
@@ -393,6 +434,66 @@ def style_axes_for_publication(ax, spine_width=1.5, tick_width=1.5, tick_length=
     # Style grid
     ax.grid(True, alpha=grid_alpha, linewidth=1.0, linestyle="-")
     ax.set_axisbelow(True)
+
+
+def set_publication_labels(
+    ax,
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    title: str = "",
+    *,
+    fontfamily: str = "Times New Roman",
+):
+    """
+    Apply consistent publication-style labels to an axis.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axis to format.
+    xlabel : str, optional
+        X-axis label.
+    ylabel : str, optional
+        Y-axis label.
+    title : str
+        Axis title.
+    fontfamily : str
+        Font family for labels and title.
+    """
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily=fontfamily)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily=fontfamily)
+    if title:
+        ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold", fontfamily=fontfamily)
+
+    ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
+    return ax
+
+
+def add_corner_annotation(
+    ax,
+    text: str,
+    *,
+    x: float = 0.02,
+    y: float = 0.98,
+    fontsize: int = 10,
+    facecolor: str = "white",
+    alpha: float = 0.8,
+):
+    """
+    Add a small statistics box in the upper-left corner of an axis.
+    """
+    ax.text(
+        x,
+        y,
+        text,
+        transform=ax.transAxes,
+        verticalalignment="top",
+        fontsize=fontsize,
+        bbox=dict(boxstyle="round", facecolor=facecolor, alpha=alpha),
+    )
+    return ax
 
 
 def save_publication_figure(fig, save_path, dpi=300, format="png", bbox_inches="tight", transparent=False):

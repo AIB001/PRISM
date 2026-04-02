@@ -3,9 +3,13 @@
 
 """
 PRISM Core - High-level API for protein-ligand system building
+
+**DEPRECATED**: This module is kept for backward compatibility only.
+Use prism.builder.core.PRISMBuilder directly for all new code.
 """
 
 import os
+import warnings
 import yaml
 from pathlib import Path
 from .builder import PRISMBuilder
@@ -13,9 +17,16 @@ from .builder import PRISMBuilder
 
 class PRISMSystem:
     """
-    High-level interface for building protein-ligand systems.
+    **DEPRECATED**: High-level interface for building protein-ligand systems.
 
-    This class provides a simplified API for the PRISMBuilder functionality.
+    This class is kept for backward compatibility only.
+    Use PRISMBuilder directly for new code:
+
+        >>> from prism.builder.core import PRISMBuilder
+        >>> builder = PRISMBuilder(protein_path, ligand_paths, **kwargs)
+        >>> builder.run()
+
+    The PRISMSystem class will be removed in a future version.
     """
 
     def __init__(
@@ -31,7 +42,7 @@ class PRISMSystem:
         **kwargs,
     ):
         """
-        Initialize a PRISM system.
+        **DEPRECATED**: Initialize a PRISM system.
 
         Parameters:
         -----------
@@ -54,6 +65,16 @@ class PRISMSystem:
         **kwargs : optional
             Additional parameters for PRISMBuilder
         """
+        warnings.warn(
+            "PRISMSystem is deprecated and will be removed in a future version. "
+            "Use PRISMBuilder directly:\n"
+            "  from prism.builder.core import PRISMBuilder\n"
+            "  builder = PRISMBuilder(...)\n"
+            "  builder.run()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self.protein_path = os.path.abspath(protein_path)
 
         # Handle both single ligand (string) and multiple ligands (list)
