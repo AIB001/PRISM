@@ -62,25 +62,36 @@ class ProteinProcessorMixin:
         """Convert AMBER histidine residue names to GROMACS-compatible names.
 
         AMBER force fields use: HSD, HSE, HSP
-        GROMACS force fields use: HID, HIE, HIP
+        Different GROMACS force fields use different naming:
+        - AMBER force fields: HID, HIE, HIP
+        - OPLS force fields: HISD, HISE, HISH
+        - CHARMM force fields: HID, HIE, HIP (similar to AMBER)
 
         This conversion is necessary for pdb2gmx to recognize the residues.
-        The mapping is:
-            HSD (δ-protonated) → HID
-            HSE (ε-protonated) → HIE
-            HSP (protonated)    → HIP
 
         Parameters
         ----------
         pdb_file : str
             Path to PDB file to modify
         """
-        # AMBER to GROMACS histidine name mapping
-        his_mapping = {
-            "HSD": "HID",  # δ-protonated histidine
-            "HSE": "HIE",  # ε-protonated histidine
-            "HSP": "HIP",  # doubly protonated histidine
-        }
+        # Determine histidine mapping based on force field
+        ff_info = getattr(self, "ff_info", None)
+        ff_name = ff_info.get("name", "").lower() if ff_info else ""
+
+        if "opls" in ff_name:
+            # OPLS-AA force field uses HISD/HISE/HISH
+            his_mapping = {
+                "HSD": "HISD",  # δ-protonated histidine
+                "HSE": "HISE",  # ε-protonated histidine
+                "HSP": "HISH",  # doubly protonated histidine
+            }
+        else:
+            # AMBER and CHARMM force fields use HID/HIE/HIP
+            his_mapping = {
+                "HSD": "HID",  # δ-protonated histidine
+                "HSE": "HIE",  # ε-protonated histidine
+                "HSP": "HIP",  # doubly protonated histidine
+            }
 
         with open(pdb_file, "r") as f:
             lines = f.readlines()

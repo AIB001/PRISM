@@ -100,21 +100,28 @@ class FEPWorkflowMixin:
             print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
             print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
 
-            ref_coord_source = self.ligand_paths[0] if self.ligand_paths else ref_gro
-            if not os.path.exists(ref_coord_source):
-                ref_coord_source = ref_gro
+            ref_mapping_coord_source = ref_gro
+            mut_mapping_coord_source = mut_gro
+            if not os.path.exists(ref_mapping_coord_source):
+                raise FileNotFoundError(f"Generated reference ligand coordinates not found: {ref_mapping_coord_source}")
+            if not os.path.exists(mut_mapping_coord_source):
+                raise FileNotFoundError(f"Generated mutant ligand coordinates not found: {mut_mapping_coord_source}")
 
-            mut_coord_source = self.mutant_ligand or mut_gro
-            if not os.path.exists(mut_coord_source):
-                mut_coord_source = mut_gro
+            ref_visual_coord_source = self.ligand_paths[0] if self.ligand_paths else ref_gro
+            if not os.path.exists(ref_visual_coord_source):
+                ref_visual_coord_source = ref_gro
+
+            mut_visual_coord_source = self.mutant_ligand or mut_gro
+            if not os.path.exists(mut_visual_coord_source):
+                mut_visual_coord_source = mut_gro
 
             print("  Mapping coordinate sources:")
-            print(f"    Reference coords: {ref_coord_source}")
-            print(f"    Mutant coords:    {mut_coord_source}")
+            print(f"    Reference coords: {ref_mapping_coord_source}")
+            print(f"    Mutant coords:    {mut_mapping_coord_source}")
 
-            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_coord_source)
+            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_mapping_coord_source)
 
-            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_coord_source)
+            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_mapping_coord_source)
 
             # Perform atom mapping
             from ..fep.core.mapping import DistanceAtomMapper
@@ -130,8 +137,8 @@ class FEPWorkflowMixin:
                 mapping=mapping,
                 ref_atoms=ref_atoms,
                 mut_atoms=mut_atoms,
-                ref_coord_source=ref_coord_source,
-                mut_coord_source=mut_coord_source,
+                ref_coord_source=ref_visual_coord_source,
+                mut_coord_source=mut_visual_coord_source,
             )
 
             # Build hybrid topology
@@ -309,6 +316,14 @@ class FEPWorkflowMixin:
         suffix = source_path.suffix.lower()
 
         if suffix == ".pdb":
+            mol2_candidates = [
+                source_path.with_suffix(".mol2"),
+                source_path.with_name(f"{source_path.stem}_3D.mol2"),
+                source_path.with_name(f"{source_path.stem.lower()}_3D.mol2"),
+            ]
+            for mol2_candidate in mol2_candidates:
+                if mol2_candidate.exists():
+                    return str(source_path), str(mol2_candidate)
             return str(source_path), None
 
         if suffix == ".mol2":

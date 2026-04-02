@@ -202,6 +202,13 @@ class HybridTopologyBuilder:
                 # Use resolved charge (same for A/B)
                 charge = self._resolve_charge(atom_a.charge, atom_b.charge)
 
+                # DEBUG: Print C6 for debugging
+                if atom_a.name == "C6" or atom_b.name == "C6":
+                    print(f"DEBUG C6 in HybridTopologyBuilder.build():")
+                    print(f"  atom_a.charge={atom_a.charge:.6f}, atom_b.charge={atom_b.charge:.6f}")
+                    print(f"  resolved charge={charge:.6f}")
+                    print(f"  charge_strategy={self.charge_strategy}")
+
                 # Common atoms: typeA = typeB, chargeA = chargeB (after averaging)
                 self.hybrid_atoms.append(
                     HybridAtom(

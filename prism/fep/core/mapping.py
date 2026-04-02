@@ -393,44 +393,51 @@ class DistanceAtomMapper:
         surrounding_b: List[Atom],
     ) -> List[Tuple[Atom, Atom]]:
         """
-        For OpenFF/GAFF: remove hydrogens from common if they're close to transformed/surrounding.
+        Reclassify common hydrogens near uncommon atoms for generic atom types.
 
-        This approximates FEbuilder's bond-based logic using distance.
+        OpenFF/OPLS-style sequential types do not provide reliable bonded-neighbor
+        identity for deciding whether a hydrogen should remain in the common core.
+        When a hydrogen sits within typical bond distance of a transformed or
+        surrounding heavy atom on either side, keep it out of ``common`` and move it
+        into ``surrounding`` so downstream visualization and charge handling still
+        classify it explicitly instead of dropping it as unknown.
         """
-        # Collect all uncommon atoms
         uncommon_a = transformed_a + surrounding_a
         uncommon_b = transformed_b + surrounding_b
-
-        # Hydrogens to keep in common (not close to uncommon atoms)
         common_to_keep = []
 
+        surrounding_a_indices = {atom.index for atom in surrounding_a}
+        surrounding_b_indices = {atom.index for atom in surrounding_b}
+
         for atom_a, atom_b in common:
-            # Check if this is a hydrogen pair
-            if not (atom_a.name.startswith("H") or atom_b.name.startswith("H")):
-                # Non-hydrogen: always keep
+            if atom_a.element != "H" and atom_b.element != "H":
                 common_to_keep.append((atom_a, atom_b))
                 continue
 
-            # For hydrogens: check if close to any uncommon atom
-            # If close to uncommon, should be in transformed/surrounding, not common
             close_to_uncommon = False
 
             for uncommon_atom in uncommon_a:
                 dist = np.linalg.norm(atom_a.coord - uncommon_atom.coord)
-                if dist < 1.5:  # Typical C-H bond length
+                if dist < 1.5:
                     close_to_uncommon = True
                     break
 
             if not close_to_uncommon:
-                # Also check the B side
                 for uncommon_atom in uncommon_b:
                     dist = np.linalg.norm(atom_b.coord - uncommon_atom.coord)
                     if dist < 1.5:
                         close_to_uncommon = True
                         break
 
-            if not close_to_uncommon:
-                # Hydrogen is not close to any uncommon atom, keep in common
-                common_to_keep.append((atom_a, atom_b))
+            if close_to_uncommon:
+                if atom_a.index not in surrounding_a_indices:
+                    surrounding_a.append(atom_a)
+                    surrounding_a_indices.add(atom_a.index)
+                if atom_b.index not in surrounding_b_indices:
+                    surrounding_b.append(atom_b)
+                    surrounding_b_indices.add(atom_b.index)
+                continue
+
+            common_to_keep.append((atom_a, atom_b))
 
         return common_to_keep

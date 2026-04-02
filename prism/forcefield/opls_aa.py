@@ -143,6 +143,8 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             return "mol2"
         elif file_ext in [".sdf", ".sd", ".mol"]:
             return "mol"
+        elif file_ext == ".pdb":
+            return "pdb"
         else:
             print(f"Warning: Unknown file extension '{file_ext}', assuming MOL format")
             return "mol"
@@ -393,6 +395,8 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             # Load input molecule
             if self.file_format == "mol2":
                 mol_input = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
+            elif self.file_format == "pdb":
+                mol_input = Chem.MolFromPDBFile(self.ligand_path, removeHs=False)
             else:
                 mol_input = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
 

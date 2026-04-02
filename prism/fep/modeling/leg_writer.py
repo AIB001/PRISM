@@ -74,6 +74,9 @@ class LegWriter:
             shutil.copy2(solv_ions_gro, leg_dir / "input" / "conf.gro")
             print(f"  ✓ Copied solv_ions.gro → {leg_name}/input/conf.gro")
 
+        # Copy all topology ITP files (chain topologies, posre files, etc.)
+        self.copy_topology_itp_files(prism_system_dir, leg_dir)
+
         # Copy and modify topology to use hybrid ligand
         self.copy_and_modify_topology(topol_top, leg_dir / "topol.top")
 
@@ -89,6 +92,30 @@ class LegWriter:
 
         print(f"  ✓ {leg_name.capitalize()} leg system ready")
         print(f"{'='*70}\n")
+
+    def copy_topology_itp_files(self, source_dir: Path, target_dir: Path) -> None:
+        """
+        Copy all topology ITP files from source to target directory.
+
+        This includes chain topology files (topol_Protein_*.itp) and
+        position restraint files (posre_*.itp) that are referenced by topol.top.
+
+        Parameters
+        ----------
+        source_dir : Path
+            Source directory (GMX_PROLIG_MD)
+        target_dir : Path
+            Target directory (bound/unbound leg)
+        """
+        # LIG* ITPs will be replaced with hybrid versions; skip them
+        _lig_itps = {"LIG.itp", "posre_LIG.itp", "atomtypes_LIG.itp", "defaults_LIG.itp"}
+        copied_count = 0
+        for itp_file in source_dir.glob("*.itp"):
+            if itp_file.name not in _lig_itps:
+                shutil.copy2(itp_file, target_dir / itp_file.name)
+                copied_count += 1
+        if copied_count:
+            print(f"  ✓ Copied {copied_count} topology ITP files")
 
     def generate_posre_file(self, leg_dir: Path, leg_name: str) -> None:
         """
@@ -256,18 +283,21 @@ class LegWriter:
                 residue_number = 164
                 starting_atom_index = 1
 
-            # Add hybrid ligand atoms with updated indices
+            # editconf shifts the whole system box; hybrid.gro still has original ff coords
+            dx, dy, dz = self._compute_ligand_shift(source_lines, ligand_start, ligand_end, hybrid_atoms)
+
+            # GRO split: [resnum+resname, atomname, atomidx, x, y, z]
             for i, hybrid_line in enumerate(hybrid_atoms):
                 parts = hybrid_line.split()
-                if len(parts) >= 7:
+                if len(parts) >= 6:
                     try:
                         atom_idx = starting_atom_index + i
-                        atom_name = parts[2]
-                        x = parts[4] if len(parts) > 4 else "0.000"
-                        y = parts[5] if len(parts) > 5 else "0.000"
-                        z = parts[6] if len(parts) > 6 else "0.000"
+                        atom_name = parts[1]
+                        x = float(parts[3]) + dx
+                        y = float(parts[4]) + dy
+                        z = float(parts[5]) + dz
 
-                        new_line = f"{residue_number:5d}{parts[1]:<5.5s}{atom_name:>5.5s}{atom_idx:5d}{x:>8.8s}{y:>8.8s}{z:>8.8s}\n"
+                        new_line = f"{residue_number:5d}{self.molecule_name:<5s}{atom_name:>5s}{atom_idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}\n"
                         new_lines.append(new_line)
                     except (ValueError, IndexError):
                         new_lines.append(hybrid_line)
@@ -276,26 +306,59 @@ class LegWriter:
 
             new_lines.extend(source_lines[ligand_end + 1 :])
 
-            # Write to target file
+            # Update atom count in memory before writing
+            num_atoms_old = int(source_lines[1].strip())
+            num_atoms_new = num_atoms_old + len(hybrid_atoms) - (ligand_end - ligand_start + 1)
+            new_lines[1] = f"{num_atoms_new}\n"
+
             with open(target_gro, "w") as f:
                 f.writelines(new_lines)
-
-            # Update atom count in line 2
-            num_atoms_old = int(source_lines[1].strip())
-            num_atoms_diff = len(hybrid_atoms) - (ligand_end - ligand_start + 1)
-            num_atoms_new = num_atoms_old + num_atoms_diff
-
-            # Read back the file to update the count
-            with open(target_gro, "r") as f:
-                target_content = f.readlines()
-
-            target_content[1] = f"{num_atoms_new}\n"
-
-            with open(target_gro, "w") as f:
-                f.writelines(target_content)
         else:
             # No ligand found, copy as-is
             shutil.copy2(source_gro, target_gro)
+
+    def _compute_ligand_shift(
+        self,
+        source_lines: list,
+        ligand_start: int,
+        ligand_end: int,
+        hybrid_atoms: list,
+    ) -> tuple:
+        """
+        Compute (dx, dy, dz) to align hybrid.gro coords to the editconf-centered system.
+
+        solv_ions.gro has been shifted by gmx editconf; hybrid.gro still has the original
+        forcefield GRO coords. We align via centroid of atoms present in both.
+        Returns (0, 0, 0) if no common atoms found.
+        """
+        # Parse source ligand atoms using fixed-width GRO columns
+        source_coords: dict = {}
+        for line in source_lines[ligand_start : ligand_end + 1]:
+            try:
+                name = line[10:15].strip()
+                source_coords[name] = (float(line[20:28]), float(line[28:36]), float(line[36:44]))
+            except (ValueError, IndexError):
+                pass
+
+        # Parse hybrid atoms from split format [resnum+resname, atomname, atomidx, x, y, z]
+        hybrid_coords: dict = {}
+        for line in hybrid_atoms:
+            parts = line.split()
+            if len(parts) >= 6:
+                try:
+                    hybrid_coords[parts[1]] = (float(parts[3]), float(parts[4]), float(parts[5]))
+                except (ValueError, IndexError):
+                    pass
+
+        common = [n for n in source_coords if n in hybrid_coords]
+        if not common:
+            print("  ⚠ Warning: no common atoms between source LIG and hybrid.gro; skipping coord shift")
+            return (0.0, 0.0, 0.0)
+
+        n = len(common)
+        shift = tuple(sum(source_coords[a][i] - hybrid_coords[a][i] for a in common) / n for i in range(3))
+        print(f"  ✓ Ligand coord shift: ({shift[0]:+.3f}, {shift[1]:+.3f}, {shift[2]:+.3f}) nm " f"[{n} common atoms]")
+        return shift
 
     def copy_and_modify_topology(self, source_top: Path, target_top: Path) -> None:
         """
