@@ -15,11 +15,11 @@ The PRISM_MDRUN_NSTEPS environment variable is intended for TESTING ONLY:
 
 Usage for testing:
     export PRISM_MDRUN_NSTEPS=100  # Run only 100 steps for quick validation
-    cd bound && bash localrun.sh
+    cd GMX_PROLIG_FEP && bash run_fep.sh bound
 
 For production FEP calculations:
     unset PRISM_MDRUN_NSTEPS  # Ensure it's not set
-    cd bound && bash localrun.sh
+    cd GMX_PROLIG_FEP && bash run_fep.sh bound
 
 WARNING: Results obtained with PRISM_MDRUN_NSTEPS set are NOT valid for publication!
 """
@@ -140,14 +140,12 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         if [ -f "${{window_dir}}/npt_short.gro" ]; then
             echo "  ${{lambda_name}}: NPT short already completed"
         elif [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
-            echo "  ${{lambda_name}}: resuming NPT short"
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}} || \
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}}"
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
             echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}}"
             gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/npt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         if [ -f "${{window_dir}}/prod.gro" ]; then
@@ -160,8 +158,7 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
             if [ ! -f "${{window_dir}}/prod.tpr" ]; then
                 gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 20
             fi
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
-                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
@@ -210,8 +207,7 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
             gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -t "${{BUILD_DIR}}/npt.cpt" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
         fi
-        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}} || \\
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp 10 -v ${{MDRUN_NSTEPS_ARG}}
+        gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v ${{MDRUN_NSTEPS_ARG}}
     fi
 
     if [ ! -f "${{window_dir}}/prod.tpr" ]; then
@@ -287,7 +283,7 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
         Number of concurrent lambda windows in ``standard`` mode. In ``repex``
         mode, all configured GPUs are assigned to one multidir production job.
     execution.omp_threads : int
-        OpenMP threads per GPU (default: 14)
+        OpenMP threads per GPU (default: 8)
     fep.replicas : int
         Number of replica runs for error estimation (default: 1)
         When >1, creates bound1, bound2, ... and unbound1, unbound2, ... directories
@@ -402,15 +398,15 @@ run_leg() {{
     if [ -f ${{BUILD_DIR}}/nvt.gro ]; then
         echo "✓ NVT already completed, skipping..."
     elif [ -f ${{BUILD_DIR}}/nvt.tpr ]; then
-        echo "NVT checkpoint found, resuming..."
+        echo "NVT checkpoint found, resuming on GPU..."
         (
             cd ${{BUILD_DIR}}
-            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -cpi nvt.cpt -v || gmx mdrun -deffnm nvt -ntmpi 1 -ntomp 10 -cpi nvt.cpt -v
+            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi nvt.cpt -v
         )
     else
         echo "Running NVT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp 10 -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
     fi
 
     # NPT equilibration (must run to completion)
@@ -419,10 +415,10 @@ run_leg() {{
     elif [ -f ${{BUILD_DIR}}/npt.tpr ]; then
         # Check if NPT checkpoint is valid (has corresponding cpt file)
         if [ -f ${{BUILD_DIR}}/npt.cpt ]; then
-            echo "NPT checkpoint found, resuming..."
+            echo "NPT checkpoint found, resuming on GPU..."
             (
                 cd ${{BUILD_DIR}}
-                gmx mdrun -deffnm npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -cpi npt.cpt -v || gmx mdrun -deffnm npt -ntmpi 1 -ntomp 10 -cpi npt.cpt -v
+                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -cpi npt.cpt -v
             )
         else
             # NPT TPR exists but no checkpoint - previous run failed, clean up and restart
@@ -430,12 +426,12 @@ run_leg() {{
             rm -f ${{BUILD_DIR}}/npt.* 2>/dev/null || true
             echo "Running NPT equilibration..."
             gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
         fi
     else
         echo "Running NPT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 15 -nb gpu -bonded gpu {pme_gpu_flag} -v || gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp 10 -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -v
     fi
 
     echo "Running FEP production for all lambda windows..."
