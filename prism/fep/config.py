@@ -240,6 +240,13 @@ class FEPConfig:
             raise ValueError(f"Invalid execution.mode: {params['mode']}")
         return params
 
+    def get_replica_count(self) -> int:
+        """Get the total number of repeats to scaffold."""
+        replicas = self.fep_config.get("replicas")
+        if replicas is None:
+            replicas = self.fep_config.get("fep", {}).get("replicas", 1)
+        return max(1, int(replicas))
+
     def get_all_mdp_params(self) -> Dict[str, Any]:
         """
         Get all parameters needed for write_fep_mdps()
@@ -258,6 +265,7 @@ class FEPConfig:
         return {
             "forcefield": {"type": self.get_forcefield_type(), "params": self.get_forcefield_params()},
             "mapping": self.get_mapping_params(),
+            "replicas": self.get_replica_count(),
             "simulation": self.get_simulation_params(),
             "soft_core": self.get_soft_core_params(),
             "lambda": self.get_lambda_params(),

@@ -8,6 +8,7 @@ This module handles writing bound/unbound leg directories, copying PRISM systems
 modifying topologies, and managing coordinate files.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -304,6 +305,9 @@ class LegWriter:
         Also adds hybrid atomtypes includes for unbound leg.
         """
         content = source_top.read_text()
+        hybrid_prefix = self._hybrid_include_prefix(target_top.parent)
+        hybrid_include = f'#include "{hybrid_prefix}/hybrid.itp"'
+        hybrid_ff_include = f'#include "{hybrid_prefix}/ff_hybrid.itp"'
 
         # Check if we need to add hybrid atomtypes (for unbound leg)
         hybrid_ff_path = self.output_dir / "common" / "hybrid" / "ff_hybrid.itp"
@@ -312,12 +316,11 @@ class LegWriter:
         # Replace ligand ITP include with hybrid ligand
         content = re.sub(
             r'#include\s+"[^"]*LIG\.itp"',
-            '#include "../common/hybrid/hybrid.itp"',
+            hybrid_include,
             content,
         )
 
         # Deduplicate hybrid.itp includes (can happen if source topology was already modified)
-        hybrid_include = '#include "../common/hybrid/hybrid.itp"'
         if content.count(hybrid_include) > 1:
             lines = content.splitlines()
             seen = False
@@ -333,13 +336,13 @@ class LegWriter:
 
         # Add hybrid force field include if needed (after forcefield.itp)
         # Note: Must be after forcefield.itp to ensure [ defaults ] comes before [ atomtypes ]
-        if needs_hybrid_ff and '#include "../common/hybrid/ff_hybrid.itp"' not in content:
+        if needs_hybrid_ff and hybrid_ff_include not in content:
             # Find forcefield.itp include and insert after it
             lines = content.splitlines()
             for i, line in enumerate(lines):
                 if "forcefield.itp" in line or "force_field.itp" in line:
                     # Insert after this line
-                    lines.insert(i + 1, '#include "../common/hybrid/ff_hybrid.itp"')
+                    lines.insert(i + 1, hybrid_ff_include)
                     break
             content = "\n".join(lines) + "\n"
 
@@ -354,7 +357,7 @@ class LegWriter:
             lines = content.splitlines()
             insert_idx = -1
             for i, line in enumerate(lines):
-                if line.strip() == '#include "../common/hybrid/ff_hybrid.itp"':
+                if line.strip() == hybrid_ff_include:
                     insert_idx = i + 1
                     break
             if insert_idx == -1:
@@ -426,6 +429,11 @@ class LegWriter:
             cleaned.append(line)
 
         return "\n".join(cleaned).rstrip() + "\n"
+
+    def _hybrid_include_prefix(self, leg_dir: Path) -> str:
+        """Return the relative include path from a leg directory to common/hybrid."""
+        relative = os.path.relpath(self.output_dir / "common" / "hybrid", leg_dir)
+        return relative.replace("\\", "/")
 
     def sync_unbound_molecules_with_conf(self, topol_path: Path, conf_gro_path: Path) -> None:
         """
@@ -535,11 +543,12 @@ class LegWriter:
         include_protein : bool
             Whether to include protein topology
         """
+        hybrid_prefix = self._hybrid_include_prefix(output_path.parent)
         lines = [
             "; Topology for FEP calculation",
             "",
             f'#include "{forcefield}.ff/forcefield.itp"',
-            '#include "../common/hybrid/ff_hybrid.itp"',
+            f'#include "{hybrid_prefix}/ff_hybrid.itp"',
             "",
         ]
 
@@ -560,7 +569,7 @@ class LegWriter:
         lines.extend(
             [
                 "; Include hybrid ligand topology",
-                '#include "../common/hybrid/hybrid.itp"',
+                f'#include "{hybrid_prefix}/hybrid.itp"',
                 "",
                 f"; Include water topology",
                 f'#include "{forcefield}.ff/{water_model}.itp"',

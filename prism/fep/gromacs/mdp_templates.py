@@ -15,7 +15,7 @@ FEP_PROD_MDP = """
 ; calculations using GROMACS coupled-topology formalism.
 ;
 
-include = -I. -I../mdps -I../hybrid
+include = -I. -I../mdps
 
 ; Integrator
 integrator  = md

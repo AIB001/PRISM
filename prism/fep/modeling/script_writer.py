@@ -89,7 +89,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
         "parallel_windows": parallel_windows,
         "omp_threads": omp_threads,
         "total_cpus": total_cpus,  # For logging/validation
-        "replicas": int(fep_config.get("replicas", 1)),
+        "replicas": int(config.get("replicas", fep_config.get("replicas", 1))),
     }
 
 
@@ -517,11 +517,6 @@ fi
 resolve_leg_dir() {{
     local target="$1"
 
-    if [ -d "${{FEP_DIR}}/${{target}}" ]; then
-        printf '%s\\n' "${{FEP_DIR}}/${{target}}"
-        return 0
-    fi
-
     if [[ "${{target}}" =~ ^(bound|unbound)([0-9]+)$ ]]; then
         local leg="${{BASH_REMATCH[1]}}"
         local replica_idx="${{BASH_REMATCH[2]}}"
@@ -538,6 +533,11 @@ resolve_leg_dir() {{
             printf '%s\\n' "${{nested_dir}}"
             return 0
         fi
+    fi
+
+    if [ -d "${{FEP_DIR}}/${{target}}" ]; then
+        printf '%s\\n' "${{FEP_DIR}}/${{target}}"
+        return 0
     fi
 
     return 1

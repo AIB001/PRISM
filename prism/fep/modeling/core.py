@@ -13,6 +13,7 @@ This module orchestrates FEP scaffold building by delegating to specialized buil
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,7 +65,15 @@ class FEPScaffoldBuilder:
         self.lambda_strategy = lambda_strategy
         self.lambda_distribution = lambda_distribution
         self.overwrite = overwrite
-        self.replicas = max(1, int(self.config.get("fep", {}).get("replicas", 1)))
+        self.replicas = max(
+            1,
+            int(
+                self.config.get(
+                    "replicas",
+                    self.config.get("fep", {}).get("replicas", 1),
+                )
+            ),
+        )
 
         # Initialize sub-builders
         self.hybrid_builder = HybridPackageBuilder()
@@ -352,7 +361,7 @@ class FEPScaffoldBuilder:
         )
 
     def _replicate_repeat_layout(self, layout: FEPScaffoldLayout) -> None:
-        """Clone repeat1 into repeat2..N when multiple repeats are requested."""
+        """Create repeat2..N using shared links for static assets."""
         if self.replicas <= 1:
             return
 
@@ -362,7 +371,15 @@ class FEPScaffoldBuilder:
                 replica_dir = leg_root / f"repeat{replica_idx}"
                 if replica_dir.exists():
                     continue
-                shutil.copytree(seed_dir, replica_dir)
+                replica_dir.mkdir(parents=True, exist_ok=True)
+                for item in seed_dir.iterdir():
+                    if item.name == "build" or item.name.startswith("window_"):
+                        continue
+                    target = replica_dir / item.name
+                    if item.is_dir():
+                        target.symlink_to(os.path.relpath(item, replica_dir), target_is_directory=True)
+                    else:
+                        target.symlink_to(os.path.relpath(item, replica_dir))
 
     def _copy_common_assets(self, receptor_path: Path, hybrid_dir: Path, layout: FEPScaffoldLayout) -> None:
         """Copy receptor and hybrid ligand assets to common directory."""
@@ -536,34 +553,36 @@ class FEPScaffoldBuilder:
 
     def _write_unbound_topology(self, topol_path: Path) -> None:
         """Write unbound leg topology template."""
+        hybrid_prefix = os.path.relpath(self.layout.common_hybrid_dir, topol_path.parent).replace("\\", "/")
         content = "; PRISM-FEP unbound topology template\n"
         defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
         if defaults_path.exists():
-            content += '#include "../common/hybrid/defaults_hybrid.itp"\n'
+            content += f'#include "{hybrid_prefix}/defaults_hybrid.itp"\n'
         if ff_path.exists():
-            content += f'#include "../common/hybrid/{self.hybrid_forcefield_filename}"\n'
+            content += f'#include "{hybrid_prefix}/{self.hybrid_forcefield_filename}"\n'
         elif atomtypes_path.exists():
-            content += f'#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
-        content += f'#include "../common/hybrid/{self.hybrid_itp_filename}"\n\n'
+            content += f'#include "{hybrid_prefix}/{self.hybrid_atomtypes_filename}"\n'
+        content += f'#include "{hybrid_prefix}/{self.hybrid_itp_filename}"\n\n'
         content += "[ system ]\nUnbound FEP leg\n\n"
         content += f"[ molecules ]\n{self.molecule_name} 1\n"
         topol_path.write_text(content)
 
     def _write_bound_topology_template(self, topol_path: Path) -> None:
         """Write bound leg topology template."""
+        hybrid_prefix = os.path.relpath(self.layout.common_hybrid_dir, topol_path.parent).replace("\\", "/")
         content = "; PRISM-FEP bound topology template\n"
         defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
         atomtypes_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_atomtypes_filename
         if defaults_path.exists():
-            content += '#include "../common/hybrid/defaults_hybrid.itp"\n'
+            content += f'#include "{hybrid_prefix}/defaults_hybrid.itp"\n'
         if ff_path.exists():
-            content += f'#include "../common/hybrid/{self.hybrid_forcefield_filename}"\n'
+            content += f'#include "{hybrid_prefix}/{self.hybrid_forcefield_filename}"\n'
         elif atomtypes_path.exists():
-            content += f'#include "../common/hybrid/{self.hybrid_atomtypes_filename}"\n'
-        content += f'#include "../common/hybrid/{self.hybrid_itp_filename}"\n\n'
+            content += f'#include "{hybrid_prefix}/{self.hybrid_atomtypes_filename}"\n'
+        content += f'#include "{hybrid_prefix}/{self.hybrid_itp_filename}"\n\n'
         content += "[ system ]\nBound FEP leg\n\n"
         content += f"[ molecules ]\nProtein      1\n{self.molecule_name} 1\n"
         topol_path.write_text(content)

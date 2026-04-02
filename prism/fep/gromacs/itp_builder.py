@@ -352,15 +352,22 @@ class ITPBuilder:
 
             if current_section == "atoms":
                 if len(parts) >= 5:
-                    atom_names[int(parts[0])] = parts[4]
+                    try:
+                        atom_index = int(parts[0])
+                    except ValueError:
+                        continue
+                    atom_names[atom_index] = parts[4]
                 continue
 
             atom_count = cls._SECTION_ATOM_COUNT[current_section]
             if len(parts) < atom_count + 1:
                 continue
 
-            atom_indices = tuple(int(parts[i]) for i in range(atom_count))
-            funct = int(parts[atom_count])
+            try:
+                atom_indices = tuple(int(parts[i]) for i in range(atom_count))
+                funct = int(parts[atom_count])
+            except ValueError:
+                continue
             params = parts[atom_count + 1 :]
             sections[current_section].append(InteractionTerm(atoms=atom_indices, funct=funct, params=params))
 
