@@ -166,6 +166,7 @@ echo "OpenMP threads per GPU: {omp_threads}"
 echo "CPU affinity: enabled (each GPU gets dedicated CPU cores)"
 
 JOB_COUNT=0
+PIDS=()
 for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
     lambda_name=$(basename "${{lambda_mdp}}" .mdp)
     lambda_idx="${{lambda_name#prod_}}"
@@ -256,6 +257,7 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
 
     if [ {parallel_windows} -gt 1 ]; then
         run_window "${{lambda_idx}}" "${{lambda_name}}" "${{lambda_mdp}}" "${{window_dir}}" "${{gpu_id}}" &
+        PIDS+=($!)
         JOB_COUNT=$((JOB_COUNT + 1))
     else
         run_window "${{lambda_idx}}" "${{lambda_name}}" "${{lambda_mdp}}" "${{window_dir}}" "${{gpu_id}}"
@@ -265,8 +267,8 @@ done
 if [ {parallel_windows} -gt 1 ]; then
     echo "Waiting for all windows to complete..."
     failure=0
-    for job in $(jobs -p); do
-        if ! wait "${{job}}"; then
+    for job_pid in "${{PIDS[@]}}"; do
+        if ! wait "${{job_pid}}"; then
             failure=1
         fi
     done

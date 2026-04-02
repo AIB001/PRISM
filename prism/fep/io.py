@@ -63,11 +63,10 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
         atom_id = atom_data["id"]
         atom_name = atom_data["name"]
 
-        # Priority: Use element from PDB file, then extract from ITP name
-        if atom_id in elements_by_id:
-            element = elements_by_id[atom_id]
-        else:
-            element = _extract_element(atom_name)
+        # Use ITP atom names as the source of truth for element identity.
+        # Force-field generators may reorder atoms while keeping names/types consistent,
+        # so structure-file atom indices are not reliable for element assignment.
+        element = _extract_element(atom_name)
 
         coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name, np.array([0.0, 0.0, 0.0])))
 

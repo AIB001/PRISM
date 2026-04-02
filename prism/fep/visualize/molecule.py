@@ -10,9 +10,23 @@ atom labeling, bond order correction, and charge annotation.
 
 from typing import List, Optional
 from pathlib import Path
+import re
 
 # Constants for coordinate matching
 COORDINATE_MATCH_TOLERANCE_ANGSTROM = 1.0  # Max distance (Å) for atom coordinate matching
+
+
+def _normalize_atom_name(name: str) -> str:
+    """Return a normalized atom name for cross-force-field matching."""
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", name.strip())
+    return re.sub(r"[AB]$", "", cleaned)
+
+
+def _assign_atom_metadata(rdkit_atom: "Chem.Atom", atom) -> None:
+    """Copy name and charge metadata from a topology atom onto an RDKit atom."""
+    rdkit_atom.SetProp("atomLabel", atom.name)
+    rdkit_atom.SetProp("name", atom.name)
+    rdkit_atom.SetProp("atomNote", f"{atom.charge:+.4f}")
 
 
 def pdb_to_mol(pdb_file: str) -> "Chem.Mol":
@@ -155,16 +169,20 @@ def assign_bond_orders_from_mol2(
     return pdb_mol
 
 
-def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None) -> Optional[str]:
+def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None, charmm_gui: bool = False) -> Optional[str]:
     """
     自动检测与PDB文件对应的MOL2文件。
 
     搜索策略：
     1. 相同目录下，同名但扩展名为.mol2的文件
-    2. 相同目录下，basename + "_3D.mol2" 的文件
-    3. 处理特殊basename（如 "39_matched" -> "39"）
+    2. 相同目录下，basename + "_3D.mol2" 的文件（仅 charmm_gui=True 时启用）
+    3. 处理特殊basename（如 "39_matched" -> "39"，仅 charmm_gui=True）
     4. 父目录中搜索同名文件
     5. 搜索指定目录中的匹配文件
+
+    Strategy 2/3 (`_3D.mol2` naming) is a CHARMM-GUI convention. For GAFF/OpenFF/OPLS
+    workflows the user should name the MOL2 file with the same stem as the PDB (Strategy 1)
+    so that bond order templates are found reliably without picking up unrelated files.
 
     Parameters
     ----------
@@ -172,6 +190,9 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None) -> Optiona
         PDB文件路径
     search_dir : str, optional
         额外的搜索目录
+    charmm_gui : bool, optional
+        Enable CHARMM-GUI/CGenFF search strategies (``_3D.mol2`` pattern).
+        Default False.
 
     Returns
     -------
@@ -180,9 +201,9 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None) -> Optiona
 
     Examples
     --------
-    >>> auto_detect_mol2("/path/to/39.pdb")
-    "/path/to/39_3D.mol2"
-    >>> auto_detect_mol2("/path/to/output/39_matched.pdb")
+    >>> auto_detect_mol2("/path/to/42.pdb")           # finds 42.mol2 only
+    >>> auto_detect_mol2("/path/to/39.pdb", charmm_gui=True)  # also finds 39_3D.mol2
+    >>> auto_detect_mol2("/path/to/output/39_matched.pdb", charmm_gui=True)
     "/path/to/39_3D.mol2"
     """
     from pathlib import Path
@@ -191,35 +212,38 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None) -> Optiona
     search_paths = []
     parent_dir = pdb_path.parent
 
-    # 策略1: 同目录同名.mol2
+    # 策略1: 同目录同名.mol2（通用）
     search_paths.append(pdb_path.with_suffix(".mol2"))
 
-    # 策略2: 同目录 basename_3D.mol2
-    search_paths.append(parent_dir / f"{pdb_path.stem}_3D.mol2")
+    if charmm_gui:
+        # 策略2: 同目录 basename_3D.mol2（CHARMM-GUI 命名约定）
+        search_paths.append(parent_dir / f"{pdb_path.stem}_3D.mol2")
 
-    # 策略3: 处理特殊basename（如 "39_matched" -> "39"）
-    # 移除常见后缀：_matched, _aligned, _processed 等
-    basename = pdb_path.stem
-    for suffix in ["_matched", "_aligned", "_processed", "_generated"]:
-        if basename.endswith(suffix):
-            base_stem = basename[: -len(suffix)]
-            # 在当前目录和父目录中搜索
-            search_paths.append(parent_dir / f"{base_stem}.mol2")
-            search_paths.append(parent_dir / f"{base_stem}_3D.mol2")
-            search_paths.append(parent_dir.parent / f"{base_stem}.mol2")
-            search_paths.append(parent_dir.parent / f"{base_stem}_3D.mol2")
-            break
+        # 策略3: 处理特殊basename（如 "39_matched" -> "39"）
+        # 移除常见后缀：_matched, _aligned, _processed 等
+        basename = pdb_path.stem
+        for suffix in ["_matched", "_aligned", "_processed", "_generated"]:
+            if basename.endswith(suffix):
+                base_stem = basename[: -len(suffix)]
+                # 在当前目录和父目录中搜索
+                search_paths.append(parent_dir / f"{base_stem}.mol2")
+                search_paths.append(parent_dir / f"{base_stem}_3D.mol2")
+                search_paths.append(parent_dir.parent / f"{base_stem}.mol2")
+                search_paths.append(parent_dir.parent / f"{base_stem}_3D.mol2")
+                break
 
     # 策略4: 父目录中搜索同名文件
     if parent_dir != parent_dir.parent:
         search_paths.append(parent_dir.parent / f"{pdb_path.stem}.mol2")
-        search_paths.append(parent_dir.parent / f"{pdb_path.stem}_3D.mol2")
+        if charmm_gui:
+            search_paths.append(parent_dir.parent / f"{pdb_path.stem}_3D.mol2")
 
     # 策略5: 额外搜索目录
     if search_dir:
         search_dir = Path(search_dir)
         search_paths.append(search_dir / f"{pdb_path.stem}.mol2")
-        search_paths.append(search_dir / f"{pdb_path.stem}_3D.mol2")
+        if charmm_gui:
+            search_paths.append(search_dir / f"{pdb_path.stem}_3D.mol2")
 
     # 返回第一个存在的文件
     for path in search_paths:
@@ -233,6 +257,7 @@ def prepare_mol_with_charges_and_labels(
     pdb_file: str,
     mol2_file: Optional[str],
     atoms: List,  # List of Atom objects from prism.fep.core.mapping
+    charmm_gui: bool = False,
 ) -> "Chem.Mol":
     """
     Prepare RDKit Mol object with correct bond orders, atom names and charge labels.
@@ -254,6 +279,9 @@ def prepare_mol_with_charges_and_labels(
         Path to mol2 file with correct bond orders (template only)
     atoms : List[Atom]
         List of Atom objects with receptor-aligned coordinates
+    charmm_gui : bool, optional
+        Enable CHARMM-GUI/CGenFF MOL2 auto-detection strategies (``_3D.mol2``).
+        Default False.
 
     Returns
     -------
@@ -268,7 +296,7 @@ def prepare_mol_with_charges_and_labels(
 
     # Step 0: Auto-detect MOL2 file if not provided
     if mol2_file is None:
-        detected_mol2 = auto_detect_mol2(pdb_file)
+        detected_mol2 = auto_detect_mol2(pdb_file, charmm_gui=charmm_gui)
         if detected_mol2:
             mol2_file = detected_mol2
 
@@ -302,58 +330,74 @@ def prepare_mol_with_charges_and_labels(
         except Exception:
             pass  # Proceed with unsanitized mol
 
-    # Step 4: Match atoms by distance and assign labels
-    # This now works because PDB coords == atoms coords (both receptor-aligned)
+    # Step 4: Match atoms and assign labels
     charge_dict = {atom.name: atom.charge for atom in atoms}
     atom_coords = [atom.coord for atom in atoms]
+    atoms_by_name = {atom.name: idx for idx, atom in enumerate(atoms)}
+    atoms_by_normalized_name = {}
+    for idx, atom in enumerate(atoms):
+        atoms_by_normalized_name.setdefault(_normalize_atom_name(atom.name), []).append(idx)
 
     conf = mol.GetConformer()
     used_indices = set()
 
     for mol_idx in range(mol.GetNumAtoms()):
-        pos = conf.GetAtomPosition(mol_idx)
-        mol_coord = [pos.x, pos.y, pos.z]
         rdkit_atom = mol.GetAtomWithIdx(mol_idx)
+        pdb_info = rdkit_atom.GetPDBResidueInfo()
+        pdb_name = pdb_info.GetName().strip() if pdb_info else ""
+        normalized_pdb_name = _normalize_atom_name(pdb_name) if pdb_name else ""
         mol_element = rdkit_atom.GetSymbol()
 
-        # Find closest atom with matching element
-        min_dist = float("inf")
-        best_idx = None
+        matched_idx = None
 
-        for atom_idx, atom in enumerate(atoms):
-            if atom_idx in used_indices or atom.element != mol_element:
-                continue
+        # Priority 1: exact atom name match
+        if pdb_name:
+            candidate_idx = atoms_by_name.get(pdb_name)
+            if candidate_idx is not None and candidate_idx not in used_indices:
+                candidate_atom = atoms[candidate_idx]
+                if candidate_atom.element == mol_element:
+                    matched_idx = candidate_idx
 
-            # Calculate Euclidean distance
-            dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coords[atom_idx])) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                best_idx = atom_idx
+        # Priority 2: normalized atom name match (strip A/B suffixes)
+        if matched_idx is None and normalized_pdb_name:
+            for candidate_idx in atoms_by_normalized_name.get(normalized_pdb_name, []):
+                if candidate_idx in used_indices:
+                    continue
+                candidate_atom = atoms[candidate_idx]
+                if candidate_atom.element == mol_element:
+                    matched_idx = candidate_idx
+                    break
 
-        # Match if distance is reasonable (< 1.0 Å)
-        if best_idx is not None and min_dist < COORDINATE_MATCH_TOLERANCE_ANGSTROM:
-            name = atoms[best_idx].name
-            rdkit_atom.SetProp("atomLabel", name)
-            rdkit_atom.SetProp("name", name)
+        # Priority 3: nearest coordinate match with same element
+        if matched_idx is None:
+            pos = conf.GetAtomPosition(mol_idx)
+            mol_coord = [pos.x, pos.y, pos.z]
+            min_dist = float("inf")
+            best_idx = None
 
-            # Add charge as note
-            if name in charge_dict:
-                charge = charge_dict[name]
-                rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+            for atom_idx, atom in enumerate(atoms):
+                if atom_idx in used_indices or atom.element != mol_element:
+                    continue
 
-            used_indices.add(best_idx)
-        else:
-            # No match found - use PDB name as fallback
-            pdb_info = rdkit_atom.GetPDBResidueInfo()
-            if pdb_info:
-                name = pdb_info.GetName().strip()
-                rdkit_atom.SetProp("atomLabel", name)
-                rdkit_atom.SetProp("name", name)
+                dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coords[atom_idx])) ** 0.5
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = atom_idx
 
-                # Try to look up charge with PDB name
-                if name in charge_dict:
-                    charge = charge_dict[name]
-                    rdkit_atom.SetProp("atomNote", f"{charge:+.4f}")
+            if best_idx is not None and min_dist < COORDINATE_MATCH_TOLERANCE_ANGSTROM:
+                matched_idx = best_idx
+
+        if matched_idx is not None:
+            _assign_atom_metadata(rdkit_atom, atoms[matched_idx])
+            used_indices.add(matched_idx)
+            continue
+
+        # Fallback: keep PDB name if present
+        if pdb_name:
+            rdkit_atom.SetProp("atomLabel", pdb_name)
+            rdkit_atom.SetProp("name", pdb_name)
+            if pdb_name in charge_dict:
+                rdkit_atom.SetProp("atomNote", f"{charge_dict[pdb_name]:+.4f}")
 
     # Step 5: Generate 2D coordinates for depiction
     try:
