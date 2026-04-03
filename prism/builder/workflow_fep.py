@@ -126,7 +126,12 @@ class FEPWorkflowMixin:
             # Perform atom mapping
             from ..fep.core.mapping import DistanceAtomMapper
 
-            mapper = DistanceAtomMapper(dist_cutoff=self.distance_cutoff)
+            mapper = DistanceAtomMapper(
+                dist_cutoff=self.distance_cutoff,
+                charge_cutoff=self.charge_cutoff,
+                charge_common=self.charge_strategy,
+                charge_reception=self.charge_reception,
+            )
             mapping = mapper.map(ref_atoms, mut_atoms)
 
             # Export an interactive mapping report into the final FEP output

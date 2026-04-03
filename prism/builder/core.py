@@ -77,6 +77,8 @@ class PRISMBuilder(
         mutant_ligand=None,
         fep_config=None,
         distance_cutoff=0.6,
+        charge_cutoff=0.05,
+        charge_reception="surround",
         charge_strategy="mean",
         lambda_windows=11,
         lambda_strategy="decoupled",
@@ -234,6 +236,8 @@ class PRISMBuilder(
         self.mutant_ligand = mutant_ligand
         self.fep_config = fep_config
         self.distance_cutoff = distance_cutoff
+        self.charge_cutoff = charge_cutoff
+        self.charge_reception = charge_reception
         self.charge_strategy = charge_strategy
         self.lambda_windows = lambda_windows
         self.lambda_strategy = lambda_strategy
@@ -311,6 +315,10 @@ class PRISMBuilder(
             lambda_cfg = fep_config_data.get("lambda", {})
             if "dist_cutoff" in mapping_cfg:
                 self.distance_cutoff = mapping_cfg["dist_cutoff"]
+            if "charge_cutoff" in mapping_cfg:
+                self.charge_cutoff = mapping_cfg["charge_cutoff"]
+            if "charge_reception" in mapping_cfg:
+                self.charge_reception = mapping_cfg["charge_reception"]
             if "charge_common" in mapping_cfg:
                 self.charge_strategy = mapping_cfg["charge_common"]
             if "windows" in lambda_cfg:
