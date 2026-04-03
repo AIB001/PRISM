@@ -305,6 +305,67 @@ class TestSwissParamWorkflow:
 
         shutil.rmtree(output_dir)
 
+    @patch("prism.forcefield.swissparam.subprocess.run")
+    def test_api_submission_accepts_small_gzip_tarball(self, mock_run):
+        """Small gzip tarballs from SwissParam should not be rejected as incomplete."""
+        import io
+        import tarfile
+
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+            content = b"ok\n"
+            tarinfo = tarfile.TarInfo(name="tiny.txt")
+            tarinfo.size = len(content)
+            tar.addfile(tarinfo, io.BytesIO(content))
+        tar_data = tar_buffer.getvalue()
+        assert len(tar_data) < 1000
+
+        mock_run.return_value = Mock(returncode=0, stdout=tar_data, stderr=b"")
+
+        output_dir = tempfile.mkdtemp()
+        ligand_file = Path(output_dir, "test.mol2")
+        ligand_file.write_text("dummy")
+        generator = MMFFForceFieldGenerator(ligand_path=str(ligand_file), output_dir=output_dir, overwrite=True)
+
+        result = generator._submit_to_swissparam_api()
+
+        assert result == tar_data
+
+        shutil.rmtree(output_dir)
+
+    @patch("prism.forcefield.swissparam.subprocess.run")
+    def test_api_submission_session_polling(self, mock_run):
+        """Queued SwissParam sessions should be polled and retrieved."""
+        import io
+        import tarfile
+
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+            content = b"ok\n"
+            tarinfo = tarfile.TarInfo(name="tiny.txt")
+            tarinfo.size = len(content)
+            tar.addfile(tarinfo, io.BytesIO(content))
+        tar_data = tar_buffer.getvalue()
+        assert len(tar_data) < 1000
+
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout=b"Session number: 12345", stderr=b""),
+            Mock(returncode=0, stdout=b"Calculation is finished", stderr=b""),
+            Mock(returncode=0, stdout=tar_data, stderr=b""),
+        ]
+
+        output_dir = tempfile.mkdtemp()
+        ligand_file = Path(output_dir, "test.mol2")
+        ligand_file.write_text("dummy")
+        generator = MMFFForceFieldGenerator(ligand_path=str(ligand_file), output_dir=output_dir, overwrite=True)
+
+        result = generator._submit_to_swissparam_api()
+
+        assert result == tar_data
+        assert mock_run.call_count == 3
+
+        shutil.rmtree(output_dir)
+
 
 class TestSwissParamApproaches:
     """Test different SwissParam approaches"""

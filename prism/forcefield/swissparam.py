@@ -103,7 +103,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             self._copy_output_files(files, sp_dir)
 
             # Generate PRISM format files if needed
-            self._generate_prism_formats(files, sp_dir)
+            self._generate_prism_formats(files)
 
             print(f"\n{'='*60}")
             print(f"SwissParam Force Field Generation Complete!")
@@ -149,8 +149,9 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
             tar_data = result.stdout
 
-            # Check if we got valid tarball data or a session number
-            if len(tar_data) < 1000:
+            # Small responses can still be valid gzip-compressed tarballs.
+            # Only interpret small payloads as text when they are not gzip data.
+            if len(tar_data) < 1000 and not tar_data.startswith(b"\x1f\x8b"):
                 response_text = tar_data.decode("utf-8", errors="ignore").strip()
 
                 # Check if this is a session number response
@@ -247,7 +248,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
                     tar_data = result.stdout
 
-                    if len(tar_data) < 1000:
+                    if len(tar_data) < 1000 and not tar_data.startswith(b"\x1f\x8b"):
                         raise RuntimeError(f"Retrieved incomplete data ({len(tar_data)} bytes)")
 
                     print(f"    ✓ Retrieved tarball ({len(tar_data)} bytes)")
