@@ -171,14 +171,16 @@ def assign_bond_orders_from_mol2(
 
 def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None, charmm_gui: bool = False) -> Optional[str]:
     """
-    自动检测与PDB文件对应的MOL2文件。
+    Automatically detect a MOL2 file corresponding to the given PDB file.
 
-    搜索策略：
-    1. 相同目录下，同名但扩展名为.mol2的文件
-    2. 相同目录下，basename + "_3D.mol2" 的文件（仅 charmm_gui=True 时启用）
-    3. 处理特殊basename（如 "39_matched" -> "39"，仅 charmm_gui=True）
-    4. 父目录中搜索同名文件
-    5. 搜索指定目录中的匹配文件
+    Search strategy:
+    1. A same-stem ``.mol2`` in the current directory
+    2. ``basename + '_3D.mol2'`` in the current directory (only when
+       ``charmm_gui=True``)
+    3. Special basename handling such as ``39_matched -> 39`` (only when
+       ``charmm_gui=True``)
+    4. A same-stem file in the parent directory
+    5. A matching file in the optional search directory
 
     Strategy 2/3 (`_3D.mol2` naming) is a CHARMM-GUI convention. For GAFF/OpenFF/OPLS
     workflows the user should name the MOL2 file with the same stem as the PDB (Strategy 1)
@@ -187,9 +189,9 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None, charmm_gui
     Parameters
     ----------
     pdb_file : str
-        PDB文件路径
+        PDB file path
     search_dir : str, optional
-        额外的搜索目录
+        Optional extra search directory
     charmm_gui : bool, optional
         Enable CHARMM-GUI/CGenFF search strategies (``_3D.mol2`` pattern).
         Default False.
@@ -197,7 +199,7 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None, charmm_gui
     Returns
     -------
     str or None
-        找到的MOL2文件路径，或None
+        Path to the detected MOL2 file, or ``None`` if no match is found
 
     Examples
     --------
@@ -212,40 +214,39 @@ def auto_detect_mol2(pdb_file: str, search_dir: Optional[str] = None, charmm_gui
     search_paths = []
     parent_dir = pdb_path.parent
 
-    # 策略1: 同目录同名.mol2（通用）
+    # Strategy 1: same-stem .mol2 in the current directory.
     search_paths.append(pdb_path.with_suffix(".mol2"))
 
     if charmm_gui:
-        # 策略2: 同目录 basename_3D.mol2（CHARMM-GUI 命名约定）
+        # Strategy 2: basename_3D.mol2 in the current directory (CHARMM-GUI convention).
         search_paths.append(parent_dir / f"{pdb_path.stem}_3D.mol2")
 
-        # 策略3: 处理特殊basename（如 "39_matched" -> "39"）
-        # 移除常见后缀：_matched, _aligned, _processed 等
+        # Strategy 3: strip common suffixes such as "_matched" and search again.
         basename = pdb_path.stem
         for suffix in ["_matched", "_aligned", "_processed", "_generated"]:
             if basename.endswith(suffix):
                 base_stem = basename[: -len(suffix)]
-                # 在当前目录和父目录中搜索
+                # Search both the current directory and its parent.
                 search_paths.append(parent_dir / f"{base_stem}.mol2")
                 search_paths.append(parent_dir / f"{base_stem}_3D.mol2")
                 search_paths.append(parent_dir.parent / f"{base_stem}.mol2")
                 search_paths.append(parent_dir.parent / f"{base_stem}_3D.mol2")
                 break
 
-    # 策略4: 父目录中搜索同名文件
+    # Strategy 4: search for a same-stem file in the parent directory.
     if parent_dir != parent_dir.parent:
         search_paths.append(parent_dir.parent / f"{pdb_path.stem}.mol2")
         if charmm_gui:
             search_paths.append(parent_dir.parent / f"{pdb_path.stem}_3D.mol2")
 
-    # 策略5: 额外搜索目录
+    # Strategy 5: search the optional extra directory.
     if search_dir:
         search_dir = Path(search_dir)
         search_paths.append(search_dir / f"{pdb_path.stem}.mol2")
         if charmm_gui:
             search_paths.append(search_dir / f"{pdb_path.stem}_3D.mol2")
 
-    # 返回第一个存在的文件
+    # Return the first existing candidate.
     for path in search_paths:
         if path.exists():
             return str(path)

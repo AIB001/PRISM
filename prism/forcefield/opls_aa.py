@@ -690,20 +690,23 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _normalize_charges(self):
         """
-        校正OPLS配体的总电荷到最接近的整数。
+        Normalize the total OPLS ligand charge to the nearest integer.
 
-        LigParGen生成的电荷总和不一定是整数（例如-0.0001）。
-        本方法根据误差大小采用两种策略：
-        1. 小误差（< 0.01）：将误差分配给电荷绝对值最大的原子
-        2. 大误差（≥ 0.01）：按比例缩放所有原子电荷
+        LigParGen can emit a slightly non-integer total charge (for example
+        ``-0.0001``). This method uses two strategies based on the magnitude
+        of the error:
+        1. Small error (< 0.01): apply the correction to the atom with the
+           largest absolute charge.
+        2. Larger error (>= 0.01): scale all atomic charges proportionally.
 
-        这样可以保持总电荷为整数，同时最小化对电荷分布的影响。
+        This preserves an integer total charge while minimizing distortion of
+        the original charge distribution.
         """
         itp_path = os.path.join(self.lig_ff_dir, "LIG.itp")
         if not os.path.exists(itp_path):
             return
 
-        # 解析ITP文件中的原子电荷
+        # Parse atom charges from the ITP file.
         atoms = []
         with open(itp_path, "r") as f:
             in_atom_section = False
@@ -713,7 +716,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                     continue
                 if in_atom_section:
                     if line.startswith("["):
-                        # 进入新的section，退出
+                        # Entered a new section; stop reading atom records.
                         break
                     line = line.strip()
                     if not line or line.startswith(";"):
@@ -743,32 +746,31 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                                 }
                             )
                         except (ValueError, IndexError) as e:
-                            # 解析失败，跳过此行
+                            # Ignore malformed atom rows.
                             continue
 
         if not atoms:
             print("  Warning: No atoms found in ITP file, skipping charge normalization")
             return
 
-        # 计算当前总电荷
+        # Compute the current total charge.
         current_total = sum(atom["charge"] for atom in atoms)
 
-        # 确定期望电荷（四舍五入到最接近的整数）
+        # Round to the nearest integer charge.
         target_charge = round(current_total)
 
-        # 如果总电荷已经是整数（误差小于1e-10），不需要校正
+        # No correction is needed if the charge is already effectively integer.
         if abs(current_total - target_charge) < 1e-10:
             print(f"  Total charge is already integer: {current_total:.6f}")
             return
 
-        # 计算需要校正的量
+        # Compute the correction that must be applied.
         charge_error = target_charge - current_total
         print(f"  Normalizing charges: {current_total:.6f} → {target_charge:.6f} (Δ = {charge_error:+.6f})")
 
-        # 根据误差大小选择策略
+        # Choose the correction strategy based on the magnitude of the error.
         if abs(charge_error) < 0.01:
-            # 策略1：小误差，分配给电荷绝对值最大的原子
-            # 这样可以最小化对整体电荷分布的影响
+            # Small error: apply it to the atom with the largest absolute charge.
             max_charge_atom = max(atoms, key=lambda a: abs(a["charge"]))
             max_charge_atom["charge"] += charge_error
             print(
@@ -777,18 +779,17 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 f"{max_charge_atom['charge']:.6f})"
             )
         else:
-            # 策略2：大误差，按比例缩放所有原子电荷
-            # 这样保持电荷分布的相对关系
+            # Larger error: rescale all charges proportionally.
             scale_factor = target_charge / current_total
             for atom in atoms:
                 atom["charge"] *= scale_factor
             print(f"  Applied proportional scaling (factor: {scale_factor:.6f}) to all atoms")
 
-        # 重写ITP文件
+        # Rewrite the ITP file with the corrected charges.
         with open(itp_path, "r") as f:
             lines = f.readlines()
 
-        # 替换原子行
+        # Replace atom rows inside the [ atoms ] section.
         atom_dict = {atom["nr"]: atom for atom in atoms}
         new_lines = []
         in_atom_section = False
@@ -799,18 +800,18 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 new_lines.append(line)
             elif in_atom_section:
                 if line.strip().startswith("["):
-                    # 进入新的section
+                    # Entered a new section.
                     in_atom_section = False
                     new_lines.append(line)
                 elif line.strip() and not line.strip().startswith(";"):
-                    # 这是原子行，尝试替换
+                    # Replace atom records while preserving the surrounding file layout.
                     parts = line.split()
                     if len(parts) >= 8:
                         try:
                             nr = int(parts[0])
                             if nr in atom_dict:
                                 atom = atom_dict[nr]
-                                # 重建行，保持原始格式
+                                # Rebuild the row while keeping the original column layout.
                                 new_line = (
                                     f"{atom['nr']:>6}  "
                                     f"{atom['type']:<10}  "
@@ -825,20 +826,20 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                                 continue
                         except (ValueError, IndexError):
                             pass
-                    # 保留原始行
+                    # Keep the original line if it cannot be rewritten.
                     new_lines.append(line)
             else:
                 new_lines.append(line)
 
-        # 写回文件
+        # Write the updated file back to disk.
         with open(itp_path, "w") as f:
             f.writelines(new_lines)
 
-        # 验证校正后的总电荷
+        # Validate the corrected total charge.
         verified_total = sum(atom["charge"] for atom in atoms)
         print(f"  ✓ Verified total charge: {verified_total:.6f}")
 
-        # 检查是否成功校正到整数
+        # Confirm the normalization reached the intended integer charge.
         if abs(verified_total - target_charge) > 1e-6:
             print(
                 f"  ⚠ Warning: Charge normalization may have issues "

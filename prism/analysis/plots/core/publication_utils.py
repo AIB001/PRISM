@@ -30,15 +30,15 @@ PUBLICATION_FONTS = {
     "bar_annotation": 14,  # Bar chart annotations - very small to prevent overlap
 }
 
-# 标准panel尺寸定义 - 确保所有单个panel图片字体相对大小一致
+# Standard panel sizes to keep font scaling consistent across single-panel figures.
 STANDARD_PANEL_SIZES = {
-    "single": (8, 6),  # 单panel标准尺寸 - 所有单个图片统一使用
-    "horizontal": (12, 6),  # 水平排列两panel (1x2)
-    "vertical": (8, 12),  # 垂直排列两panel (2x1)
-    "quad": (12, 10),  # 2x2四panel
-    "wide": (16, 6),  # 宽format单panel (特殊情况)
-    "tall": (8, 10),  # 高format单panel (特殊情况)
-    "distribution": (12, 8),  # 分布图专用 - 增加高度改善比例
+    "single": (8, 6),  # Standard single-panel size
+    "horizontal": (12, 6),  # Two horizontal panels (1x2)
+    "vertical": (8, 12),  # Two vertical panels (2x1)
+    "quad": (12, 10),  # 2x2 grid
+    "wide": (16, 6),  # Wide single-panel layout
+    "tall": (8, 10),  # Tall single-panel layout
+    "distribution": (12, 8),  # Distribution plots with extra height
 }
 
 # Color palettes for scientific publications
@@ -127,17 +127,17 @@ def get_publication_style(style_type: str = "default") -> Dict[str, Any]:
 
 def get_standard_figsize(panel_type: str = "single") -> Tuple[float, float]:
     """
-    获取标准panel尺寸，确保所有图片字体相对大小一致。
+    Return the standard panel size for consistent font scaling.
 
     Parameters
     ----------
     panel_type : str
-        Panel类型: 'single', 'horizontal', 'vertical', 'quad', 'wide', 'tall'
+        Panel type: 'single', 'horizontal', 'vertical', 'quad', 'wide', 'tall'
 
     Returns
     -------
     tuple
-        标准figure尺寸 (width, height)
+        Standard figure size (width, height)
     """
     if panel_type in STANDARD_PANEL_SIZES:
         return STANDARD_PANEL_SIZES[panel_type]

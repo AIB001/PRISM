@@ -13,6 +13,7 @@ from typing import Union, TYPE_CHECKING
 from datetime import datetime
 
 from .. import plots
+from .multi_quality import build_quality_warnings_section
 
 if TYPE_CHECKING:
     from ..core.models import FEResults
@@ -305,13 +306,17 @@ class MultiEstimatorReportGenerator:
         Build complete tab content for one estimator
 
         Structure must match original HTML:
-        1. Detailed Results (2-column: stats table + box plot)
-        2. Lambda Profiles (4 plots in 2x2 grid)
-        3. Convergence Diagnostics (Time convergence)
-        4. Bootstrap Analysis (2-column: histogram + table)
-        5. Overlap Matrix (placeholder for TI/BAR, real for MBAR)
+        1. Quality Warnings (conditional)
+        2. Detailed Results (2-column: stats table + box plot)
+        3. Lambda Profiles (4 plots in 2x2 grid)
+        4. Convergence Diagnostics (Time convergence)
+        5. Bootstrap Analysis (2-column: histogram + table)
+        6. Overlap Matrix (placeholder for TI/BAR, real for MBAR)
         """
-        # 1. Detailed Results Section (2-column grid)
+        # 1. Quality Warnings (conditional display)
+        quality_warnings = build_quality_warnings_section(estimator_name, results)
+
+        # 2. Detailed Results Section (2-column grid)
         detailed_results = self._build_detailed_results_section(estimator_name, results)
 
         # 2. Lambda Profiles (4 plots in 2x2 grid)
@@ -385,6 +390,7 @@ class MultiEstimatorReportGenerator:
         # Combine all sections in correct order
         return f"""
         <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
+            {quality_warnings}
             {detailed_results}
             {lambda_section}
             {overlap_section}

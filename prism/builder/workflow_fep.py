@@ -118,13 +118,6 @@ class FEPWorkflowMixin:
             print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
             print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
 
-            ref_mapping_coord_source = ref_gro
-            mut_mapping_coord_source = mut_gro
-            if not os.path.exists(ref_mapping_coord_source):
-                raise FileNotFoundError(f"Generated reference ligand coordinates not found: {ref_mapping_coord_source}")
-            if not os.path.exists(mut_mapping_coord_source):
-                raise FileNotFoundError(f"Generated mutant ligand coordinates not found: {mut_mapping_coord_source}")
-
             ref_visual_coord_source = self.ligand_paths[0] if self.ligand_paths else ref_gro
             if not os.path.exists(ref_visual_coord_source):
                 ref_visual_coord_source = ref_gro
@@ -132,6 +125,16 @@ class FEPWorkflowMixin:
             mut_visual_coord_source = self.mutant_ligand or mut_gro
             if not os.path.exists(mut_visual_coord_source):
                 mut_visual_coord_source = mut_gro
+
+            # Use user-provided, receptor-aligned ligand coordinates for mapping whenever
+            # available. Generated LIG.gro coordinates can differ from the aligned input
+            # geometry and degrade the atom mapping and HTML report quality.
+            ref_mapping_coord_source = ref_visual_coord_source if os.path.exists(ref_visual_coord_source) else ref_gro
+            mut_mapping_coord_source = mut_visual_coord_source if os.path.exists(mut_visual_coord_source) else mut_gro
+            if not os.path.exists(ref_mapping_coord_source):
+                raise FileNotFoundError(f"Reference ligand coordinates not found: {ref_mapping_coord_source}")
+            if not os.path.exists(mut_mapping_coord_source):
+                raise FileNotFoundError(f"Mutant ligand coordinates not found: {mut_mapping_coord_source}")
 
             print("  Mapping coordinate sources:")
             print(f"    Reference coords: {ref_mapping_coord_source}")
@@ -300,6 +303,28 @@ class FEPWorkflowMixin:
         ref_pdb, ref_mol2 = self._prepare_mapping_visualization_inputs(ref_coord_source, output_dir, "ligand_a")
         mut_pdb, mut_mol2 = self._prepare_mapping_visualization_inputs(mut_coord_source, output_dir, "ligand_b")
 
+        html_mapping = mapping
+        html_ref_atoms = ref_atoms
+        html_mut_atoms = mut_atoms
+
+        if getattr(self, "ligand_forcefield", "").lower() == "cgenff" and getattr(self, "forcefield_paths", None):
+            try:
+                from ..fep.io import read_ligand_from_prism
+                from ..fep.core.mapping import DistanceAtomMapper
+
+                ref_source_itp = self._resolve_cgenff_mapping_topology(self.forcefield_paths[0])
+                mut_source_itp = self._resolve_cgenff_mapping_topology(self.forcefield_paths[1])
+                html_ref_atoms = read_ligand_from_prism(ref_source_itp, ref_pdb)
+                html_mut_atoms = read_ligand_from_prism(mut_source_itp, mut_pdb)
+                html_mapping = DistanceAtomMapper(
+                    dist_cutoff=self.distance_cutoff,
+                    charge_cutoff=self.charge_cutoff,
+                    charge_common=self.charge_strategy,
+                    charge_reception=self.charge_reception,
+                ).map(html_ref_atoms, html_mut_atoms)
+            except Exception as exc:
+                print_warning(f"Failed to regenerate CGenFF mapping HTML inputs: {exc}")
+
         html_config = None
         if self.fep_config:
             try:
@@ -309,18 +334,26 @@ class FEPWorkflowMixin:
             except Exception as exc:
                 print_warning(f"Could not load FEP HTML config: {exc}")
 
+        if html_config is None:
+            html_config = {}
+
+        ff_cfg = dict(html_config.get("forcefield", {}))
+        ff_type = ff_cfg.get("type", getattr(self, "ligand_forcefield", "unknown"))
+        ff_cfg["type"] = self._describe_mapping_forcefield(ff_type)
+        html_config["forcefield"] = ff_cfg
+
         ligand_a_name = Path(ref_coord_source).stem or "Ligand A"
         ligand_b_name = Path(mut_coord_source).stem or "Ligand B"
 
         try:
             visualize_mapping_html(
-                mapping=mapping,
+                mapping=html_mapping,
                 pdb_a=ref_pdb,
                 pdb_b=mut_pdb,
                 mol2_a=ref_mol2,
                 mol2_b=mut_mol2,
-                atoms_a=ref_atoms,
-                atoms_b=mut_atoms,
+                atoms_a=html_ref_atoms,
+                atoms_b=html_mut_atoms,
                 output_path=html_path,
                 title=f"FEP Mapping: {ligand_a_name} -> {ligand_b_name}",
                 ligand_a_name=ligand_a_name,
@@ -330,6 +363,32 @@ class FEPWorkflowMixin:
             print_success(f"Mapping HTML: {html_path}")
         except Exception as exc:
             print_warning(f"Failed to generate FEP mapping HTML: {exc}")
+
+    def _describe_mapping_forcefield(self, ff_type: str) -> str:
+        """Return a user-facing force-field label for mapping HTML."""
+        base = str(ff_type).upper()
+        if getattr(self, "ligand_forcefield", "").lower() != "cgenff":
+            return base
+
+        ff_paths = [Path(p) for p in (getattr(self, "forcefield_paths", None) or [])]
+        if ff_paths and all((path / "charmm36.ff" / "charmm36.itp").exists() for path in ff_paths):
+            return "CGENFF (CHARMM-GUI)"
+        return "CGENFF (WEBSITE)"
+
+    def _resolve_cgenff_mapping_topology(self, cgenff_path: str) -> str:
+        """Return the source topology file that best represents the original CGenFF ligand."""
+        path = Path(cgenff_path)
+        if (path / "LIG.itp").exists():
+            return str(path / "LIG.itp")
+        gmx_tops = sorted(path.glob("*_gmx.top"))
+        if gmx_tops:
+            return str(gmx_tops[0])
+        top_files = [candidate for candidate in sorted(path.glob("*.top")) if candidate.name != "LIG.top"]
+        if top_files:
+            return str(top_files[0])
+        if (path / "LIG.top").exists() and (path / "LIG.itp").exists():
+            return str(path / "LIG.itp")
+        raise FileNotFoundError(f"No suitable CGenFF topology file found under {cgenff_path}")
 
     def _prepare_mapping_visualization_inputs(
         self, coord_source: str, output_dir: str, stem: str

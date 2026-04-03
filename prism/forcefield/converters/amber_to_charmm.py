@@ -253,7 +253,8 @@ class AmberToCharmmConverter:
 
     def _make_unique_type(self, amber_type: str) -> str:
         """
-        生成不超过4字符的GAFF原子类型名字（如 l_ca, l_sy）。
+        Generate a GAFF-derived atom type name no longer than 4 characters
+        (for example ``l_ca`` or ``l_sy``).
         """
         prefix = (self.residue_name[:1] or "L")[0].lower()
         core = amber_type.lower()
