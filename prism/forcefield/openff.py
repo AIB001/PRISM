@@ -130,6 +130,17 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
         """Get the output directory name for OpenFF"""
         return "LIG.openff2gmx"
 
+    @property
+    def capabilities(self):
+        """OpenFF force field capabilities"""
+        return {
+            "supports_fep": True,
+            "supports_pmf": True,
+            "requires_external": False,
+            "has_protein_ff": False,
+            "charge_method": "AM1-BCC",  # OpenFF uses AM1-BCC by default
+        }
+
     def run(self):
         """Run the OpenFF force field generation workflow"""
         print(f"\n{'='*60}")

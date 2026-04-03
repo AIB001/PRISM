@@ -22,6 +22,24 @@ from ..utils.colors import (
     print_warning,
     path,
 )
+from ..utils.system.topology import _parse_atomtypes
+
+try:
+    from ..forcefield.adapters import CGenFFAdapter
+except ImportError:
+    # Fallback if adapters not available
+    class CGenFFAdapter:
+        @classmethod
+        def should_include_ligand_atomtypes(cls, ff_name, lig_ff_path):
+            return not (ff_name.startswith("charmm") and (lig_ff_path / "charmm36.ff").exists())
+
+        @classmethod
+        def is_charmm_forcefield(cls, ff_name):
+            return ff_name.lower().startswith("charmm")
+
+        @classmethod
+        def detect(cls, lig_ff_path):
+            return (lig_ff_path / "charmm36.ff").exists()
 
 
 class FEPWorkflowMixin:
@@ -439,33 +457,25 @@ class FEPWorkflowMixin:
         # Second line is atom count
         num_atoms = int(lines[1].strip())
 
-        # Parse atom lines (format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f)
+        # Parse atom lines using GRO fixed-width columns.
         for i in range(num_atoms):
             line = lines[2 + i]
-            # Skip box line (starts with space and has only numbers)
-            if i == num_atoms - 1 and len(line.strip().split()) <= 3:
-                break
-
-            # More robust parsing using split
-            parts = line.split()
-            if len(parts) < 7:
-                continue
-
-            # GRO format: residue_number residue_name atom_name atom_number x y z
-            # parts: [0]=residue_number, [1]=residue_name, [2]=atom_name, [3]=atom_number, [4]=x, [5]=y, [6]=z
-            atom_name = parts[2].strip()
             try:
-                x = float(parts[4])
-                y = float(parts[5])
-                z = float(parts[6])
+                atom_name = line[10:15].strip()
+                x = float(line[20:28].strip())
+                y = float(line[28:36].strip())
+                z = float(line[36:44].strip())
                 atoms.append({"name": atom_name, "coord": [x, y, z]})
             except (ValueError, IndexError):
-                # Try fixed column format as fallback
+                # Fall back to split parsing for non-standard whitespace-separated lines
+                parts = line.split()
+                if len(parts) < 6:
+                    continue
                 try:
-                    atom_name = line[5:10].strip()
-                    x = float(line[20:28].strip())
-                    y = float(line[28:36].strip())
-                    z = float(line[36:44].strip())
+                    atom_name = parts[1].strip()
+                    x = float(parts[3])
+                    y = float(parts[4])
+                    z = float(parts[5])
                     atoms.append({"name": atom_name, "coord": [x, y, z]})
                 except (ValueError, IndexError):
                     continue
@@ -621,11 +631,48 @@ class FEPWorkflowMixin:
 
         topol_path = model_dir / "topol.top"
         ligand_rel_dir = f"../{ligand_ff_dir.name}"
+        cgenff_supplement = None
+        main_atomtypes = set()
+        if CGenFFAdapter.is_charmm_forcefield(ff_name) and CGenFFAdapter.detect(ligand_ff_dir):
+            main_ff_dir = model_dir / f"{ff_name}.ff"
+            if not main_ff_dir.exists() and ff_info and ff_info.get("path"):
+                main_ff_dir = Path(ff_info["path"])
+            ffnonbonded = main_ff_dir / "ffnonbonded.itp"
+            if ffnonbonded.exists():
+                main_atomtypes = _parse_atomtypes(ffnonbonded)
+            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_ff_dir)
+            cgenff_supplement = self.system_builder._build_cgenff_parameter_supplement(
+                lig_ff_path=ligand_ff_dir,
+                lig_itp_path=ligand_ff_dir / "LIG.itp",
+                charmm_ff_dir=charmm_ff_dir,
+                main_bonded_files=[
+                    p for p in [main_ff_dir / "ffbonded.itp", main_ff_dir / "ffmissingdihedrals.itp"] if p.exists()
+                ],
+                main_nonbonded_files=[p for p in [ffnonbonded] if p.exists()],
+            )
 
         with open(topol_path, "w") as f:
             f.write("; Ligand-only topology for FEP unbound leg\n")
             f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
-            f.write(f'#include "{ligand_rel_dir}/atomtypes_LIG.itp"\n')
+            atomtypes_lines = []
+            atomtypes_itp = ligand_ff_dir / "atomtypes_LIG.itp"
+            include_ligand_atomtypes = CGenFFAdapter.should_include_ligand_atomtypes(ff_name, ligand_ff_dir)
+            if include_ligand_atomtypes and atomtypes_itp.exists():
+                for line in atomtypes_itp.read_text().splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith(";") or stripped.startswith("["):
+                        continue
+                    atomtype = stripped.split()[0]
+                    if atomtype not in main_atomtypes:
+                        atomtypes_lines.append(line)
+            if atomtypes_lines:
+                f.write("\n; Include ligand-specific atomtypes\n")
+                f.write("[ atomtypes ]\n")
+                for line in atomtypes_lines:
+                    f.write(f"{line}\n")
+                f.write("\n")
+            if cgenff_supplement is not None:
+                f.write(f'#include "{ligand_rel_dir}/{cgenff_supplement.name}"\n')
             f.write(f'#include "{ligand_rel_dir}/LIG.itp"\n')
             f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
             f.write(f'#include "{ff_name}.ff/{use_ions_itp}"\n\n')

@@ -14,6 +14,16 @@ from typing import Dict, Optional
 
 from prism.fep.gromacs.itp_builder import ITPBuilder
 
+try:
+    from prism.forcefield.adapters import CGenFFAdapter
+except ImportError:
+    # Fallback for backward compatibility
+    class CGenFFAdapter:
+        @classmethod
+        def find_charmm_ff_dir(cls, lig_ff_path):
+            charmm_ff = lig_ff_path / "charmm36.ff"
+            return charmm_ff if charmm_ff.exists() else None
+
 
 class HybridPackageBuilder:
     """
@@ -122,17 +132,24 @@ class HybridPackageBuilder:
 
         # Build atomtypes file
         atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
-        atomtypes_content = self._build_hybrid_atomtypes_itp(normalized_itp, atomtypes)
+        base_ff_atomtypes = self._collect_cgenff_base_atomtypes(reference_ligand_dir, mutant_ligand_dir)
+        atomtypes_content = self._build_hybrid_atomtypes_itp(normalized_itp, atomtypes, base_ff_atomtypes)
         (hybrid_dir / self.hybrid_atomtypes_filename).write_text(atomtypes_content)
 
         defaults_block = self._extract_defaults_block(reference_ligand_dir, mutant_ligand_dir)
         (hybrid_dir / self.hybrid_defaults_filename).write_text(defaults_block)
+
+        cgenff_supplement = self._build_cgenff_hybrid_bonded_itp(reference_ligand_dir, mutant_ligand_dir)
+        if cgenff_supplement:
+            (hybrid_dir / "cgenff_bonded_hybrid.itp").write_text(cgenff_supplement)
 
         # Build force field file WITHOUT [ defaults ] block.
         # The standalone unbound topology includes defaults_hybrid.itp before
         # this file; PRISM-built bound/unbound topologies already carry the
         # forcefield defaults and only need atomtypes here.
         ff_hybrid = f'#include "{self.hybrid_atomtypes_filename}"\n'
+        if cgenff_supplement:
+            ff_hybrid += '#include "cgenff_bonded_hybrid.itp"\n'
         (hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
 
         # Build hybrid GRO file
@@ -267,7 +284,105 @@ class HybridPackageBuilder:
             atomtypes[parts[0]] = stripped
         return atomtypes
 
-    def _build_hybrid_atomtypes_itp(self, hybrid_itp_content: str, source_atomtypes: Dict[str, str]) -> str:
+    def _build_cgenff_hybrid_bonded_itp(
+        self,
+        reference_ligand_dir: Path,
+        mutant_ligand_dir: Optional[Path],
+    ) -> str:
+        """Merge ligand-specific CGenFF bonded supplements when present."""
+        supplement_files = []
+        for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
+            for candidate in (
+                ligand_dir / "cgenff_bonded_LIG.itp",
+                ligand_dir / "LIG.amb2gmx" / "cgenff_bonded_LIG.itp",
+            ):
+                if candidate.exists():
+                    supplement_files.append(candidate)
+                    break
+
+        if not supplement_files:
+            return ""
+
+        section_names = ("bondtypes", "pairtypes", "angletypes", "dihedraltypes")
+        merged = {section: [] for section in section_names}
+        seen = {section: set() for section in section_names}
+        current_section = None
+
+        for file_path in supplement_files:
+            for raw_line in file_path.read_text().splitlines():
+                stripped = raw_line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    current_section = stripped.strip("[] ").lower()
+                    continue
+                if current_section not in merged:
+                    continue
+                if not stripped or stripped.startswith(";"):
+                    continue
+                if raw_line not in seen[current_section]:
+                    merged[current_section].append(raw_line.rstrip() + "\n")
+                    seen[current_section].add(raw_line)
+
+        parts = [
+            "; Auto-generated hybrid CGenFF supplement\n",
+            "; Merged from ligand-specific bonded supplement files.\n",
+            "\n",
+        ]
+        wrote_any = False
+        for section in section_names:
+            lines = merged[section]
+            if not lines:
+                continue
+            wrote_any = True
+            parts.append(f"[ {section} ]\n")
+            parts.extend(lines)
+            parts.append("\n")
+        return "".join(parts) if wrote_any else ""
+
+    def _collect_cgenff_base_atomtypes(
+        self,
+        reference_ligand_dir: Path,
+        mutant_ligand_dir: Optional[Path],
+    ) -> set[str]:
+        atomtypes = set()
+        for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
+            # Use adapter to find CHARMM force field directory dynamically
+            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_dir)
+            if not charmm_ff_dir:
+                # Try nested structure (LIG.amb2gmx/charmm*.ff)
+                for subdir in ligand_dir.glob("LIG.*"):
+                    charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(subdir)
+                    if charmm_ff_dir:
+                        break
+
+            if not charmm_ff_dir:
+                continue
+
+            for candidate in (
+                charmm_ff_dir / "ffnonbonded.itp",
+                charmm_ff_dir / "charmm36.itp",
+            ):
+                if not candidate.exists():
+                    continue
+                in_section = False
+                for line in candidate.read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.lower() == "[ atomtypes ]":
+                        in_section = True
+                        continue
+                    if in_section and stripped.startswith("["):
+                        break
+                    if not in_section or not stripped or stripped.startswith(";"):
+                        continue
+                    atomtypes.add(stripped.split()[0])
+                break
+        return atomtypes
+
+    def _build_hybrid_atomtypes_itp(
+        self,
+        hybrid_itp_content: str,
+        source_atomtypes: Dict[str, str],
+        base_forcefield_atomtypes: Optional[set[str]] = None,
+    ) -> str:
         """
         Build atomtypes ITP file for hybrid ligand.
 
@@ -275,6 +390,7 @@ class HybridPackageBuilder:
         including dummy atomtypes (DUM_*) with zero LJ parameters.
         """
         used_types = self._parse_used_atomtypes(hybrid_itp_content)
+        base_forcefield_atomtypes = base_forcefield_atomtypes or set()
         lines = [
             "[ atomtypes ]",
             "; merged atomtypes for hybrid ligand",
@@ -299,7 +415,7 @@ class HybridPackageBuilder:
             if atomtype in written:
                 continue
             base_line = source_atomtypes.get(atomtype)
-            if base_line:
+            if base_line and atomtype not in base_forcefield_atomtypes:
                 lines.append(base_line)
                 written.add(atomtype)
 
@@ -319,7 +435,11 @@ class HybridPackageBuilder:
 
         # Check for missing atomtypes
         missing_non_dummy = sorted(
-            atomtype for atomtype in used_types if not atomtype.startswith("DUM_") and atomtype not in source_atomtypes
+            atomtype
+            for atomtype in used_types
+            if not atomtype.startswith("DUM_")
+            and atomtype not in source_atomtypes
+            and atomtype not in base_forcefield_atomtypes
         )
         if missing_non_dummy:
             raise ValueError(f"Missing atomtype definitions for: {', '.join(missing_non_dummy)}")

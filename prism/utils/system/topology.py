@@ -7,12 +7,189 @@ Topology generation and fixing utilities for SystemBuilder.
 
 import re
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 try:
     from ..colors import print_success, print_warning, print_info, path, number
 except ImportError:
     from prism.utils.colors import print_success, print_warning, print_info, path, number
+
+try:
+    from prism.forcefield.adapters import CGenFFAdapter
+except ImportError:
+    # Fallback if adapters not available
+    class CGenFFAdapter:
+        @classmethod
+        def detect(cls, lig_ff_path):
+            return (lig_ff_path / "charmm36.ff").exists()
+
+        @classmethod
+        def find_charmm_ff_dir(cls, lig_ff_path):
+            charmm_ff = lig_ff_path / "charmm36.ff"
+            return charmm_ff if charmm_ff.exists() else None
+
+
+_PARAM_SECTIONS = {"bondtypes", "pairtypes", "angletypes", "dihedraltypes", "atomtypes"}
+
+
+def _strip_comment(line: str) -> str:
+    return line.split(";", 1)[0].strip()
+
+
+def _section_name(line: str) -> Optional[str]:
+    stripped = line.strip().lower()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return stripped.strip("[] ").lower()
+    return None
+
+
+def _read_itp_sections(file_path: Path) -> Dict[str, List[str]]:
+    sections: Dict[str, List[str]] = {}
+    current: Optional[str] = None
+    for raw_line in file_path.read_text().splitlines():
+        section = _section_name(raw_line)
+        if section:
+            current = section
+            sections.setdefault(section, [])
+            continue
+        if current:
+            sections[current].append(raw_line)
+    return sections
+
+
+def _parse_atomtypes(file_path: Path) -> set[str]:
+    atomtypes = set()
+    for raw_line in _read_itp_sections(file_path).get("atomtypes", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if tokens:
+            atomtypes.add(tokens[0])
+    return atomtypes
+
+
+def _make_param_key(section: str, tokens: List[str]) -> Optional[Tuple[str, ...]]:
+    if section == "bondtypes":
+        if len(tokens) < 3:
+            return None
+        return (tokens[0], tokens[1], tokens[2])
+    if section == "pairtypes":
+        if len(tokens) < 3:
+            return None
+        return (tokens[0], tokens[1], tokens[2])
+    if section == "angletypes":
+        if len(tokens) < 4:
+            return None
+        return (tokens[0], tokens[1], tokens[2], tokens[3])
+    if section == "dihedraltypes":
+        if len(tokens) < 5:
+            return None
+        return (tokens[0], tokens[1], tokens[2], tokens[3], tokens[4])
+    return None
+
+
+def _parse_param_entries(file_paths: Iterable[Path], section: str) -> List[Dict[str, object]]:
+    entries: List[Dict[str, object]] = []
+    for file_path in file_paths:
+        if not file_path.exists():
+            continue
+        for raw_line in _read_itp_sections(file_path).get(section, []):
+            stripped = _strip_comment(raw_line)
+            if not stripped:
+                continue
+            tokens = stripped.split()
+            key = _make_param_key(section, tokens)
+            if key is None:
+                continue
+            entries.append({"key": key, "line": raw_line.rstrip() + "\n", "source": str(file_path)})
+    return entries
+
+
+def _match_param_key(section: str, required: Tuple[str, ...], candidate: Tuple[str, ...]) -> bool:
+    if section in {"bondtypes", "pairtypes"}:
+        return required == candidate or required == (candidate[1], candidate[0], candidate[2])
+    if section == "angletypes":
+        rev = (candidate[2], candidate[1], candidate[0], candidate[3])
+        return required == candidate or required == rev
+    if section == "dihedraltypes":
+        if required[-1] != candidate[-1]:
+            return False
+
+        def _matches(req: Tuple[str, ...], cand: Tuple[str, ...]) -> bool:
+            return all(c == "X" or r == c for r, c in zip(req[:4], cand[:4]))
+
+        rev = (candidate[3], candidate[2], candidate[1], candidate[0], candidate[4])
+        return _matches(required, candidate) or _matches(required, rev)
+    return False
+
+
+def _entry_specificity(entry_key: Tuple[str, ...]) -> int:
+    return sum(1 for token in entry_key[:-1] if token != "X")
+
+
+def _extract_required_param_keys(lig_itp_path: Path) -> Dict[str, List[Tuple[str, ...]]]:
+    sections = _read_itp_sections(lig_itp_path)
+    atom_types: Dict[str, str] = {}
+    for raw_line in sections.get("atoms", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) >= 2:
+            atom_types[tokens[0]] = tokens[1]
+
+    required: Dict[str, List[Tuple[str, ...]]] = {
+        section: [] for section in ("bondtypes", "pairtypes", "angletypes", "dihedraltypes")
+    }
+
+    for raw_line in sections.get("bonds", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 3:
+            continue
+        key = (atom_types[tokens[0]], atom_types[tokens[1]], tokens[2])
+        required["bondtypes"].append(key)
+
+    for raw_line in sections.get("pairs", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 3:
+            continue
+        key = (atom_types[tokens[0]], atom_types[tokens[1]], tokens[2])
+        required["pairtypes"].append(key)
+
+    for raw_line in sections.get("angles", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 4:
+            continue
+        key = (atom_types[tokens[0]], atom_types[tokens[1]], atom_types[tokens[2]], tokens[3])
+        required["angletypes"].append(key)
+
+    for raw_line in sections.get("dihedrals", []):
+        stripped = _strip_comment(raw_line)
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        if len(tokens) < 5:
+            continue
+        key = (
+            atom_types[tokens[0]],
+            atom_types[tokens[1]],
+            atom_types[tokens[2]],
+            atom_types[tokens[3]],
+            tokens[4],
+        )
+        required["dihedraltypes"].append(key)
+
+    return required
 
 
 class TopologyProcessorMixin:
@@ -240,12 +417,27 @@ class TopologyProcessorMixin:
         """Includes multiple ligand parameters into the main topology file."""
         print(f"\n  Step 3: Including {number(len(lig_ff_dirs))} ligand parameters in topology...")
 
+        with open(topol_path, "r") as f:
+            lines = f.readlines()
+
         all_atomtype_lines = []  # Store individual atomtype lines
         seen_atomtypes = set()  # Track seen atomtype names to avoid duplicates
         all_includes = []
         all_bonded_includes = []  # Store CGenFF *_ffbonded.itp includes
         all_molecules = []
         is_cgenff = False
+        topol_dir = Path(topol_path).parent
+        main_ff_dir = self._resolve_main_forcefield_dir(lines, topol_dir)
+        main_bonded_files = []
+        main_nonbonded_files = []
+        main_atomtypes = set()
+        if main_ff_dir:
+            main_bonded_files = [
+                p for p in [main_ff_dir / "ffbonded.itp", main_ff_dir / "ffmissingdihedrals.itp"] if p.exists()
+            ]
+            main_nonbonded_files = [p for p in [main_ff_dir / "ffnonbonded.itp"] if p.exists()]
+            for file_path in main_nonbonded_files:
+                main_atomtypes.update(_parse_atomtypes(file_path))
 
         # Process each ligand force field directory
         for idx, lig_ff_dir in enumerate(lig_ff_dirs, 1):
@@ -257,43 +449,25 @@ class TopologyProcessorMixin:
             if not lig_itp_path.exists():
                 raise FileNotFoundError(f"Ligand {idx} ITP file not found: {lig_itp_path}")
 
-            # Check if this is CGenFF (has charmm36.ff subdirectory)
-            charmm_ff_dir = lig_ff_path / "charmm36.ff"
-            if charmm_ff_dir.exists():
+            # Check if this is CGenFF (has charmm*.ff subdirectory)
+            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(lig_ff_path)
+            if charmm_ff_dir:
                 is_cgenff = True
                 lig_include_path = lig_itp_path
 
-                # Check for CHARMM-GUI format (complete charmm36.itp)
-                # NOTE: CHARMM-GUI provides complete charmm36.itp which conflicts with main force field
-                # We skip it and only use *_ffbonded.itp if available (CGenFF website format)
-                # For CHARMM-GUI to work properly, users should use it as standalone force field
-                # without the main CHARMM36 force field
-
-                charmm36_itp = charmm_ff_dir / "charmm36.itp"
-                if charmm36_itp.exists():
-                    # CHARMM-GUI format detected
-                    # Skip charmm36.itp to avoid conflicts with main CHARMM36 force field
-                    # Fall through to use *_ffbonded.itp if available (CGenFF website format)
-                    print_info(
-                        f"  Detected CHARMM-GUI format for ligand {idx} - skipping charmm36.itp to avoid conflicts"
-                    )
-                    print_info(f"  Note: CHARMM-GUI format should be used as standalone force field")
-
-                # For both CHARMM-GUI and CGenFF website formats, try *_ffbonded.itp
-                else:
-                    # Fallback: search for *_ffbonded.itp (CGenFF website format)
-                    ffbonded_files = list(charmm_ff_dir.glob("*_ffbonded.itp"))
-                    for ffbonded_file in ffbonded_files:
-                        # Check if file has content (not empty)
-                        if ffbonded_file.stat().st_size > 200:  # More than just header
-                            # Build relative path from GMX_PROLIG_MD directory
-                            if len(lig_ff_dirs) == 1:
-                                relative_bonded_path = f"../{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
-                            else:
-                                relative_bonded_path = (
-                                    f"../Ligand_Forcefield/{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
-                                )
-                            all_bonded_includes.append(f'#include "{relative_bonded_path}"\n')
+                supplement_path = self._build_cgenff_parameter_supplement(
+                    lig_ff_path=lig_ff_path,
+                    lig_itp_path=lig_itp_path,
+                    charmm_ff_dir=charmm_ff_dir,
+                    main_bonded_files=main_bonded_files,
+                    main_nonbonded_files=main_nonbonded_files,
+                )
+                if supplement_path:
+                    if len(lig_ff_dirs) == 1:
+                        relative_bonded_path = f"../{lig_ff_path.name}/{supplement_path.name}"
+                    else:
+                        relative_bonded_path = f"../Ligand_Forcefield/{lig_ff_path.name}/{supplement_path.name}"
+                    all_bonded_includes.append(f'#include "{relative_bonded_path}"\n')
 
             # Collect atomtypes - with deduplication
             # For CGenFF, also collect atomtypes from atomtypes_LIG.itp
@@ -306,6 +480,8 @@ class TopologyProcessorMixin:
                         continue
                     # Extract atomtype name (first column)
                     atomtype_name = line.split()[0] if line.split() else None
+                    if atomtype_name in main_atomtypes:
+                        continue
                     if atomtype_name and atomtype_name not in seen_atomtypes:
                         seen_atomtypes.add(atomtype_name)
                         all_atomtype_lines.append(line)
@@ -330,10 +506,6 @@ class TopologyProcessorMixin:
             all_molecules.append(f"{mol_name:<20} 1  ; Ligand {idx}\n")
 
             print_success(f"  Processed ligand {number(idx)}: {path(lig_ff_path.name)}")
-
-        # Read current topology
-        with open(topol_path, "r") as f:
-            lines = f.readlines()
 
         # Check if already included to prevent duplication
         # Single ligand: check for LIG.xxx2gmx pattern
@@ -406,6 +578,91 @@ class TopologyProcessorMixin:
             f.writelines(new_lines)
 
         print_success(f"Topology file updated with {number(len(lig_ff_dirs))} ligand parameters")
+
+    def _resolve_main_forcefield_dir(self, topol_lines: List[str], topol_dir: Path) -> Optional[Path]:
+        for line in topol_lines:
+            if "#include" not in line or ".ff/forcefield.itp" not in line:
+                continue
+            match = re.search(r'"([^"]+\.ff)/forcefield\.itp"', line)
+            if not match:
+                continue
+            ff_dir = (topol_dir / match.group(1)).resolve()
+            if ff_dir.exists():
+                return ff_dir
+        return None
+
+    def _build_cgenff_parameter_supplement(
+        self,
+        lig_ff_path: Path,
+        lig_itp_path: Path,
+        charmm_ff_dir: Path,
+        main_bonded_files: List[Path],
+        main_nonbonded_files: List[Path],
+    ) -> Optional[Path]:
+        source_files: List[Path] = []
+        charmm36_itp = charmm_ff_dir / "charmm36.itp"
+        if charmm36_itp.exists():
+            source_files.append(charmm36_itp)
+        full_ffbonded = charmm_ff_dir / "ffbonded.itp"
+        if full_ffbonded.exists():
+            source_files.append(full_ffbonded)
+        for ffbonded_file in sorted(charmm_ff_dir.glob("*_ffbonded.itp")):
+            if ffbonded_file.exists() and ffbonded_file.stat().st_size > 0:
+                source_files.append(ffbonded_file)
+
+        if not source_files:
+            print_warning(f"  No CGenFF bonded parameter source files found in {charmm_ff_dir}")
+            return None
+
+        required = _extract_required_param_keys(lig_itp_path)
+        supplement_sections: Dict[str, List[str]] = {
+            section: [] for section in ("bondtypes", "pairtypes", "angletypes", "dihedraltypes")
+        }
+
+        for section, main_files, source_pool in (
+            ("bondtypes", main_bonded_files, source_files),
+            ("pairtypes", main_nonbonded_files, source_files),
+            ("angletypes", main_bonded_files, source_files),
+            ("dihedraltypes", main_bonded_files, source_files),
+        ):
+            main_entries = _parse_param_entries(main_files, section)
+            source_entries = _parse_param_entries(source_pool, section)
+            seen_lines = set()
+            for req_key in required[section]:
+                if any(_match_param_key(section, req_key, entry["key"]) for entry in main_entries):
+                    continue
+                matches = [entry for entry in source_entries if _match_param_key(section, req_key, entry["key"])]
+                if not matches:
+                    continue
+                best_entry = max(matches, key=lambda entry: _entry_specificity(entry["key"]))
+                if best_entry["line"] not in seen_lines:
+                    supplement_sections[section].append(best_entry["line"])
+                    seen_lines.add(best_entry["line"])
+
+        supplement_parts: List[str] = [
+            "; Auto-generated CGenFF supplement with ligand-specific parameters\n",
+            "; Generated by PRISM to avoid including a full secondary CHARMM force field.\n",
+            "\n",
+        ]
+        wrote_any = False
+        for section in ("bondtypes", "pairtypes", "angletypes", "dihedraltypes"):
+            lines = supplement_sections[section]
+            if not lines:
+                continue
+            wrote_any = True
+            supplement_parts.append(f"[ {section} ]\n")
+            supplement_parts.extend(lines)
+            if lines and not lines[-1].endswith("\n"):
+                supplement_parts.append("\n")
+            supplement_parts.append("\n")
+
+        if not wrote_any:
+            return None
+
+        supplement_path = lig_ff_path / "cgenff_bonded_LIG.itp"
+        supplement_path.write_text("".join(supplement_parts))
+        print_info(f"  Built CGenFF bonded supplement: {supplement_path.name}")
+        return supplement_path
 
     def _update_topology_molecules(self, topol_path: str, genion_stdout: str):
         """

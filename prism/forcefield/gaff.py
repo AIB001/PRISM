@@ -106,6 +106,17 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         """Get the output directory name for GAFF"""
         return "LIG.amb2gmx"
 
+    @property
+    def capabilities(self):
+        """GAFF force field capabilities"""
+        return {
+            "supports_fep": True,
+            "supports_pmf": True,
+            "requires_external": False,
+            "has_protein_ff": False,
+            "charge_method": "AM1-BCC" if self.charge_mode == "bcc" else "gas-phase",
+        }
+
     def run(self):
         """Run the GAFF force field generation workflow"""
         print(f"\n{'='*60}")

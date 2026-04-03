@@ -73,6 +73,17 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         """Get the output directory name for CGenFF"""
         return "LIG.cgenff2gmx"
 
+    @property
+    def capabilities(self):
+        """CGenFF force field capabilities"""
+        return {
+            "supports_fep": True,
+            "supports_pmf": True,
+            "requires_external": True,  # Requires files from cgenff.com
+            "has_protein_ff": False,
+            "charge_method": "CGenFF",
+        }
+
     def run(self):
         """Run the CGenFF force field conversion workflow"""
         print(f"\n{'='*60}")

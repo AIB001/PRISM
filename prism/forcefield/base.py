@@ -56,6 +56,28 @@ class ForceFieldGeneratorBase(ABC):
         """
         pass
 
+    @property
+    def capabilities(self):
+        """
+        Declare force field capabilities
+
+        Returns:
+        --------
+        dict : Capability flags
+            - supports_fep (bool): Whether this force field supports FEP calculations
+            - supports_pmf (bool): Whether this force field supports PMF calculations
+            - requires_external (bool): Whether external service/download is required
+            - has_protein_ff (bool): Whether this includes protein force field
+            - charge_method (str): Charge calculation method (e.g., 'AM1-BCC', 'RESP', 'EEM')
+        """
+        return {
+            "supports_fep": True,
+            "supports_pmf": True,
+            "requires_external": False,
+            "has_protein_ff": False,
+            "charge_method": "unknown",
+        }
+
     def check_required_files(self, output_dir):
         """
         Check if all required files exist in the output directory
