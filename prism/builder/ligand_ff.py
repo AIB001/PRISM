@@ -34,6 +34,7 @@ from ..forcefield.swissparam import (
     MATCHForceFieldGenerator,
     HybridMMFFMATCHForceFieldGenerator,
 )
+from ..forcefield.rtf import RTFForceFieldGenerator
 
 
 class LigandForceFieldMixin:
@@ -55,6 +56,8 @@ class LigandForceFieldMixin:
             ff_suffix = "opls2gmx"
         elif self.ligand_forcefield in ["mmff", "match", "hybrid"]:
             ff_suffix = "sp2gmx"  # SwissParam
+        elif self.ligand_forcefield == "rtf":
+            ff_suffix = "rtf2gmx"  # CHARMM RTF
         else:
             ff_suffix = "lig2gmx"
 
@@ -126,6 +129,58 @@ class LigandForceFieldMixin:
                 generator = MATCHForceFieldGenerator(ligand_path, temp_output_dir, overwrite=self.overwrite)
             elif self.ligand_forcefield == "hybrid":
                 generator = HybridMMFFMATCHForceFieldGenerator(ligand_path, temp_output_dir, overwrite=self.overwrite)
+            elif self.ligand_forcefield == "rtf":
+                # RTF requires RTF+PRM+PDB files (from MATCH or CHARMM-GUI)
+                # ligand_path can be:
+                # 1. A directory containing .rtf, .prm, .pdb files
+                # 2. A PDB file (will infer RTF directory from PDB file location)
+                import glob
+
+                # Determine RTF directory
+                if os.path.isdir(ligand_path):
+                    rtf_dir = ligand_path
+                elif ligand_path.endswith(".pdb"):
+                    # Extract directory from PDB file path
+                    # Expected: /path/to/ligand.pdb
+                    # Look for /path/to/ligand.rtf and /path/to/ligand.prm
+                    pdb_base = ligand_path.replace(".pdb", "")
+                    rtf_dir = os.path.dirname(ligand_path)
+                elif self.forcefield_paths and ligand_idx < len(self.forcefield_paths):
+                    rtf_dir = self.forcefield_paths[ligand_idx]
+                else:
+                    raise ValueError(
+                        f"RTF force field requires a directory containing .rtf, .prm, .pdb files "
+                        f"or a PDB file with corresponding RTF/PRM files in the same directory. "
+                        f"Provided ligand_path: {ligand_path}"
+                    )
+
+                # Find RTF, PRM, PDB files
+                rtf_files = glob.glob(os.path.join(rtf_dir, "*.rtf"))
+                prm_files = glob.glob(os.path.join(rtf_dir, "*.prm"))
+                pdb_files = glob.glob(os.path.join(rtf_dir, "*.pdb"))
+
+                if not rtf_files or not prm_files or not pdb_files:
+                    raise FileNotFoundError(
+                        f"RTF force field requires .rtf, .prm, and .pdb files in {rtf_dir}. "
+                        f"Found: {len(rtf_files)} RTF, {len(prm_files)} PRM, {len(pdb_files)} PDB files"
+                    )
+
+                # Use first matching files (usually one set per ligand)
+                rtf_file = rtf_files[0]
+                prm_file = prm_files[0]
+                pdb_file = pdb_files[0]
+
+                print_info(
+                    f"  Using RTF files: {os.path.basename(rtf_file)}, {os.path.basename(prm_file)}, {os.path.basename(pdb_file)}"
+                )
+
+                generator = RTFForceFieldGenerator(
+                    rtf_file=rtf_file,
+                    prm_file=prm_file,
+                    pdb_file=pdb_file,
+                    output_dir=temp_output_dir,
+                    overwrite=self.overwrite,
+                )
 
             temp_ff_dir = generator.run()
 

@@ -66,6 +66,11 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
         self.rtf_angles = []  # [(atom1, atom2, atom3), ...]
         self.rtf_dihedrals = []  # [(atom1, atom2, atom3, atom4), ...]
 
+        # PRM parameters (type-based)
+        self.prm_bond_params = {}  # (type1, type2) -> (k_b, b0)
+        self.prm_angle_params = {}  # (type1, type2, type3) -> (k_theta, theta0)
+        self.prm_dihedral_params = {}  # (type1, type2, type3, type4) -> list of (k, phi0, multiplicity)
+
         print(f"\nInitialized RTF Force Field Generator:")
         print(f"  RTF file: {self.rtf_file}")
         print(f"  PRM file: {self.prm_file}")
@@ -151,6 +156,7 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
         in_bonds = False
         in_angles = False
         in_dihedrals = False
+        in_impropers = False
 
         for line in lines:
             line = line.strip()
@@ -160,7 +166,7 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
             # Section detection
             if line.startswith("ATOM"):
                 in_atoms = True
-                in_bonds = in_angles = in_dihedrals = False
+                in_bonds = in_angles = in_dihedrals = in_impropers = False
                 # Parse atom line: ATOM name type charge
                 parts = line.split()
                 if len(parts) >= 4:
@@ -172,39 +178,44 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
 
             elif line.startswith("BOND"):
                 in_bonds = True
-                in_atoms = in_angles = in_dihedrals = False
+                in_atoms = in_angles = in_dihedrals = in_impropers = False
                 # Parse bond line: BOND atom1 atom2 atom3 atom4 ...
                 parts = line.split()[1:]  # Skip "BOND"
                 for i in range(0, len(parts), 2):
-                    if i + 1 < len(parts):
+                    if i + 1 < len(parts) and parts[i + 1] not in ["PATCH", "NONE", "IMPR", "FIRST", "LAST"]:
                         self.rtf_bonds.append((parts[i], parts[i + 1]))
                 continue
 
             elif line.startswith("ANGL") or line.startswith("ANGLE"):
                 in_angles = True
-                in_atoms = in_bonds = in_dihedrals = False
-                # Parse angle line: ANGLE atom1 atom2 atom3 atom4 atom5 atom6 ...
-                parts = line.split()[1:]  # Skip "ANGLE"
-                for i in range(0, len(parts), 3):
-                    if i + 2 < len(parts):
-                        self.rtf_angles.append((parts[i], parts[i + 1], parts[i + 2]))
+                in_atoms = in_bonds = in_dihedrals = in_impropers = False
                 continue
 
             elif line.startswith("DIHE") or line.startswith("DIHEDRAL"):
                 in_dihedrals = True
-                in_atoms = in_bonds = in_angles = False
-                # Parse dihedral line: DIHEDRAL atom1 atom2 atom3 atom4 ...
-                parts = line.split()[1:]  # Skip "DIHEDRAL"
-                for i in range(0, len(parts), 4):
-                    if i + 3 < len(parts):
-                        self.rtf_dihedrals.append((parts[i], parts[i + 1], parts[i + 2], parts[i + 3]))
+                in_atoms = in_bonds = in_angles = in_impropers = False
                 continue
 
-            # Continue parsing multi-line sections
+            elif line.startswith("IMPR") or line.startswith("IMPROPER"):
+                in_impropers = True
+                in_atoms = in_bonds = in_angles = in_dihedrals = False
+                continue
+
+            elif (
+                line.startswith("PATCH")
+                or line.startswith("NONE")
+                or line.startswith("FIRST")
+                or line.startswith("LAST")
+            ):
+                # Skip control statements
+                in_atoms = in_bonds = in_angles = in_dihedrals = in_impropers = False
+                continue
+
+            # Continue parsing multi-line sections (but skip IMPROPERS)
             if in_bonds and line:
                 parts = line.split()
                 for i in range(0, len(parts), 2):
-                    if i + 1 < len(parts):
+                    if i + 1 < len(parts) and parts[i + 1] not in ["PATCH", "NONE", "IMPR", "FIRST", "LAST"]:
                         self.rtf_bonds.append((parts[i], parts[i + 1]))
 
             elif in_angles and line:
@@ -219,6 +230,8 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                     if i + 3 < len(parts):
                         self.rtf_dihedrals.append((parts[i], parts[i + 1], parts[i + 2], parts[i + 3]))
 
+            # Skip IMPROPERS section for now (not used in basic ITP)
+
         print(f"  - Found {len(self.rtf_atoms)} atoms")
         print(f"  - Found {len(self.rtf_bonds)} bonds")
         print(f"  - Found {len(self.rtf_angles)} angles")
@@ -231,26 +244,61 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
         with open(self.prm_file, "r") as f:
             lines = f.readlines()
 
-        # Extract atom types and their parameters
+        section = None
         for line in lines:
             line = line.strip()
             if not line or line.startswith("*"):
                 continue
 
-            # Look for atom type definitions (simplified)
-            # In CHARMM PRM files, atom types are usually defined in NONBONDED section
-            if line.startswith("NONBONDED") or "NONBONDED" in line:
-                continue  # Skip for now, we'll use RTF atom types
+            # Detect sections
+            if line.startswith("BONDS"):
+                section = "bonds"
+                continue
+            elif line.startswith("ANGLES") or line.startswith("ANGL"):
+                section = "angles"
+                continue
+            elif line.startswith("DIHEDRALS") or line.startswith("DIHE"):
+                section = "dihedrals"
+                continue
+            elif line.startswith("NONBONDED") or line.startswith("IMPROPER"):
+                section = None  # Skip these sections for now
+                continue
 
-        # For now, we'll use the atom types from RTF
-        # In a full implementation, you'd parse the PRM file for:
-        # - NONBONDED parameters (epsilon, sigma)
-        # - BOND parameters (force constants, equilibrium lengths)
-        # - ANGLE parameters
-        # - DIHEDRAL parameters
+            # Parse parameters based on section
+            if section == "bonds":
+                parts = line.split()
+                if len(parts) >= 4:
+                    type1, type2 = parts[0], parts[1]
+                    k_b = float(parts[2])  # kcal/mol/Å^2
+                    b0 = float(parts[3])  # Å
+                    # Store both orderings for flexible lookup
+                    self.prm_bond_params[(type1, type2)] = (k_b, b0)
+                    self.prm_bond_params[(type2, type1)] = (k_b, b0)
 
-        unique_types = set(atom_data["type"] for atom_data in self.rtf_atoms.values())
-        print(f"  - Found {len(unique_types)} unique atom types")
+            elif section == "angles":
+                parts = line.split()
+                if len(parts) >= 5:
+                    type1, type2, type3 = parts[0], parts[1], parts[2]
+                    k_theta = float(parts[3])  # kcal/mol/rad^2
+                    theta0 = float(parts[4])  # degrees
+                    self.prm_angle_params[(type1, type2, type3)] = (k_theta, theta0)
+
+            elif section == "dihedrals":
+                parts = line.split()
+                if len(parts) >= 7:
+                    type1, type2, type3, type4 = parts[0], parts[1], parts[2], parts[3]
+                    k = float(parts[4])  # kcal/mol
+                    phi0 = float(parts[5])  # degrees
+                    multiplicity = int(float(parts[6]))  # CHARMM uses int but stored as float
+
+                    key = (type1, type2, type3, type4)
+                    if key not in self.prm_dihedral_params:
+                        self.prm_dihedral_params[key] = []
+                    self.prm_dihedral_params[key].append((k, phi0, multiplicity))
+
+        print(f"  - Found {len(self.prm_bond_params)//2} bond parameters")
+        print(f"  - Found {len(self.prm_angle_params)} angle parameters")
+        print(f"  - Found {len(self.prm_dihedral_params)} dihedral parameter sets")
 
     def _parse_pdb(self) -> Dict[str, Tuple[float, float, float]]:
         """Parse PDB file for coordinates"""
@@ -326,14 +374,30 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                 f.write("\n[ bonds ]\n")
                 f.write(";  ai    aj funct            c0            c1            c2            c3\n")
 
-                # Create atom name to ID mapping
+                # Create atom name to ID and type mappings
                 name_to_id = {name: i + 1 for i, name in enumerate(self.rtf_atoms.keys())}
+                name_to_type = {name: data["type"] for name, data in self.rtf_atoms.items()}
 
                 for atom1, atom2 in self.rtf_bonds:
                     if atom1 in name_to_id and atom2 in name_to_id:
                         id1 = name_to_id[atom1]
                         id2 = name_to_id[atom2]
-                        f.write(f"{id1:5d} {id2:5d}     1\n")
+                        type1 = name_to_type[atom1]
+                        type2 = name_to_type[atom2]
+
+                        # Look up bond parameters
+                        param_key = (type1, type2)
+                        if param_key in self.prm_bond_params:
+                            k_b, b0 = self.prm_bond_params[param_key]
+                            # Convert CHARMM to GROMACS units:
+                            # k_b: kcal/mol/Å^2 -> kJ/mol/nm^2 = (k_b * 4.184) * 100
+                            # b0: Å -> nm = b0 / 10
+                            k_gromacs = k_b * 418.4  # kJ/mol/nm^2
+                            b0_gromacs = b0 / 10.0  # nm
+                            f.write(f"{id1:5d} {id2:5d}     1   {k_gromacs:12.6f}  {b0_gromacs:12.6f}\n")
+                        else:
+                            # Write placeholder if parameters not found
+                            f.write(f"{id1:5d} {id2:5d}     1\n")
 
             # Angles
             if self.rtf_angles:
@@ -341,13 +405,30 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                 f.write(";  ai    aj    ak funct            c0            c1            c2            c3\n")
 
                 name_to_id = {name: i + 1 for i, name in enumerate(self.rtf_atoms.keys())}
+                name_to_type = {name: data["type"] for name, data in self.rtf_atoms.items()}
 
                 for atom1, atom2, atom3 in self.rtf_angles:
                     if all(atom in name_to_id for atom in [atom1, atom2, atom3]):
                         id1 = name_to_id[atom1]
                         id2 = name_to_id[atom2]
                         id3 = name_to_id[atom3]
-                        f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
+                        type1 = name_to_type[atom1]
+                        type2 = name_to_type[atom2]
+                        type3 = name_to_type[atom3]
+
+                        # Look up angle parameters
+                        param_key = (type1, type2, type3)
+                        if param_key in self.prm_angle_params:
+                            k_theta, theta0 = self.prm_angle_params[param_key]
+                            # Convert CHARMM to GROMACS units:
+                            # k_theta: kcal/mol/rad^2 -> kJ/mol/rad^2 = k_theta * 4.184
+                            # theta0: degrees -> radians = theta0 * pi / 180
+                            k_gromacs = k_theta * 4.184  # kJ/mol/rad^2
+                            theta0_gromacs = theta0 * 3.14159265359 / 180.0  # radians
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d}     1   {k_gromacs:12.6f}  {theta0_gromacs:12.6f}\n")
+                        else:
+                            # Write placeholder if parameters not found
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
 
             # Dihedrals
             if self.rtf_dihedrals:
@@ -357,6 +438,7 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                 )
 
                 name_to_id = {name: i + 1 for i, name in enumerate(self.rtf_atoms.keys())}
+                name_to_type = {name: data["type"] for name, data in self.rtf_atoms.items()}
 
                 for atom1, atom2, atom3, atom4 in self.rtf_dihedrals:
                     if all(atom in name_to_id for atom in [atom1, atom2, atom3, atom4]):
@@ -364,7 +446,29 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                         id2 = name_to_id[atom2]
                         id3 = name_to_id[atom3]
                         id4 = name_to_id[atom4]
-                        f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
+                        type1 = name_to_type[atom1]
+                        type2 = name_to_type[atom2]
+                        type3 = name_to_type[atom3]
+                        type4 = name_to_type[atom4]
+
+                        # Look up dihedral parameters
+                        param_key = (type1, type2, type3, type4)
+                        if param_key in self.prm_dihedral_params:
+                            # Write each term in the Fourier series
+                            for k, phi0, multiplicity in self.prm_dihedral_params[param_key]:
+                                # Convert CHARMM to GROMACS units:
+                                # k: kcal/mol -> kJ/mol = k * 4.184
+                                # phi0: degrees -> radians = phi0 * pi / 180
+                                # multiplicity: integer
+                                # CHARMM function type 9 (periodic) -> GROMACS function type 9
+                                k_gromacs = k * 4.184  # kJ/mol
+                                phi0_gromacs = phi0 * 3.14159265359 / 180.0  # radians
+                                f.write(
+                                    f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9   {k_gromacs:12.6f}  {phi0_gromacs:12.6f}      {multiplicity:12.6f}\n"
+                                )
+                        else:
+                            # Write placeholder if parameters not found
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
 
     def _generate_atomtypes_file(self, output_dir: str):
         """Generate atomtypes file"""

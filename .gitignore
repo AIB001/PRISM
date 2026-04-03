@@ -114,3 +114,4 @@ prism/*/*.backup
 prism/*/*/*.backup
 .mcp.json
 .serena
+.*.pid

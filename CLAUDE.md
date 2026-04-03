@@ -154,3 +154,5 @@ Git commit message format: `[module] description;xxx`. Don't be too long!
 - **File creation**: Avoid creating files in root directory
 
 不用每次push；TODO完成了就清掉
+
+尽量复用已有的测试脚本。

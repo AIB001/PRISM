@@ -717,32 +717,10 @@ parse_targets() {{
     echo "${{targets[@]}}"
 }}
 
-# Show usage if no argument or invalid argument
+# Default behavior with no arguments: run all configured legs/repeats.
 if [ $# -eq 0 ]; then
-    echo "Usage: $0 <target> [target ...]"
-    echo ""
-    echo "Target specifications:"
-    echo "  bound           - Run all bound replicas (bound/repeat1, bound/repeat2, ...)"
-    echo "  unbound         - Run all unbound replicas (unbound/repeat1, unbound/repeat2, ...)"
-    echo "  all             - Run all bound and unbound replicas"
-    echo "  bound1          - Run specific replica"
-    echo "  bound1-3        - Run range of replicas (bound/repeat1, bound/repeat2, bound/repeat3)"
-    echo "  unbound1-2      - Run range of replicas"
-    echo "  bound1,unbound2 - Mix different legs and replicas"
-    echo "  bound1-3,unbound1-2 - Mix ranges"
-    echo ""
-    echo "Configuration:"
-    echo "  Replicas configured: ${{REPLICAS}}"
-    if [ ${{REPLICAS}} -gt 1 ]; then
-        echo "  Available on disk: bound/repeat1..repeat${{REPLICAS}}, unbound/repeat1..repeat${{REPLICAS}}"
-    else
-        echo "  Available on disk: bound/repeat1, unbound/repeat1"
-    fi
-    echo ""
-    echo "Environment variables:"
-    echo "  PRISM_MDRUN_NSTEPS - Limit production steps (testing only, DO NOT use for production)"
-    echo "  PRISM_FEP_MODE     - Override execution mode (standard or repex)"
-    exit 1
+    echo "No target specified; defaulting to 'all'."
+    set -- all
 fi
 
 # Special case: 'all' means all bound and unbound replicas

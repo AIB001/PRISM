@@ -96,7 +96,7 @@ class PRISMBuilder(
         output_dir : str
             Directory where output files will be stored
         ligand_forcefield : str
-            Force field for ligand ('gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid')
+            Force field for ligand ('gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid', or 'rtf')
         config_path : str, optional
             Path to configuration YAML file
         forcefield : str, optional
@@ -191,9 +191,19 @@ class PRISMBuilder(
             raise TypeError(f"forcefield_path must be None, str, or list, got {type(forcefield_path)}")
 
         # Validate ligand force field
-        if self.ligand_forcefield not in ["gaff", "gaff2", "openff", "cgenff", "opls", "mmff", "match", "hybrid"]:
+        if self.ligand_forcefield not in [
+            "gaff",
+            "gaff2",
+            "openff",
+            "cgenff",
+            "opls",
+            "mmff",
+            "match",
+            "hybrid",
+            "rtf",
+        ]:
             raise ValueError(
-                f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', or 'hybrid'"
+                f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid', or 'rtf'"
             )
 
         # Validate cgenff requires forcefield_path
