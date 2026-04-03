@@ -79,10 +79,12 @@ class ProteinProcessorMixin:
         ff_name = ff_info.get("name", "").lower() if ff_info else ""
 
         if "opls" in ff_name:
-            # OPLS-AA force field uses HISD/HISE/HISH
+            # OPLS-AA force field: Convert HSE to HISD to avoid chain splitting
+            # GROMACS pdb2gmx separates HISE (but not HISD/HISH) into individual molecules
+            # This is a workaround for GROMACS OPLS + HISE issue
             his_mapping = {
                 "HSD": "HISD",  # δ-protonated histidine
-                "HSE": "HISE",  # ε-protonated histidine
+                "HSE": "HISD",  # ε-protonated → δ-protonated (workaround)
                 "HSP": "HISH",  # doubly protonated histidine
             }
         elif "charmm" in ff_name:

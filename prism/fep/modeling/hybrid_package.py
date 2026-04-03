@@ -665,27 +665,58 @@ class HybridPackageBuilder:
         atom_name = atom["name"]
         atom_type = atom["type"]
 
-        # Try reference first for state A atoms
+        # Strategy 1: Try reference coordinates first (state A atoms)
         if atom_name in ref_coords and ref_coords[atom_name]:
             coord = ref_coords[atom_name][0]
             return coord["x"], coord["y"], coord["z"]
 
-        # If dummy in reference, try mutant coordinates
-        if atom_type.startswith("DUM_") and atom_name in mut_coords and mut_coords[atom_name]:
-            coord = mut_coords[atom_name][0]
-            return coord["x"], coord["y"], coord["z"]
+        # Strategy 2: For dummy atoms (state A), try mutant coordinates with multiple name variants
+        if atom_type.startswith("DUM_"):
+            # Try direct name match first
+            if atom_name in mut_coords and mut_coords[atom_name]:
+                coord = mut_coords[atom_name][0]
+                return coord["x"], coord["y"], coord["z"]
 
-        # If atom has FEbuilder correspondence, try using corresponding atom from mutant
+            # Try removing single B suffix (C0BB → C0B)
+            # Note: Only remove ONE "B" if atom name ends with "B"
+            base_name = atom_name[:-1] if atom_name.endswith("B") else atom_name
+            if base_name in mut_coords and mut_coords[base_name]:
+                coord = mut_coords[base_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+            # Try adding B suffix (C0B → C0BB)
+            b_name = f"{atom_name}B"
+            if b_name in mut_coords and mut_coords[b_name]:
+                coord = mut_coords[b_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 3: Use FEbuilder correspondence mapping
         if atom_name in correspondence:
             corresponding_name_b = correspondence[atom_name]
-            # Try with B suffix (e.g., H08 -> H08B)
+
+            # Try exact correspondence name
+            if corresponding_name_b in mut_coords and mut_coords[corresponding_name_b]:
+                coord = mut_coords[corresponding_name_b][0]
+                return coord["x"], coord["y"], coord["z"]
+
+            # Try with B suffix variations
             for suffix in ["", "B"]:
                 candidate_name = f"{corresponding_name_b}{suffix}"
                 if candidate_name in mut_coords and mut_coords[candidate_name]:
                     coord = mut_coords[candidate_name][0]
                     return coord["x"], coord["y"], coord["z"]
 
-        # Default to origin (should not happen)
+        # Strategy 4: Reverse correspondence lookup (B → A)
+        # Check if this atom name appears as a value in correspondence
+        for atom_a, atom_b in correspondence.items():
+            if atom_name == atom_b:
+                # Try atom_a from reference
+                if atom_a in ref_coords and ref_coords[atom_a]:
+                    coord = ref_coords[atom_a][0]
+                    return coord["x"], coord["y"], coord["z"]
+
+        # Fallback: Default to origin with warning
+        print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
         return 0.0, 0.0, 0.0
 
     def _normalize_box_line(self, box_line: Optional[str]) -> str:

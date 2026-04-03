@@ -460,14 +460,15 @@ class FEPWorkflowMixin:
         # Generate hybrid coordinates
         hybrid_atoms_data = []
         for hatom in hybrid_atoms:
-            # Remove A/B suffixes from hybrid atom name to find original name
-            base_name = hatom.name.rstrip("AB")
-
+            # Remove single A/B suffix from hybrid atom name to find original name
+            # Note: Only remove ONE suffix character (A or B), not all trailing As/Bs
             if hatom.name.endswith("A"):
+                base_name = hatom.name[:-1]  # Remove single 'A'
                 # Transformed A atom (disappearing in state B)
                 # Use coordinates from reference ligand
                 coord = ref_coord_map.get(base_name, [0.0, 0.0, 0.0])
             elif hatom.name.endswith("B"):
+                base_name = hatom.name[:-1]  # Remove single 'B'
                 # Transformed B atom (appearing in state B)
                 # Use coordinates from mutant ligand
                 coord = mut_coord_map.get(base_name, [0.0, 0.0, 0.0])

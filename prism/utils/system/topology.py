@@ -235,6 +235,12 @@ class TopologyProcessorMixin:
             "-ignh",  # Always use -ignh to regenerate standardized hydrogens
         ]
 
+        # Add -merge option for OPLS to prevent histidine chain splitting
+        # See: https://manual.gromacs.org/current/reference-manual/topologies/pdb2gmx-input-files.html
+        if ff_info and "opls" in ff_info.get("name", "").lower():
+            command.extend(["-merge", "all"])
+            print_info("  Using -merge all for OPLS to prevent histidine chain splitting")
+
         # Print information about protonation method
         if protonation_method == "gromacs":
             print_info("  Using GROMACS protonation (pdb2gmx -ignh: ignore and regenerate all hydrogens)")
