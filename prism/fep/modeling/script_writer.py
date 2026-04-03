@@ -599,7 +599,7 @@ run_leg() {{
     else
         echo "Running energy minimization..."
         gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp 10 -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp {omp_threads} -v
     fi
 
     # Check EM convergence

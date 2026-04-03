@@ -632,10 +632,37 @@ class FEPWorkflowMixin:
         ff_info = None
         use_ions_itp = "ions.itp"  # Default to old-style
 
+        # If no index, try to find it by name
+        if not ff_idx and self.gromacs_env:
+            ff_name = self.forcefield.get("name")
+            if ff_name:
+                ff_name_lower = ff_name.lower()
+                if ff_name_lower in self.gromacs_env.force_field_names:
+                    ff_idx = self.gromacs_env.force_field_names[ff_name_lower]
+
         if ff_idx and self.gromacs_env:
             # Get force field info from environment
             if ff_idx in self.gromacs_env.force_fields:
                 ff_info = self.gromacs_env.force_fields[ff_idx]
+
+        # Determine which ion file to use (check before copying)
+        if ff_info and "path" in ff_info:
+            ff_path = Path(ff_info["path"])
+            if ff_path.exists() and ff_path.is_dir():
+                water_specific_ions = f"ions_{water_model}.itp"
+                generic_ions = "ions.itp"
+
+                # Check in force field directory
+                if (ff_path / water_specific_ions).exists():
+                    use_ions_itp = water_specific_ions
+                    print(f"  Using water-specific ion file: {water_specific_ions}")
+                elif (ff_path / generic_ions).exists():
+                    use_ions_itp = generic_ions
+                    print(f"  Using generic ion file: {generic_ions}")
+                else:
+                    # Neither exists - keep default and warn
+                    print(f"  ⚠ Warning: Neither {water_specific_ions} nor {generic_ions} found in {ff_path}")
+                    print(f"  Will attempt to use {use_ions_itp} (may fail at grompp)")
 
         if ff_info and "dir" in ff_info:
             ff_basename = ff_info["dir"]
@@ -649,18 +676,9 @@ class FEPWorkflowMixin:
                 # Validate force field completeness (support both old and new force field structures)
                 required_files = ["forcefield.itp", "ffbonded.itp", "ffnonbonded.itp"]
 
-                # Check for ion files (support both old and new force field structures)
-                water_specific_ions = f"ions_{water_model}.itp"
-                if (ff_path / water_specific_ions).exists():
-                    required_files.append(water_specific_ions)
-                    use_ions_itp = water_specific_ions
-                elif (ff_path / "ions.itp").exists():
-                    # Old-style force field with generic ions.itp
-                    required_files.append("ions.itp")
-                    use_ions_itp = "ions.itp"
-                else:
-                    # No ion file found - will raise error below
-                    use_ions_itp = None
+                # Add the detected ion file to required files
+                if use_ions_itp:
+                    required_files.append(use_ions_itp)
 
                 missing = [f for f in required_files if not (ff_path / f).exists()]
                 if missing:
@@ -735,7 +753,12 @@ class FEPWorkflowMixin:
                 f.write(f'#include "{ligand_rel_dir}/{cgenff_supplement.name}"\n')
             f.write(f'#include "{ligand_rel_dir}/LIG.itp"\n')
             f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
-            f.write(f'#include "{ff_name}.ff/{use_ions_itp}"\n\n')
+            if use_ions_itp:
+                f.write(f'#include "{ff_name}.ff/{use_ions_itp}"\n\n')
+            else:
+                # No ion file found - write comment and let grompp fail with clear error
+                f.write(f"; WARNING: No ion file found for {ff_name} with water model {water_model}\n")
+                f.write(f'#include "{ff_name}.ff/ions.itp"  ; This will likely fail\n\n')
             f.write("[ system ]\n")
             f.write("Ligand in water\n\n")
             f.write("[ molecules ]\n")

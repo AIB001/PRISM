@@ -5,6 +5,9 @@ Complete analysis toolkit for Free Energy Perturbation (FEP) calculations perfor
 ## Features
 
 - **Multiple Estimators**: Support for BAR, MBAR, and TI methods
+- **Bootstrap Error Analysis**: Parallel bootstrap estimation with user-configurable core count
+- **Quality Checks**: Automatic warnings for high SE, poor convergence, endpoint issues, low overlap
+- **Multi-Estimator Reports**: Compare results from multiple estimators in a single report
 - **Comprehensive Reports**: Publication-ready HTML reports with interactive plots
 - **Convergence Analysis**: Time-convergence and hysteresis diagnostics
 - **Energy Decomposition**: Separate electrostatic and van der Waals contributions
@@ -40,6 +43,14 @@ prism --fep-analyze \
     --temperature 300 \
     --output report.html
 
+# With parallel bootstrap (faster error estimation)
+prism --fep-analyze \
+    --bound-dir fep_project/bound \
+    --unbound-dir fep_project/unbound \
+    --estimator MBAR \
+    --bootstrap-n-jobs 4 \
+    --output report.html
+
 # Save both HTML and JSON results
 prism --fep-analyze \
     --bound-dir fep_project/bound \
@@ -58,7 +69,8 @@ analyzer = FEPAnalyzer(
     bound_dir='fep_project/bound',
     unbound_dir='fep_project/unbound',
     temperature=310.0,
-    estimator='MBAR'
+    estimator='MBAR',
+    bootstrap_n_jobs=4  # Parallel bootstrap with 4 cores
 )
 
 # Run analysis
@@ -103,6 +115,7 @@ fep_project/
 Comprehensive HTML report containing:
 
 - **Summary**: Quick overview of binding free energy and key parameters
+- **Quality Warnings**: Alerts for high SE, poor convergence, endpoint issues, low overlap
 - **Results Table**: Detailed breakdown of all computed quantities
 - **Free Energy Profile**: Interactive plot of ΔG vs λ
 - **Convergence Analysis**: Time-convergence diagnostics
@@ -223,8 +236,9 @@ pip install alchemlyb
 
 1. **Use MBAR** for better statistical efficiency
 2. **Subsample data** if you have more than 10,000 samples per window
-3. **Parallelize** analysis of bound and unbound legs
-4. **Cache parsed data** if running multiple analyses
+3. **Parallelize bootstrap** with `--bootstrap-n-jobs N` for faster error estimation
+4. **Parallelize** analysis of bound and unbound legs
+5. **Cache parsed data** if running multiple analyses
 
 ## Comparison with NAMD FEBuilder
 
@@ -235,7 +249,9 @@ This framework is the GROMACS equivalent of the NAMD FEBuilder analysis module:
 | Input files | fepout files | dhdl.xvg files |
 | Estimators | BAR, MBAR, TI | BAR, MBAR, TI |
 | Convergence analysis | ✓ | ✓ |
-| Bootstrap error analysis | ✓ | Planned |
+| Bootstrap error analysis | ✓ | ✓ (with parallelization) |
+| Quality checks | ✓ | ✓ |
+| Multi-estimator reports | ✓ | ✓ |
 | HTML reports | ✓ | ✓ |
 | Energy decomposition | ✓ | Partial |
 | Platform | NAMD | GROMACS |
@@ -266,7 +282,37 @@ For issues, questions, or contributions:
 - GitHub: https://github.com/your-org/prism
 - Email: your-email@institution.edu
 
+## Recent Development Highlights
+
+### Analysis Features (v0.2.0)
+- **Bootstrap parallelization**: User-configurable core count (`--bootstrap-n-jobs`) for faster error estimation
+- **Quality checks**: Automatic warnings for high SE, poor convergence, endpoint issues, low overlap
+- **Multi-estimator reports**: Compare BAR, MBAR, TI results in a single HTML report
+- **CLI enhancements**: New `--bootstrap-n-jobs` parameter for parallel bootstrap
+- **Python API**: `bootstrap_n_jobs` parameter in all analyzer classes
+
+### Architecture & Force Field
+- **Exception hierarchy**: Structured error handling across FEP module
+- **Capabilities interface**: Force field capability detection system
+- **CGenFF adapter**: Improved format detection and atomtypes integration
+
+### Performance Optimization
+- **CPU affinity**: GROMACS `-pinoffset` for better GPU utilization
+- **Auto thread calculation**: OpenMP threads computed from `total_cpus` (no more hardcoding)
+- **GPU consistency**: Removed unconditional CPU fallback from FEP scripts
+
+### Modeling Improvements
+- **Charge mapping**: Fixed `charge_cutoff` and `charge_reception` parameter propagation
+- **Topology handling**: Improved leg topology alignment and ITP file copying
+- **Repeat directories**: Symlink optimization and PDB file support
+- **Multi-estimator CLI**: Fixed parameter passing for multi-estimator analysis
+
 ## Version History
+
+### 0.2.0 (2025-04-03)
+- Bootstrap parallelization with user-configurable core count
+- Quality checks (high SE, poor convergence, endpoint issues, low overlap)
+- Multi-estimator reports (BAR, MBAR, TI comparison)
 
 ### 0.1.0 (2025-03-19)
 - Initial release

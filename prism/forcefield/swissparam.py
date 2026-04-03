@@ -149,13 +149,30 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
             tar_data = result.stdout
 
-            # Check if we got valid tarball data
+            # Check if we got valid tarball data or a session number
             if len(tar_data) < 1000:
-                error_msg = tar_data.decode("utf-8", errors="ignore").strip()
-                if error_msg:
-                    raise RuntimeError(f"SwissParam server error: {error_msg}")
+                response_text = tar_data.decode("utf-8", errors="ignore").strip()
+
+                # Check if this is a session number response
+                if "Session number:" in response_text:
+                    # Extract session number
+                    import re
+
+                    match = re.search(r"Session number:\s*(\d+)", response_text)
+                    if match:
+                        session_number = match.group(1)
+                        print(f"    ⏳ Job queued, session number: {session_number}")
+
+                        # Poll for completion
+                        tar_data = self._poll_swissparam_session(session_number, ligand_dir=ligand_dir)
+                    else:
+                        raise RuntimeError(f"Could not parse session number from: {response_text}")
                 else:
-                    raise RuntimeError(f"Incomplete data ({len(tar_data)} bytes)")
+                    # Other error
+                    if response_text:
+                        raise RuntimeError(f"SwissParam server error: {response_text}")
+                    else:
+                        raise RuntimeError(f"Incomplete data ({len(tar_data)} bytes)")
 
             print(f"    ✓ Retrieved tarball ({len(tar_data)} bytes)")
             return tar_data
@@ -173,6 +190,87 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                     "    Please wait a few minutes before trying again."
                 )
             raise RuntimeError(f"Failed: {e}")
+
+    def _poll_swissparam_session(
+        self, session_number: str, ligand_dir: str, timeout: int = 300, poll_interval: int = 10
+    ) -> bytes:
+        """
+        Poll SwissParam session until completion and retrieve results.
+
+        Parameters
+        ----------
+        session_number : str
+            Session number returned by SwissParam
+        ligand_dir : str
+            Working directory for curl commands
+        timeout : int
+            Maximum time to wait in seconds (default: 300s = 5min)
+        poll_interval : int
+            Time between polls in seconds (default: 10s)
+
+        Returns
+        -------
+        bytes
+            Tarball data from completed session
+        """
+        import time
+
+        print(f"\n[1b] Polling SwissParam session {session_number}...")
+        print(f"    Timeout: {timeout}s, Poll interval: {poll_interval}s")
+
+        start_time = time.time()
+        attempts = 0
+
+        while time.time() - start_time < timeout:
+            attempts += 1
+
+            # Check session status
+            check_cmd = ["curl", "-s", f"https://www.swissparam.ch:8443/checksession?sessionNumber={session_number}"]
+
+            try:
+                result = subprocess.run(check_cmd, capture_output=True, timeout=30, cwd=ligand_dir)
+
+                status_text = result.stdout.decode("utf-8", errors="ignore")
+
+                # Check if calculation is finished
+                if "Calculation is finished" in status_text:
+                    print(f"    ✓ Session completed after {attempts} attempts ({time.time() - start_time:.1f}s)")
+
+                    # Retrieve results
+                    retrieve_cmd = [
+                        "curl",
+                        "-s",
+                        f"https://www.swissparam.ch:8443/retrievesession?sessionNumber={session_number}",
+                    ]
+
+                    result = subprocess.run(retrieve_cmd, capture_output=True, timeout=120, cwd=ligand_dir)
+
+                    tar_data = result.stdout
+
+                    if len(tar_data) < 1000:
+                        raise RuntimeError(f"Retrieved incomplete data ({len(tar_data)} bytes)")
+
+                    print(f"    ✓ Retrieved tarball ({len(tar_data)} bytes)")
+                    return tar_data
+
+                elif "still running" in status_text or "queued" in status_text:
+                    print(f"    Attempt {attempts}: Job still running, waiting {poll_interval}s...")
+                    time.sleep(poll_interval)
+
+                else:
+                    # Unknown status
+                    print(f"    Status: {status_text[:200]}")
+                    time.sleep(poll_interval)
+
+            except subprocess.TimeoutExpired:
+                print(f"    Attempt {attempts}: Timeout checking status, retrying...")
+                time.sleep(poll_interval)
+
+        raise RuntimeError(
+            f"Timeout after {timeout}s waiting for session {session_number}\n"
+            f"    You can manually check status with:\n"
+            f"    curl 'https://www.swissparam.ch:8443/checksession?sessionNumber={session_number}'"
+        )
 
     def _extract_tarball(self, tar_data):
         """Extract tarball to temporary directory"""
