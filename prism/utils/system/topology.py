@@ -251,6 +251,7 @@ class TopologyProcessorMixin:
         for idx, lig_ff_dir in enumerate(lig_ff_dirs, 1):
             lig_ff_path = Path(lig_ff_dir)
             lig_itp_path = lig_ff_path / "LIG.itp"
+            lig_top_path = lig_ff_path / "LIG.top"
             atomtypes_itp_path = lig_ff_path / "atomtypes_LIG.itp"
 
             if not lig_itp_path.exists():
@@ -260,43 +261,63 @@ class TopologyProcessorMixin:
             charmm_ff_dir = lig_ff_path / "charmm36.ff"
             if charmm_ff_dir.exists():
                 is_cgenff = True
+                lig_include_path = lig_itp_path
 
-                # Collect ligand-specific bonded parameter files (*_ffbonded.itp)
-                ffbonded_files = list(charmm_ff_dir.glob("*_ffbonded.itp"))
-                for ffbonded_file in ffbonded_files:
-                    # Check if file has content (not empty)
-                    if ffbonded_file.stat().st_size > 200:  # More than just header
-                        # Build relative path from GMX_PROLIG_MD directory
-                        if len(lig_ff_dirs) == 1:
-                            relative_bonded_path = f"../{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
-                        else:
-                            relative_bonded_path = (
-                                f"../Ligand_Forcefield/{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
-                            )
-                        all_bonded_includes.append(f'#include "{relative_bonded_path}"\n')
+                # Check for CHARMM-GUI format (complete charmm36.itp)
+                # NOTE: CHARMM-GUI provides complete charmm36.itp which conflicts with main force field
+                # We skip it and only use *_ffbonded.itp if available (CGenFF website format)
+                # For CHARMM-GUI to work properly, users should use it as standalone force field
+                # without the main CHARMM36 force field
 
-            # Collect atomtypes (if not CGenFF) - with deduplication
-            if not is_cgenff:
-                if not atomtypes_itp_path.exists():
-                    raise FileNotFoundError(f"Ligand {idx} atomtypes file not found: {atomtypes_itp_path}")
-                with open(atomtypes_itp_path, "r") as f:
-                    for line in f:
-                        # Skip headers and comments
-                        if line.strip().startswith("[") or line.strip().startswith(";") or not line.strip():
-                            continue
-                        # Extract atomtype name (first column)
-                        atomtype_name = line.split()[0] if line.split() else None
-                        if atomtype_name and atomtype_name not in seen_atomtypes:
-                            seen_atomtypes.add(atomtype_name)
-                            all_atomtype_lines.append(line)
+                charmm36_itp = charmm_ff_dir / "charmm36.itp"
+                if charmm36_itp.exists():
+                    # CHARMM-GUI format detected
+                    # Skip charmm36.itp to avoid conflicts with main CHARMM36 force field
+                    # Fall through to use *_ffbonded.itp if available (CGenFF website format)
+                    print_info(
+                        f"  Detected CHARMM-GUI format for ligand {idx} - skipping charmm36.itp to avoid conflicts"
+                    )
+                    print_info(f"  Note: CHARMM-GUI format should be used as standalone force field")
+
+                # For both CHARMM-GUI and CGenFF website formats, try *_ffbonded.itp
+                else:
+                    # Fallback: search for *_ffbonded.itp (CGenFF website format)
+                    ffbonded_files = list(charmm_ff_dir.glob("*_ffbonded.itp"))
+                    for ffbonded_file in ffbonded_files:
+                        # Check if file has content (not empty)
+                        if ffbonded_file.stat().st_size > 200:  # More than just header
+                            # Build relative path from GMX_PROLIG_MD directory
+                            if len(lig_ff_dirs) == 1:
+                                relative_bonded_path = f"../{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
+                            else:
+                                relative_bonded_path = (
+                                    f"../Ligand_Forcefield/{lig_ff_path.name}/charmm36.ff/{ffbonded_file.name}"
+                                )
+                            all_bonded_includes.append(f'#include "{relative_bonded_path}"\n')
+
+            # Collect atomtypes - with deduplication
+            # For CGenFF, also collect atomtypes from atomtypes_LIG.itp
+            if not atomtypes_itp_path.exists():
+                raise FileNotFoundError(f"Ligand {idx} atomtypes file not found: {atomtypes_itp_path}")
+            with open(atomtypes_itp_path, "r") as f:
+                for line in f:
+                    # Skip headers and comments
+                    if line.strip().startswith("[") or line.strip().startswith(";") or not line.strip():
+                        continue
+                    # Extract atomtype name (first column)
+                    atomtype_name = line.split()[0] if line.split() else None
+                    if atomtype_name and atomtype_name not in seen_atomtypes:
+                        seen_atomtypes.add(atomtype_name)
+                        all_atomtype_lines.append(line)
 
             # Collect include statement - use relative path from GMX_PROLIG_MD
             # Single ligand: ../LIG.xxx2gmx/LIG.itp (no Ligand_Forcefield parent)
             # Multi-ligand: ../Ligand_Forcefield/LIG.xxx2gmx_N/LIG.itp
+            lig_include_filename = lig_include_path.name
             if len(lig_ff_dirs) == 1:
-                relative_path = f"../{lig_ff_path.name}/LIG.itp"
+                relative_path = f"../{lig_ff_path.name}/{lig_include_filename}"
             else:
-                relative_path = f"../Ligand_Forcefield/{lig_ff_path.name}/LIG.itp"
+                relative_path = f"../Ligand_Forcefield/{lig_ff_path.name}/{lig_include_filename}"
             all_includes.append(f'#include "{relative_path}"\n')
 
             # Collect molecule entry
@@ -338,6 +359,17 @@ class TopologyProcessorMixin:
                 if is_cgenff:
                     # CGenFF: Include bonded parameters first, then LIG.itp files
                     print_info("  Detected CGenFF force field - using integrated CHARMM atomtypes")
+
+                    # CRITICAL FIX: Include atomtypes for CGenFF ligands
+                    # Even though CHARMM36 has atomtypes, ligand-specific atomtypes
+                    # from atomtypes_LIG.itp must be included in the main topology
+                    new_lines.append("\n; Include CGenFF ligand atomtypes\n")
+                    new_lines.append("[ atomtypes ]\n")
+                    new_lines.append(";type, bondingtype, atomic_number, mass, charge, ptype, sigma, epsilon\n")
+                    # Write all unique atomtype lines
+                    for atomtype_line in all_atomtype_lines:
+                        new_lines.append(atomtype_line)
+                    new_lines.append("\n")
 
                     # Include ligand-specific bonded parameters BEFORE LIG.itp files
                     if all_bonded_includes:

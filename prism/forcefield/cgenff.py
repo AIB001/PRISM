@@ -205,6 +205,20 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             if itp_files:
                 top_files = itp_files
 
+        # Special handling for CHARMM-GUI LIG.top files that contain #include statements
+        # These are full topology files, not molecule-only ITP files
+        for top_file in top_files:
+            with open(top_file, "r") as f:
+                content = f.read()
+                # Check if it contains #include "LIG.itp" and no [ atoms ] section
+                if '#include "LIG.itp"' in content and "[ atoms ]" not in content:
+                    # This is a full topology file, use LIG.itp instead
+                    itp_file = self.cgenff_dir / "LIG.itp"
+                    if itp_file.exists():
+                        top_files = [itp_file]
+                        print(f"  Detected CHARMM-GUI full topology file, using LIG.itp instead")
+                        break
+
         if not top_files:
             raise FileNotFoundError(
                 f"No topology file found in {self.cgenff_dir}\n"
@@ -228,21 +242,28 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         else:
             # CHARMM-GUI or other: find PDB that matches topology
             pdb_files = list(self.cgenff_dir.glob("*.pdb"))
-            if not pdb_files:
-                raise FileNotFoundError(
-                    f"No PDB file found in {self.cgenff_dir}\n" f"  Expected: *_gmx.pdb or *.pdb (e.g., ligandrm.pdb)"
-                )
-
-            # Try to find PDB file with matching atom names
-            matching_pdb = self._find_matching_pdb(pdb_files, self.top_file)
-            if matching_pdb:
-                self.pdb_file = matching_pdb
-                print(f"  Found matching PDB file: {self.pdb_file.name}")
+            if pdb_files:
+                # Try to find PDB file with matching atom names
+                matching_pdb = self._find_matching_pdb(pdb_files, self.top_file)
+                if matching_pdb:
+                    self.pdb_file = matching_pdb
+                    print(f"  Found matching PDB file: {self.pdb_file.name}")
+                else:
+                    # No matching PDB found - use first but warn
+                    self.pdb_file = pdb_files[0]
+                    print(f"  Warning: No PDB file matches topology atom names")
+                    print(f"  Using: {self.pdb_file.name}")
             else:
-                # No matching PDB found - use first but warn
-                self.pdb_file = pdb_files[0]
-                print(f"  Warning: No PDB file matches topology atom names")
-                print(f"  Using: {self.pdb_file.name}")
+                # Last resort: try GRO files (CHARMM-GUI format)
+                gro_files = list(self.cgenff_dir.glob("*.gro"))
+                if gro_files:
+                    self.pdb_file = gro_files[0]
+                    print(f"  Found GRO file (will convert): {self.pdb_file.name}")
+                else:
+                    raise FileNotFoundError(
+                        f"No coordinate file found in {self.cgenff_dir}\n"
+                        f"  Expected: *_gmx.pdb, *.pdb, or *.gro (e.g., ligandrm.pdb)"
+                    )
                 print(f"  Note: This may cause atom mismatches")
 
         # Validate atom name consistency
@@ -412,6 +433,16 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"  Atom names validated: {len(pdb_atom_names)} atoms match between PDB and TOP")
 
     def _parse_pdb(self):
+        """Parse coordinate file (PDB or GRO) and convert to GRO format (excluding LP atoms)"""
+        # Detect file format
+        is_gro = self.pdb_file.suffix.lower() == ".gro"
+
+        if is_gro:
+            return self._parse_gro_file()
+        else:
+            return self._parse_pdb_file()
+
+    def _parse_pdb_file(self):
         """Parse PDB file and convert to GRO format (excluding LP atoms)"""
         gro_lines = []
         atom_count = 0
@@ -447,6 +478,115 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         box_x = max(x_coords) - min(x_coords) + 1.0
         box_y = max(y_coords) - min(y_coords) + 1.0
         box_z = max(z_coords) - min(z_coords) + 1.0
+
+        # Write GRO file
+        gro_content = f"{self.moleculetype_name} system\n"
+        gro_content += f"{atom_count:5d}\n"
+        gro_content += "".join(gro_lines)
+        gro_content += f"{box_x:10.7f}{box_y:10.7f}{box_z:10.7f}\n"
+
+        return gro_content, atom_count
+
+    def _parse_gro_file(self):
+        """Parse GRO file and convert to GRO format (excluding LP atoms)"""
+        gro_lines = []
+        atom_count = 0
+
+        # Box size calculation
+        x_coords, y_coords, z_coords = [], [], []
+
+        with open(self.pdb_file, "r") as f:
+            lines = f.readlines()
+
+            # Skip header line (title)
+            # Second line has atom count
+            if len(lines) < 2:
+                raise ValueError(f"GRO file too short: {self.pdb_file}")
+
+            # Parse atoms (start from line 2, until box dimensions)
+            for i, line in enumerate(lines[2:], start=2):
+                # Check if we've reached the box dimensions line
+                stripped = line.strip()
+                if not stripped or len(stripped.split()) < 3:
+                    # This is likely the box dimensions line
+                    break
+
+                parts = stripped.split()
+                if len(parts) < 6:
+                    continue
+
+                # GRO format can have two forms:
+                # 1. resnum and resname separate: "1 LIG N 1 ..."
+                # 2. resnum and resname combined: "1LIG N 1 ..."
+                if len(parts) >= 7:
+                    # Try to parse as separate fields
+                    try:
+                        # First field might be resnum only
+                        res_num = int(parts[0])
+                        res_name = parts[1]
+                        atom_name = parts[2]
+                        atom_num = int(parts[3])
+                        x = float(parts[4])
+                        y = float(parts[5])
+                        z = float(parts[6])
+                    except ValueError:
+                        # Combined format: extract resnum from start
+                        first_field = parts[0]
+                        # Find where numbers end and letters begin
+                        import re
+
+                        match = re.match(r"(\d+)([A-Za-z]+)", first_field)
+                        if match:
+                            res_num = int(match.group(1))
+                            res_name = match.group(2)
+                            atom_name = parts[1]
+                            atom_num = int(parts[2])
+                            x = float(parts[3])
+                            y = float(parts[4])
+                            z = float(parts[5])
+                        else:
+                            # Skip this line if we can't parse it
+                            continue
+                else:
+                    # Assume combined format
+                    first_field = parts[0]
+                    import re
+
+                    match = re.match(r"(\d+)([A-Za-z]+)", first_field)
+                    if match:
+                        res_num = int(match.group(1))
+                        res_name = match.group(2)
+                        atom_name = parts[1]
+                        atom_num = int(parts[2])
+                        x = float(parts[3])
+                        y = float(parts[4])
+                        z = float(parts[5]) if len(parts) > 5 else 0.0
+                    else:
+                        # Skip this line if we can't parse it
+                        continue
+
+                # Skip LP (lone pair) atoms
+                if "LP" in atom_name.upper():
+                    continue
+
+                atom_count += 1
+                x_coords.append(x)
+                y_coords.append(y)
+                z_coords.append(z)
+
+                # Re-number atoms sequentially
+                gro_line = f"{res_num:5d}{res_name:<5s}{atom_name:>5s}{atom_count:5d}"
+                gro_line += f"{x:8.3f}{y:8.3f}{z:8.3f}\n"
+                gro_lines.append(gro_line)
+
+        # Calculate box dimensions (with 1.0 nm padding)
+        if x_coords:
+            box_x = max(x_coords) - min(x_coords) + 1.0
+            box_y = max(y_coords) - min(y_coords) + 1.0
+            box_z = max(z_coords) - min(z_coords) + 1.0
+        else:
+            # Default box size if no atoms
+            box_x = box_y = box_z = 1.0
 
         # Write GRO file
         gro_content = f"{self.moleculetype_name} system\n"
@@ -840,21 +980,29 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         charmm_ff_dir = self.cgenff_dir / "charmm36.ff"
 
         if charmm_ff_dir.exists():
-            # Include CHARMM force field files
-            content = "; Include CHARMM36 force field\n"
-            content += '#include "charmm36.ff/forcefield.itp"\n'
-            content += '#include "charmm36.ff/ffnonbonded.itp"\n'
-            content += '#include "charmm36.ff/ffbonded.itp"\n'
+            # Check for CHARMM-GUI format (complete charmm36.itp)
+            charmm36_itp = charmm_ff_dir / "charmm36.itp"
+            if charmm36_itp.exists():
+                # CHARMM-GUI format: single file with all parameters
+                content = "; Include CHARMM-GUI force field (complete)\n"
+                content += f'#include "charmm36.ff/{charmm36_itp.name}"\n'
+                content += "\n"
+            else:
+                # CGenFF website format: use forcefield.itp + ffbonded.itp
+                content = "; Include CHARMM36 force field\n"
+                content += '#include "charmm36.ff/forcefield.itp"\n'
+                content += '#include "charmm36.ff/ffnonbonded.itp"\n'
+                content += '#include "charmm36.ff/ffbonded.itp"\n'
 
-            # Include ligand-specific bonded parameters if exists
-            # Search for any *_ffbonded.itp files
-            ffbonded_files = list(charmm_ff_dir.glob("*_ffbonded.itp"))
-            for ffbonded_file in ffbonded_files:
-                # Check if file has content (not empty)
-                if ffbonded_file.stat().st_size > 200:  # More than just header
-                    content += f'#include "charmm36.ff/{ffbonded_file.name}"\n'
+                # Include ligand-specific bonded parameters if exists
+                # Search for any *_ffbonded.itp files
+                ffbonded_files = list(charmm_ff_dir.glob("*_ffbonded.itp"))
+                for ffbonded_file in ffbonded_files:
+                    # Check if file has content (not empty)
+                    if ffbonded_file.stat().st_size > 200:  # More than just header
+                        content += f'#include "charmm36.ff/{ffbonded_file.name}"\n'
 
-            content += "\n"
+                content += "\n"
         else:
             # Fallback: minimal topology
             content = "[ defaults ]\n"

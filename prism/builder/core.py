@@ -202,9 +202,12 @@ class PRISMBuilder(
                 raise ValueError(
                     "CGenFF force field requires --forcefield-path to specify the directory containing downloaded CGenFF files"
                 )
-            if len(self.forcefield_paths) != self.ligand_count:
+            # In FEP mode, mutant_ligand is separate from ligand_paths
+            expected_count = self.ligand_count + (1 if fep_mode and mutant_ligand else 0)
+            if len(self.forcefield_paths) != expected_count:
                 raise ValueError(
-                    f"CGenFF requires one --forcefield-path per ligand. Expected {self.ligand_count}, got {len(self.forcefield_paths)}"
+                    f"CGenFF requires one --forcefield-path per ligand. Expected {expected_count} (ligand_paths={self.ligand_count}"
+                    f"{', +1 mutant' if fep_mode and mutant_ligand else ''}), got {len(self.forcefield_paths)}"
                 )
 
         # Gaussian RESP charge options

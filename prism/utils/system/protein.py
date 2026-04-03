@@ -65,7 +65,7 @@ class ProteinProcessorMixin:
         Different GROMACS force fields use different naming:
         - AMBER force fields: HID, HIE, HIP
         - OPLS force fields: HISD, HISE, HISH
-        - CHARMM force fields: HID, HIE, HIP (similar to AMBER)
+        - CHARMM force fields: HIS (generic name only - pdb2gmx handles protonation)
 
         This conversion is necessary for pdb2gmx to recognize the residues.
 
@@ -85,8 +85,14 @@ class ProteinProcessorMixin:
                 "HSE": "HISE",  # ε-protonated histidine
                 "HSP": "HISH",  # doubly protonated histidine
             }
+        elif "charmm" in ff_name:
+            # CHARMM force fields use generic HIS only
+            # pdb2gmx will handle protonation state automatically
+            # Do NOT convert - keep HIS as HIS to avoid "Residue HIE not found" error
+            print("  CHARMM force field detected - using generic HIS naming (pdb2gmx will handle protonation)")
+            return
         else:
-            # AMBER and CHARMM force fields use HID/HIE/HIP
+            # AMBER force fields use HID/HIE/HIP
             his_mapping = {
                 "HSD": "HID",  # δ-protonated histidine
                 "HSE": "HIE",  # ε-protonated histidine
