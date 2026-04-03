@@ -451,6 +451,7 @@ class TopologyProcessorMixin:
 
             # Check if this is CGenFF (has charmm*.ff subdirectory)
             charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(lig_ff_path)
+            lig_include_path = lig_itp_path
             if charmm_ff_dir:
                 is_cgenff = True
                 lig_include_path = lig_itp_path

@@ -23,6 +23,14 @@ def normalize_charge_reception(value: str) -> str:
     return normalized
 
 
+def _normalize_atom_name(name: str) -> str:
+    """Normalize atom names for cross-state matching."""
+    name = str(name).strip()
+    if name.endswith(("A", "B")) and len(name) > 1:
+        return name[:-1]
+    return name
+
+
 @dataclass
 class Atom:
     """
@@ -230,13 +238,29 @@ class DistanceAtomMapper:
                     continue
                 if atom_a.element != atom_b.element:
                     continue
-                if not uses_generic_types and atom_a.atom_type != atom_b.atom_type:
-                    continue
-                candidates.append((dist, atom_a.index, atom_b.index, atom_a, atom_b))
+                exact_name_match = atom_a.name == atom_b.name
+                normalized_name_match = _normalize_atom_name(atom_a.name) == _normalize_atom_name(atom_b.name)
+                type_match = atom_a.atom_type == atom_b.atom_type
+                # Do not require atom-type identity at the candidate stage.
+                # Otherwise atoms like C17 that keep the same position and name
+                # but are retyped by CGenFF get forced into transformed_* instead
+                # of becoming surrounding_*.
+                candidates.append(
+                    (
+                        0 if exact_name_match else 1,
+                        0 if normalized_name_match else 1,
+                        0 if type_match else 1,
+                        dist,
+                        atom_a.index,
+                        atom_b.index,
+                        atom_a,
+                        atom_b,
+                    )
+                )
 
-        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        candidates.sort(key=lambda item: item[:6])
 
-        for _, _, _, atom_a, atom_b in candidates:
+        for _, _, _, _, _, _, atom_a, atom_b in candidates:
             if atom_a.index in matched_a_indices or atom_b.index in matched_b_indices:
                 continue
             common.append((atom_a, atom_b))

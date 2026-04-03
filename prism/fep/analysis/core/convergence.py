@@ -9,9 +9,52 @@ Time convergence and bootstrap error estimation for FEP calculations.
 
 import logging
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
+from concurrent.futures import ProcessPoolExecutor
 
 logger = logging.getLogger(__name__)
+
+
+def _bootstrap_worker(args: Tuple) -> Tuple[int, float]:
+    """
+    Worker function for one bootstrap iteration.
+
+    Parameters
+    ----------
+    args : tuple
+        (iteration_index, combined_df, n_states, rows_per_state, fraction, estimator_class)
+
+    Returns
+    -------
+    tuple of (int, float)
+        (iteration_index, dg_kcal)
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return args[0], None
+
+    iteration_idx, combined_bytes, n_states, rows_per_state, fraction, estimator_class = args
+
+    try:
+        # Deserialize DataFrame
+        import pickle
+
+        combined = pickle.loads(combined_bytes)
+
+        sub_dfs = []
+        idx_start = 0
+        for _ in range(n_states):
+            chunk = combined.iloc[idx_start : idx_start + rows_per_state]
+            n_take = max(1, int(len(chunk) * fraction))
+            sub_dfs.append(chunk.sample(n=n_take))
+            idx_start += rows_per_state
+        sub_combined = pd.concat(sub_dfs).sort_index()
+        fitted = estimator_class().fit(sub_combined)
+        dg_kcal = float(fitted.delta_f_.iloc[0, -1]) / 4.184
+        return iteration_idx, dg_kcal
+    except Exception:
+        return iteration_idx, None
 
 
 def compute_time_convergence(
@@ -88,6 +131,7 @@ def compute_bootstrap(
     estimator_class: Any,
     n_bootstrap: int = 50,
     fraction: float = 0.8,
+    n_jobs: int = 1,
 ) -> Optional[Dict]:
     """
     Bootstrap error estimation by resampling frames per lambda window.
@@ -99,6 +143,7 @@ def compute_bootstrap(
     estimator_class : alchemlyb estimator class
     n_bootstrap : number of bootstrap iterations
     fraction : fraction of frames to sample each iteration
+    n_jobs : number of parallel workers (default 1 = serial)
 
     Returns
     -------
@@ -128,23 +173,38 @@ def compute_bootstrap(
             n_states = len(all_dfs)
             rows_per_state = len(combined) // n_states if n_states > 0 else len(combined)
 
-            for i in range(n_bootstrap):
-                try:
-                    if i > 0 and i % 10 == 0:
-                        logger.info(f"  Bootstrap progress: {i}/{n_bootstrap} iterations")
-                    sub_dfs = []
-                    idx_start = 0
-                    for _ in range(n_states):
-                        chunk = combined.iloc[idx_start : idx_start + rows_per_state]
-                        n_take = max(1, int(len(chunk) * fraction))
-                        sub_dfs.append(chunk.sample(n=n_take))
-                        idx_start += rows_per_state
-                    sub_combined = pd.concat(sub_dfs).sort_index()
-                    fitted = estimator_class().fit(sub_combined)
-                    dg_kcal = float(fitted.delta_f_.iloc[0, -1]) / 4.184
-                    dgs_out.append(dg_kcal)
-                except Exception as e:
-                    logger.debug(f"Bootstrap iteration failed: {e}")
+            if n_jobs == 1:
+                # Serial path
+                for i in range(n_bootstrap):
+                    try:
+                        if i > 0 and i % 10 == 0:
+                            logger.info(f"  Bootstrap progress: {i}/{n_bootstrap} iterations")
+                        sub_dfs = []
+                        idx_start = 0
+                        for _ in range(n_states):
+                            chunk = combined.iloc[idx_start : idx_start + rows_per_state]
+                            n_take = max(1, int(len(chunk) * fraction))
+                            sub_dfs.append(chunk.sample(n=n_take))
+                            idx_start += rows_per_state
+                        sub_combined = pd.concat(sub_dfs).sort_index()
+                        fitted = estimator_class().fit(sub_combined)
+                        dg_kcal = float(fitted.delta_f_.iloc[0, -1]) / 4.184
+                        dgs_out.append(dg_kcal)
+                    except Exception as e:
+                        logger.debug(f"Bootstrap iteration failed: {e}")
+            else:
+                # Parallel path
+                import pickle
+
+                combined_bytes = pickle.dumps(combined)
+                tasks = [
+                    (i, combined_bytes, n_states, rows_per_state, fraction, estimator_class) for i in range(n_bootstrap)
+                ]
+                with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                    results = list(executor.map(_bootstrap_worker, tasks))
+                for idx, dg_kcal in sorted(results):
+                    if dg_kcal is not None:
+                        dgs_out.append(dg_kcal)
 
         if not bound_dgs or not unbound_dgs:
             return None

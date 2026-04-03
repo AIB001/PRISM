@@ -102,6 +102,7 @@ class FEPAnalyzer:
         allow_mock: bool = False,  # For testing without alchemlyb
         skip_bootstrap: bool = False,
         skip_time_convergence: bool = False,
+        bootstrap_n_jobs: int = 1,
     ):
         """
         Initialize FEP analyzer
@@ -126,6 +127,8 @@ class FEPAnalyzer:
             Skip bootstrap error estimation (saves ~10-30 min, default: False)
         skip_time_convergence : bool
             Skip time convergence analysis (saves ~5-10 min, default: False)
+        bootstrap_n_jobs : int
+            Number of parallel workers for bootstrap (default: 1 = serial)
         """
         self.bound_dirs = [Path(bound_dir)] if not isinstance(bound_dir, list) else [Path(d) for d in bound_dir]
         self.unbound_dirs = [Path(unbound_dir)] if not isinstance(unbound_dir, list) else [Path(d) for d in unbound_dir]
@@ -136,6 +139,7 @@ class FEPAnalyzer:
         self.allow_mock = allow_mock
         self.skip_bootstrap = skip_bootstrap
         self.skip_time_convergence = skip_time_convergence
+        self.bootstrap_n_jobs = bootstrap_n_jobs
 
         if len(self.bound_dirs) != len(self.unbound_dirs):
             raise ValueError("Number of bound and unbound directories must match")
@@ -253,6 +257,7 @@ class FEPAnalyzer:
                     estimator_cls,
                     n_bootstrap=50,
                     fraction=0.8,
+                    n_jobs=self.bootstrap_n_jobs,
                 )
 
             self.raw_data["lambda_profiles"] = lambda_profiles

@@ -164,6 +164,13 @@ For more information, see: https://github.com/your-repo/prism
         metavar="COMP",
         help="Energy components to analyze (default: elec vdw)",
     )
+    analysis.add_argument(
+        "--bootstrap-n-jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of parallel workers for bootstrap analysis (default: 1 = serial)",
+    )
 
     # Utility options
     utility = parser.add_argument_group("Utility Options")
@@ -286,6 +293,7 @@ def main() -> int:
                 temperature=args.temperature,
                 backend=args.backend,
                 show_progress=not args.no_progress,
+                bootstrap_n_jobs=args.bootstrap_n_jobs,
             )
 
             # Run analysis
@@ -335,6 +343,7 @@ def main() -> int:
                 estimator=estimators[0],
                 backend=args.backend,
                 energy_components=args.components,
+                bootstrap_n_jobs=args.bootstrap_n_jobs,
             )
 
             # Run analysis

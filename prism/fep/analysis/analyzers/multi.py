@@ -100,6 +100,7 @@ class FEPMultiEstimatorAnalyzer:
         skip_bootstrap: bool = False,
         skip_time_convergence: bool = False,
         cache_file: Optional[Union[str, Path]] = None,
+        bootstrap_n_jobs: int = 1,
     ):
         """
         Initialize multi-estimator analyzer
@@ -127,6 +128,8 @@ class FEPMultiEstimatorAnalyzer:
             If provided and file exists, results will be loaded from cache
             instead of re-running analysis. After analysis, results will be
             saved to this file for future use.
+        bootstrap_n_jobs : int, optional
+            Number of parallel workers for bootstrap (default: 1 = serial)
 
         Raises
         ------
@@ -153,6 +156,7 @@ class FEPMultiEstimatorAnalyzer:
         self.skip_bootstrap = skip_bootstrap
         self.skip_time_convergence = skip_time_convergence
         self.cache_file = Path(cache_file) if cache_file else None
+        self.bootstrap_n_jobs = bootstrap_n_jobs
 
         # Validate estimators
         for estimator_name in self.estimators:
@@ -328,6 +332,7 @@ class FEPMultiEstimatorAnalyzer:
                         estimator_class,
                         n_bootstrap=50,
                         fraction=0.8,
+                        n_jobs=self.bootstrap_n_jobs,
                     )
                 except Exception as exc:
                     self.logger.warning(f"Bootstrap analysis failed for {estimator_name}: {exc}")
