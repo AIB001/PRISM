@@ -264,7 +264,6 @@ def main() -> int:
         logger.info(f"Unbound directory: {args.unbound_dir}")
         if multi_mode:
             logger.info(f"Estimators: {', '.join(estimators)}")
-            logger.info(f"Parallel execution: {args.parallel}")
         else:
             logger.info(f"Estimator: {estimators[0]}")
         logger.info(f"Temperature: {args.temperature} K")
@@ -281,8 +280,8 @@ def main() -> int:
 
             # Create multi-estimator analyzer
             analyzer = FEPMultiEstimatorAnalyzer(
-                bound_dir=args.bound_dir,
-                unbound_dir=args.unbound_dir,
+                bound_dirs=args.bound_dir,
+                unbound_dirs=args.unbound_dir,
                 estimators=estimators,
                 temperature=args.temperature,
                 backend=args.backend,
