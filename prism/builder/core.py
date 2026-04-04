@@ -196,6 +196,7 @@ class PRISMBuilder(
             "gaff2",
             "openff",
             "cgenff",
+            "charmm-gui",
             "opls",
             "mmff",
             "match",
@@ -203,7 +204,7 @@ class PRISMBuilder(
             "rtf",
         ]:
             raise ValueError(
-                f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'opls', 'mmff', 'match', 'hybrid', or 'rtf'"
+                f"Unsupported ligand force field: {self.ligand_forcefield}. Use 'gaff', 'gaff2', 'openff', 'cgenff', 'charmm-gui', 'opls', 'mmff', 'match', 'hybrid', or 'rtf'"
             )
 
         # Validate cgenff requires forcefield_path
@@ -217,6 +218,20 @@ class PRISMBuilder(
             if len(self.forcefield_paths) != expected_count:
                 raise ValueError(
                     f"CGenFF requires one --forcefield-path per ligand. Expected {expected_count} (ligand_paths={self.ligand_count}"
+                    f"{', +1 mutant' if fep_mode and mutant_ligand else ''}), got {len(self.forcefield_paths)}"
+                )
+
+        # Validate charmm-gui requires forcefield_path
+        if self.ligand_forcefield == "charmm-gui":
+            if not self.forcefield_paths:
+                raise ValueError(
+                    "CHARMM-GUI force field requires --forcefield-path to specify the CHARMM-GUI output directory"
+                )
+            # In FEP mode, mutant_ligand is separate from ligand_paths
+            expected_count = self.ligand_count + (1 if fep_mode and mutant_ligand else 0)
+            if len(self.forcefield_paths) != expected_count:
+                raise ValueError(
+                    f"CHARMM-GUI requires one --forcefield-path per ligand. Expected {expected_count} (ligand_paths={self.ligand_count}"
                     f"{', +1 mutant' if fep_mode and mutant_ligand else ''}), got {len(self.forcefield_paths)}"
                 )
 

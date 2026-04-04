@@ -28,6 +28,7 @@ from ..forcefield.gaff import GAFFForceFieldGenerator
 from ..forcefield.gaff2 import GAFF2ForceFieldGenerator
 from ..forcefield.openff import OpenFFForceFieldGenerator
 from ..forcefield.cgenff import CGenFFForceFieldGenerator
+from ..forcefield.charmm_gui import CHARMMGUIForceFieldGenerator
 from ..forcefield.opls_aa import OPLSAAForceFieldGenerator
 from ..forcefield.swissparam import (
     MMFFForceFieldGenerator,
@@ -52,6 +53,8 @@ class LigandForceFieldMixin:
             ff_suffix = "openff2gmx"
         elif self.ligand_forcefield == "cgenff":
             ff_suffix = "cgenff2gmx"
+        elif self.ligand_forcefield == "charmm-gui":
+            ff_suffix = "charmm2gmx"
         elif self.ligand_forcefield == "opls":
             ff_suffix = "opls2gmx"
         elif self.ligand_forcefield in ["mmff", "match", "hybrid"]:
@@ -109,10 +112,16 @@ class LigandForceFieldMixin:
                     overwrite=self.overwrite,
                 )
             elif self.ligand_forcefield == "cgenff":
-                # For CGenFF, use the corresponding forcefield_path for this ligand
+                # CGenFF website format (PDB+TOP files from cgenff.com)
                 cgenff_dir = self.forcefield_paths[ligand_idx] if self.forcefield_paths else None
                 generator = CGenFFForceFieldGenerator(
                     ligand_path, temp_output_dir, cgenff_dir=cgenff_dir, overwrite=self.overwrite
+                )
+            elif self.ligand_forcefield == "charmm-gui":
+                # CHARMM-GUI format (ITP files from charmm-gui.org)
+                charmm_gui_dir = self.forcefield_paths[ligand_idx] if self.forcefield_paths else None
+                generator = CHARMMGUIForceFieldGenerator(
+                    ligand_path, temp_output_dir, charmm_gui_dir=charmm_gui_dir, overwrite=self.overwrite
                 )
             elif self.ligand_forcefield == "opls":
                 generator = OPLSAAForceFieldGenerator(

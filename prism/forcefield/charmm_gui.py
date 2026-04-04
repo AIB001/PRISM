@@ -209,16 +209,22 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
         self.pdb_file = None
         self.gro_file = None
 
-        # Priority: GRO > PDB > other structure files
+        # Priority: GRO > ligandrm.pdb > other PDB > other structure files
+        # ligandrm.pdb is the CHARMM-GUI processed PDB with correct atom names
         for ext in [".gro", ".pdb", ".crd"]:
             structure_files = list(self.gromacs_dir.glob(f"*{ext}"))
             if structure_files:
                 if ext == ".gro":
                     self.gro_file = structure_files[0]
+                    print(f"  Found structure file: {structure_files[0].name}")
+                    break
                 elif ext == ".pdb":
-                    self.pdb_file = structure_files[0]
-                print(f"  Found structure file: {structure_files[0].name}")
-                break
+                    # Prefer ligandrm.pdb over other PDB files
+                    # Sort to ensure ligandrm.pdb comes first if it exists
+                    structure_files.sort(key=lambda f: 1 if "ligandrm" in f.name.lower() else 0)
+                    self.pdb_file = structure_files[-1]  # Get the last one (ligandrm.pdb if exists)
+                    print(f"  Found PDB file: {self.pdb_file.name}")
+                    break
 
         # Also check parent directories for structure files
         if not self.gro_file and not self.pdb_file:
@@ -227,9 +233,14 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
                 if structure_files:
                     if ext == ".gro":
                         self.gro_file = structure_files[0]
+                        print(f"  Found structure file in parent dir: {structure_files[0].name}")
+                        break
                     elif ext == ".pdb":
-                        self.pdb_file = structure_files[0]
-                    print(f"  Found structure file in parent dir: {structure_files[0].name}")
+                        # Prefer ligandrm.pdb over other PDB files
+                        # Sort to ensure ligandrm.pdb comes first if it exists
+                        structure_files.sort(key=lambda f: 1 if "ligandrm" in f.name.lower() else 0)
+                    self.pdb_file = structure_files[-1]  # Get the last one (ligandrm.pdb if exists)
+                    print(f"  Found PDB file in parent dir: {self.pdb_file.name}")
                     break
 
     def _read_itp_file(self):

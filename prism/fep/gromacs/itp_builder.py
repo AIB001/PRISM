@@ -165,6 +165,8 @@ class ITPBuilder:
         hybrid_itp: str,
         ligand_a_itp: str,
         ligand_b_itp: str,
+        atom_types_a: Optional[Dict[int, str]] = None,
+        atom_types_b: Optional[Dict[int, str]] = None,
     ) -> Dict[str, List]:
         """
         Reconstruct complete hybrid bonded terms from a hybrid atoms-only ITP and
@@ -180,6 +182,14 @@ class ITPBuilder:
         source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text())
         source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text())
 
+        # Remap atom types from source IDs to hybrid IDs
+        hybrid_atom_types_a = None
+        hybrid_atom_types_b = None
+        if atom_types_a:
+            hybrid_atom_types_a = cls._remap_atom_types_to_hybrid(atom_types_a, source_a["atom_names"], name_map_a)
+        if atom_types_b:
+            hybrid_atom_types_b = cls._remap_atom_types_to_hybrid(atom_types_b, source_b["atom_names"], name_map_b)
+
         hybrid_params: Dict[str, List] = {key: [] for key in cls._SECTION_ATOM_COUNT}
         for section in cls._SECTION_ATOM_COUNT:
             hybrid_params[section] = cls._merge_section_terms(
@@ -192,6 +202,8 @@ class ITPBuilder:
                 name_map_b=name_map_b,
                 dummy_in_a=dummy_in_a,
                 dummy_in_b=dummy_in_b,
+                atom_types_a=hybrid_atom_types_a,
+                atom_types_b=hybrid_atom_types_b,
             )
         return hybrid_params
 
@@ -203,6 +215,8 @@ class ITPBuilder:
         ligand_a_itp: str,
         ligand_b_itp: str,
         molecule_name: str = "HYB",
+        atom_types_a: Optional[Dict[int, str]] = None,
+        atom_types_b: Optional[Dict[int, str]] = None,
     ) -> Dict[str, List]:
         """
         Write a complete hybrid ITP using the atoms section from ``hybrid_itp``
@@ -211,7 +225,13 @@ class ITPBuilder:
         content = Path(hybrid_itp).read_text()
         hybrid_records = cls._parse_hybrid_atom_records(content)
         hybrid_atoms = [cls._record_to_hybrid_atom(record) for record in hybrid_records]
-        hybrid_params = cls.build_hybrid_params_from_itps(hybrid_itp, ligand_a_itp, ligand_b_itp)
+        hybrid_params = cls.build_hybrid_params_from_itps(
+            hybrid_itp,
+            ligand_a_itp,
+            ligand_b_itp,
+            atom_types_a=atom_types_a,
+            atom_types_b=atom_types_b,
+        )
         cls(hybrid_atoms, hybrid_params).write_itp(output_path, molecule_name=molecule_name)
         return hybrid_params
 
@@ -385,6 +405,8 @@ class ITPBuilder:
         name_map_b: Dict[str, int],
         dummy_in_a: Optional[set] = None,
         dummy_in_b: Optional[set] = None,
+        atom_types_a: Optional[Dict[int, str]] = None,
+        atom_types_b: Optional[Dict[int, str]] = None,
     ) -> List[Dict]:
         """Merge A/B section terms into hybrid interaction lines."""
         merged: Dict[Tuple, Dict[str, Optional[InteractionTerm]]] = {}
@@ -447,6 +469,43 @@ class ITPBuilder:
             else:
                 params_b = cls._zeroize_params(section, funct, list(term_a.params))  # type: ignore[union-attr]
 
+            # Special handling for CHARMM bonds/angles/dihedrals with atom type changes
+            # GROMACS cannot automatically perturb these when types differ
+            if section in {"bonds", "angles", "dihedrals"} and atom_types_a and atom_types_b:
+                if cls._has_type_changes(canonical_atoms, atom_types_a, atom_types_b):
+                    # For CHARMM-style terms (5-column format without parameters),
+                    # add explicit zero parameters to avoid GROMACS perturbation errors
+                    if section == "bonds":
+                        # funct 1: b0, kb
+                        if not params_a:
+                            params_a = ["0.0", "0.0"]
+                        else:
+                            params_a = cls._zeroize_params(section, funct, params_a)
+                        if not params_b:
+                            params_b = ["0.0", "0.0"]
+                        else:
+                            params_b = cls._zeroize_params(section, funct, params_b)
+                    elif section == "angles":
+                        # funct 5: theta0, cth, ub0, cub (Urey-Bradley)
+                        if not params_a:
+                            params_a = ["0.0", "0.0", "0.0", "0.0"]
+                        else:
+                            params_a = cls._zeroize_params(section, funct, params_a)
+                        if not params_b:
+                            params_b = ["0.0", "0.0", "0.0", "0.0"]
+                        else:
+                            params_b = cls._zeroize_params(section, funct, params_b)
+                    elif section == "dihedrals":
+                        # funct 9: phi0, cp, mult
+                        if not params_a:
+                            params_a = ["0.0", "0.0", "1"]
+                        else:
+                            params_a = cls._zeroize_params(section, funct, params_a)
+                        if not params_b:
+                            params_b = ["0.0", "0.0", "1"]
+                        else:
+                            params_b = cls._zeroize_params(section, funct, params_b)
+
             output.append(
                 {
                     "atoms": canonical_atoms,
@@ -466,6 +525,45 @@ class ITPBuilder:
         if section == "angles":
             return atoms if atoms[0] <= atoms[2] else atoms[::-1]
         return atoms if atoms <= atoms[::-1] else atoms[::-1]
+
+    @staticmethod
+    def _has_type_changes(atoms: Tuple[int, ...], atom_types_a: Dict[int, str], atom_types_b: Dict[int, str]) -> bool:
+        """Check if any atoms in the interaction have different types in A vs B states."""
+        for atom_id in atoms:
+            type_a = atom_types_a.get(atom_id)
+            type_b = atom_types_b.get(atom_id)
+            if type_a and type_b and type_a != type_b:
+                return True
+        return False
+
+    @staticmethod
+    def _remap_atom_types_to_hybrid(
+        source_atom_types: Dict[int, str], source_atom_names: Dict[int, str], name_map: Dict[str, int]
+    ) -> Dict[int, str]:
+        """
+        Remap atom types from source ligand IDs to hybrid IDs.
+
+        Parameters
+        ----------
+        source_atom_types : Dict[int, str]
+            Atom types indexed by source ligand atom IDs
+        source_atom_names : Dict[int, str]
+            Atom names indexed by source ligand atom IDs
+        name_map : Dict[str, int]
+            Mapping from atom names to hybrid IDs
+
+        Returns
+        -------
+        Dict[int, str]
+            Atom types indexed by hybrid atom IDs
+        """
+        hybrid_atom_types = {}
+        for source_id, atom_type in source_atom_types.items():
+            atom_name = source_atom_names.get(source_id)
+            if atom_name and atom_name in name_map:
+                hybrid_id = name_map[atom_name]
+                hybrid_atom_types[hybrid_id] = atom_type
+        return hybrid_atom_types
 
     @staticmethod
     def _parameter_signature(section: str, funct: int, params: List[str]) -> Tuple[str, ...]:

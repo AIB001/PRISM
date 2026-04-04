@@ -121,12 +121,18 @@ class HybridPackageBuilder:
             ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
             ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
 
+            # Extract atom types for CHARMM force field dihedral handling
+            atom_types_a = self._parse_atom_types_from_itp(ligand_a_itp)
+            atom_types_b = self._parse_atom_types_from_itp(ligand_b_itp)
+
             ITPBuilder.write_complete_hybrid_itp(
                 output_path=str(hybrid_itp_output),
                 hybrid_itp=str(hybrid_itp_output),
                 ligand_a_itp=ligand_a_itp,
                 ligand_b_itp=ligand_b_itp,
                 molecule_name=self.molecule_name,
+                atom_types_a=atom_types_a,
+                atom_types_b=atom_types_b,
             )
             normalized_itp = hybrid_itp_output.read_text()
 
@@ -283,6 +289,36 @@ class HybridPackageBuilder:
             parts = stripped.split()
             atomtypes[parts[0]] = stripped
         return atomtypes
+
+    def _parse_atom_types_from_itp(self, itp_path: str) -> Dict[int, str]:
+        """
+        Parse atom types from ligand ITP file.
+
+        Returns
+        -------
+        Dict[int, str]
+            Mapping of atom ID to atom type
+        """
+        atom_types = {}
+        in_atoms = False
+        for line in Path(itp_path).read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if not in_atoms or not stripped or stripped.startswith(";"):
+                continue
+            parts = stripped.split()
+            if len(parts) >= 2:
+                try:
+                    atom_id = int(parts[0])
+                    atom_type = parts[1]
+                    atom_types[atom_id] = atom_type
+                except ValueError:
+                    continue
+        return atom_types
 
     def _build_cgenff_hybrid_bonded_itp(
         self,

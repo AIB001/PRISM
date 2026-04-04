@@ -155,6 +155,22 @@ class FEPWorkflowMixin:
             )
             mapping = mapper.map(ref_atoms, mut_atoms)
 
+            # Debug: Print mapping results
+            print(f"  Debug: Mapping results:")
+            print(f"    Common: {len(mapping.common)}")
+            print(f"    Transformed A: {len(mapping.transformed_a)}")
+            print(f"    Transformed B: {len(mapping.transformed_b)}")
+            print(f"    Surrounding A: {len(mapping.surrounding_a)}")
+            print(f"    Surrounding B: {len(mapping.surrounding_b)}")
+            if mapping.transformed_a:
+                print(f"    Transformed A atoms:")
+                for atom in mapping.transformed_a:
+                    print(f"      {atom.name}: type={atom.atom_type}, charge={atom.charge}")
+            if mapping.transformed_b:
+                print(f"    Transformed B atoms:")
+                for atom in mapping.transformed_b:
+                    print(f"      {atom.name}: type={atom.atom_type}, charge={atom.charge}")
+
             # Export an interactive mapping report into the final FEP output
             # so CLI users can inspect the hybridization result without running
             # a separate visualization helper.
@@ -192,6 +208,11 @@ class FEPWorkflowMixin:
             )
 
             hybrid_atoms = hybrid_builder.build(mapping, params_a, params_b, ref_atoms, mut_atoms)
+            print(f"  Debug: hybrid_atoms count = {len(hybrid_atoms)}")
+            transformed_atoms = [a for a in hybrid_atoms if a.name.endswith("A") or a.name.endswith("B")]
+            print(f"  Debug: transformed atoms with A/B suffix: {len(transformed_atoms)}")
+            for atom in transformed_atoms:
+                print(f"    {atom.name}: A_type={atom.state_a_type}, B_type={atom.state_b_type}")
 
             # Build hybrid bonded parameters from source ITPs
             # First write a temporary atoms-only ITP
@@ -201,12 +222,21 @@ class FEPWorkflowMixin:
 
             # Then build complete hybrid ITP with bonded terms
             hybrid_itp = os.path.join(hybrid_output, "hybrid.itp")
+            # Extract atom types for CHARMM force field dihedral handling
+            from prism.fep.modeling.hybrid_package import HybridPackageBuilder
+
+            hybrid_pkg_builder = HybridPackageBuilder()
+            atom_types_a = hybrid_pkg_builder._parse_atom_types_from_itp(os.path.join(ref_ff_dir, "LIG.itp"))
+            atom_types_b = hybrid_pkg_builder._parse_atom_types_from_itp(os.path.join(mut_ff_dir, "LIG.itp"))
+
             hybrid_params = ITPBuilder.write_complete_hybrid_itp(
                 output_path=hybrid_itp,
                 hybrid_itp=temp_itp,
                 ligand_a_itp=os.path.join(ref_ff_dir, "LIG.itp"),
                 ligand_b_itp=os.path.join(mut_ff_dir, "LIG.itp"),
                 molecule_name="HYB",
+                atom_types_a=atom_types_a,
+                atom_types_b=atom_types_b,
             )
             print(f"  Debug: hybrid.itp written: {os.path.exists(hybrid_itp)}")
             if os.path.exists(hybrid_itp):
@@ -307,7 +337,9 @@ class FEPWorkflowMixin:
         html_ref_atoms = ref_atoms
         html_mut_atoms = mut_atoms
 
-        if getattr(self, "ligand_forcefield", "").lower() == "cgenff" and getattr(self, "forcefield_paths", None):
+        # Check if using CGenFF or CHARMM-GUI force field (both have ITP files)
+        lig_ff_lower = getattr(self, "ligand_forcefield", "").lower()
+        if lig_ff_lower in ["cgenff", "charmm-gui"] and getattr(self, "forcefield_paths", None):
             try:
                 from ..fep.io import read_ligand_from_prism
                 from ..fep.core.mapping import DistanceAtomMapper
@@ -323,7 +355,7 @@ class FEPWorkflowMixin:
                     charge_reception=self.charge_reception,
                 ).map(html_ref_atoms, html_mut_atoms)
             except Exception as exc:
-                print_warning(f"Failed to regenerate CGenFF mapping HTML inputs: {exc}")
+                print_warning(f"Failed to regenerate {lig_ff_lower} mapping HTML inputs: {exc}")
 
         html_config = None
         if self.fep_config:
@@ -367,11 +399,16 @@ class FEPWorkflowMixin:
     def _describe_mapping_forcefield(self, ff_type: str) -> str:
         """Return a user-facing force-field label for mapping HTML."""
         base = str(ff_type).upper()
-        if getattr(self, "ligand_forcefield", "").lower() != "cgenff":
+        lig_ff_lower = getattr(self, "ligand_forcefield", "").lower()
+
+        # Handle both "cgenff" and "charmm-gui" force field types
+        if lig_ff_lower not in ["cgenff", "charmm-gui"]:
             return base
 
         ff_paths = [Path(p) for p in (getattr(self, "forcefield_paths", None) or [])]
         if ff_paths and all((path / "charmm36.ff" / "charmm36.itp").exists() for path in ff_paths):
+            return "CGENFF (CHARMM-GUI)"
+        elif ff_paths and all((path / "gromacs" / "LIG.itp").exists() for path in ff_paths):
             return "CGENFF (CHARMM-GUI)"
         return "CGENFF (WEBSITE)"
 
@@ -832,10 +869,15 @@ class FEPWorkflowMixin:
         original_ligands = self.ligand_paths
         original_output = self.output_dir
         original_lig_ff_dirs = self.lig_ff_dirs
+        original_ff_paths = self.forcefield_paths
 
         # Set up for mutant ligand
         self.ligand_paths = [mutant_ligand]
         self.output_dir = output_dir
+        # Use the second forcefield_path for mutant ligand (index 1)
+        # In FEP mode: forcefield_paths = [ref_ff, mut_ff]
+        if self.forcefield_paths and len(self.forcefield_paths) > 1:
+            self.forcefield_paths = [self.forcefield_paths[1]]
 
         try:
             # Generate FF
@@ -845,3 +887,4 @@ class FEPWorkflowMixin:
             self.ligand_paths = original_ligands
             self.output_dir = original_output
             self.lig_ff_dirs = original_lig_ff_dirs
+            self.forcefield_paths = original_ff_paths
