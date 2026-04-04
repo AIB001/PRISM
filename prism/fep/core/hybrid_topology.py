@@ -40,6 +40,9 @@ class HybridAtom:
         Atomic mass for state A
     mass_b : Optional[float], optional
         Atomic mass for state B (for pmx protein mutation topologies)
+    is_perturbed : bool, optional
+        Whether this atom is perturbed (transformed or surrounding).
+        If True, B-state columns MUST be written even if A/B values are identical.
     """
 
     name: str
@@ -52,6 +55,7 @@ class HybridAtom:
     mass: float = 0.0
     mass_b: Optional[float] = None
     name_b: Optional[str] = None
+    is_perturbed: bool = False
 
 
 @dataclass
@@ -239,6 +243,7 @@ class HybridTopologyBuilder:
                     state_b_charge=0.0,
                     element=atom_a.element,
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    is_perturbed=True,  # MUST write B-state columns
                 )
             )
             index += 1
@@ -257,6 +262,7 @@ class HybridTopologyBuilder:
                     state_b_charge=atom_b.charge,
                     element=atom_b.element,
                     mass=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
+                    is_perturbed=True,  # MUST write B-state columns
                 )
             )
             index += 1
@@ -275,6 +281,7 @@ class HybridTopologyBuilder:
                     state_b_charge=atom_b.charge,  # MUST have chargeB (different!)
                     element=atom_a.element,
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    is_perturbed=True,  # MUST write B-state columns
                 )
             )
             index += 1

@@ -87,7 +87,11 @@ class ITPBuilder:
             f.write("; Name            nrexcl\n")
             f.write(f"{molecule_name:16s}     3\n\n")
 
-            f.write(self._get_atoms_section())
+            atoms_section = self._get_atoms_section()
+            f.write(atoms_section)
+
+            # Validate that at least one atom has B-state parameters
+            self._validate_perturbed_atoms_exist(atoms_section)
 
             if self.hybrid_params.get("bonds"):
                 f.write(self._get_interaction_section("bonds", ";  ai    aj funct"))
@@ -129,8 +133,20 @@ class ITPBuilder:
             line = f"{atom.index:6d} {atom.state_a_type:>10s}      1     LIG {atom.name:>5s}      1 "
             line += f"{atom.state_a_charge:10.6f} {atom.mass:10.5f}"
 
+            # Write B-state columns if:
+            # 1. Atom is marked as perturbed (transformed/surrounding), OR
+            # 2. Type differs, OR
+            # 3. Charge differs, OR
+            # 4. Mass differs
             if atom.state_b_type is not None and atom.state_b_charge is not None:
-                if atom.state_b_type != atom.state_a_type or abs(atom.state_b_charge - atom.state_a_charge) > 1e-6:
+                should_write_b = (
+                    getattr(atom, "is_perturbed", False)  # Perturbed atoms always write B
+                    or atom.state_b_type != atom.state_a_type
+                    or abs(atom.state_b_charge - atom.state_a_charge) > 1e-6
+                    or (atom.mass_b is not None and abs(atom.mass_b - atom.mass) > 1e-6)
+                )
+
+                if should_write_b:
                     line += f" {atom.state_b_type:>10s} {atom.state_b_charge:10.6f}"
                     mass_b = atom.mass_b if atom.mass_b is not None else atom.mass
                     line += f" {mass_b:10.5f}"
@@ -139,6 +155,53 @@ class ITPBuilder:
 
         lines.append("")
         return "\n".join(lines) + "\n"
+
+    def _validate_perturbed_atoms_exist(self, atoms_section: str) -> None:
+        """
+        Validate that at least one atom has B-state parameters.
+
+        This ensures the hybrid topology actually represents a transformation.
+        If no atoms have typeB/chargeB/massB, the FEP calculation is meaningless.
+
+        Parameters
+        ----------
+        atoms_section : str
+            The generated [ atoms ] section text
+
+        Raises
+        ------
+        ValueError
+            If no atoms have B-state parameters
+        """
+        # Count lines with B-state columns (more than 8 fields)
+        b_state_count = 0
+        for line in atoms_section.split("\n"):
+            if line.strip() and not line.strip().startswith(";"):
+                fields = line.split()
+                if len(fields) > 8:  # Has typeB, chargeB, massB
+                    b_state_count += 1
+
+        if b_state_count == 0:
+            total_atoms = len(self.hybrid_atoms)
+            perturbed_count = sum(1 for a in self.hybrid_atoms if getattr(a, "is_perturbed", False))
+
+            error_msg = (
+                f"FEP validation error: No atoms have B-state parameters!\n"
+                f"  Total atoms: {total_atoms}\n"
+                f"  Atoms marked as perturbed: {perturbed_count}\n"
+                f"  Atoms with B-state columns written: 0\n\n"
+                f"This indicates a problem with the atom mapping or charge equalization.\n"
+                f"Possible causes:\n"
+                f"  1. All atoms classified as 'common' with identical A/B parameters\n"
+                f"  2. Charge redistribution eliminated all differences\n"
+                f"  3. Mapping configuration too strict (try increasing charge_cutoff)\n\n"
+                f"Suggestions:\n"
+                f"  - Check mapping results in mapping.html\n"
+                f"  - Verify ligands A and B are actually different\n"
+                f"  - Try charge_strategy='none' to preserve original charges\n"
+                f"  - Increase charge_cutoff (e.g., from 0.05 to 0.1)\n"
+            )
+            raise ValueError(error_msg)
 
     def _get_interaction_section(self, section: str, header: str) -> str:
         """Generate a bonded interaction section."""
@@ -237,6 +300,10 @@ class ITPBuilder:
 
     @staticmethod
     def _record_to_hybrid_atom(record: HybridAtomRecord) -> HybridAtom:
+        # Infer is_perturbed from the presence of B-state parameters
+        # If record has B-state type/charge, it's perturbed
+        is_perturbed = record.state_b_type is not None and record.state_b_charge is not None
+
         return HybridAtom(
             name=record.name,
             name_b=record.name_b,
@@ -247,6 +314,7 @@ class ITPBuilder:
             state_b_charge=record.state_b_charge,
             mass=record.mass,
             mass_b=record.mass_b,
+            is_perturbed=is_perturbed,
         )
 
     @classmethod
