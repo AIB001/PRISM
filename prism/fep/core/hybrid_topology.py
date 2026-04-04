@@ -214,6 +214,17 @@ class HybridTopologyBuilder:
                     print(f"  charge_strategy={self.charge_strategy}")
 
                 # Common atoms: typeA = typeB, chargeA = chargeB (after averaging)
+                # Only set B-state parameters if charge_strategy == "none"
+                # Otherwise, set to None to prevent B-state columns from being written
+                if self.charge_strategy == "none":
+                    # Keep original charges for both states
+                    state_b_type = atom_a.atom_type
+                    state_b_charge = atom_a.charge
+                else:
+                    # Use mean charge for state A, no B-state parameters
+                    state_b_type = None
+                    state_b_charge = None
+
                 self.hybrid_atoms.append(
                     HybridAtom(
                         name=atom_a.name,
@@ -221,8 +232,8 @@ class HybridTopologyBuilder:
                         index=index,
                         state_a_type=atom_a.atom_type,
                         state_a_charge=charge,
-                        state_b_type=atom_a.atom_type,  # Same type
-                        state_b_charge=charge,  # Same charge
+                        state_b_type=state_b_type,  # None for common when charge_strategy != "none"
+                        state_b_charge=state_b_charge,  # None for common when charge_strategy != "none"
                         element=atom_a.element,
                         mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
                     )

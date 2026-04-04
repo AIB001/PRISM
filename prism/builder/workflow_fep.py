@@ -140,9 +140,9 @@ class FEPWorkflowMixin:
             print(f"    Reference coords: {ref_mapping_coord_source}")
             print(f"    Mutant coords:    {mut_mapping_coord_source}")
 
-            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_mapping_coord_source)
+            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_mapping_coord_source, state="a")
 
-            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_mapping_coord_source)
+            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_mapping_coord_source, state="b")
 
             # Perform atom mapping
             from ..fep.core.mapping import DistanceAtomMapper
@@ -170,18 +170,6 @@ class FEPWorkflowMixin:
                 print(f"    Transformed B atoms:")
                 for atom in mapping.transformed_b:
                     print(f"      {atom.name}: type={atom.atom_type}, charge={atom.charge}")
-
-            # Export an interactive mapping report into the final FEP output
-            # so CLI users can inspect the hybridization result without running
-            # a separate visualization helper.
-            self._generate_fep_mapping_html(
-                output_dir=hybrid_output,
-                mapping=mapping,
-                ref_atoms=ref_atoms,
-                mut_atoms=mut_atoms,
-                ref_coord_source=ref_visual_coord_source,
-                mut_coord_source=mut_visual_coord_source,
-            )
 
             # Build hybrid topology
             hybrid_builder = HybridTopologyBuilder(charge_strategy=self.charge_strategy)
@@ -248,6 +236,16 @@ class FEPWorkflowMixin:
             hybrid_gro = os.path.join(hybrid_output, "hybrid.gro")
             self._generate_hybrid_gro(hybrid_gro, hybrid_atoms, mapping, ref_ff_dir, mut_ff_dir)
             print_success(f"Hybrid structure: {hybrid_gro}")
+
+            # Export an interactive mapping report into the final FEP output
+            # so CLI users can inspect the hybridization result without running
+            # a separate visualization helper.
+            # Note: Called after hybrid topology creation to ensure hybrid.itp and hybrid.gro exist
+            self._generate_fep_mapping_html(
+                output_dir=hybrid_output,
+                ref_coord_source=ref_visual_coord_source,
+                mut_coord_source=mut_visual_coord_source,
+            )
 
             # Phase 4: Create FEP scaffold with complete systems
             print_step(4, 5, "Creating FEP scaffold with complete systems")
@@ -316,9 +314,6 @@ class FEPWorkflowMixin:
     def _generate_fep_mapping_html(
         self,
         output_dir: str,
-        mapping,
-        ref_atoms: list,
-        mut_atoms: list,
         ref_coord_source: str,
         mut_coord_source: str,
     ) -> None:
@@ -330,32 +325,38 @@ class FEPWorkflowMixin:
             return
 
         html_path = os.path.join(output_dir, "mapping.html")
-        ref_pdb, ref_mol2 = self._prepare_mapping_visualization_inputs(ref_coord_source, output_dir, "ligand_a")
-        mut_pdb, mut_mol2 = self._prepare_mapping_visualization_inputs(mut_coord_source, output_dir, "ligand_b")
 
-        html_mapping = mapping
-        html_ref_atoms = ref_atoms
-        html_mut_atoms = mut_atoms
+        # Generate state-specific PDB files from hybrid topology
+        # This ensures RDKit molecules match the filtered topology atoms
+        hybrid_gro = os.path.join(output_dir, "hybrid.gro")
+        ref_pdb = self._generate_state_specific_pdb(hybrid_gro, output_dir, "hybrid_state_a", state="a")
+        mut_pdb = self._generate_state_specific_pdb(hybrid_gro, output_dir, "hybrid_state_b", state="b")
+        ref_mol2 = None  # MOL2 not needed for hybrid coordinates
+        mut_mol2 = None
 
-        # Check if using CGenFF or CHARMM-GUI force field (both have ITP files)
-        lig_ff_lower = getattr(self, "ligand_forcefield", "").lower()
-        if lig_ff_lower in ["cgenff", "charmm-gui"] and getattr(self, "forcefield_paths", None):
-            try:
-                from ..fep.io import read_ligand_from_prism
-                from ..fep.core.mapping import DistanceAtomMapper
+        # Regenerate atoms using hybrid coordinates for HTML visualization
+        # This ensures coordinates are aligned between hybrid topology and visualization
+        from ..fep.io import read_ligand_from_prism
 
-                ref_source_itp = self._resolve_cgenff_mapping_topology(self.forcefield_paths[0])
-                mut_source_itp = self._resolve_cgenff_mapping_topology(self.forcefield_paths[1])
-                html_ref_atoms = read_ligand_from_prism(ref_source_itp, ref_pdb)
-                html_mut_atoms = read_ligand_from_prism(mut_source_itp, mut_pdb)
-                html_mapping = DistanceAtomMapper(
-                    dist_cutoff=self.distance_cutoff,
-                    charge_cutoff=self.charge_cutoff,
-                    charge_common=self.charge_strategy,
-                    charge_reception=self.charge_reception,
-                ).map(html_ref_atoms, html_mut_atoms)
-            except Exception as exc:
-                print_warning(f"Failed to regenerate {lig_ff_lower} mapping HTML inputs: {exc}")
+        hybrid_itp = os.path.join(output_dir, "hybrid.itp")
+        hybrid_gro = os.path.join(output_dir, "hybrid.gro")
+
+        html_ref_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="a")
+        html_mut_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="b")
+
+        # Create new mapping from hybrid topology atoms (not use old mapping)
+        # This ensures consistency between hybrid atoms and state-specific PDBs
+        from ..fep.core.mapping import DistanceAtomMapper
+
+        html_mapper = DistanceAtomMapper(
+            dist_cutoff=self.distance_cutoff,
+            charge_cutoff=self.charge_cutoff,
+            charge_common=self.charge_strategy,
+            charge_reception=self.charge_reception,
+        )
+        html_mapping = html_mapper.map(html_ref_atoms, html_mut_atoms)
+
+        # Note: Using hybrid-aligned coordinates for all force fields to ensure consistency
 
         html_config = None
         if self.fep_config:
@@ -461,7 +462,133 @@ class FEPWorkflowMixin:
                     f"Failed to prepare PDB for mapping visualization from {source_path}: {exc}"
                 ) from exc
 
+        if suffix == ".gro":
+            # Convert GRO to PDB using simple conversion (MDAnalysis writes incorrect elements)
+            # Force custom conversion to ensure proper element symbols
+            pdb_path = Path(output_dir) / f"{stem}.pdb"
+            with open(source_path) as f:
+                lines = f.readlines()
+            with open(pdb_path, "w") as out:
+                # Skip header (first 2 lines) and footer (last line)
+                for i, line in enumerate(lines[2:-1]):
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        # GRO format: resid_resname atom_name atom_id x y z
+                        # resid and resname are combined (e.g., "1HYB")
+                        resid_resname = parts[0]
+                        atom_name = parts[1]
+                        atom_id = parts[2]
+                        x = float(parts[3]) * 10  # nm to Å
+                        y = float(parts[4]) * 10
+                        z = float(parts[5]) * 10 if len(parts) > 5 else 0.0
+                        # Split resid and resname
+                        # resid is the numeric part, resname is the alphabetic part
+                        resid = ""
+                        resname = ""
+                        for char in resid_resname:
+                            if char.isdigit():
+                                resid += char
+                            else:
+                                resname += char
+                        # Extract element symbol BEFORE modifying resname
+                        # Element is first character (uppercase), or first two if second is lowercase
+                        atom_element = atom_name[0].upper()
+                        if len(atom_name) > 1 and atom_name[1].islower():
+                            atom_element = atom_name[:2].capitalize()
+                        # Handle special cases
+                        if atom_name.upper().startswith("CL"):
+                            atom_element = "Cl"
+                        elif atom_name.upper().startswith("BR"):
+                            atom_element = "Br"
+                        # Write PDB format
+                        out.write(
+                            f"ATOM  {atom_id:>5} {atom_name:<4} {resname:>3} {resid:>4}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atom_element:>2}\n"
+                        )
+                out.write("END\n")
+            return str(pdb_path), None
+
         raise RuntimeError(f"Unsupported coordinate source for mapping visualization: {coord_source}")
+
+    def _generate_state_specific_pdb(self, gro_file: str, output_dir: str, stem: str, state: str = "a") -> str:
+        """
+        Generate state-specific PDB file from hybrid GRO file.
+
+        Filters atoms by state:
+        - State "a": Includes common atoms + transformed atoms ending with digit+"A" (e.g., "00A", "01A")
+        - State "b": Includes common atoms + transformed atoms ending with digit+"B" (e.g., "00B", "01B")
+
+        Common atoms don't follow the digit+A/B pattern (e.g., C0A, C02, H11).
+
+        Args:
+            gro_file: Path to hybrid GRO file
+            output_dir: Output directory
+            stem: Output file stem
+            state: "a" for state A, "b" for state B
+
+        Returns:
+            Path to generated PDB file
+        """
+
+        pdb_path = Path(output_dir) / f"{stem}.pdb"
+        with open(gro_file) as f:
+            lines = f.readlines()
+
+        with open(pdb_path, "w") as out:
+            # Skip header (first 2 lines) and footer (last line)
+            for i, line in enumerate(lines[2:-1]):
+                parts = line.split()
+                if len(parts) >= 5:
+                    # GRO format: resid_resname atom_name atom_id x y z
+                    resid_resname = parts[0]
+                    atom_name = parts[1]
+                    atom_id = parts[2]
+                    x = float(parts[3]) * 10  # nm to Å
+                    y = float(parts[4]) * 10
+                    z = float(parts[5]) * 10 if len(parts) > 5 else 0.0
+
+                    # Filter by state
+                    # Transformed atoms end with "A" or "B" (e.g., "00A", "01B", "C0EA", "O0MB")
+                    # Common atoms don't end with "A" or "B" (e.g., C0A, C02, H11)
+                    # Note: The pattern matches atoms where the LAST character is "A" or "B"
+                    is_transformed_a = atom_name.endswith("A")  # Ends with A (state-specific)
+                    is_transformed_b = atom_name.endswith("B")  # Ends with B (state-specific)
+                    is_common = not (is_transformed_a or is_transformed_b)
+
+                    if state == "a":
+                        # State A: include common atoms + transformed A atoms
+                        if not (is_common or is_transformed_a):
+                            continue
+                    else:  # state == "b"
+                        # State B: include common atoms + transformed B atoms
+                        if not (is_common or is_transformed_b):
+                            continue
+
+                    # Split resid and resname
+                    resid = ""
+                    resname = ""
+                    for char in resid_resname:
+                        if char.isdigit():
+                            resid += char
+                        else:
+                            resname += char
+
+                    # Extract element symbol
+                    atom_element = atom_name[0].upper()
+                    if len(atom_name) > 1 and atom_name[1].islower():
+                        atom_element = atom_name[:2].capitalize()
+                    # Handle special cases
+                    if atom_name.upper().startswith("CL"):
+                        atom_element = "Cl"
+                    elif atom_name.upper().startswith("BR"):
+                        atom_element = "Br"
+
+                    # Write PDB format
+                    out.write(
+                        f"ATOM  {atom_id:>5} {atom_name:<4} {resname:>3} {resid:>4}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atom_element:>2}\n"
+                    )
+            out.write("END\n")
+
+        return str(pdb_path)
 
     def _generate_hybrid_gro(
         self, output_gro: str, hybrid_atoms: list, _mapping: "AtomMapping", ref_ff_dir: str, mut_ff_dir: str
