@@ -277,6 +277,34 @@ class FEPWorkflowMixin:
             # Phase 5: Clean up intermediate build files
             print_step(5, 5, "Cleaning up intermediate build files")
 
+            # Preserve ligand force field directories for debugging before cleanup
+            ligand_ff_backup = os.path.join(fep_output, "GMX_PROLIG_FEP", "common", "ligand_ff")
+
+            # Save reference ligand FF
+            if os.path.exists(ref_ff_dir):
+                ref_backup = os.path.join(ligand_ff_backup, "reference")
+                os.makedirs(ref_backup, exist_ok=True)
+                shutil.copytree(
+                    ref_ff_dir,
+                    os.path.join(ref_backup, os.path.basename(ref_ff_dir)),
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                )
+                print(f"  ✓ Preserved reference ligand FF: {ref_backup}")
+
+            # Save mutant ligand FF
+            if os.path.exists(mut_ff_dir):
+                mut_backup = os.path.join(ligand_ff_backup, "mutant")
+                os.makedirs(mut_backup, exist_ok=True)
+                shutil.copytree(
+                    mut_ff_dir,
+                    os.path.join(mut_backup, os.path.basename(mut_ff_dir)),
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                )
+                print(f"  ✓ Preserved mutant ligand FF: {mut_backup}")
+
+            # Now clean up build directory
             build_dir = os.path.join(fep_output, "_build")
             if os.path.exists(build_dir):
                 shutil.rmtree(build_dir)
