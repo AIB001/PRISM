@@ -197,6 +197,19 @@ def write_fep_mdps(
     # Production time - check both fep and simulation sections
     prod_ns = fep_cfg.get("production_time_ns", sim_cfg.get("production_time_ns", 5))
 
+    forcefield_info = config.get("forcefield", prism_config.get("forcefield", {}))
+    if isinstance(forcefield_info, dict):
+        forcefield_name = str(forcefield_info.get("name", ""))
+    else:
+        forcefield_name = str(forcefield_info)
+    normalized_forcefield = forcefield_name.lower()
+    uses_cmap_runtime_guard = "charmm" in normalized_forcefield or normalized_forcefield == "amber19sb"
+
+    # CMAP force fields on hybrid systems are more fragile during the initial
+    # constrained NVT/NPT equilibration. Use a more conservative timestep there
+    # while keeping production and per-window NPT-short settings unchanged.
+    equil_dt = min(dt, 0.001) if uses_cmap_runtime_guard else dt
+
     # Get electrostatics and VDW parameters from PRISM config
     elec_cfg = prism_config.get("electrostatics", {})
     vdw_cfg = prism_config.get("vdw", {})
@@ -285,8 +298,8 @@ constraints             = none
     nvt_mdp = f"""; {leg_name} NVT - NVT Equilibration
 define              = -DPOSRES
 integrator          = md
-dt                  = {dt}
-nsteps              = {int(nvt_ps / dt)}
+dt                  = {equil_dt}
+nsteps              = {int(nvt_ps / equil_dt)}
 
 ; Output control
 nstxout             = 0
@@ -348,8 +361,8 @@ lincs-warnangle         = 30
     npt_mdp = f"""; {leg_name} NPT - NPT Equilibration
 define              = -DPOSRES
 integrator          = md
-dt                  = {dt}
-nsteps              = {int(npt_ps / dt)}
+dt                  = {equil_dt}
+nsteps              = {int(npt_ps / equil_dt)}
 
 ; Output control
 nstxout             = 0

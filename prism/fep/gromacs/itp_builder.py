@@ -228,6 +228,8 @@ class ITPBuilder:
         hybrid_itp: str,
         ligand_a_itp: str,
         ligand_b_itp: str,
+        ligand_a_structure: Optional[str] = None,
+        ligand_b_structure: Optional[str] = None,
         atom_types_a: Optional[Dict[int, str]] = None,
         atom_types_b: Optional[Dict[int, str]] = None,
     ) -> Dict[str, List]:
@@ -242,8 +244,8 @@ class ITPBuilder:
         dummy_in_a: set = {r.index for r in hybrid_records if r.state_a_type.startswith("DUM_")}
         dummy_in_b: set = {r.index for r in hybrid_records if (r.state_b_type or "").startswith("DUM_")}
 
-        source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text())
-        source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text())
+        source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text(), structure_file=ligand_a_structure)
+        source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text(), structure_file=ligand_b_structure)
 
         # Remap atom types from source IDs to hybrid IDs
         hybrid_atom_types_a = None
@@ -278,6 +280,8 @@ class ITPBuilder:
         ligand_a_itp: str,
         ligand_b_itp: str,
         molecule_name: str = "HYB",
+        ligand_a_structure: Optional[str] = None,
+        ligand_b_structure: Optional[str] = None,
         atom_types_a: Optional[Dict[int, str]] = None,
         atom_types_b: Optional[Dict[int, str]] = None,
     ) -> Dict[str, List]:
@@ -292,6 +296,8 @@ class ITPBuilder:
             hybrid_itp,
             ligand_a_itp,
             ligand_b_itp,
+            ligand_a_structure=ligand_a_structure,
+            ligand_b_structure=ligand_b_structure,
             atom_types_a=atom_types_a,
             atom_types_b=atom_types_b,
         )
@@ -403,7 +409,7 @@ class ITPBuilder:
         return map_a, map_b
 
     @classmethod
-    def _parse_source_itp(cls, content: str) -> Dict[str, Dict]:
+    def _parse_source_itp(cls, content: str, structure_file: Optional[str] = None) -> Dict[str, Dict]:
         """Parse atoms and bonded sections from a source ligand ITP."""
         atom_names: Dict[int, str] = {}
         sections: Dict[str, List[InteractionTerm]] = {key: [] for key in cls._SECTION_ATOM_COUNT}
@@ -459,7 +465,128 @@ class ITPBuilder:
             params = parts[atom_count + 1 :]
             sections[current_section].append(InteractionTerm(atoms=atom_indices, funct=funct, params=params))
 
+        atom_names = cls._remap_generic_atom_names(atom_names, sections.get("bonds", []), structure_file)
         return {"atom_names": atom_names, "sections": sections}
+
+    @classmethod
+    def _remap_generic_atom_names(
+        cls, atom_names: Dict[int, str], bond_terms: List[InteractionTerm], structure_file: Optional[str]
+    ) -> Dict[int, str]:
+        """
+        Remap generic source-I T P atom names onto the original MOL2 atom names.
+
+        OPLS/OpenFF source ITPs may use generator-local labels that do not match the
+        aligned ligand coordinates used for atom mapping. When a MOL2 template is
+        available, use graph isomorphism on the bond graph to recover the original
+        atom naming so bonded terms can be merged against the hybrid topology.
+        """
+        if not structure_file or not structure_file.lower().endswith(".mol2"):
+            return atom_names
+        if not atom_names or not bond_terms:
+            return atom_names
+
+        generic_to_mol2 = cls._map_generic_itp_atoms_to_mol2(atom_names, bond_terms, structure_file)
+        if not generic_to_mol2:
+            return atom_names
+
+        mol2_names = cls._read_mol2_atom_names(structure_file)
+        remapped = {}
+        for itp_idx, atom_name in atom_names.items():
+            mol2_idx = generic_to_mol2.get(int(itp_idx))
+            remapped[itp_idx] = mol2_names.get(mol2_idx, atom_name)
+        return remapped
+
+    @staticmethod
+    def _read_mol2_atom_names(mol2_file: str) -> Dict[int, str]:
+        names: Dict[int, str] = {}
+        with open(mol2_file, "r") as handle:
+            in_atoms = False
+            for line in handle:
+                stripped = line.strip()
+                if stripped.startswith("@<TRIPOS>ATOM"):
+                    in_atoms = True
+                    continue
+                if stripped.startswith("@<TRIPOS>") and in_atoms:
+                    break
+                if not in_atoms or not stripped:
+                    continue
+
+                parts = stripped.split()
+                if len(parts) < 2:
+                    continue
+                try:
+                    names[int(parts[0])] = parts[1]
+                except ValueError:
+                    continue
+        return names
+
+    @staticmethod
+    def _parse_mol2_bonds(mol2_file: str) -> List[Tuple[int, int]]:
+        bonds: List[Tuple[int, int]] = []
+        with open(mol2_file, "r") as handle:
+            in_bonds = False
+            for line in handle:
+                stripped = line.strip()
+                if stripped.startswith("@<TRIPOS>BOND"):
+                    in_bonds = True
+                    continue
+                if stripped.startswith("@<TRIPOS>") and in_bonds:
+                    break
+                if not in_bonds or not stripped:
+                    continue
+
+                parts = stripped.split()
+                if len(parts) < 4:
+                    continue
+                try:
+                    bonds.append((int(parts[1]), int(parts[2])))
+                except ValueError:
+                    continue
+        return bonds
+
+    @classmethod
+    def _map_generic_itp_atoms_to_mol2(
+        cls, atom_names: Dict[int, str], bond_terms: List[InteractionTerm], mol2_file: str
+    ) -> Optional[Dict[int, int]]:
+        try:
+            import networkx as nx
+        except Exception:
+            return None
+
+        itp_graph = nx.Graph()
+        for idx in atom_names:
+            itp_graph.add_node(int(idx))
+        for term in bond_terms:
+            ai, aj = int(term.atoms[0]), int(term.atoms[1])
+            itp_graph.add_edge(ai, aj)
+        for node in itp_graph.nodes:
+            itp_graph.nodes[node]["degree"] = itp_graph.degree[node]
+
+        mol2_names = cls._read_mol2_atom_names(mol2_file)
+        mol2_bonds = cls._parse_mol2_bonds(mol2_file)
+        if not mol2_names or not mol2_bonds:
+            return None
+
+        mol2_graph = nx.Graph()
+        for idx in mol2_names:
+            mol2_graph.add_node(int(idx))
+        for ai, aj in mol2_bonds:
+            mol2_graph.add_edge(ai, aj)
+        for node in mol2_graph.nodes:
+            mol2_graph.nodes[node]["degree"] = mol2_graph.degree[node]
+
+        matcher = nx.algorithms.isomorphism.GraphMatcher(
+            itp_graph,
+            mol2_graph,
+            node_match=lambda a, b: a.get("degree") == b.get("degree"),
+        )
+        if not matcher.is_isomorphic():
+            return None
+
+        mapping = {int(itp_idx): int(mol2_idx) for itp_idx, mol2_idx in matcher.mapping.items()}
+        if len(mapping) != len(atom_names):
+            return None
+        return mapping
 
     @classmethod
     def _merge_section_terms(

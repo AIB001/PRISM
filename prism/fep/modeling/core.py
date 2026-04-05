@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +146,7 @@ class FEPScaffoldBuilder:
         self._write_bound_leg(layout, receptor_path, ligand_seed_pdb)
         self._write_unbound_leg(layout, ligand_seed_pdb)
         self._replicate_repeat_layout(layout)
+        self._validate_scaffold_consistency(layout)
         script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(layout, receptor_path, hybrid_dir)
 
@@ -266,6 +268,7 @@ class FEPScaffoldBuilder:
 
         # Write scripts and manifest
         self._replicate_repeat_layout(layout)
+        self._validate_scaffold_consistency(layout)
         script_writer.write_root_scripts(layout, self.config)
         self._write_manifest(
             layout,
@@ -392,6 +395,89 @@ class FEPScaffoldBuilder:
         gro_file = hybrid_dir / self.hybrid_gro_filename
         if gro_file.exists():
             (layout.hybrid_dir / "ligand_seed.pdb").write_text(self.hybrid_builder._gro_to_pdb(gro_file))
+
+    def _validate_scaffold_consistency(self, layout: FEPScaffoldLayout) -> None:
+        """Fail fast when hybrid assets and staged leg coordinates disagree."""
+        hybrid_itp_atoms = self._count_hybrid_itp_atoms(layout.hybrid_dir / self.hybrid_itp_filename)
+        hybrid_gro_atoms = self._count_gro_atoms(layout.hybrid_dir / self.hybrid_gro_filename)
+
+        if hybrid_itp_atoms != hybrid_gro_atoms:
+            raise ValueError(
+                "Hybrid asset mismatch: "
+                f"`{layout.hybrid_dir / self.hybrid_itp_filename}` has {hybrid_itp_atoms} atoms, "
+                f"but `{layout.hybrid_dir / self.hybrid_gro_filename}` has {hybrid_gro_atoms}."
+            )
+
+        for leg_dir in (layout.bound_dir, layout.unbound_dir):
+            conf_gro = leg_dir / "input" / "conf.gro"
+            ligand_atoms = self._count_leading_residue_atoms(conf_gro)
+            if ligand_atoms != hybrid_itp_atoms:
+                raise ValueError(
+                    "Leg scaffold mismatch: "
+                    f"`{conf_gro}` starts with {ligand_atoms} ligand atoms, "
+                    f"but hybrid topology defines {hybrid_itp_atoms}."
+                )
+
+    @staticmethod
+    def _count_hybrid_itp_atoms(itp_path: Path) -> int:
+        if not itp_path.exists():
+            raise FileNotFoundError(f"Hybrid ITP not found: {itp_path}")
+
+        count = 0
+        in_atoms = False
+        for line in itp_path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if in_atoms and stripped and not stripped.startswith(";"):
+                count += 1
+        return count
+
+    @staticmethod
+    def _count_gro_atoms(gro_path: Path) -> int:
+        if not gro_path.exists():
+            raise FileNotFoundError(f"GRO file not found: {gro_path}")
+        lines = gro_path.read_text().splitlines()
+        if len(lines) < 2:
+            raise ValueError(f"Invalid GRO file: {gro_path}")
+        return int(lines[1].strip())
+
+    @staticmethod
+    def _count_leading_residue_atoms(gro_path: Path) -> int:
+        if not gro_path.exists():
+            raise FileNotFoundError(f"Coordinate file not found: {gro_path}")
+
+        lines = gro_path.read_text().splitlines()
+        if len(lines) < 3:
+            raise ValueError(f"Invalid GRO file: {gro_path}")
+
+        natoms = int(lines[1].strip())
+        atom_lines = lines[2 : 2 + natoms]
+        if not atom_lines:
+            return 0
+
+        def residue_key(line: str) -> tuple[str, str]:
+            resid = line[:5].strip()
+            resname = line[5:10].strip()
+            if resid or resname:
+                return resid, resname
+            parts = line.split()
+            token = parts[0] if parts else ""
+            match = re.match(r"^(\d+)([A-Za-z].*)$", token)
+            if match:
+                return match.group(1), match.group(2)
+            return "", token
+
+        first_key = residue_key(atom_lines[0])
+        count = 0
+        for line in atom_lines:
+            if residue_key(line) != first_key:
+                break
+            count += 1
+        return count
 
     def _iter_hybrid_assets(self, hybrid_dir: Path) -> Iterable[Path]:
         """Iterate over hybrid ligand asset files."""

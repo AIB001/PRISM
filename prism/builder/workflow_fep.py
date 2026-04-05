@@ -64,6 +64,11 @@ class FEPWorkflowMixin:
                 fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
             os.makedirs(fep_output, exist_ok=True)
 
+            root_md_dir = os.path.join(self.output_dir, "GMX_PROLIG_MD")
+            if os.path.isdir(root_md_dir) and not os.listdir(root_md_dir):
+                os.rmdir(root_md_dir)
+                print(f"  ✓ Removed empty directory: {root_md_dir}")
+
             # Phase 1: Build bound system with reference ligand
             print_step(1, 5, "Building bound system with reference ligand")
             bound_output = os.path.join(fep_output, "_build/bound_md")
@@ -223,6 +228,8 @@ class FEPWorkflowMixin:
                 ligand_a_itp=os.path.join(ref_ff_dir, "LIG.itp"),
                 ligand_b_itp=os.path.join(mut_ff_dir, "LIG.itp"),
                 molecule_name="HYB",
+                ligand_a_structure=ref_mapping_coord_source,
+                ligand_b_structure=mut_mapping_coord_source,
                 atom_types_a=atom_types_a,
                 atom_types_b=atom_types_b,
             )
@@ -234,7 +241,7 @@ class FEPWorkflowMixin:
 
             # Generate hybrid ligand structure file
             hybrid_gro = os.path.join(hybrid_output, "hybrid.gro")
-            self._generate_hybrid_gro(hybrid_gro, hybrid_atoms, mapping, ref_ff_dir, mut_ff_dir)
+            self._generate_hybrid_gro(hybrid_gro, hybrid_atoms, ref_atoms, mut_atoms)
             print_success(f"Hybrid structure: {hybrid_gro}")
 
             # Export an interactive mapping report into the final FEP output
@@ -276,77 +283,17 @@ class FEPWorkflowMixin:
 
             # Phase 5: Clean up intermediate build files
             print_step(5, 5, "Cleaning up intermediate build files")
-
-            # Preserve ligand force field directories for debugging
-            # We preserve both the _build ligand FF directories and copy to common/ligand_ff
-            build_dir = os.path.join(fep_output, "_build")
-            ligand_ff_backup = os.path.join(fep_output, "GMX_PROLIG_FEP", "common", "ligand_ff")
-
-            # Save reference ligand FF from _build (if exists)
-            if os.path.exists(build_dir):
-                bound_md_dir = os.path.join(build_dir, "bound_md")
-                unbound_md_dir = os.path.join(build_dir, "unbound_md")
-
-                # Find and preserve ligand FF directories in _build/bound_md
-                if os.path.exists(bound_md_dir):
-                    for lig_ff in Path(bound_md_dir).glob("LIG.*"):
-                        if lig_ff.is_dir():
-                            ref_backup = os.path.join(ligand_ff_backup, "reference", lig_ff.name)
-                            os.makedirs(ref_backup, exist_ok=True)
-                            shutil.copytree(
-                                str(lig_ff),
-                                ref_backup,
-                                dirs_exist_ok=True,
-                                ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                            )
-                            print(f"  ✓ Preserved reference ligand FF from _build: {ref_backup}")
-
-                # Find and preserve ligand FF directories in _build/unbound_md
-                if os.path.exists(unbound_md_dir):
-                    for lig_ff in Path(unbound_md_dir).glob("LIG.*"):
-                        if lig_ff.is_dir():
-                            mut_backup = os.path.join(ligand_ff_backup, "mutant", lig_ff.name)
-                            os.makedirs(mut_backup, exist_ok=True)
-                            shutil.copytree(
-                                str(lig_ff),
-                                mut_backup,
-                                dirs_exist_ok=True,
-                                ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                            )
-                            print(f"  ✓ Preserved mutant ligand FF from _build: {mut_backup}")
-
-                # Also copy from original ligand FF directories as backup
-                if os.path.exists(ref_ff_dir):
-                    ref_backup2 = os.path.join(ligand_ff_backup, "reference", os.path.basename(ref_ff_dir))
-                    os.makedirs(ref_backup2, exist_ok=True)
-                    shutil.copytree(
-                        ref_ff_dir,
-                        ref_backup2,
-                        dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                    )
-                    print(f"  ✓ Preserved reference ligand FF: {ref_backup2}")
-
-                if os.path.exists(mut_ff_dir):
-                    mut_backup2 = os.path.join(ligand_ff_backup, "mutant", os.path.basename(mut_ff_dir))
-                    os.makedirs(mut_backup2, exist_ok=True)
-                    shutil.copytree(
-                        mut_ff_dir,
-                        mut_backup2,
-                        dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                    )
-                    print(f"  ✓ Preserved mutant ligand FF: {mut_backup2}")
-
-                # Remove _build directory after preserving ligand FF
-                shutil.rmtree(build_dir)
-                print(f"  ✓ Removed build directory: {build_dir}")
+            self._cleanup_fep_build_artifacts(fep_output)
 
             # Also clean up any files in output_dir root (outside GMX_PROLIG_FEP)
             cleanup_items = [
                 os.path.join(self.output_dir, "mdps"),
             ]
             cleanup_items.extend(str(p) for p in Path(self.output_dir).glob("LIG.*") if p.is_dir())
+
+            root_md_dir = os.path.join(self.output_dir, "GMX_PROLIG_MD")
+            if os.path.isdir(root_md_dir) and not os.listdir(root_md_dir):
+                cleanup_items.append(root_md_dir)
 
             for item in cleanup_items:
                 if os.path.exists(item):
@@ -373,6 +320,22 @@ class FEPWorkflowMixin:
 
             traceback.print_exc()
             raise
+
+    def _cleanup_fep_build_artifacts(self, fep_output: str) -> None:
+        """Prune heavy intermediate system builds while keeping initial ligand FF outputs.
+
+        Keep `_build/.../LIG.*` directories as the canonical backup of the initial
+        reference/mutant ligand force fields. Remove nested `GMX_PROLIG_MD`
+        directories generated only for scaffold assembly.
+        """
+        build_dir = Path(fep_output) / "_build"
+        if not build_dir.exists():
+            return
+
+        for md_dir in sorted(build_dir.glob("**/GMX_PROLIG_MD")):
+            if md_dir.is_dir():
+                shutil.rmtree(md_dir)
+                print(f"  ✓ Removed intermediate system directory: {md_dir}")
 
     def _generate_fep_mapping_html(
         self,
@@ -695,9 +658,7 @@ class FEPWorkflowMixin:
 
         return str(pdb_path)
 
-    def _generate_hybrid_gro(
-        self, output_gro: str, hybrid_atoms: list, _mapping: "AtomMapping", ref_ff_dir: str, mut_ff_dir: str
-    ) -> None:
+    def _generate_hybrid_gro(self, output_gro: str, hybrid_atoms: list, ref_atoms: list, mut_atoms: list) -> None:
         """
         Generate hybrid ligand GRO file with dummy atoms
 
@@ -707,24 +668,13 @@ class FEPWorkflowMixin:
             Output path for hybrid GRO file
         hybrid_atoms : list
             List of HybridAtom objects from hybrid topology
-        mapping : AtomMapping
-            Atom mapping between reference and mutant ligands
-        ref_ff_dir : str
-            Reference ligand force field directory (contains LIG.gro)
-        mut_ff_dir : str
-            Mutant ligand force field directory (contains LIG.gro)
+        ref_atoms : list
+            Reference ligand atoms with coordinates already aligned to the mapping source
+        mut_atoms : list
+            Mutant ligand atoms with coordinates already aligned to the mapping source
         """
-
-        # Read reference and mutant ligand GRO files
-        ref_gro_path = os.path.join(ref_ff_dir, "LIG.gro")
-        mut_gro_path = os.path.join(mut_ff_dir, "LIG.gro")
-
-        ref_coords = self._parse_gro(ref_gro_path)
-        mut_coords = self._parse_gro(mut_gro_path)
-
-        # Build coordinate lookup by atom name
-        ref_coord_map = {atom["name"]: atom["coord"] for atom in ref_coords["atoms"]}
-        mut_coord_map = {atom["name"]: atom["coord"] for atom in mut_coords["atoms"]}
+        ref_coord_map = {atom.name: atom.coord for atom in ref_atoms}
+        mut_coord_map = {atom.name: atom.coord for atom in mut_atoms}
 
         # Generate hybrid coordinates
         hybrid_atoms_data = []
@@ -753,16 +703,7 @@ class FEPWorkflowMixin:
             f.write("Hybrid ligand structure generated by PRISM-FEP\n")
             f.write(f"{len(hybrid_atoms_data)}\n")
 
-            # Get residue number from reference ligand
-            if ref_coords["atoms"]:
-                # Parse the first atom line to get residue number
-                with open(ref_gro_path, "r") as ref_file:
-                    ref_lines = ref_file.readlines()
-                    first_atom_line = ref_lines[2]  # Skip title and atom count
-                    res_num_str = first_atom_line[0:5].strip()
-                    residue_number = int(res_num_str) if res_num_str else 1
-            else:
-                residue_number = 1
+            residue_number = 1
 
             for atom_data in hybrid_atoms_data:
                 idx = atom_data["index"]

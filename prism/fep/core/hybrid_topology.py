@@ -493,13 +493,21 @@ class HybridTopologyBuilder:
 
         for atom in self.hybrid_atoms:
             state_a_dummy = atom.state_a_type.startswith("DUM_")
-            state_b_dummy = (atom.state_b_type or "").startswith("DUM_")
+            # Correctly check if B-state exists and is dummy
+            has_state_b = atom.state_b_type is not None and atom.state_b_type != ""
+            state_b_dummy = has_state_b and atom.state_b_type.startswith("DUM_")
 
             if atom.name.endswith("A") and state_b_dummy and not state_a_dummy:
+                # Atom with A suffix is real in state A, dummy in state B
                 state_a_map[atom.name[:-1]] = atom
             elif atom.name.endswith("B") and state_a_dummy and not state_b_dummy:
+                # Atom with B suffix is dummy in state A, real in state B
                 state_b_only_map[atom.name[:-1]] = atom
-            else:
+            elif not state_a_dummy and not state_b_dummy:
+                # Common atom (real in both states) OR real only in state A (no B-state)
+                state_a_map[atom.name] = atom
+            elif not state_a_dummy and has_state_b and not state_b_dummy:
+                # Common atom (real in both states with B-state present)
                 state_a_map[atom.name] = atom
 
         for atom_a in atoms_a:

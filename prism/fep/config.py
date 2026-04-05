@@ -56,6 +56,7 @@ DEFAULT_EXECUTION_PARAMS = {
     "omp_threads": None,
     "use_gpu_pme": True,
     "use_gpu_update": True,  # Use -update gpu for constraint updates on GPU
+    "mdrun_update_mode": "auto",  # auto -> cpu for CHARMM, otherwise follows use_gpu_update
 }
 
 DEFAULT_LEGACY_PARAMS = {
@@ -234,6 +235,7 @@ class FEPConfig:
         - parallel_windows: Number of concurrent windows in standard mode
         - omp_threads: OpenMP threads per worker/rank
         - use_gpu_pme: Whether to request GPU PME in mdrun commands
+        - mdrun_update_mode: Runtime update mode for GPU runs ('auto', 'gpu', 'cpu', 'none')
         """
         params = self._merged_fep_section("execution", DEFAULT_EXECUTION_PARAMS)
         params["mode"] = str(params.get("mode", "standard")).strip().lower()

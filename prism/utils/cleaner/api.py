@@ -68,8 +68,8 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
     """
     Fix terminal atom naming and ordering for GROMACS compatibility.
 
-    Different AMBER force fields use different C-terminal oxygen naming:
-    - Standard AMBER (amber99sb, amber14sb, etc.): Single 'O' atom
+    Different force fields use different C-terminal oxygen naming:
+    - Standard force fields (CHARMM, OPLS, standard AMBER): single terminal oxygen
     - Modified AMBER (amber99sb-star-ildn-*-mut, etc.): 'OC1' and 'OC2' atoms (carboxylate)
 
     This function handles both cases:
@@ -77,7 +77,7 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
     2. Removes duplicate backbone 'O'/'OXT' atoms
     3. Renames/creates proper terminal atoms based on force field:
        - Standard: Single 'O' atom after 'C'
-       - Modified (mut): Two atoms 'OC1' and 'OC2' after 'C'
+       - Modified AMBER: Two atoms 'OC1' and 'OC2' after 'C'
 
     Parameters
     ----------
@@ -87,8 +87,8 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
         Path to output file. If None, overwrites input file.
     force_field : str, optional
         Force field name to determine terminal atom naming.
-        If contains 'mut' or 'star', uses OC1/OC2 naming.
-        Otherwise uses single O atom (default).
+        Only AMBER-derived force fields that also contain 'mut' or 'star'
+        use OC1/OC2 naming. Otherwise uses a single terminal oxygen.
     verbose : bool
         Print information about fixes
 
@@ -108,13 +108,14 @@ def fix_terminal_atoms(pdb_file: str, output_file: str = None, force_field: str 
     if not os.path.exists(pdb_file):
         raise FileNotFoundError(f"PDB file not found: {pdb_file}")
 
-    # Determine terminal oxygen naming based on force field
-    # Modified AMBER force fields (with 'mut' or 'star') use OC1/OC2
-    # Standard AMBER uses single O atom
+    # Determine terminal oxygen naming based on force field.
+    # Only modified AMBER variants use OC1/OC2; names like "charmm36m-mut"
+    # must not be treated as AMBER simply because they contain "mut".
     use_oc1_oc2 = False
     if force_field:
         ff_lower = force_field.lower()
-        if "mut" in ff_lower or "star" in ff_lower:
+        is_amber_family = "amber" in ff_lower
+        if is_amber_family and ("mut" in ff_lower or "star" in ff_lower):
             use_oc1_oc2 = True
             if verbose:
                 print(f"Detected modified AMBER force field ({force_field})")

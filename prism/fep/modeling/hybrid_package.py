@@ -98,6 +98,7 @@ class HybridPackageBuilder:
         """
         # Normalize and write hybrid ITP
         normalized_itp = self._normalize_hybrid_itp(hybrid_itp.read_text(), self.molecule_name)
+        normalized_itp = self._dedupe_moleculetype_sections(normalized_itp)
         hybrid_itp_output = hybrid_dir / self.hybrid_itp_filename
         hybrid_itp_output.write_text(normalized_itp)
 
@@ -135,7 +136,8 @@ class HybridPackageBuilder:
                 atom_types_b=atom_types_b,
             )
             # Read back the newly written complete ITP for subsequent atomtypes collection
-            normalized_itp = hybrid_itp_output.read_text()
+            normalized_itp = self._dedupe_moleculetype_sections(hybrid_itp_output.read_text())
+            hybrid_itp_output.write_text(normalized_itp)
 
         # Build atomtypes file
         atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
@@ -241,6 +243,41 @@ class HybridPackageBuilder:
     def _normalize_hybrid_atom_line(self, line: str) -> str:
         """Normalize hybrid atom line formatting."""
         return line.rstrip()
+
+    def _dedupe_moleculetype_sections(self, content: str) -> str:
+        """Keep only the first ``[ moleculetype ]`` block in a hybrid ITP.
+
+        Some historical hybrid ITPs have been observed to carry a duplicated
+        ``[ moleculetype ]`` header/name block, which makes GROMACS report
+        ``moleculetype HYB is redefined``. The valid hybrid topology must only
+        contain a single such block before the bonded sections.
+        """
+
+        lines = content.splitlines()
+        cleaned = []
+        seen_moleculetype = False
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip().lower()
+
+            if stripped == "[ moleculetype ]":
+                if seen_moleculetype:
+                    i += 1
+                    while i < len(lines):
+                        current = lines[i].strip()
+                        if current.startswith("["):
+                            break
+                        i += 1
+                    continue
+
+                seen_moleculetype = True
+
+            cleaned.append(line)
+            i += 1
+
+        return "\n".join(cleaned) + "\n"
 
     def _itp_needs_bonded_sections(self, content: str) -> bool:
         """Check if ITP file is missing bonded sections."""
@@ -567,7 +604,7 @@ class HybridPackageBuilder:
                 lines.append(line)
                 continue
             if in_section:
-                if stripped.startswith("["):
+                if stripped.startswith("[") or stripped.startswith("#include"):
                     break
                 lines.append(line)
         return "\n".join(lines) + "\n" if lines else ""
