@@ -58,33 +58,50 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
 
     coords_by_id, coords_by_name, elements_by_id = _load_structure_coordinates(gro_file)
 
-    # Create ordered coordinate list for index-based fallback lookup
-    # Used by force fields (e.g., OPLS-AA LigParGen) that rename atoms but preserve order
+    # Create ordered coordinate list for index-based fallback lookup. Some generic force-field
+    # generators rename and reorder atoms, so we try a graph-based remap for MOL2 sources first.
     coords_list = list(coords_by_id.values())
+    generic_to_mol2 = None
+    mol2_atoms_by_id: Dict[int, Atom] = {}
+    if (
+        gro_file.lower().endswith(".mol2")
+        and selected_atoms
+        and selected_atoms[0]["type"].startswith(("opls_", "output_"))
+    ):
+        generic_to_mol2 = _map_generic_itp_atoms_to_mol2(itp_file, gro_file)
+        if generic_to_mol2:
+            mol2_atoms_by_id = {atom.index: atom for atom in read_mol2_atoms(gro_file)}
 
     atoms = []
     for atom_data in selected_atoms:
         atom_id = atom_data["id"]
         atom_name = atom_data["name"]
 
-        # Use ITP atom names as the source of truth for element identity.
-        # Force-field generators may reorder atoms while keeping names/types consistent,
-        # so structure-file atom indices are not reliable for element assignment.
-        element = _extract_element(atom_name)
+        mapped_mol2_atom = None
+        if generic_to_mol2:
+            mapped_mol2_atom = mol2_atoms_by_id.get(generic_to_mol2.get(atom_id))
 
-        # Try atom name/ID lookup first, fallback to index-based lookup
-        coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name))
-        if coord is None:
-            # Fallback: index-based lookup for force fields that rename atoms (e.g., OPLS-AA LigParGen)
-            # LigParGen preserves atom order and coordinates, only changes atom names
-            if atom_id - 1 < len(coords_list):
+        if mapped_mol2_atom is not None:
+            name = mapped_mol2_atom.name
+            element = mapped_mol2_atom.element
+            coord = mapped_mol2_atom.coord
+        else:
+            name = atom_name
+            if atom_data["type"].startswith(("opls_", "output_")) and atom_id in elements_by_id:
+                element = elements_by_id[atom_id]
+            else:
+                element = _extract_element(atom_name)
+
+            # Try atom name/ID lookup first, fallback to index-based lookup
+            coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name))
+            if coord is None and atom_id - 1 < len(coords_list):
                 coord = coords_list[atom_id - 1]
-        if coord is None:
-            coord = np.array([0.0, 0.0, 0.0])
+            if coord is None:
+                coord = np.array([0.0, 0.0, 0.0])
 
         atoms.append(
             Atom(
-                name=atom_name,
+                name=name,
                 element=element,
                 coord=coord,
                 charge=atom_data["charge"],
@@ -160,8 +177,11 @@ def _load_structure_coordinates(
                     continue
 
                 atom_type_field = parts[5]
-                # Extract element from atom name (more reliable than atom type field)
-                element_symbol = _extract_element(atom_name)
+                # MOL2 atom types carry explicit element identity (e.g. C.ar, O.2, S.O2).
+                # Prefer that over the atom name because some inputs use generic or reordered names.
+                element_symbol = normalize_element_symbol(atom_type_field.split(".", 1)[0])
+                if not element_symbol:
+                    element_symbol = _extract_element(atom_name)
                 coord = np.array([x, y, z])
                 coords_by_id[atom_id] = coord
                 coords_by_name[atom_name] = coord
@@ -221,6 +241,76 @@ def _read_mol2_atom_names(mol2_file: Optional[str]) -> Tuple[Optional[List[str]]
                 atom_order.append(atom_name)
                 atom_names.add(atom_name)
     return atom_order, atom_names
+
+
+def _parse_mol2_bonds(mol2_file: str) -> List[Tuple[int, int]]:
+    """Parse bond pairs from a MOL2 file."""
+    bonds: List[Tuple[int, int]] = []
+    with open(mol2_file, "r") as handle:
+        in_bonds = False
+        for line in handle:
+            stripped = line.strip()
+            if stripped.startswith("@<TRIPOS>BOND"):
+                in_bonds = True
+                continue
+            if stripped.startswith("@<TRIPOS>") and in_bonds:
+                break
+            if not in_bonds or not stripped:
+                continue
+            parts = stripped.split()
+            if len(parts) >= 4:
+                try:
+                    bonds.append((int(parts[1]), int(parts[2])))
+                except ValueError:
+                    continue
+    return bonds
+
+
+def _map_generic_itp_atoms_to_mol2(itp_file: str, mol2_file: str) -> Optional[Dict[int, int]]:
+    """Match generic-typed ITP atom indices onto the original MOL2 atom order via graph isomorphism."""
+    try:
+        import networkx as nx
+        from pathlib import Path
+        from prism.fep.gromacs.itp_builder import ITPBuilder
+    except Exception:
+        return None
+
+    parsed = ITPBuilder._parse_source_itp(Path(itp_file).read_text())
+    atom_names = parsed.get("atom_names", {})
+    bond_terms = parsed.get("sections", {}).get("bonds", [])
+    if not atom_names or not bond_terms:
+        return None
+
+    itp_graph = nx.Graph()
+    for idx in atom_names.keys():
+        itp_graph.add_node(int(idx))
+    for term in bond_terms:
+        ai, aj = (int(term.atoms[0]), int(term.atoms[1]))
+        itp_graph.add_edge(ai, aj)
+    for node in itp_graph.nodes:
+        itp_graph.nodes[node]["degree"] = itp_graph.degree[node]
+
+    mol2_atoms = read_mol2_atoms(mol2_file)
+    mol2_graph = nx.Graph()
+    for atom in mol2_atoms:
+        mol2_graph.add_node(atom.index)
+    for ai, aj in _parse_mol2_bonds(mol2_file):
+        mol2_graph.add_edge(ai, aj)
+    for node in mol2_graph.nodes:
+        mol2_graph.nodes[node]["degree"] = mol2_graph.degree[node]
+
+    matcher = nx.algorithms.isomorphism.GraphMatcher(
+        itp_graph,
+        mol2_graph,
+        node_match=lambda a, b: a.get("degree") == b.get("degree"),
+    )
+    if not matcher.is_isomorphic():
+        return None
+
+    mapping = {int(itp_idx): int(mol2_idx) for itp_idx, mol2_idx in matcher.mapping.items()}
+    if len(mapping) != len(atom_names):
+        return None
+    return mapping
 
 
 def _parse_itp_atoms(itp_file: str, capture_state_b_names: bool = False) -> List[Dict[str, Any]]:

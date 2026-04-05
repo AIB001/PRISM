@@ -282,19 +282,23 @@ def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_lig
         # 分析 mapping 质量
         content = mapping_html.read_text()
 
-        atoms_a_match = re.search(r"const ATOMS_A = \[(.*?)\];", content, re.DOTALL)
-        atoms_b_match = re.search(r"const ATOMS_B = \[(.*?)\];", content, re.DOTALL)
+        atoms_a_match = re.search(r"const ATOMS_A = (\[.*?\]);", content, re.DOTALL)
+        atoms_b_match = re.search(r"const ATOMS_B = (\[.*?\]);", content, re.DOTALL)
 
         if atoms_a_match and atoms_b_match:
+            import json
 
-            def count_classifications(data_str):
-                common = len(re.findall(r'"classification": "common"', data_str))
-                transformed = len(re.findall(r'"classification": "transformed"', data_str))
-                surrounding = len(re.findall(r'"classification": "surrounding"', data_str))
+            atoms_a = json.loads(atoms_a_match.group(1))
+            atoms_b = json.loads(atoms_b_match.group(1))
+
+            def count_classifications(atom_records):
+                common = sum(1 for atom in atom_records if atom.get("classification") == "common")
+                transformed = sum(1 for atom in atom_records if atom.get("classification") == "transformed")
+                surrounding = sum(1 for atom in atom_records if atom.get("classification") == "surrounding")
                 return common, transformed, surrounding
 
-            common_a, trans_a, surr_a = count_classifications(atoms_a_match.group(1))
-            common_b, trans_b, surr_b = count_classifications(atoms_b_match.group(1))
+            common_a, trans_a, surr_a = count_classifications(atoms_a)
+            common_b, trans_b, surr_b = count_classifications(atoms_b)
 
             total_a = common_a + trans_a + surr_a
             total_b = common_b + trans_b + surr_b

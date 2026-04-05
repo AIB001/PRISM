@@ -332,14 +332,19 @@ class FEPWorkflowMixin:
 
         html_path = os.path.join(output_dir, "mapping.html")
 
-        # Use the original mapped ligand atoms as the single source of truth for
-        # classification. Do not recompute mapping from hybrid state atoms here.
-        from ..fep.io import write_ligand_to_pdb
+        # Default: use the original mapped ligand atoms as the single source of
+        # truth for classification. Do not recompute mapping from hybrid state
+        # atoms here.
+        from ..fep.io import read_mol2_atoms, write_ligand_to_pdb
+
+        html_mapping = mapping
+        html_atoms_a = ref_atoms
+        html_atoms_b = mut_atoms
 
         ref_pdb = os.path.join(output_dir, "mapping_state_a.pdb")
         mut_pdb = os.path.join(output_dir, "mapping_state_b.pdb")
-        write_ligand_to_pdb(ref_atoms, ref_pdb, residue_name="LIG")
-        write_ligand_to_pdb(mut_atoms, mut_pdb, residue_name="LIG")
+        write_ligand_to_pdb(html_atoms_a, ref_pdb, residue_name="LIG")
+        write_ligand_to_pdb(html_atoms_b, mut_pdb, residue_name="LIG")
 
         print(f"  DEBUG MOL2 detection:")
         print(f"    ref_coord_source: {ref_coord_source}")
@@ -367,6 +372,37 @@ class FEPWorkflowMixin:
 
         print(f"    ref_mol2: {ref_mol2}")
         print(f"    mut_mol2: {mut_mol2}")
+
+        from ..fep.core.mapping import DistanceAtomMapper
+
+        html_mapper = DistanceAtomMapper(
+            dist_cutoff=self.distance_cutoff,
+            charge_cutoff=self.charge_cutoff,
+            charge_common=self.charge_strategy,
+            charge_reception=self.charge_reception,
+        )
+
+        # For generic sequential force fields such as OPLS/OpenFF, the original
+        # aligned MOL2 files are a better source for HTML mapping than the
+        # parameterized topology output. If the MOL2-derived mapping is clearly
+        # better, use it for visualization only.
+        if ref_mol2 and mut_mol2:
+            try:
+                mol2_atoms_a = read_mol2_atoms(ref_mol2)
+                mol2_atoms_b = read_mol2_atoms(mut_mol2)
+                mol2_mapping = html_mapper.map(mol2_atoms_a, mol2_atoms_b)
+                if len(mol2_mapping.common) > len(html_mapping.common):
+                    html_mapping = mol2_mapping
+                    html_atoms_a = mol2_atoms_a
+                    html_atoms_b = mol2_atoms_b
+                    write_ligand_to_pdb(html_atoms_a, ref_pdb, residue_name="LIG")
+                    write_ligand_to_pdb(html_atoms_b, mut_pdb, residue_name="LIG")
+                    print(
+                        "  Using MOL2-derived mapping for HTML "
+                        f"({len(mol2_mapping.common)} common vs {len(mapping.common)})"
+                    )
+            except Exception as exc:
+                print_warning(f"Could not build MOL2-derived HTML mapping: {exc}")
         html_config = None
         if self.fep_config:
             try:
@@ -389,13 +425,13 @@ class FEPWorkflowMixin:
 
         try:
             visualize_mapping_html(
-                mapping=mapping,
+                mapping=html_mapping,
                 pdb_a=ref_pdb,
                 pdb_b=mut_pdb,
                 mol2_a=ref_mol2,
                 mol2_b=mut_mol2,
-                atoms_a=ref_atoms,
-                atoms_b=mut_atoms,
+                atoms_a=html_atoms_a,
+                atoms_b=html_atoms_b,
                 output_path=html_path,
                 title=f"FEP Mapping: {ligand_a_name} -> {ligand_b_name}",
                 ligand_a_name=ligand_a_name,
@@ -990,7 +1026,13 @@ class FEPWorkflowMixin:
 
     def _resolve_generated_ligand_ff_dir(self, output_dir: str) -> str:
         """Return the generated ligand force-field directory for the current ligand FF."""
+        # First search top-level (backward compatibility)
         ff_dirs = [p for p in Path(output_dir).glob("LIG.*") if p.is_dir()]
+        if len(ff_dirs) != 1:
+            # If not found, search Ligand_Forcefield subdirectory (new multi-ligand format)
+            ligand_ff_dir = Path(output_dir) / "Ligand_Forcefield"
+            if ligand_ff_dir.exists():
+                ff_dirs = [p for p in ligand_ff_dir.glob("LIG.*") if p.is_dir()]
         if len(ff_dirs) != 1:
             raise FileNotFoundError(
                 f"Expected exactly one generated ligand FF dir in {output_dir}, found {len(ff_dirs)}"
