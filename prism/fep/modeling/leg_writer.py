@@ -445,42 +445,7 @@ class LegWriter:
                 lines.insert(insert_idx, hybrid_include)
                 content = "\n".join(lines) + "\n"
 
-        # Remove all ligand entries (LIG, LIG_1, LIG_2, etc.) from molecules section
-        # In multi-ligand FEP builds, there may be multiple ligand entries (LIG_1, LIG_2)
-        # We need to remove ALL of them and add a single HYB entry for the hybrid ligand
-        lines = content.splitlines()
-        in_molecules = False
-        filtered_lines = []
-        ligand_count = 0
-
-        for line in lines:
-            if "[ molecules ]" in line.lower():
-                in_molecules = True
-                filtered_lines.append(line)
-                continue
-
-            if in_molecules and line.strip() and not line.strip().startswith(";"):
-                # Check if this is a ligand molecule line
-                if re.match(r"^\s*LIG(?:_\d+)?\s+\d+", line):
-                    # Count but don't add to filtered lines (we'll add one HYB later)
-                    ligand_count += 1
-                    continue
-
-            filtered_lines.append(line)
-
-        # Add a single HYB molecule entry after removing all ligands
-        # Insert it before solvent/ion entries or at the end of molecules section
-        if ligand_count > 0:
-            # Find where to insert HYB entry (before Protein/SOL/NA/CL entries)
-            for i, line in enumerate(filtered_lines):
-                if in_molecules and re.match(r"^\s*(Protein|SOL|NA|CL|Ion)", line, re.IGNORECASE):
-                    filtered_lines.insert(i, f"{self.molecule_name:<8} 1")
-                    break
-            else:
-                # No solvent/ion entries found, append at end
-                filtered_lines.append(f"{self.molecule_name:<8} 1")
-
-        content = "\n".join(filtered_lines) + "\n"
+        content = self._replace_ligands_in_molecules_section(content)
 
         # Add posre.itp include if not present
         if "#ifdef POSRES" not in content:
@@ -534,6 +499,57 @@ class LegWriter:
             cleaned.append(line)
 
         return "\n".join(cleaned).rstrip() + "\n"
+
+    def _replace_ligands_in_molecules_section(self, content: str) -> str:
+        """Replace LIG* entries with a single hybrid ligand entry inside [ molecules ]."""
+        lines = content.splitlines()
+        molecules_idx = -1
+        section_end = len(lines)
+
+        for i, line in enumerate(lines):
+            if line.strip().lower() == "[ molecules ]":
+                molecules_idx = i
+                break
+
+        if molecules_idx == -1:
+            return content
+
+        for i in range(molecules_idx + 1, len(lines)):
+            stripped = lines[i].strip()
+            if stripped.startswith("[") and stripped.lower() != "[ molecules ]":
+                section_end = i
+                break
+
+        section_lines = lines[molecules_idx + 1 : section_end]
+        filtered_section = []
+        ligand_count = 0
+        inserted_hybrid = False
+
+        for line in section_lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                filtered_section.append(line)
+                continue
+
+            if re.match(r"^\s*LIG(?:_\d+)?\s+\d+", line):
+                ligand_count += 1
+                continue
+
+            if (
+                ligand_count > 0
+                and not inserted_hybrid
+                and re.match(r"^\s*(SOL|NA|CL|K|MG|CA|Ion)\b", line, re.IGNORECASE)
+            ):
+                filtered_section.append(f"{self.molecule_name:<8} 1")
+                inserted_hybrid = True
+
+            filtered_section.append(line)
+
+        if ligand_count > 0 and not inserted_hybrid:
+            filtered_section.append(f"{self.molecule_name:<8} 1")
+
+        rebuilt = lines[: molecules_idx + 1] + filtered_section + lines[section_end:]
+        return "\n".join(rebuilt).rstrip() + "\n"
 
     def _hybrid_include_prefix(self, leg_dir: Path) -> str:
         """Return the relative include path from a leg directory to common/hybrid."""
