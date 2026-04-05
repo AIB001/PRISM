@@ -277,36 +277,68 @@ class FEPWorkflowMixin:
             # Phase 5: Clean up intermediate build files
             print_step(5, 5, "Cleaning up intermediate build files")
 
-            # Preserve ligand force field directories for debugging before cleanup
+            # Preserve ligand force field directories for debugging
+            # We preserve both the _build ligand FF directories and copy to common/ligand_ff
+            build_dir = os.path.join(fep_output, "_build")
             ligand_ff_backup = os.path.join(fep_output, "GMX_PROLIG_FEP", "common", "ligand_ff")
 
-            # Save reference ligand FF
-            if os.path.exists(ref_ff_dir):
-                ref_backup = os.path.join(ligand_ff_backup, "reference")
-                os.makedirs(ref_backup, exist_ok=True)
-                shutil.copytree(
-                    ref_ff_dir,
-                    os.path.join(ref_backup, os.path.basename(ref_ff_dir)),
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                )
-                print(f"  ✓ Preserved reference ligand FF: {ref_backup}")
-
-            # Save mutant ligand FF
-            if os.path.exists(mut_ff_dir):
-                mut_backup = os.path.join(ligand_ff_backup, "mutant")
-                os.makedirs(mut_backup, exist_ok=True)
-                shutil.copytree(
-                    mut_ff_dir,
-                    os.path.join(mut_backup, os.path.basename(mut_ff_dir)),
-                    dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
-                )
-                print(f"  ✓ Preserved mutant ligand FF: {mut_backup}")
-
-            # Now clean up build directory
-            build_dir = os.path.join(fep_output, "_build")
+            # Save reference ligand FF from _build (if exists)
             if os.path.exists(build_dir):
+                bound_md_dir = os.path.join(build_dir, "bound_md")
+                unbound_md_dir = os.path.join(build_dir, "unbound_md")
+
+                # Find and preserve ligand FF directories in _build/bound_md
+                if os.path.exists(bound_md_dir):
+                    for lig_ff in Path(bound_md_dir).glob("LIG.*"):
+                        if lig_ff.is_dir():
+                            ref_backup = os.path.join(ligand_ff_backup, "reference", lig_ff.name)
+                            os.makedirs(ref_backup, exist_ok=True)
+                            shutil.copytree(
+                                str(lig_ff),
+                                ref_backup,
+                                dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                            )
+                            print(f"  ✓ Preserved reference ligand FF from _build: {ref_backup}")
+
+                # Find and preserve ligand FF directories in _build/unbound_md
+                if os.path.exists(unbound_md_dir):
+                    for lig_ff in Path(unbound_md_dir).glob("LIG.*"):
+                        if lig_ff.is_dir():
+                            mut_backup = os.path.join(ligand_ff_backup, "mutant", lig_ff.name)
+                            os.makedirs(mut_backup, exist_ok=True)
+                            shutil.copytree(
+                                str(lig_ff),
+                                mut_backup,
+                                dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                            )
+                            print(f"  ✓ Preserved mutant ligand FF from _build: {mut_backup}")
+
+                # Also copy from original ligand FF directories as backup
+                if os.path.exists(ref_ff_dir):
+                    ref_backup2 = os.path.join(ligand_ff_backup, "reference", os.path.basename(ref_ff_dir))
+                    os.makedirs(ref_backup2, exist_ok=True)
+                    shutil.copytree(
+                        ref_ff_dir,
+                        ref_backup2,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                    )
+                    print(f"  ✓ Preserved reference ligand FF: {ref_backup2}")
+
+                if os.path.exists(mut_ff_dir):
+                    mut_backup2 = os.path.join(ligand_ff_backup, "mutant", os.path.basename(mut_ff_dir))
+                    os.makedirs(mut_backup2, exist_ok=True)
+                    shutil.copytree(
+                        mut_ff_dir,
+                        mut_backup2,
+                        dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("*.log", "*.edr", "*.trr"),
+                    )
+                    print(f"  ✓ Preserved mutant ligand FF: {mut_backup2}")
+
+                # Remove _build directory after preserving ligand FF
                 shutil.rmtree(build_dir)
                 print(f"  ✓ Removed build directory: {build_dir}")
 
