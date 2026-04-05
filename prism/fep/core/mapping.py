@@ -383,6 +383,7 @@ class DistanceAtomMapper:
         Generic/Sequential types (skip atom type check):
         - OpenFF: output_0, output_1, ... (generic, not position-specific)
         - OPLS-AA: opls_800, opls_801, ... (sequential numbering, not chemical environment)
+        - SwissParam-based (MMFF/MATCH/Both): Use generic atom types from RTF files
 
         Position-specific types (use atom type check):
         - CGenFF: CA, CB, CG, CD, HA, HB, ... (encode position in molecule)
@@ -391,19 +392,34 @@ class DistanceAtomMapper:
         Returns
         -------
         bool
-            True if using generic/sequential types (OpenFF/OPLS), False if position-specific (CGenFF/GAFF)
+            True if using generic/sequential types (OpenFF/OPLS/SwissParam), False if position-specific (CGenFF/GAFF)
         """
-        # Check first few atoms
+        # Check first few atoms for generic type patterns
         for atom in ligand_a[:5]:
-            if atom.atom_type.startswith("output_"):
+            atom_type = atom.atom_type
+
+            # OpenFF: output_0, output_1, ...
+            if atom_type.startswith("output_"):
                 return True
-            if atom.atom_type.startswith("opls_"):
+            # OPLS-AA: opls_800, opls_801, ...
+            if atom_type.startswith("opls_"):
+                return True
+            # SwissParam (MMFF/MATCH): Check for RTF-style generic types
+            # MMFF/MATCH atom types are typically like C_3, H_1, N_3, O_2, etc.
+            # which are generic (element_number format), not position-specific
+            if "_" in atom_type and len(atom_type) <= 4:
+                # Format: C_3, H_1, N_3, O_2, etc. (element_number)
+                # These are generic MMFF types, not position-specific like GAFF's ca/c3
                 return True
 
         for atom in ligand_b[:5]:
-            if atom.atom_type.startswith("output_"):
+            atom_type = atom.atom_type
+
+            if atom_type.startswith("output_"):
                 return True
-            if atom.atom_type.startswith("opls_"):
+            if atom_type.startswith("opls_"):
+                return True
+            if "_" in atom_type and len(atom_type) <= 4:
                 return True
 
         return False
