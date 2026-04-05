@@ -2,7 +2,7 @@
 ;	File 'mdout.mdp' was generated
 ;	By user: gxf1212 (1006)
 ;	On host: zju-X795-G30
-;	At date: Sun Apr  5 11:37:18 2026
+;	At date: Sun Apr  5 16:03:52 2026
 ;
 ;	Created by:
 ;	                     :-) GROMACS - gmx grompp, 2024.4 (-:
@@ -11,7 +11,7 @@
 ;	Data prefix:  /opt/gromacs/2024.4
 ;	Working dir:  /data2/gxf1212/work/PRISM
 ;	Command line:
-;	  gmx grompp -f /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/25-36/amber14sb_OL15_openff/GMX_PROLIG_FEP/unbound/repeat1/mdps/em.mdp -c /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/25-36/amber14sb_OL15_openff/GMX_PROLIG_FEP/unbound/repeat1/input/conf.gro -r /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/25-36/amber14sb_OL15_openff/GMX_PROLIG_FEP/unbound/repeat1/input/conf.gro -p /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/25-36/amber14sb_OL15_openff/GMX_PROLIG_FEP/unbound/repeat1/topol.top -o /tmp/test_grompp.tpr -maxwarn 2
+;	  gmx grompp -f /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/oMeEtPh-EtPh/omeEtPh-EtPh_mmff_fep/GMX_PROLIG_FEP/unbound/repeat1/mdps/em.mdp -c /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/oMeEtPh-EtPh/omeEtPh-EtPh_mmff_fep/GMX_PROLIG_FEP/unbound/repeat1/input/conf.gro -r /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/oMeEtPh-EtPh/omeEtPh-EtPh_mmff_fep/GMX_PROLIG_FEP/unbound/repeat1/input/conf.gro -p /data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/oMeEtPh-EtPh/omeEtPh-EtPh_mmff_fep/GMX_PROLIG_FEP/unbound/repeat1/topol.top -o /tmp/test_grompp.tpr -maxwarn 2
 
 ; VARIOUS PREPROCESSING OPTIONS
 ; Preprocessor information: use cpp syntax.
@@ -175,7 +175,7 @@ annealing-temp           =
 ; GENERATE VELOCITIES FOR STARTUP RUN
 gen-vel                  = no
 gen-temp                 = 300
-gen-seed                 = -484193541
+gen-seed                 = 1809383423
 
 ; OPTIONS FOR BONDS    
 constraints              = none

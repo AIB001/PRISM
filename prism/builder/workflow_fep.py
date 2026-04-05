@@ -917,7 +917,10 @@ class FEPWorkflowMixin:
                     print(f"Using existing force field copy: {local_ff_dir}")
 
         topol_path = model_dir / "topol.top"
-        ligand_rel_dir = f"../{ligand_ff_dir.name}"
+        # Compute ligand include paths relative to the working model directory.
+        # This must work for both legacy single-ligand layouts (output_dir/LIG.*)
+        # and newer multi-ligand layouts (output_dir/Ligand_Forcefield/LIG.*).
+        ligand_rel_dir = os.path.relpath(ligand_ff_dir, model_dir)
         cgenff_supplement = None
         main_atomtypes = set()
         if CGenFFAdapter.is_charmm_forcefield(ff_name) and CGenFFAdapter.detect(ligand_ff_dir):
@@ -971,7 +974,11 @@ class FEPWorkflowMixin:
             f.write("[ system ]\n")
             f.write("Ligand in water\n\n")
             f.write("[ molecules ]\n")
-            f.write("LIG    1\n")
+            # Read the actual moleculetype name from the ligand ITP file
+            # This handles the multi-ligand renaming (LIG -> LIG_N) correctly
+            ligand_itp = ligand_ff_dir / "LIG.itp"
+            ligand_mol_name = self._read_moleculetype_name(ligand_itp)
+            f.write(f"{ligand_mol_name:<8} 1\n")
 
         shutil.copy(ligand_gro, model_dir / "lig.gro")
 
@@ -1032,12 +1039,55 @@ class FEPWorkflowMixin:
             # If not found, search Ligand_Forcefield subdirectory (new multi-ligand format)
             ligand_ff_dir = Path(output_dir) / "Ligand_Forcefield"
             if ligand_ff_dir.exists():
-                ff_dirs = [p for p in ligand_ff_dir.glob("LIG.*") if p.is_dir()]
-        if len(ff_dirs) != 1:
+                ff_dirs = sorted([p for p in ligand_ff_dir.glob("LIG.*") if p.is_dir()], key=lambda p: p.name)
+        if len(ff_dirs) == 0:
             raise FileNotFoundError(
-                f"Expected exactly one generated ligand FF dir in {output_dir}, found {len(ff_dirs)}"
+                f"Expected at least one generated ligand FF dir in {output_dir}, found {len(ff_dirs)}"
             )
+        # For multi-ligand case:
+        # - FEP always builds reference ligand first (ligand index 0)
+        # - Multi-ligand renaming names it LIG.sp2gmx_1 (1-based numbering)
+        # - Look for _1 suffix first, then fall back to sorted first
+        ff_dirs_names = [p.name for p in ff_dirs]
+        # Check for directory ending with _1 (reference ligand)
+        ref_candidates = [p for p in ff_dirs if p.name.endswith("_1")]
+        if ref_candidates:
+            # Found explicit _1, use it
+            return str(ref_candidates[0])
+        # No explicit _1, use sorted first
         return str(ff_dirs[0])
+
+    def _read_moleculetype_name(self, itp_path: Path) -> str:
+        """Read the moleculetype name from a ligand ITP file.
+
+        Parameters
+        ----------
+        itp_path : Path
+            Path to the LIG.itp file.
+
+        Returns
+        -------
+        str
+            The moleculetype name (e.g., LIG or LIG_1).
+
+        Raises
+        ------
+        ValueError
+            If the moleculetype section cannot be parsed.
+        """
+        in_moleculetype = False
+        for raw_line in itp_path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(";"):
+                continue
+            if line.lower() == "[ moleculetype ]":
+                in_moleculetype = True
+                continue
+            if in_moleculetype:
+                # First non-comment line after [ moleculetype ]
+                # Format: "name  nrexcl"
+                return line.split()[0]
+        raise ValueError(f"Could not parse moleculetype from {itp_path}")
 
     def _generate_mutant_ligand_ff(self, mutant_ligand: str, output_dir: str):
         """Generate force field for mutant ligand"""

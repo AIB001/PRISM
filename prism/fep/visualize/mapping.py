@@ -31,6 +31,14 @@ def _align_mols_2d(mol_a: Chem.Mol, mol_b: Chem.Mol) -> bool:
         True if alignment succeeded, False if it failed (but coordinates were generated)
     """
     try:
+        # Hybrid visualization molecules may skip full sanitization. Initialize ring
+        # information explicitly so MCS/depiction matching can still run.
+        for mol in [mol_a, mol_b]:
+            try:
+                Chem.GetSymmSSSR(mol)
+            except Exception:
+                pass
+
         mcs = Chem.rdFMCS.FindMCS(
             [mol_a, mol_b],
             atomCompare=rdFMCS.AtomCompare.CompareAny,
