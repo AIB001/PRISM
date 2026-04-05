@@ -86,6 +86,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
     return {
         "mode": mode,
         "use_gpu_pme": bool(exec_config.get("use_gpu_pme", True)),
+        "use_gpu_update": bool(exec_config.get("use_gpu_update", True)),
         "num_gpus": max(1, int(num_gpus)),
         "parallel_windows": parallel_windows,
         "omp_threads": omp_threads,
@@ -99,12 +100,14 @@ def _write_leg_execution_scripts(
     execution_mode: str,  # noqa: ARG001
     *,
     use_gpu_pme: bool,
+    use_gpu_update: bool,
     num_gpus: int,
     parallel_windows: int,
     omp_threads: int,
 ) -> None:
     """Generate per-leg production helper scripts for standard and repex modes."""
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
+    update_gpu_flag = "-update gpu" if use_gpu_update else ""
     standard_script = leg_dir / "run_prod_standard.sh"
     repex_script = leg_dir / "run_prod_repex.sh"
 
@@ -211,11 +214,11 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
             echo "  ${{lambda_name}}: lambda-specific EM already completed"
             if [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
                 echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
             else
                 echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
                 gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
             fi
         elif [ -f "${{window_dir}}/em_short.tpr" ]; then
             echo "  ${{lambda_name}}: resuming lambda-specific EM"
@@ -241,13 +244,13 @@ for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
             echo "  ${{lambda_name}}: production already completed"
         elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
             echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
         else
             echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
             if [ ! -f "${{window_dir}}/prod.tpr" ]; then
                 gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 20
             fi
-            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
         fi
 
         rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
@@ -377,7 +380,7 @@ echo "Configured GPUs: $NUM_GPUS"
 echo "GPU id string: $gpu_ids"
 
 mpirun -oversubscribe -np "${{num_windows}}" \\
-    gmx_mpi mdrun -v -deffnm prod -nb gpu -bonded gpu {pme_gpu_flag} -pin on -replex 1000 \\
+    gmx_mpi mdrun -v -deffnm prod -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -replex 1000 \\
     -multidir "${{window_dirs[@]}}" -gpu_id "${{gpu_ids}}" -pin on -dhdl dhdl \\
     "${{cpi_args[@]}}" ${{MDRUN_NSTEPS_ARG}}
 """
@@ -460,6 +463,7 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
             leg_dir,
             settings["mode"],
             use_gpu_pme=settings["use_gpu_pme"],
+            use_gpu_update=settings["use_gpu_update"],
             num_gpus=settings["num_gpus"],
             parallel_windows=settings["parallel_windows"],
             omp_threads=settings["omp_threads"],
@@ -508,11 +512,13 @@ def write_fep_master_script(fep_dir: Path, config: Optional[dict] = None) -> Non
     settings = _get_execution_settings(config)
     execution_mode = settings["mode"]
     use_gpu_pme = settings["use_gpu_pme"]
+    use_gpu_update = settings["use_gpu_update"]
     num_gpus = settings["num_gpus"]
     parallel_windows = settings["parallel_windows"]
     omp_threads = settings["omp_threads"]
     replicas = settings["replicas"]
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
+    update_gpu_flag = "-update gpu" if use_gpu_update else ""
 
     script_path = fep_dir / "run_fep.sh"
 
@@ -622,12 +628,12 @@ run_leg() {{
         echo "NVT checkpoint found, resuming on GPU..."
         (
             cd ${{BUILD_DIR}}
-            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi nvt.cpt -v
+            gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -cpi nvt.cpt -v
         )
     else
         echo "Running NVT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -v
     fi
 
     # NPT equilibration (must run to completion)
@@ -639,7 +645,7 @@ run_leg() {{
             echo "NPT checkpoint found, resuming on GPU..."
             (
                 cd ${{BUILD_DIR}}
-                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -cpi npt.cpt -v
+                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -cpi npt.cpt -v
             )
         else
             # NPT TPR exists but no checkpoint - previous run failed, clean up and restart
@@ -647,7 +653,7 @@ run_leg() {{
             rm -f ${{BUILD_DIR}}/npt.* 2>/dev/null || true
             echo "Running NPT equilibration..."
             gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {pme_gpu_flag} -pin on -v
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} -nb gpu -bonded gpu {update_gpu_flag} {pme_gpu_flag} -pin on -v
         fi
     else
         echo "Running NPT equilibration..."

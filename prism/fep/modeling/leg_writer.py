@@ -445,6 +445,12 @@ class LegWriter:
                 lines.insert(insert_idx, hybrid_include)
                 content = "\n".join(lines) + "\n"
 
+        # Some protein+ligand source topologies inline a ligand moleculetype name
+        # immediately before the protein moleculetype entry. Once the hybrid ligand
+        # is provided via `hybrid.itp`, keeping that stray HYB/LIG entry causes
+        # `moleculetype ... is redefined` in grompp.
+        content = self._remove_redundant_ligand_moleculetype_entries(content)
+
         content = self._replace_ligands_in_molecules_section(content)
 
         # Add posre.itp include if not present
@@ -476,6 +482,51 @@ class LegWriter:
                 content = "\n".join(lines) + "\n"
 
         target_top.write_text(content)
+
+    def _remove_redundant_ligand_moleculetype_entries(self, content: str) -> str:
+        """Drop stray HYB/LIG names embedded in a protein `[ moleculetype ]` section."""
+        lines = content.splitlines()
+        cleaned = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            cleaned.append(line)
+
+            if line.strip().lower() != "[ moleculetype ]":
+                i += 1
+                continue
+
+            i += 1
+            section_lines = []
+            while i < len(lines):
+                current = lines[i]
+                stripped = current.strip()
+                if stripped.startswith("[") and stripped.lower() != "[ moleculetype ]":
+                    break
+                section_lines.append(current)
+                i += 1
+
+            entry_lines = []
+            for offset, section_line in enumerate(section_lines):
+                stripped = section_line.strip()
+                if not stripped or stripped.startswith(";"):
+                    continue
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    entry_lines.append((offset, parts[0]))
+
+            remove_offsets = set()
+            if len(entry_lines) > 1:
+                non_ligand_entries = [name for _, name in entry_lines if name not in {self.molecule_name, "LIG"}]
+                if non_ligand_entries:
+                    remove_offsets = {offset for offset, name in entry_lines if name in {self.molecule_name, "LIG"}}
+
+            for offset, section_line in enumerate(section_lines):
+                if offset not in remove_offsets:
+                    cleaned.append(section_line)
+
+        return "\n".join(cleaned).rstrip() + "\n"
 
     def _remove_top_level_atomtypes_block(self, content: str) -> str:
         """Remove a standalone top-level [ atomtypes ] block from a copied topology."""
@@ -533,15 +584,12 @@ class LegWriter:
 
             if re.match(r"^\s*LIG(?:_\d+)?\s+\d+", line):
                 ligand_count += 1
+                if not inserted_hybrid:
+                    parts = stripped.split()
+                    count = parts[1] if len(parts) > 1 else "1"
+                    filtered_section.append(f"{self.molecule_name:<8} {count}")
+                    inserted_hybrid = True
                 continue
-
-            if (
-                ligand_count > 0
-                and not inserted_hybrid
-                and re.match(r"^\s*(SOL|NA|CL|K|MG|CA|Ion)\b", line, re.IGNORECASE)
-            ):
-                filtered_section.append(f"{self.molecule_name:<8} 1")
-                inserted_hybrid = True
 
             filtered_section.append(line)
 

@@ -381,14 +381,7 @@ class HybridPackageBuilder:
     ) -> set[str]:
         atomtypes = set()
         for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
-            # Use adapter to find CHARMM force field directory dynamically
-            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_dir)
-            if not charmm_ff_dir:
-                # Try nested structure (LIG.amb2gmx/charmm*.ff)
-                for subdir in ligand_dir.glob("LIG.*"):
-                    charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(subdir)
-                    if charmm_ff_dir:
-                        break
+            charmm_ff_dir = self._find_nearby_charmm_ff_dir(ligand_dir)
 
             if not charmm_ff_dir:
                 continue
@@ -412,6 +405,45 @@ class HybridPackageBuilder:
                     atomtypes.add(stripped.split()[0])
                 break
         return atomtypes
+
+    def _find_nearby_charmm_ff_dir(self, ligand_dir: Path) -> Optional[Path]:
+        """Locate a CHARMM force-field directory near a ligand output directory."""
+        # 1. Direct ligand-local layouts.
+        charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_dir)
+        if charmm_ff_dir:
+            return charmm_ff_dir
+
+        # 2. Nested layouts such as LIG.amb2gmx/charmm*.ff.
+        for subdir in ligand_dir.glob("LIG.*"):
+            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(subdir)
+            if charmm_ff_dir:
+                return charmm_ff_dir
+
+        # 3. Nearby system build layouts. MMFF/SwissParam cases often keep the
+        # force field under bound|unbound/repeat*/<ff>.ff rather than the ligand dir.
+        search_roots = []
+        seen_roots = set()
+        for candidate in [ligand_dir, *ligand_dir.parents[:4]]:
+            if candidate not in seen_roots:
+                search_roots.append(candidate)
+                seen_roots.add(candidate)
+            for sibling_name in ("GMX_PROLIG_FEP", "GMX_PROLIG_MD", "bound", "unbound", "common"):
+                sibling = candidate / sibling_name
+                if sibling not in seen_roots:
+                    search_roots.append(sibling)
+                    seen_roots.add(sibling)
+
+        for root in search_roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for ff_dir in root.glob("**/*.ff"):
+                if not ff_dir.is_dir():
+                    continue
+                for candidate in (ff_dir / "ffnonbonded.itp", ff_dir / "charmm36.itp"):
+                    if candidate.exists():
+                        return ff_dir
+
+        return None
 
     def _build_hybrid_atomtypes_itp(
         self,
@@ -705,6 +737,16 @@ class HybridPackageBuilder:
         if atom_name in ref_coords and ref_coords[atom_name]:
             coord = ref_coords[atom_name][0]
             return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 1b: Hybrid state-A names are often tagged with a trailing
+        # "A" (for example C01A/H02A), while the source ligand GRO keeps the
+        # original untagged atom names. Reuse the reference coordinates for
+        # those transformed-A atoms instead of dropping them at the origin.
+        if atom_name.endswith("A"):
+            base_name = atom_name[:-1]
+            if base_name in ref_coords and ref_coords[base_name]:
+                coord = ref_coords[base_name][0]
+                return coord["x"], coord["y"], coord["z"]
 
         # Strategy 2: For dummy atoms (state A), try mutant coordinates with multiple name variants
         if atom_type.startswith("DUM_"):

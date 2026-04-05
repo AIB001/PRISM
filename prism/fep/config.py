@@ -55,6 +55,7 @@ DEFAULT_EXECUTION_PARAMS = {
     "total_cpus": None,
     "omp_threads": None,
     "use_gpu_pme": True,
+    "use_gpu_update": True,  # Use -update gpu for constraint updates on GPU
 }
 
 DEFAULT_LEGACY_PARAMS = {
