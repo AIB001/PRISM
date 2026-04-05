@@ -326,23 +326,54 @@ class FEPWorkflowMixin:
 
         html_path = os.path.join(output_dir, "mapping.html")
 
-        # Generate state-specific PDB files from hybrid topology
-        # This ensures RDKit molecules match the filtered topology atoms
-        hybrid_gro = os.path.join(output_dir, "hybrid.gro")
-        ref_pdb = self._generate_state_specific_pdb(hybrid_gro, output_dir, "hybrid_state_a", state="a")
-        mut_pdb = self._generate_state_specific_pdb(hybrid_gro, output_dir, "hybrid_state_b", state="b")
-        ref_mol2 = None  # MOL2 not needed for hybrid coordinates
-        mut_mol2 = None
-
-        # Regenerate atoms using hybrid coordinates for HTML visualization
-        # This ensures coordinates are aligned between hybrid topology and visualization
-        from ..fep.io import read_ligand_from_prism
+        # First, read state-specific atoms from hybrid topology
+        # This ensures we get the correct atom lists with proper dummy atom filtering
+        from ..fep.io import read_ligand_from_prism, write_ligand_to_pdb
 
         hybrid_itp = os.path.join(output_dir, "hybrid.itp")
         hybrid_gro = os.path.join(output_dir, "hybrid.gro")
 
         html_ref_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="a")
         html_mut_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="b")
+
+        # Generate state-specific PDB files from the correct atom lists
+        # This ensures RDKit molecules match the filtered topology atoms
+        ref_pdb = os.path.join(output_dir, "hybrid_state_a.pdb")
+        mut_pdb = os.path.join(output_dir, "hybrid_state_b.pdb")
+
+        write_ligand_to_pdb(html_ref_atoms, ref_pdb, residue_name="LIG")
+        write_ligand_to_pdb(html_mut_atoms, mut_pdb, residue_name="LIG")
+
+        # Use original MOL2 files for bond order assignment
+        # ref_coord_source and mut_coord_source should be original MOL2/PDB files
+        print(f"  DEBUG MOL2 detection:")
+        print(f"    ref_coord_source: {ref_coord_source}")
+        print(f"    mut_coord_source: {mut_coord_source}")
+        print(f"    ref_coord_source suffix: {Path(ref_coord_source).suffix}")
+        print(f"    mut_coord_source suffix: {Path(mut_coord_source).suffix}")
+
+        if Path(ref_coord_source).suffix == ".mol2":
+            ref_mol2 = str(Path(ref_coord_source).absolute()) if Path(ref_coord_source).exists() else ref_coord_source
+        elif Path(ref_coord_source).suffix == ".pdb":
+            # Try to find corresponding MOL2 file
+            ref_mol2 = str(Path(ref_coord_source).with_suffix(".mol2"))
+            if not Path(ref_mol2).exists():
+                ref_mol2 = None
+        else:
+            ref_mol2 = None
+
+        if Path(mut_coord_source).suffix == ".mol2":
+            mut_mol2 = str(Path(mut_coord_source).absolute()) if Path(mut_coord_source).exists() else mut_coord_source
+        elif Path(mut_coord_source).suffix == ".pdb":
+            # Try to find corresponding MOL2 file
+            mut_mol2 = str(Path(mut_coord_source).with_suffix(".mol2"))
+            if not Path(mut_mol2).exists():
+                mut_mol2 = None
+        else:
+            mut_mol2 = None
+
+        print(f"    ref_mol2: {ref_mol2}")
+        print(f"    mut_mol2: {mut_mol2}")
 
         # Create new mapping from hybrid topology atoms (not use old mapping)
         # This ensures consistency between hybrid atoms and state-specific PDBs
@@ -548,10 +579,10 @@ class FEPWorkflowMixin:
 
                     # Filter by state
                     # Transformed atoms end with "A" or "B" (e.g., "00A", "01B", "C0EA", "O0MB")
-                    # Common atoms don't end with "A" or "B" (e.g., C0A, C02, H11)
-                    # Note: The pattern matches atoms where the LAST character is "A" or "B"
-                    is_transformed_a = atom_name.endswith("A")  # Ends with A (state-specific)
-                    is_transformed_b = atom_name.endswith("B")  # Ends with B (state-specific)
+                    # Common atoms don't end with "A" or "B", except for the special case "C0A"
+                    # Note: "C0A" is a common atom even though it ends with "A"
+                    is_transformed_a = atom_name.endswith("A") and atom_name != "C0A"
+                    is_transformed_b = atom_name.endswith("B")
                     is_common = not (is_transformed_a or is_transformed_b)
 
                     if state == "a":

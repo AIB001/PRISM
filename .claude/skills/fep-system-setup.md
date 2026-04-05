@@ -1001,3 +1001,68 @@ cgenff_dir_38 = test_dir / "input" / "38_cgenff"
 - Lambda 调度：`prism/fep/modeling/mdp_generator.py::_generate_lambda_schedule()`
 - 目录构建：`prism/fep/modeling/core.py::FEPScaffoldBuilder.build_from_components()`
 - 原子映射：`prism/fep/gromacs/itp_builder.py::ITPBuilder`
+
+## 自动化系统验证
+
+**使用统一的 FEP 系统检查脚本**：
+
+```bash
+# 运行全面检查
+python .claude/skills/fep_system_check.py <fep_directory>
+
+# 示例
+python .claude/skills/fep_system_check.py tests/gxf/FEP/unit_test/42-38/CHARMM-GUI/GMX_PROLIG_FEP
+```
+
+**检查内容**：
+1. ✓ 目录结构完整性
+2. ✓ 原子映射质量（gray/unknown atoms）
+3. ✓ 拓扑文件完整性
+4. ✓ Grompp 验证（bound/unbound）
+5. ✓ 配体位置验证
+6. ✓ 错误和警告报告
+
+**输出示例**：
+```
+================================================================================
+FEP System Validation Report
+================================================================================
+
+System: tests/gxf/FEP/unit_test/42-38/CHARMM-GUI/GMX_PROLIG_FEP
+
+[1] Directory Structure
+  common/hybrid: ✓
+  bound:         ✓
+  unbound:       ✓
+
+[2] Mapping Quality
+  Common atoms:      35
+  Transformed A:     1
+  Transformed B:     1
+  Surrounding A:     2
+  Surrounding B:     2
+  Gray atoms:        0 ✓
+  Unknown atoms:     0 ✓
+
+[3] Topology Completeness
+  ✓ All required files present
+
+[4] Grompp Validation
+  Bound:   ✓ PASS
+  Unbound: ✓ PASS
+
+[5] Ligand Placement
+  Centroid distance: 0.307 nm
+  Min distance:      0.228 nm
+  Ligand atoms:      39
+  Protein atoms:     2675
+
+================================================================================
+Status: ✓ PASSED - System fully validated
+================================================================================
+```
+
+**在技能工作流中使用**：
+- 搭建完成后立即运行检查脚本
+- 根据 report 修复所有错误和警告
+- 确保所有检查项通过后再提交代码

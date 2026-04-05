@@ -58,6 +58,10 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
 
     coords_by_id, coords_by_name, elements_by_id = _load_structure_coordinates(gro_file)
 
+    # Create ordered coordinate list for index-based fallback lookup
+    # Used by force fields (e.g., OPLS-AA LigParGen) that rename atoms but preserve order
+    coords_list = list(coords_by_id.values())
+
     atoms = []
     for atom_data in selected_atoms:
         atom_id = atom_data["id"]
@@ -68,7 +72,15 @@ def read_ligand_from_prism(itp_file: str, gro_file: str, state: Optional[str] = 
         # so structure-file atom indices are not reliable for element assignment.
         element = _extract_element(atom_name)
 
-        coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name, np.array([0.0, 0.0, 0.0])))
+        # Try atom name/ID lookup first, fallback to index-based lookup
+        coord = coords_by_id.get(atom_id, coords_by_name.get(atom_name))
+        if coord is None:
+            # Fallback: index-based lookup for force fields that rename atoms (e.g., OPLS-AA LigParGen)
+            # LigParGen preserves atom order and coordinates, only changes atom names
+            if atom_id - 1 < len(coords_list):
+                coord = coords_list[atom_id - 1]
+        if coord is None:
+            coord = np.array([0.0, 0.0, 0.0])
 
         atoms.append(
             Atom(
@@ -93,11 +105,12 @@ def _load_structure_coordinates(
     elements_by_id: Dict[int, str] = {}
 
     with open(structure_file, "r") as handle:
-        header_lines = [handle.readline().strip() for _ in range(3)]
+        header_lines = [handle.readline().strip() for _ in range(10)]  # Read more lines for better detection
 
     first_nonempty = next((line for line in header_lines if line), "")
-    is_pdb = (
-        first_nonempty.startswith("ATOM") or first_nonempty.startswith("HETATM") or first_nonempty.startswith("REMARK")
+    # Check if any line starts with ATOM/HETATM (more robust PDB detection)
+    is_pdb = any(
+        line.startswith("ATOM") or line.startswith("HETATM") or line.startswith("REMARK") for line in header_lines
     )
     is_mol2 = any(line.startswith("@<TRIPOS>MOLECULE") for line in header_lines)
 
@@ -586,10 +599,31 @@ def write_ligand_to_pdb(atoms: List[Atom], output_pdb: str, residue_name: str = 
 
         for i, atom in enumerate(atoms, 1):
             x, y, z = atom.coord
-            # Match original PDB format: "ATOM      1  N   LIG L   1      ..."
-            # Chain identifier is the first letter of residue name (not 'A')
-            chain_id = residue_name[0] if residue_name else "A"
-            line = f"ATOM  {i:5d}  {atom.name:<4s}{residue_name:>3s} {chain_id}   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00      {residue_name} \n"
+            # PDB format (standard): "ATOM      1  N   MOL X   1      ..."
+            # Columns: 1-6=ATOM, 7-11=serial, 13-16=name, 17=altLoc, 18-20=resName,
+            #          22=chainID, 23-26=resSeq, 27=iCode, 31-54=coords, 55-60=occupancy,
+            #          61-66=tempFactor
+            #
+            # For atom names:
+            # - If atom name starts with number (e.g., 1HG): right-justify to columns 14-16
+            # - If atom name starts with letter: left-justify to columns 13-15 (or 13-16 for 4-char names)
+            #
+            # For 4-character atom names (e.g., N00A, C01A):
+            # - Use all 4 columns (13-16): "N00A"
+            # - RDKit with flavor=0 will read the full 4-character name
+            chain_id = " "  # Use space for chain identifier (RDKit-compatible)
+
+            # Format atom name field
+            atom_name = atom.name
+            if len(atom_name) <= 3:
+                # For 1-3 char names, left-justify in columns 13-15: "CA  " or "C0A "
+                atom_name_field = f"{atom_name:<4s}"
+            else:
+                # For 4-char names, use all 4 columns (13-16): "N00A"
+                # RDKit with flavor=0 will preserve the full name
+                atom_name_field = atom_name[:4]
+
+            line = f"ATOM  {i:5d} {atom_name_field} {residue_name:>3s} {chain_id}{i:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          \n"
             f.write(line)
 
         f.write("TER\n")
