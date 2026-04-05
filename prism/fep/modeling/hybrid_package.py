@@ -134,6 +134,7 @@ class HybridPackageBuilder:
                 atom_types_a=atom_types_a,
                 atom_types_b=atom_types_b,
             )
+            # Read back the newly written complete ITP for subsequent atomtypes collection
             normalized_itp = hybrid_itp_output.read_text()
 
         # Build atomtypes file
