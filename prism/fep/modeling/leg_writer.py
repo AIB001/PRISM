@@ -445,9 +445,10 @@ class LegWriter:
                 lines.insert(insert_idx, hybrid_include)
                 content = "\n".join(lines) + "\n"
 
-        # Replace LIG with HYB in molecules section
+        # Replace LIG, LIG_1, LIG_2, etc. with HYB in molecules section
+        # Handles multi-ligand renamed molecules (LIG_N) from PRISM builds
         content = re.sub(
-            r"^(\s*)LIG(\s+\d+.*?)$",
+            r"^(\s*)LIG(?:_\d+)?(\s+\d+.*?)$",
             rf"\1{self.molecule_name}\2",
             content,
             flags=re.MULTILINE,

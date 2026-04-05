@@ -155,7 +155,7 @@ All changed files organized by category
 - **Branch**: gxf → main
 - **URL**: https://github.com/AIB001/PRISM/pull/4
 - **Main content**: FEP workflow (atom mapping, hybrid topology, scaffold generation, analysis, force-field integration)
-- **Latest addition**: RTF force field support
+- **Latest additions**: RTF force field support, SwissParam-based force fields (MMFF/MATCH/Both)
 
 ### Common Commands
 ```bash
