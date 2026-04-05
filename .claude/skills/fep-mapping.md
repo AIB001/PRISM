@@ -1,6 +1,6 @@
 ---
 name: fep-mapping-viz
-description: FEP hybrid topology atom mapping 与可视化验证（联合检查）
+description: FEP hybrid topology atom mapping and visualization validation (joint inspection)
 type: fep
 ---
 

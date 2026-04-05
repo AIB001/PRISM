@@ -1,46 +1,46 @@
-# PR提交工作流程
+# PR Submission Workflow
 
-记录PR提交和描述文件管理的完整流程和要求。
+Document the complete process and requirements for PR submission and description file management.
 
-## PR描述文件管理
+## PR Description File Management
 
-### 固定文件名规则
-**唯一PR描述文件**：`/tmp/pr_body_expanded.md`
+### Fixed Filename Rule
+**Sole PR Description File**: `/tmp/pr_body_expanded.md`
 
-**严格规则**：
-- ✅ 保留：`/tmp/pr_body_expanded.md` （固定使用，永不改名）
-- ❌ 删除：所有其他PR相关的.md文件（pr_body_update.md, pr_description.md等）
+**Strict Rules**:
+- ✅ Keep: `/tmp/pr_body_expanded.md` (fixed name, never rename)
+- ❌ Delete: All other PR-related .md files (pr_body_update.md, pr_description.md, etc.)
 
-**重要说明**：
-- 这个文件包含PR #4的**完整描述**（整个FEP工作流程）
-- 每次有新提交时，需要更新这个文件，包含**所有累积的更改**
-- 用这个文件更新远程PR，让同事审阅时能看到完整的变更历史
-- 写长一点没关系，重要的是**完整和详细**
+**Important Notes**:
+- This file contains the **complete description** for PR #4 (entire FEP workflow)
+- When making new commits, update this file to include **all accumulated changes**
+- Use this file to update the remote PR so colleagues can see the complete change history during review
+- It's fine to write a long description; the important thing is **completeness and detail**
 
-### PR描述清理
+### PR Description Cleanup
 ```bash
-# 删除所有其他PR文件
+# Delete all other PR files
 rm -f /tmp/pr_body_update.md /tmp/pr_description.md /tmp/prism_format_support.md
 
-# 验证只剩下一个文件
+# Verify only one file remains
 ls -la /tmp/pr*.md
 ```
 
-## PR提交流程
+## PR Submission Process
 
-### 1. 检查未提交更改
+### 1. Check Uncommitted Changes
 ```bash
 cd /data2/gxf1212/work/PRISM
 git status --short
 ```
 
-### 2. 暂存所有更改
+### 2. Stage All Changes
 ```bash
 git add -A
 git status --short
 ```
 
-### 3. 提交更改
+### 3. Commit Changes
 ```bash
 git commit -m "$(cat <<'EOF'
 [module] Brief description of changes
@@ -54,153 +54,153 @@ EOF
 )"
 ```
 
-**Commit消息格式**：
-- 使用 `[module]` 前缀（如 [fep], [builder], [analysis]）
-- 简洁描述主要更改
-- 列出关键变更点
-- 包含Co-Authored-By标签
+**Commit Message Format**:
+- Use `[module]` prefix (e.g., [fep], [builder], [analysis])
+- Briefly describe main changes
+- List key changes
+- Include Co-Authored-By tag
 
-### 4. 推送到远程
+### 4. Push to Remote
 ```bash
 git push origin gxf
 ```
 
-### 5. 更新PR描述（关键步骤）
+### 5. Update PR Description (Critical Step)
 ```bash
 gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@/tmp/pr_body_expanded.md
 ```
 
-**重要**：
-- 每次推送新提交后，都要用 `/tmp/pr_body_expanded.md` 更新PR描述
-- PR描述应该包含**完整的FEP工作流程描述**，不只是最新改动
-- 体现从main分支到现在的**所有变更对比**
-- 方便同事审阅时了解完整的工作内容
+**Important**:
+- After each new push, update the PR description using `/tmp/pr_body_expanded.md`
+- PR description should contain the **complete FEP workflow description**, not just the latest changes
+- Reflect **all changes compared to main branch** from the beginning
+- Help colleagues understand the complete work content during review
 
-### 6. 验证PR更新
+### 6. Verify PR Update
 ```bash
 gh pr view 4 --json title,state,updatedAt --jq '{title, state, updated_at}'
 ```
 
-## PR描述内容要求
+## PR Description Content Requirements
 
-### 必须包含的章节
+### Required Sections
 
 ```markdown
 ## Summary
-简要概述（1-2句话）
+Brief overview (1-2 sentences)
 
 ## Main Features
 ### FEP workflow
-- 完整的FEP工作流程特性
-- 原子映射、混合拓扑等
+- Complete FEP workflow features
+- Atom mapping, hybrid topology, etc.
 
 ### FEP analysis
-- 分析方法、Bootstrap等
+- Analysis methods, Bootstrap, etc.
 
 ### Builder and force-field integration
-- 力场集成、RTF支持等
+- Force field integration, RTF support, etc.
 
 ### Analysis and architecture refactoring
-- 架构重构、模块拆分等
+- Architecture refactoring, module splitting, etc.
 
 ## Command-line usage
-实际的CLI使用示例（不是测试文件路径）
+Actual CLI usage examples (not test file paths)
 
 ## Python API usage
-Python接口使用示例
+Python interface usage examples
 
 ## Current validation status
 ### Validated end-to-end
-- 完整验证的测试系统
+- Fully validated test systems
 
 ### Validated for modeling / scaffold generation
-- 建模验证的测试系统
+- Modeling validated test systems
 
 ### Additional validated paths
-- 其他验证路径
+- Other validated paths
 
 ## Review guidance
-审阅顺序和建议
+Review order and recommendations
 
 ## Notes
-注意事项和限制
+Important notes and limitations
 
 ## Files Changed
-按类别列出的所有更改文件
+All changed files organized by category
 ```
 
-### 内容规则
-1. **完整详细**：包含所有主要功能、验证结果、使用方法
-2. **方便审阅**：同事能看到完整的变更内容，不只是最新改动
-3. **体现对比**：展示从main到现在的完整变更历史
-4. **保持更新**：每次新提交都要更新PR描述，包含累积的所有更改
-5. **实际代码**：根据实际代码描述，不虚构内容
-6. **重点突出**：FEP模块是主题内容，要详细描述所有FEP特性
-7. **多写features**：详细列出功能点，每个功能类别都要展开说明
-8. **测试文件**：不要告诉同事测试文件在哪，只说有comprehensive test systems即可
+### Content Rules
+1. **Complete and detailed**: Include all main features, validation results, usage methods
+2. **Review-friendly**: Colleagues can see complete change content, not just latest changes
+3. **Show comparison**: Display complete change history from main to now
+4. **Keep updated**: Update PR description with each new commit, including all accumulated changes
+5. **Real code**: Describe based on actual code, don't fabricate content
+6. **Highlight focus**: FEP module is the main content, describe all FEP features in detail
+7. **List features**: Detail feature points, expand on each feature category
+8. **Test files**: Don't tell colleagues where test files are, just mention comprehensive test systems exist
 
-### 必须保留的内容
-- ✅ Main Features（所有主要功能类别）
-- ✅ Command-line usage（实际CLI接口）
-- ✅ Python API usage（Python接口）
-- ✅ Current validation status（完整验证结果）
-- ✅ Review guidance（审阅指南）
-- ✅ Files Changed（按类别组织的文件列表）
-- ✅ Notes（注意事项）
+### Must-Keep Content
+- ✅ Main Features (all main feature categories)
+- ✅ Command-line usage (actual CLI interface)
+- ✅ Python API usage (Python interface)
+- ✅ Current validation status (complete validation results)
+- ✅ Review guidance (review guide)
+- ✅ Files Changed (file list organized by category)
+- ✅ Notes (important notes)
 
-## 当前PR状态
+## Current PR Status
 
 ### PR #4: "Integrate FEP workflow with analysis and builder refactors"
-- **状态**: OPEN
-- **分支**: gxf → main
+- **Status**: OPEN
+- **Branch**: gxf → main
 - **URL**: https://github.com/AIB001/PRISM/pull/4
-- **主题内容**: FEP工作流程（atom mapping, hybrid topology, scaffold generation, analysis, force-field integration）
-- **最新添加**: RTF force field支持
+- **Main content**: FEP workflow (atom mapping, hybrid topology, scaffold generation, analysis, force-field integration)
+- **Latest addition**: RTF force field support
 
-### 常用命令
+### Common Commands
 ```bash
-# 查看PR状态
+# View PR status
 gh pr view 4
 
-# 查看PR提交数
+# View PR commit count
 gh pr view 4 --json commits --jq '.commits | length'
 
-# 查看PR文件更改
+# View PR file changes
 gh pr view 4 --json changedFiles --jq '.changedFiles'
 
-# 检查PR评论
+# Check PR comments
 gh pr view 4 --json comments --jq '.comments | length'
 
-# 更新PR描述
+# Update PR description
 gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@/tmp/pr_body_expanded.md
 ```
 
-## 重要提醒
+## Important Reminders
 
-1. **文件名固定**：永远使用 `/tmp/pr_body_expanded.md`，不准改文件名
-2. **清理旧文件**：每次更新PR前删除其他PR描述文件
-3. **Commit格式**：使用 `[module] description` 格式，不要太长
-4. **完整描述**：PR描述要完整详细，包含所有累积的更改
-5. **每次更新**：每次推送新提交后，都要更新PR描述
-6. **体现对比**：PR描述体现从main到现在的完整变更对比
+1. **Fixed filename**: Always use `/tmp/pr_body_expanded.md`, do not change filename
+2. **Cleanup old files**: Delete other PR description files before each PR update
+3. **Commit format**: Use `[module] description` format, don't make it too long
+4. **Complete description**: PR description should be complete and detailed, include all accumulated changes
+5. **Update every time**: Update PR description after each new push
+6. **Show comparison**: PR description reflects complete change comparison from main to now
 
-## Git工作流程
+## Git Workflow
 
-### 分支管理
-- **开发分支**: gxf
-- **主分支**: main
-- **PR目标**: main
+### Branch Management
+- **Development branch**: gxf
+- **Main branch**: main
+- **PR target**: main
 
-### 提交流程
-1. 在gxf分支上开发和测试
-2. 提交更改到gxf分支
-3. 推送到origin/gxf
-4. **更新PR #4描述**（包含所有累积的更改）
-5. 等待review和合并
+### Submission Process
+1. Develop and test on gxf branch
+2. Commit changes to gxf branch
+3. Push to origin/gxf
+4. **Update PR #4 description** (including all accumulated changes)
+5. Wait for review and merge
 
-### 不要做的事
-- ❌ 不要直接推送到main分支
-- ❌ 不要创建新的PR（使用PR #4）
-- ❌ 不要随意更改PR描述文件名
-- ❌ 不要在commit消息中写太长的描述
-- ❌ 不要只描述最新改动，要包含所有累积更改
+### Don't Do
+- ❌ Don't push directly to main branch
+- ❌ Don't create new PRs (use PR #4)
+- ❌ Don't arbitrarily change PR description filename
+- ❌ Don't write too long in commit messages
+- ❌ Don't describe only latest changes, include all accumulated changes

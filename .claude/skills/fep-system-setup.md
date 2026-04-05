@@ -1,6 +1,6 @@
 ---
 name: fep-system-setup
-description: FEP 体系搭建与脚手架生成调试
+description: FEP system setup and scaffold generation debugging
 type: fep
 ---
 

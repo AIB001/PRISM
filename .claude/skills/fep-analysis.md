@@ -1,6 +1,6 @@
 ---
 name: fep-analysis
-description: FEP 结果分析模块调试（多估算器 TI/BAR/MBAR、自动缓存、收敛诊断）
+description: FEP result analysis module debugging (multi-estimator TI/BAR/MBAR, automatic caching, convergence diagnostics)
 type: fep
 ---
 

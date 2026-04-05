@@ -1,103 +1,103 @@
-# Skills 文档使用指南
+# Skills Documentation Guide
 
-## 概述
+## Overview
 
-`.claude/skills/` 目录包含 PRISM 项目的技能文档，用于指导 Claude Code 完成特定任务。这些文件已包含在 git 仓库中，可以随时访问。
+The `.claude/skills/` directory contains skill documentation for the PRISM project, used to guide Claude Code in completing specific tasks. These files are included in the git repository and can be accessed at any time.
 
-## Skills 文件列表
+## Skills File List
 
-### FEP 相关
-- **`fep-system-debug.md`** - FEP 体系搭建与运行调试
-- **`fep-analysis.md`** - FEP 结果分析和可视化（多估算器）
-- **`fep-forcefield-integration.md`** - FEP 力场集成测试
-- **`fep-mapping-viz.md`** - FEP 原子映射可视化
+### FEP Related
+- **`fep-system-debug.md`** - FEP system setup and runtime debugging
+- **`fep-analysis.md`** - FEP result analysis and visualization (multi-estimator)
+- **`fep-forcefield-integration.md`** - FEP force field integration testing
+- **`fep-mapping-viz.md`** - FEP atom mapping visualization
 
-### 通用调试
-- **`gaff-debug.md`** - GAFF 力场生成调试
+### General Debugging
+- **`gaff-debug.md`** - GAFF force field generation debugging
 
-## 使用说明
+## Usage Instructions
 
-### 如何使用 Skills 文档
+### How to Use Skills Files
 
-1. **在 Claude Code 中**：
-   - Skills 文档会自动加载
-   - 开始对话时，Claude 会参考相关的 skills 文档
-   - 可以直接询问："使用 fep-system-debug skill 来..."
+1. **In Claude Code**:
+   - Skills files are automatically loaded
+   - When starting a conversation, Claude will reference relevant skills files
+   - You can directly ask: "Use the fep-system-debug skill to..."
 
-2. **在命令行中**：
+2. **From command line**:
    ```bash
-   # 查看可用的 skills
+   # View available skills
    ls .claude/skills/
 
-   # 阅读特定 skill
+   # Read a specific skill
    cat .claude/skills/fep-system-debug.md
    ```
 
-### 测试数据引用
+### Test Data References
 
-Skills 文档中的代码示例引用了 `examples/` 目录，但该目录不在 git 中。要使用这些示例：
+Code examples in skills files reference the `examples/` directory, but this directory is not in git. To use these examples:
 
-#### 选项 1：使用你自己的数据
+#### Option 1: Use Your Own Data
 
 ```bash
-# 替换示例中的路径
-mol2_a = "examples/ligands/oMeEtPh.mol2"  # 示例路径
-mol2_a = "my_data/ligand.mol2"           # 你的数据
+# Replace example paths
+mol2_a = "examples/ligands/oMeEtPh.mol2"  # Example path
+mol2_a = "my_data/ligand.mol2"           # Your data
 ```
 
-#### 选项 2：创建示例数据目录（可选）
+#### Option 2: Create Example Data Directory (Optional)
 
-如果你想保留完整的示例，可以在本地创建 `examples/` 目录：
+If you want to keep the complete examples, you can create an `examples/` directory locally:
 
 ```bash
-# 从测试目录复制示例数据（不提交到 git）
+# Copy example data from test directory (not committed to git)
 mkdir -p examples/ligands
 cp tests/gxf/FEP/unit_test/oMeEtPh-EtPh/*.mol2 examples/ligands/ 2>/dev/null || true
 
-# 添加到 .gitignore（如果还没有）
+# Add to .gitignore (if not already there)
 echo "examples/" >> .gitignore
 ```
 
-## LSP 工具说明
+## LSP Tool Notes
 
-所有 skills 文档都包含 LSP 工具使用说明：
+All skills files include LSP tool usage instructions:
 
-- **LSP 工具优先**：使用 `mcp__cclsp__` 工具进行代码导航
-- **可用性**：仅在 Claude Code 工具上下文中可用
-- **回退方案**：LSP 不可用时使用 `Grep` 工具
+- **LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation
+- **Availability**: Only available in Claude Code tool context
+- **Fallback**: Use `Grep` tool when LSP is unavailable
 
-## 代码搜索工具对比
+## Code Search Tool Comparison
 
-| 工具 | 优势 | 使用场景 |
-|------|------|----------|
-| `mcp__cclsp__find_definition` | 精确定位符号定义 | 查找类/函数定义 |
-| `mcp__cclsp__find_references` | 查找所有引用 | 重构影响分析 |
-| `mcp__cclsp__find_workspace_symbols` | 全局符号搜索 | 发现相关功能 |
-| `Grep` | 文本搜索，广泛可用 | 快速关键词搜索 |
+| Tool | Advantages | Use Cases |
+|------|-----------|-----------|
+| `mcp__cclsp__find_definition` | Precise symbol location | Find class/function definitions |
+| `mcp__cclsp__find_references` | Find all references | Refactoring impact analysis |
+| `mcp__cclsp__find_workspace_symbols` | Global symbol search | Discover related features |
+| `Grep` | Text search, widely available | Quick keyword searches |
 
-## 更新 Skills 文档
+## Updating Skills Documentation
 
-当更新 skills 文档时：
+When updating skills files:
 
-1. **避免硬编码测试路径**：使用 `examples/` 而不是 `tests/`
-2. **保持代码示例简洁**：只展示核心逻辑
-3. **添加必要说明**：解释如何替换为用户自己的数据
-4. **更新 LSP 说明**：确保所有文档都有 LSP 工具章节
+1. **Avoid hardcoded test paths**: Use `examples/` instead of `tests/`
+2. **Keep code examples concise**: Show only core logic
+3. **Add necessary explanations**: Explain how to replace with user's own data
+4. **Update LSP notes**: Ensure all documents have LSP tool sections
 
-## Git 跟踪状态
+## Git Tracking Status
 
-Skills 文档现在已经被 git 跟踪：
+Skills files are now tracked by git:
 
 ```bash
-# 查看跟踪状态
+# Check tracking status
 git status .claude/skills/
 
-# 查看已跟踪的文件
+# View tracked files
 git ls-files .claude/skills/
 ```
 
-## 相关文档
+## Related Documentation
 
-- **项目指南**: `CLAUDE.md`
-- **FEP 教程**: `/home/gxf1212/data/work/PRISM-Tutorial`
-- **测试数据**: `tests/gxf/FEP/unit_test/`（本地，不在 git 中）
+- **Project Guide**: `CLAUDE.md`
+- **FEP Tutorial**: `/home/gxf1212/data/work/PRISM-Tutorial`
+- **Test Data**: `tests/gxf/FEP/unit_test/` (local, not in git)

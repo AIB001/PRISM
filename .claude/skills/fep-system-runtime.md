@@ -1,6 +1,6 @@
 ---
 name: fep-system-runtime
-description: FEP 系统运行与执行调试
+description: FEP system runtime and execution debugging
 type: fep
 ---
 

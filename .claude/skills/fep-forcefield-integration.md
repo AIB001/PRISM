@@ -1,6 +1,6 @@
 ---
 name: fep-forcefield-integration
-description: FEP 模块与各种力场的集成测试
+description: FEP module integration testing with various force fields
 type: fep
 ---
 
