@@ -302,6 +302,12 @@ class HybridTopologyBuilder:
         if self.charge_strategy != "none" and self.charge_reception != "none":
             self._redistribute_charges(mapping, atoms_a, atoms_b)
 
+        # Reorder atoms only after charge redistribution. The redistribution helper
+        # assumes category blocks (common/transformed/surrounding), but the final
+        # GROMACS topology should preserve the reference-ligand atom order so
+        # constrained atoms are not interleaved with unrelated dummy atoms.
+        self._reorder_hybrid_atoms(atoms_a, atoms_b)
+
         return self.hybrid_atoms
 
     def _redistribute_charges(self, mapping: AtomMapping, atoms_a: List, atoms_b: List) -> None:
@@ -463,6 +469,60 @@ class HybridTopologyBuilder:
                 modify_atoms.append(atom)
 
         return modify_atoms
+
+    def _reorder_hybrid_atoms(self, atoms_a: List[Atom], atoms_b: List[Atom]) -> None:
+        """Reorder hybrid atoms to follow reference-topology atom order.
+
+        The hybrid builder initially groups atoms by mapping class
+        (common/transformed_a/transformed_b/surrounding). That is convenient
+        for charge redistribution, but it can interleave constrained atoms with
+        unrelated dummy atoms. GROMACS GPU update groups are sensitive to this
+        ordering.
+
+        Final output order:
+        1. All atoms that exist in state A, in the original ligand-A order
+        2. Atoms unique to state B, appended in ligand-B order
+        3. Any leftover atoms as a safety fallback
+        """
+
+        ordered: List[HybridAtom] = []
+        used_ids = set()
+
+        state_a_map: Dict[str, HybridAtom] = {}
+        state_b_only_map: Dict[str, HybridAtom] = {}
+
+        for atom in self.hybrid_atoms:
+            state_a_dummy = atom.state_a_type.startswith("DUM_")
+            state_b_dummy = (atom.state_b_type or "").startswith("DUM_")
+
+            if atom.name.endswith("A") and state_b_dummy and not state_a_dummy:
+                state_a_map[atom.name[:-1]] = atom
+            elif atom.name.endswith("B") and state_a_dummy and not state_b_dummy:
+                state_b_only_map[atom.name[:-1]] = atom
+            else:
+                state_a_map[atom.name] = atom
+
+        for atom_a in atoms_a:
+            hatom = state_a_map.get(atom_a.name)
+            if hatom is not None and id(hatom) not in used_ids:
+                ordered.append(hatom)
+                used_ids.add(id(hatom))
+
+        for atom_b in atoms_b:
+            hatom = state_b_only_map.get(atom_b.name)
+            if hatom is not None and id(hatom) not in used_ids:
+                ordered.append(hatom)
+                used_ids.add(id(hatom))
+
+        for atom in self.hybrid_atoms:
+            if id(atom) not in used_ids:
+                ordered.append(atom)
+                used_ids.add(id(atom))
+
+        for new_index, atom in enumerate(ordered, start=1):
+            atom.index = new_index
+
+        self.hybrid_atoms = ordered
 
     def _resolve_charge(self, charge_a: float, charge_b: float) -> float:
         """

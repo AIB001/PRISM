@@ -99,7 +99,11 @@ class LegWriter:
 
         This includes chain topology files (topol_Protein_*.itp) and
         position restraint files (posre_*.itp) that are referenced by topol.top.
-        Also copies force field directories (*.ff) if present.
+
+        Force-field directories are intentionally not copied into each leg.
+        Topologies keep the standard `<forcefield>.ff/...` include paths and rely
+        on GROMACS search paths (working directory / GMXLIB / installation).
+        That avoids vendoring redundant `.ff` trees into every repeat directory.
 
         Parameters
         ----------
@@ -117,18 +121,6 @@ class LegWriter:
                 copied_count += 1
         if copied_count:
             print(f"  ✓ Copied {copied_count} topology ITP files")
-
-        # Copy force field directories (*.ff) if present
-        ff_copied = 0
-        for ff_dir in source_dir.glob("*.ff"):
-            if ff_dir.is_dir():
-                target_ff_dir = target_dir / ff_dir.name
-                if target_ff_dir.exists():
-                    shutil.rmtree(target_ff_dir)
-                shutil.copytree(ff_dir, target_ff_dir)
-                ff_copied += 1
-        if ff_copied:
-            print(f"  ✓ Copied {ff_copied} force field directory(ies)")
 
     def generate_posre_file(self, leg_dir: Path, leg_name: str) -> None:
         """

@@ -22,7 +22,7 @@ from ..utils.colors import (
     print_warning,
     path,
 )
-from ..utils.system.topology import _parse_atomtypes
+from ..utils.system.topology import _parse_atomtypes, _should_vendor_forcefield
 
 try:
     from ..forcefield.adapters import CGenFFAdapter
@@ -899,22 +899,25 @@ class FEPWorkflowMixin:
                         f"Please check your force field installation."
                     )
 
-                # Copy if not exists, or validate and replace if incomplete
-                need_copy = not local_ff_dir.exists()
-                if not need_copy and self.overwrite:
-                    missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
-                    if missing_local:
-                        print(f"Existing force field copy is incomplete, replacing...")
-                        shutil.rmtree(local_ff_dir)
-                        need_copy = True
+                if _should_vendor_forcefield(ff_info, model_dir):
+                    # Copy if not exists, or validate and replace if incomplete
+                    need_copy = not local_ff_dir.exists()
+                    if not need_copy and self.overwrite:
+                        missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
+                        if missing_local:
+                            print(f"Existing force field copy is incomplete, replacing...")
+                            shutil.rmtree(local_ff_dir)
+                            need_copy = True
 
-                if need_copy:
-                    shutil.copytree(ff_path, local_ff_dir)
-                    source_str = ff_info.get("source", ff_path)
-                    print(f"Copied force field to working directory: {local_ff_dir}")
-                    print(f"  Source: {source_str}")
+                    if need_copy:
+                        shutil.copytree(ff_path, local_ff_dir)
+                        source_str = ff_info.get("source", ff_path)
+                        print(f"Copied force field to working directory: {local_ff_dir}")
+                        print(f"  Source: {source_str}")
+                    else:
+                        print(f"Using existing force field copy: {local_ff_dir}")
                 else:
-                    print(f"Using existing force field copy: {local_ff_dir}")
+                    print(f"Using installed force field in place: {ff_path}")
 
         topol_path = model_dir / "topol.top"
         # Compute ligand include paths relative to the working model directory.

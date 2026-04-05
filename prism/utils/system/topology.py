@@ -5,6 +5,7 @@
 Topology generation and fixing utilities for SystemBuilder.
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -30,6 +31,69 @@ except ImportError:
 
 
 _PARAM_SECTIONS = {"bondtypes", "pairtypes", "angletypes", "dihedraltypes", "atomtypes"}
+_INSTALLED_FF_SOURCES = {"GMXLIB", "GROMACS installation"}
+
+
+def _should_vendor_forcefield(ff_info: Dict[str, str], working_dir: Path) -> bool:
+    """Return True when the selected force field must be copied into `working_dir`."""
+
+    source = ff_info.get("source", "")
+    if source in _INSTALLED_FF_SOURCES:
+        return False
+
+    ff_path = Path(ff_info.get("path", ""))
+    try:
+        return ff_path.parent.resolve() != working_dir.resolve()
+    except FileNotFoundError:
+        return True
+
+
+def _find_installed_forcefield_dir(ff_dir_name: str) -> Optional[Path]:
+    """Resolve `ff_dir_name` from GMXLIB / GROMACS installation paths."""
+
+    candidates: List[Path] = []
+
+    gmxlib = os.environ.get("GMXLIB")
+    if gmxlib:
+        candidates.append(Path(gmxlib) / ff_dir_name)
+
+    gmxdata = os.environ.get("GMXDATA")
+    if gmxdata:
+        candidates.append(Path(gmxdata) / "top" / ff_dir_name)
+
+    try:
+        import subprocess
+
+        for cmd in ("gmx", "gmx_mpi", "gmx_d", "gmx_mpi_d"):
+            try:
+                result = subprocess.run([cmd, "-version"], capture_output=True, text=True, timeout=5, check=False)
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+
+            for line in result.stdout.splitlines():
+                if "Data prefix" not in line:
+                    continue
+                data_prefix = line.split(":", 1)[1].strip()
+                candidates.append(Path(data_prefix) / "share" / "gromacs" / "top" / ff_dir_name)
+                break
+            if candidates:
+                break
+    except Exception:
+        pass
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except FileNotFoundError:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if candidate.exists():
+            return candidate
+
+    return None
 
 
 def _strip_comment(line: str) -> str:
@@ -304,23 +368,26 @@ class TopologyProcessorMixin:
                         f"Please check your force field installation."
                     )
 
-                # Copy if not exists, or validate and replace if incomplete
-                need_copy = not local_ff_dir.exists()
-                if not need_copy and self.overwrite:
-                    # Check if existing copy is complete
-                    missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
-                    if missing_local:
-                        print(f"Existing force field copy is incomplete, replacing...")
-                        shutil.rmtree(local_ff_dir)
-                        need_copy = True
+                if _should_vendor_forcefield(ff_info, self.model_dir):
+                    # Copy if not exists, or validate and replace if incomplete
+                    need_copy = not local_ff_dir.exists()
+                    if not need_copy and self.overwrite:
+                        # Check if existing copy is complete
+                        missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
+                        if missing_local:
+                            print(f"Existing force field copy is incomplete, replacing...")
+                            shutil.rmtree(local_ff_dir)
+                            need_copy = True
 
-                if need_copy:
-                    shutil.copytree(ff_path, local_ff_dir)
-                    source_str = ff_info.get("source", ff_path)
-                    print(f"Copied force field to working directory: {local_ff_dir}")
-                    print(f"  Source: {source_str}")
+                    if need_copy:
+                        shutil.copytree(ff_path, local_ff_dir)
+                        source_str = ff_info.get("source", ff_path)
+                        print(f"Copied force field to working directory: {local_ff_dir}")
+                        print(f"  Source: {source_str}")
+                    else:
+                        print(f"Using existing force field copy: {local_ff_dir}")
                 else:
-                    print(f"Using existing force field copy: {local_ff_dir}")
+                    print(f"Using installed force field in place: {ff_path}")
 
             command.extend(["-ff", ff_name])
             print(f"Using force field: {ff_name}")
@@ -596,6 +663,9 @@ class TopologyProcessorMixin:
             ff_dir = (topol_dir / match.group(1)).resolve()
             if ff_dir.exists():
                 return ff_dir
+            installed_ff = _find_installed_forcefield_dir(match.group(1))
+            if installed_ff is not None:
+                return installed_ff
         return None
 
     def _build_cgenff_parameter_supplement(
