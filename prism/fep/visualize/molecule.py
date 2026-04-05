@@ -29,6 +29,147 @@ def _assign_atom_metadata(rdkit_atom: "Chem.Atom", atom) -> None:
     rdkit_atom.SetProp("atomNote", f"{atom.charge:+.4f}")
 
 
+def _create_mol_from_atoms(atoms: List) -> "Chem.Mol":
+    """
+    Create RDKit Mol object from a list of Atom objects.
+
+    This function creates an RDKit molecule directly from atoms, bypassing
+    PDB file parsing. This is necessary for hybrid topology atoms whose names
+    (N00A, C01A, etc.) are not in standard PDB format.
+
+    Parameters
+    ----------
+    atoms : List[Atom]
+        List of Atom objects with name, element, coord, etc.
+
+    Returns
+    -------
+    Chem.Mol
+        RDKit Mol object with atoms and coordinates
+    """
+    from rdkit import Chem
+
+    # Create empty molecule
+    mol = Chem.RWMol()
+
+    # Add atoms
+    for atom in atoms:
+        rdkit_atom = Chem.Atom(atom.element)  # Create atom from element symbol
+        mol.AddAtom(rdkit_atom)
+
+    # Set conformer (coordinates)
+    conf = Chem.Conformer(len(atoms))
+    for i, atom in enumerate(atoms):
+        conf.SetAtomPosition(i, (atom.coord[0], atom.coord[1], atom.coord[2]))
+    mol.AddConformer(conf)
+
+    # Add bonds based on distance (simple heuristic)
+    # This will be overwritten by assign_bond_orders_from_mol2 if MOL2 is available
+    _add_bonds_by_distance(mol, atoms)
+
+    # Return as regular Mol
+    return mol.GetMol()
+
+
+def _add_bonds_by_distance(mol: "Chem.RWMol", atoms: List, tolerance: float = 1.7) -> None:
+    """
+    Add bonds to mol based on distance between atoms.
+
+    Simple heuristic: two atoms are bonded if their distance is less than tolerance.
+    This is a fallback for when MOL2 file is not available.
+
+    Parameters
+    ----------
+    mol : Chem.RWMol
+        RDKit molecule to add bonds to
+    atoms : List[Atom]
+        List of Atom objects with coordinates
+    tolerance : float
+        Maximum distance for bond (default 1.7 Å)
+    """
+    from rdkit import Chem
+
+    for i in range(len(atoms)):
+        for j in range(i + 1, len(atoms)):
+            coord_i = atoms[i].coord
+            coord_j = atoms[j].coord
+            dist = (
+                (coord_i[0] - coord_j[0]) ** 2 + (coord_i[1] - coord_j[1]) ** 2 + (coord_i[2] - coord_j[2]) ** 2
+            ) ** 0.5
+
+            if dist < tolerance:
+                mol.AddBond(i, j, Chem.BondType.SINGLE)
+
+
+def _assign_bond_orders_from_mol2_to_atoms_mol(
+    target_mol: "Chem.Mol",
+    mol2_file: str,
+    coord_threshold: Optional[float] = None,
+) -> "Chem.Mol":
+    """
+    Transfer bond orders from a MOL2 template onto a molecule created from the
+    mapped atom list.
+
+    The target molecule already has the correct atom names and receptor-aligned
+    coordinates. We only need the bond topology from the MOL2 file. Matching is
+    done by element + 3D coordinates, which is robust across force fields where
+    atom names may differ.
+    """
+    from rdkit import Chem
+    import numpy as np
+
+    if coord_threshold is None:
+        coord_threshold = COORDINATE_MATCH_TOLERANCE_ANGSTROM
+
+    mol2_mol = Chem.MolFromMol2File(mol2_file, sanitize=False, removeHs=False)
+    if mol2_mol is None:
+        raise ValueError(f"RDKit could not parse MOL2: {mol2_file}")
+
+    target_rw = Chem.RWMol(target_mol)
+    # Remove any heuristic bonds before adding template bonds.
+    while target_rw.GetNumBonds():
+        bond = target_rw.GetBondWithIdx(0)
+        target_rw.RemoveBond(bond.GetBeginAtomIdx(), bond.GetEndAtomIdx())
+
+    target_conf = target_rw.GetConformer()
+    mol2_conf = mol2_mol.GetConformer()
+
+    template_to_target = {}
+    used_target = set()
+    for mol2_idx in range(mol2_mol.GetNumAtoms()):
+        mol2_atom = mol2_mol.GetAtomWithIdx(mol2_idx)
+        mol2_elem = mol2_atom.GetSymbol()
+        mol2_pos = np.array(mol2_conf.GetAtomPosition(mol2_idx))
+
+        best_idx = None
+        best_dist = float("inf")
+        for target_idx in range(target_rw.GetNumAtoms()):
+            if target_idx in used_target:
+                continue
+            target_atom = target_rw.GetAtomWithIdx(target_idx)
+            if target_atom.GetSymbol() != mol2_elem:
+                continue
+            target_pos = np.array(target_conf.GetAtomPosition(target_idx))
+            dist = np.linalg.norm(mol2_pos - target_pos)
+            if dist < coord_threshold and dist < best_dist:
+                best_idx = target_idx
+                best_dist = dist
+
+        if best_idx is not None:
+            template_to_target[mol2_idx] = best_idx
+            used_target.add(best_idx)
+
+    for bond in mol2_mol.GetBonds():
+        begin = template_to_target.get(bond.GetBeginAtomIdx())
+        end = template_to_target.get(bond.GetEndAtomIdx())
+        if begin is None or end is None or begin == end:
+            continue
+        if target_rw.GetBondBetweenAtoms(begin, end) is None:
+            target_rw.AddBond(begin, end, bond.GetBondType())
+
+    return target_rw.GetMol()
+
+
 def pdb_to_mol(pdb_file: str) -> "Chem.Mol":
     """
     Convert PDB file to RDKit Mol object with proper labeling.
@@ -53,7 +194,7 @@ def pdb_to_mol(pdb_file: str) -> "Chem.Mol":
     >>> Chem.MolToSmiles(mol)  # Get SMILES
     """
     try:
-        from rdkit import Chem
+        from rdkit import Chem  # noqa: F401
         from rdkit.Chem import AllChem
     except ImportError as e:
         raise ImportError(
@@ -436,7 +577,7 @@ def prepare_mol_with_charges_and_labels(
         RDKit Mol object with atom labels and charge notes
     """
     try:
-        from rdkit import Chem
+        from rdkit import Chem  # noqa: F401
         from rdkit.Chem import AllChem
     except ImportError as e:
         raise ImportError("RDKit is required. Install with: conda install -c conda-forge rdkit") from e
@@ -447,20 +588,24 @@ def prepare_mol_with_charges_and_labels(
         if detected_mol2:
             mol2_file = detected_mol2
 
-    # Step 1: Read PDB for coordinates (ALWAYS - receptor-aligned)
-    # This is the KEY fix: we always use PDB coordinates, not MOL2 coordinates
-    # sanitize=False is critical for hybrid topologies with unusual valence states
-    # flavor=0 ensures RDKit preserves PDB atom names exactly as written (4-char names like N00A)
-    mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False, flavor=0)
-    if mol is None:
-        raise ValueError(f"Failed to read PDB: {pdb_file}")
+    # Step 1: Create RDKit Mol object from atoms list (NOT from PDB file)
+    # This is necessary because hybrid topology atom names (N00A, C01A, etc.)
+    # are not in standard PDB format and RDKit cannot parse them correctly
+    #
+    # We create a mol object manually from the atoms list, which already has
+    # the correct atom names, elements, and coordinates
+    try:
+        mol = _create_mol_from_atoms(atoms)
+        print(f"✓ Created RDKit Mol from {len(atoms)} atoms")
+    except Exception as e:
+        raise ValueError(f"Failed to create RDKit Mol from atoms list: {e}")
 
-    # Step 2: Assign bond orders from MOL2 template (if available)
-    # Uses RDKit's AssignBondOrdersFromTemplate which does MCS matching
-    # This is coordinate-independent and works for all force fields
+    # Step 2: Assign bond orders from MOL2 template (if available).
+    # This uses the visualization PDB plus a MOL2 template and preserves the
+    # topology-derived atom ordering/labels from the PDB.
     if mol2_file is not None and Path(mol2_file).exists():
         try:
-            mol = assign_bond_orders_from_mol2(pdb_file, mol2_file)
+            mol = _assign_bond_orders_from_mol2_to_atoms_mol(mol, mol2_file)
             print(f"✓ Assigned bond orders from MOL2 template: {mol2_file}")
         except Exception as e:
             error_msg = str(e)
@@ -469,16 +614,16 @@ def prepare_mol_with_charges_and_labels(
                 print(f"Warning: Standard bond order assignment failed: {e}")
                 print(f"  Trying coordinate-based bond order matching...")
                 try:
-                    mol = assign_bond_orders_from_mol2_by_coords(pdb_file, mol2_file)
+                    mol = _assign_bond_orders_from_mol2_to_atoms_mol(mol, mol2_file)
                     print(f"✓ Assigned bond orders from MOL2 using coordinate matching: {mol2_file}")
                 except Exception as e2:
                     print(f"Warning: Coordinate-based bond order assignment also failed: {e2}")
-                    print(f"  Falling back to RDKit-inferred bond orders from PDB")
+                    print(f"  Falling back to heuristic bond inference")
                     # Fall through - PDB mol already has coordinates
                     pass
             else:
                 print(f"Warning: Failed to assign bond orders from MOL2: {e}")
-                print(f"  Falling back to RDKit-inferred bond orders from PDB")
+                print(f"  Falling back to heuristic bond inference")
                 # Fall through - PDB mol already has coordinates
                 pass
 
@@ -497,95 +642,16 @@ def prepare_mol_with_charges_and_labels(
 
     print("Note: Skipping full sanitization for hybrid topology (visualization only)")
 
-    # Step 4: Match atoms and assign labels
-    charge_dict = {atom.name: atom.charge for atom in atoms}
-    atom_coords = [atom.coord for atom in atoms]
-    atoms_by_name = {atom.name: idx for idx, atom in enumerate(atoms)}
-    atoms_by_normalized_name = {}
-    for idx, atom in enumerate(atoms):
-        atoms_by_normalized_name.setdefault(_normalize_atom_name(atom.name), []).append(idx)
+    # Step 4: Assign atom metadata directly (mol created from atoms, so order matches)
+    # Since we created the mol object directly from the atoms list, the atom order
+    # should match exactly. We can assign metadata directly without complex matching.
+    for mol_idx, atom in enumerate(atoms):
+        if mol_idx >= mol.GetNumAtoms():
+            print(f"Warning: Atom index {mol_idx} out of range in RDKit mol")
+            break
 
-    conf = mol.GetConformer()
-    used_indices = set()
-
-    for mol_idx in range(mol.GetNumAtoms()):
         rdkit_atom = mol.GetAtomWithIdx(mol_idx)
-        pdb_info = rdkit_atom.GetPDBResidueInfo()
-        pdb_name = pdb_info.GetName().strip() if pdb_info else ""
-        normalized_pdb_name = _normalize_atom_name(pdb_name) if pdb_name else ""
-        mol_element = rdkit_atom.GetSymbol()
-
-        matched_idx = None
-
-        # Priority 1: exact atom name match
-        if pdb_name:
-            candidate_idx = atoms_by_name.get(pdb_name)
-            if candidate_idx is not None and candidate_idx not in used_indices:
-                candidate_atom = atoms[candidate_idx]
-                if candidate_atom.element == mol_element:
-                    matched_idx = candidate_idx
-
-        # Priority 2: normalized atom name match (strip A/B suffixes)
-        if matched_idx is None and normalized_pdb_name:
-            for candidate_idx in atoms_by_normalized_name.get(normalized_pdb_name, []):
-                if candidate_idx in used_indices:
-                    continue
-                candidate_atom = atoms[candidate_idx]
-                if candidate_atom.element == mol_element:
-                    matched_idx = candidate_idx
-                    break
-
-        # Priority 3: nearest coordinate match with same element
-        if matched_idx is None:
-            pos = conf.GetAtomPosition(mol_idx)
-            mol_coord = [pos.x, pos.y, pos.z]
-            min_dist = float("inf")
-            best_idx = None
-
-            for atom_idx, atom in enumerate(atoms):
-                if atom_idx in used_indices or atom.element != mol_element:
-                    continue
-
-                dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coords[atom_idx])) ** 0.5
-                if dist < min_dist:
-                    min_dist = dist
-                    best_idx = atom_idx
-
-            if best_idx is not None and min_dist < COORDINATE_MATCH_TOLERANCE_ANGSTROM:
-                matched_idx = best_idx
-
-        # Priority 4: nearest coordinate match regardless of element
-        # Fallback for force fields (e.g., OPLS-AA LigParGen) that rename atoms
-        # but preserve coordinates and order
-        if matched_idx is None:
-            pos = conf.GetAtomPosition(mol_idx)
-            mol_coord = [pos.x, pos.y, pos.z]
-            min_dist = float("inf")
-            best_idx = None
-
-            for atom_idx, atom in enumerate(atoms):
-                if atom_idx in used_indices:
-                    continue
-
-                dist = sum((a - b) ** 2 for a, b in zip(mol_coord, atom_coords[atom_idx])) ** 0.5
-                if dist < min_dist:
-                    min_dist = dist
-                    best_idx = atom_idx
-
-            if best_idx is not None and min_dist < COORDINATE_MATCH_TOLERANCE_ANGSTROM:
-                matched_idx = best_idx
-
-        if matched_idx is not None:
-            _assign_atom_metadata(rdkit_atom, atoms[matched_idx])
-            used_indices.add(matched_idx)
-            continue
-
-        # Fallback: keep PDB name if present
-        if pdb_name:
-            rdkit_atom.SetProp("atomLabel", pdb_name)
-            rdkit_atom.SetProp("name", pdb_name)
-            if pdb_name in charge_dict:
-                rdkit_atom.SetProp("atomNote", f"{charge_dict[pdb_name]:+.4f}")
+        _assign_atom_metadata(rdkit_atom, atom)
 
     # Step 5: Generate 2D coordinates for depiction
     try:

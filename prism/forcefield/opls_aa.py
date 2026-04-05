@@ -378,21 +378,14 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         return files
 
     def _align_coordinates(self, gro_file):
-        """
-        Align LigParGen output coordinates to input structure
-
-        Parameters:
-        -----------
-        gro_file : str
-            Path to LigParGen GRO file
-        """
+        """Align LigParGen output coordinates to the input structure."""
         print("Aligning coordinates to input structure...")
 
+        temp_pdb = gro_file.replace(".gro", "_temp.pdb")
         try:
             from rdkit import Chem
-            from rdkit.Chem import rdMolAlign
+            from rdkit.Chem import rdFMCS, rdMolAlign
 
-            # Load input molecule
             if self.file_format == "mol2":
                 mol_input = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
             elif self.file_format == "pdb":
@@ -404,30 +397,50 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 print("Warning: Could not load input molecule for alignment")
                 return
 
-            # Load LigParGen output (convert GRO to PDB first)
-            temp_pdb = gro_file.replace(".gro", "_temp.pdb")
             self._convert_gro_to_pdb(gro_file, temp_pdb)
-
             mol_lpg = Chem.MolFromPDBFile(temp_pdb, removeHs=False)
-
             if mol_lpg is None:
                 print("Warning: Could not load LigParGen output for alignment")
-                os.remove(temp_pdb)
                 return
 
-            # Perform alignment
-            rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input)
-            print(f"Alignment RMSD: {rmsd:.3f} Å")
+            rmsd = None
+            try:
+                rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input)
+                print(f"Alignment RMSD: {rmsd:.3f} Å")
+            except Exception as direct_err:
+                print(f"Direct alignment failed: {direct_err}")
+                heavy_input = Chem.RemoveHs(mol_input)
+                heavy_lpg = Chem.RemoveHs(mol_lpg)
+                mcs = rdFMCS.FindMCS(
+                    [heavy_input, heavy_lpg],
+                    atomCompare=rdFMCS.AtomCompare.CompareElements,
+                    bondCompare=rdFMCS.BondCompare.CompareAny,
+                    ringMatchesRingOnly=True,
+                    completeRingsOnly=True,
+                    timeout=10,
+                )
+                if not mcs.smartsString:
+                    raise ValueError("MCS-based alignment failed: no common scaffold found")
 
-            # Write aligned structure back to PDB, then convert to GRO
+                patt = Chem.MolFromSmarts(mcs.smartsString)
+                input_match = heavy_input.GetSubstructMatch(patt)
+                lpg_match = heavy_lpg.GetSubstructMatch(patt)
+                if not input_match or not lpg_match:
+                    raise ValueError("MCS-based alignment failed: no substructure match found")
+
+                atom_map = list(zip(lpg_match, input_match))
+                rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input, atomMap=atom_map)
+                print(f"Alignment RMSD (MCS fallback, {len(atom_map)} heavy atoms): {rmsd:.3f} Å")
+
             Chem.MolToPDBFile(mol_lpg, temp_pdb)
             self._convert_pdb_to_gro(temp_pdb, gro_file)
-
-            os.remove(temp_pdb)
             print("Coordinate alignment completed")
 
         except Exception as e:
             print(f"Warning: Coordinate alignment failed: {e}")
+        finally:
+            if os.path.exists(temp_pdb):
+                os.remove(temp_pdb)
 
     def _convert_gro_to_pdb(self, gro_file, pdb_file):
         """Convert GRO to PDB format"""

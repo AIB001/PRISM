@@ -427,7 +427,8 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
         if rtf_file and pdb_file:
             print("    Found RTF and PDB files - generating PRISM formats...")
-            self._parse_rtf_and_generate_prism(rtf_file, pdb_file)
+            par_file = files.get("par")
+            self._parse_rtf_and_generate_prism(rtf_file, pdb_file, par_file)
         elif files.get("itp") and files.get("gro"):
             print("    Using existing SwissParam ITP and GRO files")
             self._copy_swissparam_itp_to_prism(files)
@@ -435,7 +436,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             print("    ⚠ Warning: Cannot generate PRISM formats - missing required files")
             print(f"    Available files: {list(files.keys())}")
 
-    def _parse_rtf_and_generate_prism(self, rtf_file, pdb_file):
+    def _parse_rtf_and_generate_prism(self, rtf_file, pdb_file, par_file=None):
         """
         Parse RTF file and generate PRISM format output
 
@@ -445,12 +446,20 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             Path to RTF file
         pdb_file : str
             Path to PDB file
+        par_file : str, optional
+            Path to PAR file with parameters
         """
         print("\n[5a] Parsing RTF file...")
 
         try:
             # Parse RTF file
             rtf_data = self._parse_rtf_file(rtf_file)
+
+            # Parse PAR file if available
+            par_data = None
+            if par_file:
+                print("\n[5a'] Parsing PAR file for parameters...")
+                par_data = self._parse_par_file(par_file)
 
             # Parse PDB coordinates
             coordinates = self._parse_pdb_coordinates(pdb_file)
@@ -462,9 +471,9 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             if not os.path.exists(os.path.join(self.lig_ff_dir, "LIG.gro")):
                 self._generate_gro_file(coordinates, rtf_data)
 
-            # Generate ITP file
+            # Generate ITP file with parameters
             if not os.path.exists(os.path.join(self.lig_ff_dir, "LIG.itp")):
-                self._generate_itp_file(rtf_data)
+                self._generate_itp_file(rtf_data, par_data)
 
             # Generate atomtypes file
             if not os.path.exists(os.path.join(self.lig_ff_dir, "atomtypes_LIG.itp")):
@@ -484,6 +493,78 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"    ✗ Error generating PRISM formats: {e}")
             raise
 
+    def _parse_par_file(self, par_file: str) -> Dict:
+        """
+        Parse PAR file for bond, angle, dihedral parameters
+
+        Parameters:
+        -----------
+        par_file : str
+            Path to PAR file
+
+        Returns:
+        --------
+        dict : Parsed parameters with CHARMM units
+        """
+        print(f"      Reading PAR file: {os.path.basename(par_file)}")
+
+        params = {"bonds": {}, "angles": {}, "dihedrals": {}}
+
+        with open(par_file, "r") as f:
+            lines = f.readlines()
+
+        section = None
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("*"):
+                continue
+
+            # Section detection
+            if line.startswith("BONDS"):
+                section = "bonds"
+                continue
+            elif line.startswith("ANGLES"):
+                section = "angles"
+                continue
+            elif line.startswith("DIHEDRALS"):
+                section = "dihedrals"
+                continue
+            elif line.startswith("IMPROPER"):
+                section = "impropers"
+                continue
+
+            # Parse parameters
+            if section == "bonds":
+                parts = line.split()
+                if len(parts) >= 4:
+                    type1, type2, k, b0 = parts[0], parts[1], float(parts[2]), float(parts[3])
+                    key = tuple(sorted([type1, type2]))
+                    params["bonds"][key] = {"k": k, "b0": b0}
+
+            elif section == "angles":
+                parts = line.split()
+                if len(parts) >= 5:
+                    type1, type2, type3, k, theta0 = parts[0], parts[1], parts[2], float(parts[3]), float(parts[4])
+                    key = (type1, type2, type3)
+                    params["angles"][key] = {"k": k, "theta0": theta0}
+
+            elif section == "dihedrals":
+                parts = line.split()
+                if len(parts) >= 6:
+                    type1, type2, type3, type4 = parts[0], parts[1], parts[2], parts[3]
+                    k, delta = float(parts[4]), float(parts[5])
+                    # Check for multiplicity (some formats have it)
+                    mult = int(float(parts[6])) if len(parts) > 6 else 0
+                    key = (type1, type2, type3, type4)
+                    if key not in params["dihedrals"]:
+                        params["dihedrals"][key] = []
+                    params["dihedrals"][key].append({"k": k, "delta": delta, "mult": mult})
+
+        print(
+            f"        Found {len(params['bonds'])} bonds, {len(params['angles'])} angles, {len(params['dihedrals'])} dihedrals"
+        )
+        return params
+
     def _parse_rtf_file(self, rtf_file) -> Dict:
         """
         Parse RTF file for atoms, bonds, angles, dihedrals
@@ -499,7 +580,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         """
         print(f"      Reading RTF file: {os.path.basename(rtf_file)}")
 
-        rtf_data = {"atoms": {}, "bonds": [], "angles": [], "dihedrals": []}
+        rtf_data = {"atoms": {}, "bonds": [], "angles": [], "dihedrals": [], "atom_types": {}}
 
         with open(rtf_file, "r") as f:
             lines = f.readlines()
@@ -524,6 +605,7 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                     atom_type = parts[2]
                     charge = float(parts[3])
                     rtf_data["atoms"][name] = {"type": atom_type, "charge": charge}
+                    rtf_data["atom_types"][name] = atom_type
                 continue
 
             elif line.startswith("BOND"):
@@ -697,8 +779,8 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
 
         print(f"      ✓ Generated: {os.path.basename(gro_file)}")
 
-    def _generate_itp_file(self, rtf_data: Dict):
-        """Generate GROMACS ITP file"""
+    def _generate_itp_file(self, rtf_data: Dict, par_data: Dict = None):
+        """Generate GROMACS ITP file with parameters"""
         itp_file = os.path.join(self.lig_ff_dir, "LIG.itp")
         print(f"      Generating ITP file...")
 
@@ -726,39 +808,80 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                 f.write(f"{atom_id:5d} {atom_type:>10s}      1    {self.moleculetype_name}   {atom_name:>4s}")
                 f.write(f"{atom_id:5d}  {charge:10.6f}   12.01000\n")
 
-            # Bonds
+            name_to_id = {name: i + 1 for i, name in enumerate(rtf_data["atoms"].keys())}
+
+            # Bonds with parameters
             if rtf_data["bonds"]:
                 f.write("\n[ bonds ]\n")
-                f.write(";  ai    aj funct\n")
-
-                name_to_id = {name: i + 1 for i, name in enumerate(rtf_data["atoms"].keys())}
+                f.write(";  ai    aj funct   b0       kb\n")
 
                 for atom1, atom2 in rtf_data["bonds"]:
                     if atom1 in name_to_id and atom2 in name_to_id:
                         id1 = name_to_id[atom1]
                         id2 = name_to_id[atom2]
-                        f.write(f"{id1:5d} {id2:5d}     1\n")
 
-            # Angles
+                        # Look up parameters if available
+                        if par_data and "atom_types" in rtf_data:
+                            type1 = rtf_data["atom_types"].get(atom1)
+                            type2 = rtf_data["atom_types"].get(atom2)
+                            if type1 and type2:
+                                key = tuple(sorted([type1, type2]))
+                                if key in par_data.get("bonds", {}):
+                                    # Convert CHARMM to GROMACS units
+                                    # K: kcal/mol/Å² → kJ/mol/nm² = * 418.4
+                                    # b0: Å → nm = * 0.1
+                                    k_charmm = par_data["bonds"][key]["k"]
+                                    b0_charmm = par_data["bonds"][key]["b0"]
+                                    k_gromacs = k_charmm * 418.4
+                                    b0_gromacs = b0_charmm * 0.1
+                                    f.write(f"{id1:5d} {id2:5d}     1   {b0_gromacs:.6f}   {k_gromacs:.3f}\n")
+                                else:
+                                    # No parameters found, write without params
+                                    f.write(f"{id1:5d} {id2:5d}     1\n")
+                            else:
+                                f.write(f"{id1:5d} {id2:5d}     1\n")
+                        else:
+                            f.write(f"{id1:5d} {id2:5d}     1\n")
+
+            # Angles with parameters
             if rtf_data["angles"]:
                 f.write("\n[ angles ]\n")
-                f.write(";  ai    aj    ak funct\n")
-
-                name_to_id = {name: i + 1 for i, name in enumerate(rtf_data["atoms"].keys())}
+                f.write(";  ai    aj    ak funct   theta0   ktheta\n")
 
                 for atom1, atom2, atom3 in rtf_data["angles"]:
                     if all(atom in name_to_id for atom in [atom1, atom2, atom3]):
                         id1 = name_to_id[atom1]
                         id2 = name_to_id[atom2]
                         id3 = name_to_id[atom3]
-                        f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
 
-            # Dihedrals
+                        # Look up parameters if available
+                        if par_data and "atom_types" in rtf_data:
+                            type1 = rtf_data["atom_types"].get(atom1)
+                            type2 = rtf_data["atom_types"].get(atom2)
+                            type3 = rtf_data["atom_types"].get(atom3)
+                            if type1 and type2 and type3:
+                                key = (type1, type2, type3)
+                                if key in par_data.get("angles", {}):
+                                    # Convert CHARMM to GROMACS units
+                                    # K: kcal/mol/rad² → kJ/mol/rad² = * 4.184
+                                    # theta0: degrees (no conversion)
+                                    k_charmm = par_data["angles"][key]["k"]
+                                    theta0_charmm = par_data["angles"][key]["theta0"]
+                                    k_gromacs = k_charmm * 4.184
+                                    f.write(
+                                        f"{id1:5d} {id2:5d} {id3:5d}     1   {theta0_charmm:.2f}   {k_gromacs:.3f}\n"
+                                    )
+                                else:
+                                    f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
+                            else:
+                                f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
+                        else:
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
+
+            # Dihedrals with parameters
             if rtf_data["dihedrals"]:
                 f.write("\n[ dihedrals ]\n")
-                f.write(";  ai    aj    ak    al funct\n")
-
-                name_to_id = {name: i + 1 for i, name in enumerate(rtf_data["atoms"].keys())}
+                f.write(";  ai    aj    ak    al funct   delta     kd\n")
 
                 for atom1, atom2, atom3, atom4 in rtf_data["dihedrals"]:
                     if all(atom in name_to_id for atom in [atom1, atom2, atom3, atom4]):
@@ -766,7 +889,34 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                         id2 = name_to_id[atom2]
                         id3 = name_to_id[atom3]
                         id4 = name_to_id[atom4]
-                        f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
+
+                        # Look up parameters if available
+                        if par_data and "atom_types" in rtf_data:
+                            type1 = rtf_data["atom_types"].get(atom1)
+                            type2 = rtf_data["atom_types"].get(atom2)
+                            type3 = rtf_data["atom_types"].get(atom3)
+                            type4 = rtf_data["atom_types"].get(atom4)
+                            if type1 and type2 and type3 and type4:
+                                key = (type1, type2, type3, type4)
+                                if key in par_data.get("dihedrals", {}):
+                                    # Get first dihedral parameter (may have multiple)
+                                    dih_params = par_data["dihedrals"][key][0]
+                                    # Convert CHARMM to GROMACS units
+                                    # K: kcal/mol → kJ/mol = * 4.184
+                                    # delta: degrees (no conversion)
+                                    k_charmm = dih_params["k"]
+                                    delta_charmm = dih_params["delta"]
+                                    k_gromacs = k_charmm * 4.184
+                                    # Use funct=9 for proper dihedral (Ryckaert-Bellemans)
+                                    f.write(
+                                        f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9   {delta_charmm:.2f}   {k_gromacs:.3f}\n"
+                                    )
+                                else:
+                                    f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
+                            else:
+                                f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
+                        else:
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9\n")
 
         print(f"      ✓ Generated: {os.path.basename(itp_file)}")
 

@@ -135,17 +135,30 @@ def visualize_mapping_html(
 
 def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_id: str) -> Dict:
     """Prepare data for Canvas rendering - NO SCALING here."""
-    # Build classification sets
-    common_atoms_a = {a[0].name for a in mapping.common}
-    common_atoms_b = {a[1].name for a in mapping.common}
-    transformed_a = {a.name for a in mapping.transformed_a}
-    transformed_b = {a.name for a in mapping.transformed_b}
-    surrounding_a = {a.name for a in mapping.surrounding_a}
-    surrounding_b = {a.name for a in mapping.surrounding_b}
+    # Use the mapping result directly. Do not reconstruct classification from
+    # atom names. Some force fields, especially OPLS/LigParGen-derived inputs,
+    # legitimately use names ending in A/B as part of the native atom name.
+    # Name-based classification can therefore mislabel atoms even when the
+    # mapping itself is correct.
+    classification_by_index = {}
+    if mol_id == "a":
+        for atom_a, _ in mapping.common:
+            classification_by_index[atom_a.index] = "common"
+        for atom in mapping.transformed_a:
+            classification_by_index[atom.index] = "transformed"
+        for atom in mapping.surrounding_a:
+            classification_by_index[atom.index] = "surrounding"
+    else:
+        for _, atom_b in mapping.common:
+            classification_by_index[atom_b.index] = "common"
+        for atom in mapping.transformed_b:
+            classification_by_index[atom.index] = "transformed"
+        for atom in mapping.surrounding_b:
+            classification_by_index[atom.index] = "surrounding"
 
     # Build charge and type lookup
-    charge_dict = {atom.name: atom.charge for atom in atoms}
-    type_dict = {atom.name: atom.atom_type for atom in atoms}
+    charge_dict = {atom.index: atom.charge for atom in atoms}
+    type_dict = {atom.index: atom.atom_type for atom in atoms}
 
     # Get 2D coordinates
     conf = mol.GetConformer()
@@ -169,26 +182,9 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
         name = atom.GetProp("name") if atom.HasProp("name") else f"Atom{atom.GetIdx()}"
         pos = conf.GetAtomPosition(atom.GetIdx())
         element = atom.GetSymbol()
+        source_index = atoms[atom.GetIdx()].index if atom.GetIdx() < len(atoms) else None
 
-        # Determine classification
-        if mol_id == "a":
-            if name in common_atoms_a:
-                classification = "common"
-            elif name in transformed_a:
-                classification = "transformed"
-            elif name in surrounding_a:
-                classification = "surrounding"
-            else:
-                classification = "unknown"
-        else:
-            if name in common_atoms_b:
-                classification = "common"
-            elif name in transformed_b:
-                classification = "transformed"
-            elif name in surrounding_b:
-                classification = "surrounding"
-            else:
-                classification = "unknown"
+        classification = classification_by_index.get(source_index, "unknown")
 
         # Get colors and radius
         fep_color = _get_classification_color(classification)
@@ -200,9 +196,9 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
             try:
                 charge = float(atom.GetProp("atomNote"))
             except ValueError:
-                charge = charge_dict.get(name, 0.0)
+                charge = charge_dict.get(source_index, 0.0)
         else:
-            charge = charge_dict.get(name, 0.0)
+            charge = charge_dict.get(source_index, 0.0)
 
         # Center and scale coordinates (RDKit 2D coords are ~1-2 Å units, scale to pixels)
         scale = 30.0
@@ -214,11 +210,12 @@ def _prepare_canvas_data(mol: Chem.Mol, atoms: List, mapping: AtomMapping, mol_i
                 "id": f"{mol_id.upper()}{atom.GetIdx() + 1}",
                 "name": name,
                 "element": element,
+                "sourceIndex": source_index,
                 "x": float(x),
                 "y": float(y),
                 "radius": radius,
                 "charge": charge,
-                "type": type_dict.get(name, ""),
+                "type": type_dict.get(source_index, ""),
                 "classification": classification,
                 "fepColor": fep_color,
                 "elementColor": element_color,
@@ -283,49 +280,25 @@ def _get_atom_radius(element: str) -> float:
 def _build_correspondence_map(mapping: AtomMapping, canvas_data_a: Dict, canvas_data_b: Dict) -> Dict:
     """Build correspondence map between atoms in A and B (including common and surrounding)."""
     correspondence = {}
+    index_to_canvas_a = {atom["sourceIndex"]: i for i, atom in enumerate(canvas_data_a["atoms"])}
+    index_to_canvas_b = {atom["sourceIndex"]: i for i, atom in enumerate(canvas_data_b["atoms"])}
 
     # Add common atom pairs
     for atom_a, atom_b in mapping.common:
-        idx_a = None
-        idx_b = None
-        for i, atom in enumerate(canvas_data_a["atoms"]):
-            if atom["name"] == atom_a.name:
-                idx_a = i
-                break
-        for i, atom in enumerate(canvas_data_b["atoms"]):
-            if atom["name"] == atom_b.name:
-                idx_b = i
-                break
+        idx_a = index_to_canvas_a.get(atom_a.index)
+        idx_b = index_to_canvas_b.get(atom_b.index)
 
         if idx_a is not None and idx_b is not None:
             correspondence[f"a_{idx_a}"] = f"b_{idx_b}"
             correspondence[f"b_{idx_b}"] = f"a_{idx_a}"
 
-    # Add surrounding atom pairs (they also have correspondence)
-    # Surrounding atoms are position-matched but have different charges/types
-    for atom_a in mapping.surrounding_a:
-        for atom_b in mapping.surrounding_b:
-            # Check if they are at similar positions (distance-based matching)
-            if atom_a.element == atom_b.element:
-                import numpy as np
-
-                dist = np.linalg.norm(atom_a.coord - atom_b.coord)
-                if dist < 0.6:  # Same distance threshold as mapping
-                    idx_a = None
-                    idx_b = None
-                    for i, atom in enumerate(canvas_data_a["atoms"]):
-                        if atom["name"] == atom_a.name:
-                            idx_a = i
-                            break
-                    for i, atom in enumerate(canvas_data_b["atoms"]):
-                        if atom["name"] == atom_b.name:
-                            idx_b = i
-                            break
-
-                    if idx_a is not None and idx_b is not None:
-                        correspondence[f"a_{idx_a}"] = f"b_{idx_b}"
-                        correspondence[f"b_{idx_b}"] = f"a_{idx_a}"
-                    break
+    # Add surrounding atom pairs using the mapping result directly.
+    for atom_a, atom_b in zip(mapping.surrounding_a, mapping.surrounding_b):
+        idx_a = index_to_canvas_a.get(atom_a.index)
+        idx_b = index_to_canvas_b.get(atom_b.index)
+        if idx_a is not None and idx_b is not None:
+            correspondence[f"a_{idx_a}"] = f"b_{idx_b}"
+            correspondence[f"b_{idx_b}"] = f"a_{idx_a}"
 
     return correspondence
 

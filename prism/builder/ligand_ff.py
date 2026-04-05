@@ -31,7 +31,7 @@ from ..forcefield.cgenff import CGenFFForceFieldGenerator
 from ..forcefield.charmm_gui import CHARMMGUIForceFieldGenerator
 from ..forcefield.opls_aa import OPLSAAForceFieldGenerator
 from ..forcefield.swissparam import (
-    MMFFForceFieldGenerator,
+    BothForceFieldGenerator,
     MATCHForceFieldGenerator,
     HybridMMFFMATCHForceFieldGenerator,
 )
@@ -133,7 +133,7 @@ class LigandForceFieldMixin:
                     overwrite=self.overwrite,
                 )
             elif self.ligand_forcefield == "mmff":
-                generator = MMFFForceFieldGenerator(ligand_path, temp_output_dir, overwrite=self.overwrite)
+                generator = BothForceFieldGenerator(ligand_path, temp_output_dir, overwrite=self.overwrite)
             elif self.ligand_forcefield == "match":
                 generator = MATCHForceFieldGenerator(ligand_path, temp_output_dir, overwrite=self.overwrite)
             elif self.ligand_forcefield == "hybrid":

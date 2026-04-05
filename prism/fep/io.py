@@ -604,24 +604,18 @@ def write_ligand_to_pdb(atoms: List[Atom], output_pdb: str, residue_name: str = 
             #          22=chainID, 23-26=resSeq, 27=iCode, 31-54=coords, 55-60=occupancy,
             #          61-66=tempFactor
             #
-            # For atom names:
-            # - If atom name starts with number (e.g., 1HG): right-justify to columns 14-16
-            # - If atom name starts with letter: left-justify to columns 13-15 (or 13-16 for 4-char names)
+            # For atom names, RDKit expects:
+            # - Right-justified with element symbol at the end (e.g., " CA ", "1HB ")
+            # - OR left-justified starting with element symbol (e.g., "CA  ", "CL  ")
             #
-            # For 4-character atom names (e.g., N00A, C01A):
-            # - Use all 4 columns (13-16): "N00A"
-            # - RDKit with flavor=0 will read the full 4-character name
+            # For hybrid topology atoms (C0A, N00A, etc.), we need special handling:
+            # - Right-justify so the last character (element symbol) is in column 16
+            # - This allows RDKit to identify the element
             chain_id = " "  # Use space for chain identifier (RDKit-compatible)
 
-            # Format atom name field
-            atom_name = atom.name
-            if len(atom_name) <= 3:
-                # For 1-3 char names, left-justify in columns 13-15: "CA  " or "C0A "
-                atom_name_field = f"{atom_name:<4s}"
-            else:
-                # For 4-char names, use all 4 columns (13-16): "N00A"
-                # RDKit with flavor=0 will preserve the full name
-                atom_name_field = atom_name[:4]
+            # Right-justify atom name to help RDKit identify element
+            # Element symbol should be in the last position (column 16)
+            atom_name_field = f"{atom.name:>4s}"
 
             line = f"ATOM  {i:5d} {atom_name_field} {residue_name:>3s} {chain_id}{i:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          \n"
             f.write(line)

@@ -245,6 +245,9 @@ class FEPWorkflowMixin:
                 output_dir=hybrid_output,
                 ref_coord_source=ref_visual_coord_source,
                 mut_coord_source=mut_visual_coord_source,
+                mapping=mapping,
+                ref_atoms=ref_atoms,
+                mut_atoms=mut_atoms,
             )
 
             # Phase 4: Create FEP scaffold with complete systems
@@ -316,6 +319,9 @@ class FEPWorkflowMixin:
         output_dir: str,
         ref_coord_source: str,
         mut_coord_source: str,
+        mapping,
+        ref_atoms,
+        mut_atoms,
     ) -> None:
         """Write a default mapping HTML report for CLI-based FEP builds."""
         try:
@@ -326,26 +332,15 @@ class FEPWorkflowMixin:
 
         html_path = os.path.join(output_dir, "mapping.html")
 
-        # First, read state-specific atoms from hybrid topology
-        # This ensures we get the correct atom lists with proper dummy atom filtering
-        from ..fep.io import read_ligand_from_prism, write_ligand_to_pdb
+        # Use the original mapped ligand atoms as the single source of truth for
+        # classification. Do not recompute mapping from hybrid state atoms here.
+        from ..fep.io import write_ligand_to_pdb
 
-        hybrid_itp = os.path.join(output_dir, "hybrid.itp")
-        hybrid_gro = os.path.join(output_dir, "hybrid.gro")
+        ref_pdb = os.path.join(output_dir, "mapping_state_a.pdb")
+        mut_pdb = os.path.join(output_dir, "mapping_state_b.pdb")
+        write_ligand_to_pdb(ref_atoms, ref_pdb, residue_name="LIG")
+        write_ligand_to_pdb(mut_atoms, mut_pdb, residue_name="LIG")
 
-        html_ref_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="a")
-        html_mut_atoms = read_ligand_from_prism(itp_file=hybrid_itp, gro_file=hybrid_gro, state="b")
-
-        # Generate state-specific PDB files from the correct atom lists
-        # This ensures RDKit molecules match the filtered topology atoms
-        ref_pdb = os.path.join(output_dir, "hybrid_state_a.pdb")
-        mut_pdb = os.path.join(output_dir, "hybrid_state_b.pdb")
-
-        write_ligand_to_pdb(html_ref_atoms, ref_pdb, residue_name="LIG")
-        write_ligand_to_pdb(html_mut_atoms, mut_pdb, residue_name="LIG")
-
-        # Use original MOL2 files for bond order assignment
-        # ref_coord_source and mut_coord_source should be original MOL2/PDB files
         print(f"  DEBUG MOL2 detection:")
         print(f"    ref_coord_source: {ref_coord_source}")
         print(f"    mut_coord_source: {mut_coord_source}")
@@ -355,7 +350,6 @@ class FEPWorkflowMixin:
         if Path(ref_coord_source).suffix == ".mol2":
             ref_mol2 = str(Path(ref_coord_source).absolute()) if Path(ref_coord_source).exists() else ref_coord_source
         elif Path(ref_coord_source).suffix == ".pdb":
-            # Try to find corresponding MOL2 file
             ref_mol2 = str(Path(ref_coord_source).with_suffix(".mol2"))
             if not Path(ref_mol2).exists():
                 ref_mol2 = None
@@ -365,7 +359,6 @@ class FEPWorkflowMixin:
         if Path(mut_coord_source).suffix == ".mol2":
             mut_mol2 = str(Path(mut_coord_source).absolute()) if Path(mut_coord_source).exists() else mut_coord_source
         elif Path(mut_coord_source).suffix == ".pdb":
-            # Try to find corresponding MOL2 file
             mut_mol2 = str(Path(mut_coord_source).with_suffix(".mol2"))
             if not Path(mut_mol2).exists():
                 mut_mol2 = None
@@ -374,21 +367,6 @@ class FEPWorkflowMixin:
 
         print(f"    ref_mol2: {ref_mol2}")
         print(f"    mut_mol2: {mut_mol2}")
-
-        # Create new mapping from hybrid topology atoms (not use old mapping)
-        # This ensures consistency between hybrid atoms and state-specific PDBs
-        from ..fep.core.mapping import DistanceAtomMapper
-
-        html_mapper = DistanceAtomMapper(
-            dist_cutoff=self.distance_cutoff,
-            charge_cutoff=self.charge_cutoff,
-            charge_common=self.charge_strategy,
-            charge_reception=self.charge_reception,
-        )
-        html_mapping = html_mapper.map(html_ref_atoms, html_mut_atoms)
-
-        # Note: Using hybrid-aligned coordinates for all force fields to ensure consistency
-
         html_config = None
         if self.fep_config:
             try:
@@ -411,13 +389,13 @@ class FEPWorkflowMixin:
 
         try:
             visualize_mapping_html(
-                mapping=html_mapping,
+                mapping=mapping,
                 pdb_a=ref_pdb,
                 pdb_b=mut_pdb,
                 mol2_a=ref_mol2,
                 mol2_b=mut_mol2,
-                atoms_a=html_ref_atoms,
-                atoms_b=html_mut_atoms,
+                atoms_a=ref_atoms,
+                atoms_b=mut_atoms,
                 output_path=html_path,
                 title=f"FEP Mapping: {ligand_a_name} -> {ligand_b_name}",
                 ligand_a_name=ligand_a_name,
