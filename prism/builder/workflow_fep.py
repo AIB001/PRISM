@@ -45,6 +45,17 @@ except ImportError:
 class FEPWorkflowMixin:
     """Mixin providing FEP workflow for relative binding free energy calculations."""
 
+    @staticmethod
+    def _normalize_fep_output_dir(output_dir: str) -> str:
+        """Collapse accidental ``.../GMX_PROLIG_FEP/GMX_PROLIG_FEP`` nesting."""
+        normalized = os.path.abspath(output_dir)
+        while (
+            os.path.basename(normalized) == "GMX_PROLIG_FEP"
+            and os.path.basename(os.path.dirname(normalized)) == "GMX_PROLIG_FEP"
+        ):
+            normalized = os.path.dirname(normalized)
+        return normalized
+
     def run_fep(self):
         """Run the FEP workflow: build standard MD systems, generate hybrid topology, create FEP scaffold"""
         from ..fep.modeling import FEPScaffoldBuilder
@@ -58,13 +69,14 @@ class FEPWorkflowMixin:
         try:
             # Create FEP output directory first
             # Avoid double-nesting: if output_dir already ends with GMX_PROLIG_FEP, use it directly
-            if os.path.basename(os.path.abspath(self.output_dir)) == "GMX_PROLIG_FEP":
-                fep_output = os.path.abspath(self.output_dir)
+            normalized_output_dir = self._normalize_fep_output_dir(self.output_dir)
+            if os.path.basename(normalized_output_dir) == "GMX_PROLIG_FEP":
+                fep_output = normalized_output_dir
             else:
-                fep_output = os.path.join(self.output_dir, "GMX_PROLIG_FEP")
+                fep_output = os.path.join(normalized_output_dir, "GMX_PROLIG_FEP")
             os.makedirs(fep_output, exist_ok=True)
 
-            root_md_dir = os.path.join(self.output_dir, "GMX_PROLIG_MD")
+            root_md_dir = os.path.join(normalized_output_dir, "GMX_PROLIG_MD")
             if os.path.isdir(root_md_dir) and not os.listdir(root_md_dir):
                 os.rmdir(root_md_dir)
                 print(f"  ✓ Removed empty directory: {root_md_dir}")
@@ -287,11 +299,11 @@ class FEPWorkflowMixin:
 
             # Also clean up any files in output_dir root (outside GMX_PROLIG_FEP)
             cleanup_items = [
-                os.path.join(self.output_dir, "mdps"),
+                os.path.join(normalized_output_dir, "mdps"),
             ]
-            cleanup_items.extend(str(p) for p in Path(self.output_dir).glob("LIG.*") if p.is_dir())
+            cleanup_items.extend(str(p) for p in Path(normalized_output_dir).glob("LIG.*") if p.is_dir())
 
-            root_md_dir = os.path.join(self.output_dir, "GMX_PROLIG_MD")
+            root_md_dir = os.path.join(normalized_output_dir, "GMX_PROLIG_MD")
             if os.path.isdir(root_md_dir) and not os.listdir(root_md_dir):
                 cleanup_items.append(root_md_dir)
 

@@ -60,7 +60,7 @@ class FEPScaffoldBuilder:
         lambda_distribution: str = "nonlinear",
         overwrite: bool = False,
     ) -> None:
-        self.output_dir = Path(output_dir)
+        self.output_dir = self._normalize_output_dir(Path(output_dir))
         self.config = config or {}
         self.lambda_windows = lambda_windows
         self.lambda_strategy = lambda_strategy
@@ -80,6 +80,14 @@ class FEPScaffoldBuilder:
         self.hybrid_builder = HybridPackageBuilder()
         self.leg_writer = LegWriter(self.output_dir)
         self._sync_hybrid_assets()
+
+    @staticmethod
+    def _normalize_output_dir(output_dir: Path | str) -> Path:
+        """Collapse accidental ``.../GMX_PROLIG_FEP/GMX_PROLIG_FEP`` nesting."""
+        resolved = Path(output_dir).expanduser()
+        while resolved.name == "GMX_PROLIG_FEP" and resolved.parent.name == "GMX_PROLIG_FEP":
+            resolved = resolved.parent
+        return resolved
 
     def _sync_hybrid_assets(self) -> None:
         """Mirror hybrid-package naming onto the scaffold builder and leg writer."""
