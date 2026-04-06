@@ -16,6 +16,12 @@ type: fep
 - **Availability**: LSP tools available in Claude Code tool context only
 - **Fallback**: Use `Grep` tool when LSP tools are unavailable
 
+## 命名规则 (CRITICAL)
+
+- Case 目录统一使用 `<protein_ff>-mut_<ligand_ff>`（示例：`charmm36m-mut_mmff`）。
+- 禁止 `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/` 重复嵌套目录。
+- 禁止 `_pkgfix*`、`_final*`、`_new*` 这类临时后缀。
+
 ## 核心职责
 
 检查 PRISM FEP 系统的运行时状态，验证脚本执行、GROMACS 命令、GPU 利用率、lambda 窗口执行策略、生产 MD 运行等运行时配置。

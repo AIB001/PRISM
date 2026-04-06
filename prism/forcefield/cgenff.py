@@ -15,6 +15,7 @@ import os
 import shutil
 import re
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 # Import the base class
 try:
@@ -659,12 +660,122 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 if atom_type not in self.atomtypes:
                     self.atomtypes[atom_type] = {"name": atom_type, "mass": mass}
 
+    def _read_bondtypes(self) -> Dict[Tuple[str, str, str], List[str]]:
+        """Read bondtypes from bonded parameter files
+
+        Looks for bondtypes in:
+        1. cgenff_bonded_LIG.itp (PRISM-generated, ligand-specific)
+        2. charmm36.ff/ffbonded.itp (CHARMM36 force field)
+
+        Returns
+        -------
+        Dict[Tuple[str, str, str], List[str]]
+            Mapping from (type1, type2, funct) -> [b0, kb]
+            Includes both forward and reverse order for easy lookup
+        """
+        bondtypes = {}
+
+        # Read from multiple sources in order of priority
+        bonded_files = [
+            self.cgenff_dir / "cgenff_bonded_LIG.itp",
+            self.cgenff_dir / "charmm36.ff" / "ffbonded.itp",
+        ]
+
+        for bonded_file in bonded_files:
+            if bonded_file.exists():
+                print(f"  Reading bondtypes from: {bonded_file.name}")
+                # Extract bondtypes section
+                with open(bonded_file, "r") as f:
+                    content = f.read()
+
+                pattern = r"\[\s*bondtypes\s*\](.*?)(?=\[|$)"
+                match = re.search(pattern, content, re.DOTALL)
+
+                if match:
+                    count = 0
+                    for line in match.group(1).split("\n"):
+                        line = line.strip()
+                        if not line or line.startswith(";"):
+                            continue
+                        parts = line.split()
+                        if len(parts) >= 5:
+                            key = (parts[0], parts[1], parts[2])
+                            # Only add if not already present (later sources don't override earlier ones)
+                            if key not in bondtypes:
+                                params = parts[3:5]
+                                bondtypes[key] = params
+                                # Add reverse order for matching (bonds are undirected)
+                                bondtypes[(parts[1], parts[0], parts[2])] = params
+                                count += 1
+
+                    print(f"  Found {count} unique bondtypes in {bonded_file.name}")
+
+        print(f"  Total bondtypes loaded: {len(bondtypes) // 2}")
+        return bondtypes
+
+    def _expand_bond_with_params(
+        self, bond: List[str], atom_types: Dict[str, str], bondtypes: Dict[Tuple[str, str, str], List[str]]
+    ) -> List[str]:
+        """Expand bond entry with parameters from bondtypes
+
+        Parameters
+        ----------
+        bond : List[str]
+            Original bond entry [ai, aj, funct] or with params
+        atom_types : Dict[str, str]
+            Mapping from atom ID to atom type
+        bondtypes : Dict[Tuple[str, str, str], List[str]]
+            Bondtype parameters lookup
+
+        Returns
+        -------
+        List[str]
+            Bond entry with parameters [ai, aj, funct, b0, kb]
+            Returns original if params not found or already present
+        """
+        # If already has parameters (5+ fields), return as-is
+        if len(bond) >= 5:
+            return bond
+
+        ai, aj, funct = bond[0], bond[1], bond[2]
+
+        # Get atom types for the two atoms
+        type_a = atom_types.get(ai)
+        type_b = atom_types.get(aj)
+
+        if not type_a or not type_b:
+            # Atom types not found, return original
+            return bond
+
+        # Look up bondtype parameters
+        key = (type_a, type_b, funct)
+        params = bondtypes.get(key)
+
+        if params:
+            return [ai, aj, funct] + params
+        else:
+            # Try reverse order (bonds are undirected)
+            key_rev = (type_b, type_a, funct)
+            params = bondtypes.get(key_rev)
+            if params:
+                return [ai, aj, funct] + params
+
+        # No matching bondtype found, return original
+        return bond
+
     def _parse_bonds_section(self, content):
-        """Parse [bonds] section"""
+        """Parse [bonds] section and expand with bondtype parameters"""
         section = self._extract_section(content, "bonds")
         if not section:
             return
 
+        # Read bondtypes from bonded file
+        bondtypes = self._read_bondtypes()
+
+        # Build atom type mapping for parameter lookup
+        atom_types = {atom["id"]: atom["type"] for atom in self.atoms}
+
+        expanded_count = 0
         for line in section.split("\n"):
             line = line.strip()
             if not line or line.startswith(";"):
@@ -672,8 +783,15 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
             parts = line.split()
             if len(parts) >= 3:
-                # Store all parameters, not just first 3
-                self.bonds.append(parts)
+                # Expand with bondtype parameters if available
+                original_len = len(parts)
+                expanded = self._expand_bond_with_params(parts, atom_types, bondtypes)
+                if len(expanded) > original_len:
+                    expanded_count += 1
+                self.bonds.append(expanded)
+
+        if bondtypes and expanded_count > 0:
+            print(f"  Expanded {expanded_count} bonds with parameters")
 
     def _parse_pairs_section(self, content):
         """Parse [pairs] section"""

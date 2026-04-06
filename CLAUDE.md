@@ -100,6 +100,14 @@ output_dir = system.build()
    - ✅ `prism_dir = ligand_output / ffgen.get_output_dir_name()`
    - ❌ `prism_dir = "output/LIG.amb2gmx"`
 
+5. **No nested duplicate system directories**:
+   - ✅ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff/GMX_PROLIG_FEP/`
+   - ❌ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff_pkgfix2/GMX_PROLIG_FEP/GMX_PROLIG_FEP/`
+
+6. **Case directory naming must stay simple and readable**:
+   - ✅ `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`)
+   - ❌ `*_pkgfix*`, `*_final*`, `*_new*`, or other ad-hoc suffixes
+
 ### Examples
 
 ```python
@@ -144,6 +152,34 @@ builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
 ## Testing
 
 Test data in `test/4xb4/` contains complete protein-ligand example. MDP templates generated dynamically based on configuration.
+
+### FEP System Testing
+
+**Comprehensive FEP validation**: Use `tests/gxf/FEP/unit_test/test_run_fep.py` for complete FEP system testing:
+- System building and directory structure validation
+- Topology and coordinate file verification
+- Grompp validation for both bound/unbound legs
+- Mapping HTML quality checks
+- Atom classification validation
+
+**Usage** (works for all test systems):
+```bash
+# 42-38 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/42-38
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield gaff2
+
+# 25-36 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/25-36
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield opls
+
+# oMeEtPh-EtPh system (T4 lysozyme L99A)
+cd tests/gxf/FEP/unit_test/oMeEtPh-EtPh
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield openff
+
+# p38-19-24 system (p38α MAPK)
+cd tests/gxf/FEP/unit_test/p38-19-24
+python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf
+```
 
 Git commit message format: `[module] description;xxx`. Don't be too long!
 

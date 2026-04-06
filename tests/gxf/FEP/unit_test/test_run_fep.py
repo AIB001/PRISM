@@ -110,6 +110,16 @@ _UNSUPPORTED_FEP_PROTEIN_FFS = {
 }
 
 
+def _slug_case_token(value: str) -> str:
+    token = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower())
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or "case"
+
+
+def _default_case_dir(protein_ff: str, ligand_ff: str) -> str:
+    return f"{_slug_case_token(protein_ff)}-mut_{_slug_case_token(ligand_ff)}"
+
+
 def _resolve_configs(ligand_forcefield: str, forcefield: str):
     """Return (case_config, fep_config, protein_ff, water_model) for a ligand FF."""
     lff = ligand_forcefield.lower()
@@ -169,9 +179,8 @@ def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_lig
     print(f"  FEP config:       configs/{fep_cfg}")
     print(f"  Protein FF:       {protein_ff}  Water: {water_model}")
 
-    # 输出目录
-    lff_slug = ligand_forcefield.lower().replace("-", "_")
-    output_dir = protein_ff.replace("-", "_")
+    # 输出目录：默认使用 <protein_ff>-mut_<ligand_ff>
+    output_dir = _default_case_dir(protein_ff, ligand_forcefield)
 
     builder = PRISMBuilder(
         protein_path="input/receptor.pdb",

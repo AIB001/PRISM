@@ -200,6 +200,7 @@ class HybridTopologyBuilder:
                         state_b_charge=atom_b.charge,  # Original B charge (different!)
                         element=atom_a.element,
                         mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                        mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
                     )
                 )
             else:
@@ -254,6 +255,7 @@ class HybridTopologyBuilder:
                     state_b_charge=0.0,
                     element=atom_a.element,
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    mass_b=self._get_default_mass("DUM"),
                     is_perturbed=True,  # MUST write B-state columns
                 )
             )
@@ -272,7 +274,8 @@ class HybridTopologyBuilder:
                     state_b_type=atom_b.atom_type,
                     state_b_charge=atom_b.charge,
                     element=atom_b.element,
-                    mass=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
+                    mass=self._get_default_mass("DUM"),
+                    mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
                     is_perturbed=True,  # MUST write B-state columns
                 )
             )
@@ -292,6 +295,7 @@ class HybridTopologyBuilder:
                     state_b_charge=atom_b.charge,  # MUST have chargeB (different!)
                     element=atom_a.element,
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                    mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
                     is_perturbed=True,  # MUST write B-state columns
                 )
             )

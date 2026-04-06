@@ -21,6 +21,12 @@ type: fep
 
 测试 PRISM 的所有力场生成器是否都能正确生成 PRISM 格式，并能够与 FEP 模块无缝集成。验证从"普通建模 → FEP 模式"的完整工作流。
 
+## 命名规则 (CRITICAL)
+
+- Case 目录统一使用 `<protein_ff>-mut_<ligand_ff>`（示例：`charmm36m-mut_mmff`）。
+- 禁止 `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/` 重复嵌套目录。
+- 禁止 `_pkgfix*`、`_final*`、`_new*` 这类临时后缀。
+
 ## 设计原则
 
 **统一接口，解耦设计**：

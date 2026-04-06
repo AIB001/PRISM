@@ -9,10 +9,21 @@ Extracted from the original monolithic builder.py for maintainability.
 """
 
 import os
+import re
 import sys
 import argparse
 
 from .core import PRISMBuilder
+
+
+def _slug_case_token(value: str) -> str:
+    token = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower())
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or "case"
+
+
+def _default_fep_output_dir(forcefield: str, ligand_forcefield: str) -> str:
+    return f"{_slug_case_token(forcefield)}-mut_{_slug_case_token(ligand_forcefield)}"
 
 
 def main():
@@ -654,6 +665,9 @@ pressure_coupling:
         kwargs["config_path"] = temp_config.name
     elif args.config:
         kwargs["config_path"] = args.config
+
+    if args.fep and args.output == "prism_output":
+        args.output = _default_fep_output_dir(args.forcefield, args.ligand_forcefield)
 
     # Create and run PRISM Builder
     builder = PRISMBuilder(

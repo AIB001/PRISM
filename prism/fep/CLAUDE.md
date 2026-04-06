@@ -39,6 +39,10 @@ Key rules for FEP:
 2. **Force field directories**: Use `ffgen.get_output_dir_name()`
 3. **Test directories**: `gaff_test/`, `test_42_38/`, NOT `test_output_final/`
 4. **Never hardcode paths**: Always use dynamic methods
+5. **Never create nested duplicate system directories**: prohibit `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/`
+6. **Use simple case naming for force-field combinations**: `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`), avoid ad-hoc suffixes
+7. **Default FEP output naming**: when no explicit output directory is provided, default to `<protein_ff>-mut_<ligand_ff>` and place the scaffold at `<case_dir>/GMX_PROLIG_FEP/`
+8. **42-38 cleanup convention**: move legacy/non-canonical outputs into `tests/gxf/FEP/unit_test/42-38/Archive/`
 
 ## Common Issues
 

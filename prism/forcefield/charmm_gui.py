@@ -12,8 +12,10 @@ but they need to be reorganized to match PRISM's standard output structure.
 """
 
 import os
+import re
 import shutil
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 try:
     from .base import ForceFieldGeneratorBase
@@ -110,9 +112,9 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
             print("\n[Step 1] Finding CHARMM-GUI input files...")
             self._find_input_files()
 
-            # Step 2: Read CHARMM-GUI ITP file
-            print("\n[Step 2] Reading CHARMM-GUI topology file...")
-            itp_content = self._read_itp_file()
+            # Step 2: Read and process CHARMM-GUI ITP file
+            print("\n[Step 2] Reading and processing CHARMM-GUI topology file...")
+            itp_content = self._read_and_process_itp_file()
             num_atoms = self._count_atoms_in_itp(itp_content)
             print(f"  - Found {num_atoms} atoms")
 
@@ -242,6 +244,204 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
                     self.pdb_file = structure_files[-1]  # Get the last one (ligandrm.pdb if exists)
                     print(f"  Found PDB file in parent dir: {self.pdb_file.name}")
                     break
+
+    def _read_section(self, file_path: Path, section_name: str) -> List[str]:
+        """Extract a specific section from an ITP file
+
+        Parameters
+        ----------
+        file_path : Path
+            Path to ITP file
+        section_name : str
+            Name of section to extract (e.g., "bondtypes", "atoms")
+
+        Returns
+        -------
+        List[str]
+            List of non-empty, non-comment lines from the section
+        """
+        if not file_path.exists():
+            return []
+
+        with open(file_path, "r") as f:
+            content = f.read()
+
+        # Extract section using regex
+        pattern = rf"\[\s*{section_name}\s*\](.*?)(?=\[|$)"
+        match = re.search(pattern, content, re.DOTALL)
+
+        if not match:
+            return []
+
+        lines = []
+        for line in match.group(1).split("\n"):
+            stripped = line.strip()
+            if stripped and not stripped.startswith(";"):
+                lines.append(stripped)
+
+        return lines
+
+    def _read_bondtypes(self) -> Dict[Tuple[str, str, str], List[str]]:
+        """Read bondtypes from bonded parameter files
+
+        Looks for bondtypes in:
+        1. cgenff_bonded_LIG.itp (PRISM-generated)
+        2. charmm36.ff/ffbonded.itp (CHARMM force field)
+
+        Returns
+        -------
+        Dict[Tuple[str, str, str], List[str]]
+            Mapping from (type1, type2, funct) -> [b0, kb]
+            Includes both forward and reverse order for easy lookup
+        """
+        bondtypes = {}
+
+        # Try reading from separate bonded files
+        bonded_files = [
+            self.gromacs_dir / "cgenff_bonded_LIG.itp",
+            self.gromacs_dir / "charmm36.ff" / "ffbonded.itp",
+            self.charmm_gui_dir / "charmm36.ff" / "ffbonded.itp",
+            self.gromacs_dir / "charmm36.itp",  # CHARMM-GUI puts bondtypes here
+        ]
+
+        for bonded_file in bonded_files:
+            if bonded_file.exists():
+                print(f"  Reading bondtypes from: {bonded_file.name}")
+                count = 0
+                for line in self._read_section(bonded_file, "bondtypes"):
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        key = (parts[0], parts[1], parts[2])
+                        # Only add if not already present (earlier sources have priority)
+                        if key not in bondtypes:
+                            params = parts[3:5]
+                            bondtypes[key] = params
+                            # Add reverse order for matching (bonds are undirected)
+                            bondtypes[(parts[1], parts[0], parts[2])] = params
+                            count += 1
+                print(f"  Found {count} unique bondtypes in {bonded_file.name}")
+
+        print(f"  Total bondtypes loaded: {len(bondtypes) // 2}")
+        return bondtypes
+
+    def _expand_bond_with_params(
+        self, bond: List[str], atom_types: Dict[str, str], bondtypes: Dict[Tuple[str, str, str], List[str]]
+    ) -> List[str]:
+        """Expand bond entry with parameters from bondtypes
+
+        Parameters
+        ----------
+        bond : List[str]
+            Original bond entry [ai, aj, funct] or with params
+        atom_types : Dict[str, str]
+            Mapping from atom ID to atom type
+        bondtypes : Dict[Tuple[str, str, str], List[str]]
+            Bondtype parameters lookup
+
+        Returns
+        -------
+        List[str]
+            Bond entry with parameters [ai, aj, funct, b0, kb]
+            Returns original if params not found or already present
+        """
+        # If already has parameters (5+ fields), return as-is
+        if len(bond) >= 5:
+            return bond
+
+        ai, aj, funct = bond[0], bond[1], bond[2]
+
+        # Get atom types for the two atoms
+        type_a = atom_types.get(ai)
+        type_b = atom_types.get(aj)
+
+        if not type_a or not type_b:
+            # Atom types not found, return original
+            return bond
+
+        # Look up bondtype parameters
+        key = (type_a, type_b, funct)
+        params = bondtypes.get(key)
+
+        if params:
+            return [ai, aj, funct] + params
+        else:
+            # Try reverse order (bonds are undirected)
+            key_rev = (type_b, type_a, funct)
+            params = bondtypes.get(key_rev)
+            if params:
+                return [ai, aj, funct] + params
+
+        # No matching bondtype found, return original
+        return bond
+
+    def _read_and_process_itp_file(self):
+        """Read and process CHARMM-GUI ITP file, expanding bondtypes into bonds
+
+        This method:
+        1. Reads the original ITP file
+        2. Parses atom types from [atoms] section
+        3. Reads bondtype parameters from bonded files
+        4. Expands [bonds] section with explicit parameters
+
+        Returns
+        -------
+        str
+            Processed ITP content with bonds expanded
+        """
+        # Read original ITP
+        with open(self.itp_file, "r") as f:
+            content = f.read()
+
+        # Parse atoms to get atom types
+        atom_types = {}
+        in_atoms = False
+        for line in content.split("\n"):
+            if "[ atoms ]" in line:
+                in_atoms = True
+                continue
+            if in_atoms and line.strip().startswith("["):
+                break
+            if in_atoms and line.strip() and not line.strip().startswith(";"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    atom_types[parts[0]] = parts[1]
+
+        print(f"  Parsed {len(atom_types)} atom types")
+
+        # Read bondtypes
+        bondtypes = self._read_bondtypes()
+
+        if not bondtypes:
+            print("  Warning: No bondtypes found, bonds will not be expanded")
+            return content
+
+        # Expand bonds section
+        lines = content.split("\n")
+        in_bonds = False
+        expanded_count = 0
+
+        for i, line in enumerate(lines):
+            if "[ bonds ]" in line:
+                in_bonds = True
+                continue
+            if in_bonds and line.strip().startswith("["):
+                in_bonds = False
+                continue
+            if in_bonds:
+                stripped = line.strip()
+                if not stripped or stripped.startswith(";"):
+                    continue
+                parts = stripped.split()
+                if len(parts) >= 3:
+                    original_len = len(parts)
+                    expanded = self._expand_bond_with_params(parts, atom_types, bondtypes)
+                    if len(expanded) > original_len:
+                        expanded_count += 1
+                    lines[i] = "\t".join(expanded)
+
+        print(f"  Expanded {expanded_count} bonds with parameters")
+
+        return "\n".join(lines)
 
     def _read_itp_file(self):
         """Read and process CHARMM-GUI ITP file"""

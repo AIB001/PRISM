@@ -21,7 +21,7 @@ def test_gaff2_fep():
     import shutil
     import os
 
-    output_dir = "gaff2_fixed"
+    output_dir = "amber99sb-mut_gaff2"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
         print(f"  清理旧构建: {output_dir}")

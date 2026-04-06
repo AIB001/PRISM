@@ -37,8 +37,13 @@ type: fep
    - ❌ 硬编码路径
 
 3. **测试目录命名**：
-   - ✅ `gaff_test/`, `openff_test/`, `test_42_38/`
+   - ✅ `<protein_ff>-mut_<ligand_ff>`（示例：`charmm36m-mut_mmff`）
    - ❌ `gaff2_e2e_test/`, `ligand_42/`, `temp_output/`
+   - ❌ `_pkgfix*`, `_final*`, `_new*`
+
+4. **禁止重复嵌套系统目录**：
+   - ✅ `.../<case>/GMX_PROLIG_FEP/`
+   - ❌ `.../<case>/GMX_PROLIG_FEP/GMX_PROLIG_FEP/`
 
 ### 代码示例
 

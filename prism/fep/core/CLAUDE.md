@@ -2,6 +2,14 @@
 
 This file provides guidance for working with the core FEP data structures and atom mapping algorithms.
 
+## Directory Naming Rule (CRITICAL)
+
+- Use simple case names for force-field combinations: `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`).
+- Never create nested duplicate system directories like `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/`.
+- Avoid ad-hoc suffixes (`_pkgfix*`, `_final*`, `_new*`) in directory names.
+- Default output directory for FEP cases should follow `<protein_ff>-mut_<ligand_ff>` when users do not pass an explicit output path.
+- For 42-38 maintenance, move legacy non-canonical outputs into `tests/gxf/FEP/unit_test/42-38/Archive/`.
+
 ## Module Overview
 
 The core module implements the fundamental data structures and algorithms for FEP calculations:

@@ -15,6 +15,12 @@ The `.claude/skills/` directory contains skill documentation for the PRISM proje
 ### General Debugging
 - **`gaff-debug.md`** - GAFF force field generation debugging
 
+## Naming Rule (CRITICAL)
+
+- Use case directory names in the form `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`).
+- Never create nested duplicate directories such as `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/`.
+- Never use ad-hoc suffixes like `_pkgfix*`, `_final*`, `_new*`.
+
 ## Usage Instructions
 
 ### How to Use Skills Files
