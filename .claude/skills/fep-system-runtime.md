@@ -310,6 +310,40 @@ mpirun -np $NUM_GPUS gmx_mpi mdrun \
 
 ## 运行前验证
 
+### 完整系统验证（推荐）
+
+**使用 test_run_fep.py 进行完整验证**（适用于所有测试系统）：
+
+```bash
+# 42-38 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/42-38
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield gaff2
+
+# 25-36 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/25-36
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield opls
+
+# oMeEtPh-EtPh system (T4 lysozyme L99A)
+cd tests/gxf/FEP/unit_test/oMeEtPh-EtPh
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield openff
+
+# p38-19-24 system (p38α MAPK)
+cd tests/gxf/FEP/unit_test/p38-19-24
+python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf
+```
+
+**验证内容**：
+- ✅ 系统构建和目录结构
+- ✅ Topology 和坐标文件
+- ✅ Grompp 验证（bound/unbound）
+- ✅ Mapping HTML 质量
+- ✅ 原子分类验证
+
+**优势**：
+- 一次性完成所有验证
+- 自动检测常见问题
+- 生成详细的验证报告
+
 ### GPU 配置验证（必须！）
 
 **在运行任何 FEP 计算前，必须验证 GPU 配置**：
