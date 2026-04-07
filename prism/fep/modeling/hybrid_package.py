@@ -688,36 +688,9 @@ class HybridPackageBuilder:
             except Exception:
                 pass  # Fall back to GRO
 
-        # Try to find original ligand files from input directory
-        # This handles cases where GRO is in _build/ but original files are in input/
-        # Extract ligand identifier from path (e.g., "19" from ".../input/19.pdb")
-        for parent in gro_path.parents:
-            # Look for input directory
-            input_dir = parent / "input"
-            if input_dir.is_dir():
-                # Try to find matching MOL2/PDB files
-                # GRO path like: .../_build/bound_md/LIG.openff2gmx/LIG.gro
-                # We need to find corresponding 19.pdb/19.mol2 in input/
-
-                # Try all MOL2/PDB files in input directory
-                for mol2_file in input_dir.glob("*.mol2"):
-                    try:
-                        coords_by_name = self._parse_mol2_atoms(mol2_file)
-                        if coords_by_name:
-                            return coords_by_name, None
-                    except Exception:
-                        pass
-
-                for pdb_file in input_dir.glob("*.pdb"):
-                    try:
-                        coords_by_name = self._parse_pdb_atoms(pdb_file)
-                        if coords_by_name:
-                            return coords_by_name, None
-                    except Exception:
-                        pass
-                break  # Only check the first input_dir found
-
-        # Parse GRO file (original behavior)
+        # Parse GRO file directly
+        # RTF/CGenFF-generated GRO files already contain full atom names (e.g., H28, C29)
+        # No need to search input directory for alternative files
         lines = gro_path.read_text().splitlines()
         if len(lines) < 3:
             return {}, None
@@ -856,6 +829,7 @@ class HybridPackageBuilder:
         ref_coords: Dict[str, list[Dict[str, float]]],
         mut_coords: Dict[str, list[Dict[str, float]]],
         correspondence: Dict[str, str],
+        resolved_coords: list[tuple[float, float, float]] = None,
     ) -> tuple[float, float, float]:
         """
         Resolve coordinates for a hybrid atom.
@@ -864,6 +838,7 @@ class HybridPackageBuilder:
         - Real atoms in state A get coordinates from reference
         - Real atoms in state B (DUM_ in state A) get coordinates from mutant
         - If FEbuilder correspondence exists, use corresponding atom coordinates from mutant
+        - Strategy 5: Sequential index matching for duplicate atom names (H, C, N, etc.)
 
         Parameters
         ----------
@@ -875,6 +850,8 @@ class HybridPackageBuilder:
             Mutant ligand coordinates (by atom name)
         correspondence : Dict[str, str]
             FEbuilder correspondence map (state A name -> state B name)
+        resolved_coords : list[tuple[float, float, float]]
+            List of already-resolved coordinates for centroid fallback
 
         Returns
         -------
@@ -897,6 +874,33 @@ class HybridPackageBuilder:
             base_name = atom_name[:-1]
             if base_name in ref_coords and ref_coords[base_name]:
                 coord = ref_coords[base_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 1c: Handle simple element names (HA, OA, CA, N, F)
+        # where reference has numbered names (H5, O19, C21, N15, F26)
+        # Match by element prefix using sequential indexing
+        if atom_name.isalpha() and len(atom_name) <= 3:
+            # Extract element from atom name
+            element = self._extract_element_from_atom_name(atom_name)
+
+            # Find all reference atoms with this element prefix
+            ref_atoms_by_element = []
+            for ref_name, coord_list in ref_coords.items():
+                if coord_list and coord_list[0]:
+                    ref_element = self._extract_element_from_atom_name(ref_name)
+                    if ref_element == element:
+                        ref_atoms_by_element.append((ref_name, coord_list[0]))
+
+            # Use sequential index matching
+            if not hasattr(self, "_ref_element_index_counters"):
+                self._ref_element_index_counters = {}
+
+            counter_key = f"{element}_reference"
+            current_idx = self._ref_element_index_counters.get(counter_key, 0)
+
+            if current_idx < len(ref_atoms_by_element):
+                coord = ref_atoms_by_element[current_idx][1]
+                self._ref_element_index_counters[counter_key] = current_idx + 1
                 return coord["x"], coord["y"], coord["z"]
 
         # Strategy 2: For dummy atoms (state A), try mutant coordinates with multiple name variants
@@ -944,9 +948,109 @@ class HybridPackageBuilder:
                     coord = ref_coords[atom_a][0]
                     return coord["x"], coord["y"], coord["z"]
 
-        # Fallback: Default to origin with warning
+        # Strategy 5: Sequential index matching for duplicate atom names
+        # For cases where atom names are all H, C, N, O, F, etc. (no numbering)
+        # Match by sequential occurrence in the coordinate file
+        if not mut_coords:
+            # No mutant coordinates available
+            print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
+            return 0.0, 0.0, 0.0
+
+        # Extract element from atom type (for RTF types like C331 → C, N261 → N)
+        element = self._extract_element_from_atom_type(atom_type)
+
+        # Get all atoms of this element from mutant coordinates
+        mutant_atoms_by_element = []
+        for mut_name, coord_list in mut_coords.items():
+            if coord_list and coord_list[0]:
+                # Extract element from mutant atom name
+                mut_element = self._extract_element_from_atom_name(mut_name)
+                if mut_element == element:
+                    mutant_atoms_by_element.append((mut_name, coord_list[0]))
+
+        if not mutant_atoms_by_element:
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, element: {element}), using origin"
+            )
+            return 0.0, 0.0, 0.0
+
+        # Use sequential index matching: track how many of each element we've matched
+        if not hasattr(self, "_element_index_counters"):
+            self._element_index_counters = {}
+
+        counter_key = f"{element}_mutant"
+        current_idx = self._element_index_counters.get(counter_key, 0)
+
+        if current_idx < len(mutant_atoms_by_element):
+            # Use the current atom's coordinates
+            coord = mutant_atoms_by_element[current_idx][1]
+            self._element_index_counters[counter_key] = current_idx + 1
+            return coord["x"], coord["y"], coord["z"]
+        else:
+            # Ran out of atoms of this element
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, element: {element}), using origin"
+            )
+            return 0.0, 0.0, 0.0
+
+        # Fallback: Use centroid of resolved atoms (if available)
+        if resolved_coords and len(resolved_coords) > 0:
+            import numpy as np
+
+            centroid = np.mean(resolved_coords, axis=0)
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using centroid ({centroid[0]:.3f}, {centroid[1]:.3f}, {centroid[2]:.3f})"
+            )
+            return centroid[0], centroid[1], centroid[2]
+
+        # Ultimate fallback: origin
         print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
         return 0.0, 0.0, 0.0
+
+    def _extract_element_from_atom_type(self, atom_type: str) -> str:
+        """Extract element symbol from atom type.
+
+        Examples:
+        - C331 → C
+        - N261 → N
+        - O2D4 → O
+        - HGP1 → H
+        - DUM_HGP1 → H (dummy atoms)
+        """
+        # Handle dummy atoms: DUM_XYZ → XYZ
+        if atom_type.startswith("DUM_"):
+            return self._extract_element_from_atom_type(atom_type[4:])
+
+        # For CHARMM/CGenFF types, the first character is the element
+        # Exception: 2-letter elements like Cl, Br
+        two_letter_elements = {"CL", "BR", "SI", "AS", "SE", "TE"}
+        if len(atom_type) >= 2:
+            first_two = atom_type[:2].upper()
+            if first_two in two_letter_elements:
+                return first_two
+
+        # Default: first character is the element
+        return atom_type[0] if atom_type else "C"
+
+    def _extract_element_from_atom_name(self, atom_name: str) -> str:
+        """Extract element symbol from atom name.
+
+        Examples:
+        - C4 → C
+        - N11 → N
+        - H6 → H
+        - F26 → F
+        """
+        # For atom names, the first character is the element
+        # Exception: 2-letter elements like Cl, Br
+        two_letter_elements = {"CL", "BR", "SI", "AS", "SE", "TE"}
+        if len(atom_name) >= 2:
+            first_two = atom_name[:2].upper()
+            if first_two in two_letter_elements:
+                return first_two
+
+        # Default: first character is the element
+        return atom_name[0] if atom_name else "C"
 
     def _normalize_box_line(self, box_line: Optional[str]) -> str:
         """Normalize GRO box line."""

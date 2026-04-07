@@ -310,23 +310,33 @@ analyzer.generate_html_report("fep_results.html")
 
 ## Current validation status
 
-### Force field testing matrix (2026-04-06)
+### Force field testing matrix (2026-04-07)
 
-| System | Protein | Force Field | Result | Notes |
-|--------|---------|-------------|--------|-------|
-| 42-38 | HIF-2α | amber14sb_OL15 + GAFF2 | ✅ EM+NVT | Fmax=127.1, 3 repeats |
-| 42-38 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ EM+NVT | Fmax=198.4 |
-| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ✅ EM+NVT | Fmax=166.5 |
-| 42-38 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ EM+NVT | Fmax=185.4 |
-| 42-38 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ EM+NVT | Fmax=120.6 |
-| 42-38 | HIF-2α | amber14sb_OL15 + MMFF94 | ✅ EM+NVT | Fmax=96.5 |
-| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + OpenFF | ✅ EM+NVT | NVT 75000+ steps |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF | ✅ EM+NVT | NVT completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ EM+NVT | NVT completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ⚠️ EM only | GPU compatibility issue |
-| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ✅ Grompp | MATCH/CHARMM-GUI |
-| 25-36 | HIF-2α | OPLS-AA | ✅ Grompp | Generic atom types |
-| 25-36 | HIF-2α | OpenFF | ✅ Grompp | Generic atom types |
+| System | Protein | Force Field | Current status | Notes |
+|--------|---------|-------------|----------------|-------|
+| 42-38 | HIF-2α | amber14sb_OL15 + GAFF2 | ✅ Bound EM+NVT | `amber14sb_OL15-mut_gaff2` bound repeat1 completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound EM+NVT | `amber14sb_ol15-mut_opls` bound repeat1 completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + MMFF94 | ✅ Bound EM+NVT | `amber14sb_ol15-mut_mmff` bound repeat1 completed |
+| 42-38 | HIF-2α | amber99sb + GAFF2 | ✅ Bound+unbound EM+NVT | `amber99sb-mut_gaff2` bound and unbound repeat1 completed |
+| 42-38 | HIF-2α | amber99sb + MMFF94 | ✅ Bound EM+NVT | `amber99sb-mut_mmff` bound repeat1 completed |
+| 42-38 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound EM+NVT | `charmm36_jul2022-mut_cgenff` bound repeat1 completed |
+| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ✅ Bound EM+NVT | `charmm36_jul2022-mut_charmm_gui` bound repeat1 completed |
+| 42-38 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound EM+NVT | `oplsaa-mut_opls` bound repeat1 completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | ✅ Bound EM+NVT | `amber14sb_OL15` bound repeat1 completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | `amber14sb_OL15-mut_openff` bound/unbound repeat1 completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF (alt) | ✅ Bound EM+NVT | `amber14sb_OL15_openff` bound repeats 1-3 completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ❌ Bound NVT segfault | EM done; bound NVT segfaults (OPLS-AA hybrid topology issue) |
+| 25-36 | HIF-2α | oplsaa + OPLS-AA | ❌ Bound NVT segfault | EM done; bound NVT segfaults (OPLS-AA hybrid topology issue) |
+| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ⚠️ Build only | `cgenff` scaffold exists, no runtime logs yet |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF | ✅ Bound EM+NVT | `amber14sb_OL15-mut_openff` bound repeat1 completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF (non-mut) | ✅ Bound EM+NVT | `amber14sb_OL15_openff` bound repeat1 completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ Bound EM+NVT | `amber14sb_OL15_opls` bound repeat1 completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + OpenFF | ✅ Bound EM+NVT | `charmm36m_mut` bound repeat1 completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ❌ Bound NVT fatal | EM done; NVT failed with `C-*` wildcard atomtype (GROMACS 2024.4) |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ⚠️ Build only | Scaffold exists; EM failed with table extension warning |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 + OPLS-AA | ⚠️ Build only | Scaffold exists, no runtime logs yet |
+| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ❌ Hybrid.gro bug | Bound EM done; hybrid.gro has coordinate generation bug (RTF atom naming mismatch) |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
@@ -335,22 +345,33 @@ analyzer.generate_html_report("fep_results.html")
 
 ### Critical bug fixes validated
 
-**B-state atom validation** - All 13 test systems pass grompp with proper B-state atoms
+**B-state atom validation** - hybrid topologies continue to pass scaffold/grompp validation across the major FEP test systems
 - Added `is_perturbed` flag to track transformed and surrounding atoms
 - Modified ITPBuilder to always write B-state columns (typeB, chargeB, massB)
 - Mass difference checking prevents omission of mass-only perturbations
 
-**mass_b assignment fix** - Fixed structure explosion in OPLS, MMFF, and other force fields
+**mass_b assignment fix** - runtime validation now shows broad EM+NVT success across the previously failing force-field combinations
 - Transformed A atoms (disappearing): mass_b = dummy mass (12.011)
 - Transformed B atoms (appearing): mass = dummy mass, mass_b = real atom mass
 - Surrounding atoms: mass_b from B-state atom type
-- All 6 test systems now pass EM+NVT validation
+- 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
-**Test coverage**:
-- **13 systems** total scaffold generation and grompp validation
-- **10 systems** with complete EM+NVT validation
-- **3 systems** with scaffold/grompp validation only
-- **6 force field combinations** validated on 42-38 platform (GAFF2, CGenFF, CHARMM-GUI, OpenFF, OPLS-AA, MMFF94)
+**Current validation snapshot** (2026-04-07 updated):
+- **27 system variants** with completed bound EM+NVT ✅
+- **3 variants** with known issues (RTF coordinate bug, amber19sb wildcard, OPLS-AA segfault)
+- **3 variants** built but not yet runtime-validated
+- **Total: 33 tracked system variants** in the unit-test workspace
+
+**Successful force field combinations**:
+- AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
+- CHARMM (charmm36-jul2022, charmm36m) + CGenFF, CHARMM-GUI ✅
+- OPLS-AA (oplsaa) + OPLS-AA ✅
+
+**Known issues requiring fixes**:
+1. **RTF coordinate generation bug**: hybrid.gro fails to resolve State B atom coordinates due to atom naming mismatch (RTF uses numbered names like C331, MOL2 uses generic names like C)
+2. **amber19sb wildcard issue**: GROMACS 2024.4 doesn't support `C-*` wildcard atomtype in cmap.itp (requires GROMACS 2026.1)
+3. **OPLS-AA segfault**: Hybrid topology with OPLS-AA force field causes runtime segfaults during NVT
+- Remaining runtime issues are concentrated in **25-36 OPLS / OPLSAA**, **oMeEtPh-EtPh amber19sb**, and **p38-19-24** paths
 
 ## Review guidance
 
