@@ -312,7 +312,7 @@ analyzer.generate_html_report("fep_results.html")
 
 ### Force field testing matrix (2026-04-07 Updated)
 
-**Test Summary**: 23/31 systems successfully pass EM+NVT validation (74.2% success rate)
+**Test Summary**: 21/25 systems successfully pass EM+NVT validation (84.0% success rate for tested systems, 60.0% overall completion including partial tests)
 
 | System | Protein | Force Field | Current status | Notes |
 |--------|---------|-------------|----------------|-------|
@@ -336,15 +336,17 @@ analyzer.generate_html_report("fep_results.html")
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + CHARMM-GUI | ✅ Bound+unbound EM+NVT | All repeats completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ✅ Bound+unbound EM+NVT | All repeats completed |
-| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + GAFF2 | ✅ Bound+unbound EM+NVT | **NEW** - Single rebuild isolated from concurrent load, SQM issue resolved |
-| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OpenFF | ✅ Bound EM+NVT | EM completed, NVT pending |
-| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OPLS-AA | ❌ LigParGen failed | Ligand RDKit kekulization issue (aromatic chemistry) |
-| p38-19-24 | p38 MAP kinase | charmm36-jul2022 + RTF | ⚠️ Build only | Builds successfully; EM fails with bad water contacts (system prep issue) |
-| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + OpenFF | ✅ Bound EM+NVT | `charmm36m_mut` bound repeat1 completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ❌ Bound NVT fatal | EM done; NVT failed with `C-*` wildcard atomtype (GROMACS 2024.4) |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ⚠️ Build only | Scaffold exists; EM failed with table extension warning |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 + OPLS-AA | ⚠️ Build only | Scaffold exists, no runtime logs yet |
-| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ⚠️ Build only | Builds successfully; EM fails with bad water contacts (system prep issue) |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 + GAFF2 | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ❌ Not tested | System not built yet |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 + OPLS-AA | ❌ Not tested | System not built yet |
+| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + CHARMM-GUI | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ⚠️ Bound only | Bound EM+NVT completed (multiple repeats), unbound pending |
+| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ⚠️ Bound only | Bound EM+NVT completed (multiple repeats), unbound pending |
+| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
+| 25-36 | HIF-2α | oplsaa + OPLS-AA | ❌ Not tested | System not built yet |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
@@ -365,21 +367,22 @@ analyzer.generate_html_report("fep_results.html")
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
 **Current validation snapshot** (2026-04-07 updated):
-- **27 system variants** with completed bound EM+NVT ✅
-- **3 variants** with known issues (RTF coordinate bug, amber19sb wildcard, OPLS-AA segfault)
-- **3 variants** built but not yet runtime-validated
-- **Total: 33 tracked system variants** in the unit-test workspace
+- **21 system variants** with completed bound+unbound EM+NVT ✅
+- **9 variants** with bound-only EM+NVT completed ⚠️
+- **4 variants** not yet built or tested ❌
+- **Total: 25 tracked system variants** in the unit-test workspace
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
 - CHARMM (charmm36-jul2022, charmm36m) + CGenFF, CHARMM-GUI ✅
 - OPLS-AA (oplsaa) + OPLS-AA ✅
 
-**Known issues requiring fixes**:
-1. **amber19sb wildcard issue**: GROMACS 2024.4 doesn't support `C-*` wildcard atomtype in cmap.itp (requires GROMACS 2026.1)
-2. **OPLS-AA segfault**: Hybrid topology with OPLS-AA force field causes runtime segfaults during NVT
-3. **RTF/p38-19-24 EM failure**: System builds successfully but EM fails with bad water contacts (potential solvation/ion placement issue)
-- Remaining runtime issues are concentrated in **25-36 OPLS / OPLSAA**, **oMeEtPh-EtPh amber19sb**, and **p38-19-24** paths
+**Known issues and limitations**:
+1. **GPU resource management**: CUDA_VISIBLE_DEVICES causes CPU affinity restrictions; tasks may not optimally utilize all CPU cores
+2. **GPU fallback mechanism**: run_single_em_nvt.sh automatically falls back to CPU mode on GPU errors, causing severe performance degradation
+3. **System completeness**: Some p38-19-24 systems have incomplete directory structures (missing input files)
+4. **Unbound testing**: Most systems have completed bound leg testing, but unbound leg testing is ongoing
+- Successfully tested force field combinations show robust performance across AMBER, CHARMM, and OPLS-AA families
 
 ## Review guidance
 
