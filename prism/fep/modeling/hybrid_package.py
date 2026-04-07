@@ -668,6 +668,7 @@ class HybridPackageBuilder:
             return {}, None
 
         # Try MOL2 first (preserves full atom names)
+        # Check in same directory as GRO
         mol2_path = gro_path.with_suffix(".mol2")
         if mol2_path.exists():
             try:
@@ -686,6 +687,35 @@ class HybridPackageBuilder:
                     return coords_by_name, None  # PDB doesn't have box info
             except Exception:
                 pass  # Fall back to GRO
+
+        # Try to find original ligand files from input directory
+        # This handles cases where GRO is in _build/ but original files are in input/
+        # Extract ligand identifier from path (e.g., "19" from ".../input/19.pdb")
+        for parent in gro_path.parents:
+            # Look for input directory
+            input_dir = parent / "input"
+            if input_dir.is_dir():
+                # Try to find matching MOL2/PDB files
+                # GRO path like: .../_build/bound_md/LIG.openff2gmx/LIG.gro
+                # We need to find corresponding 19.pdb/19.mol2 in input/
+
+                # Try all MOL2/PDB files in input directory
+                for mol2_file in input_dir.glob("*.mol2"):
+                    try:
+                        coords_by_name = self._parse_mol2_atoms(mol2_file)
+                        if coords_by_name:
+                            return coords_by_name, None
+                    except Exception:
+                        pass
+
+                for pdb_file in input_dir.glob("*.pdb"):
+                    try:
+                        coords_by_name = self._parse_pdb_atoms(pdb_file)
+                        if coords_by_name:
+                            return coords_by_name, None
+                    except Exception:
+                        pass
+                break  # Only check the first input_dir found
 
         # Parse GRO file (original behavior)
         lines = gro_path.read_text().splitlines()
@@ -713,7 +743,11 @@ class HybridPackageBuilder:
         return coords_by_name, box_line
 
     def _parse_mol2_atoms(self, mol2_path: Path) -> Dict[str, list[Dict[str, float]]]:
-        """Parse MOL2 file and extract atom coordinates by atom name."""
+        """Parse MOL2 file and extract atom coordinates by atom name.
+
+        MOL2 files use Angstroms (Å), GROMACS uses nanometers (nm).
+        Converts coordinates from Å to nm (divide by 10).
+        """
         coords_by_name = {}
         in_atoms = False
 
@@ -731,9 +765,9 @@ class HybridPackageBuilder:
             if len(parts) >= 6:
                 atom_id = parts[1]  # Atom ID (column 2)
                 atom_name = parts[1]  # Atom name (column 2, same as ID in many MOL2 files)
-                x = float(parts[2])
-                y = float(parts[3])
-                z = float(parts[4])
+                x = float(parts[2]) / 10.0  # Å → nm
+                y = float(parts[3]) / 10.0  # Å → nm
+                z = float(parts[4]) / 10.0  # Å → nm
 
                 # Use atom_id as key since it's more likely to match ITP atom names
                 coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
@@ -741,7 +775,11 @@ class HybridPackageBuilder:
         return coords_by_name
 
     def _parse_pdb_atoms(self, pdb_path: Path) -> Dict[str, list[Dict[str, float]]]:
-        """Parse PDB file and extract atom coordinates by atom name."""
+        """Parse PDB file and extract atom coordinates by atom name.
+
+        PDB files use Angstroms (Å), GROMACS uses nanometers (nm).
+        Converts coordinates from Å to nm (divide by 10).
+        """
         coords_by_name = {}
 
         for line in pdb_path.read_text().splitlines():
@@ -751,9 +789,9 @@ class HybridPackageBuilder:
                 continue
 
             atom_name = line[12:16].strip()
-            x = float(line[30:38].strip())
-            y = float(line[38:46].strip())
-            z = float(line[46:54].strip())
+            x = float(line[30:38].strip()) / 10.0  # Å → nm
+            y = float(line[38:46].strip()) / 10.0  # Å → nm
+            z = float(line[46:54].strip()) / 10.0  # Å → nm
 
             coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
 
