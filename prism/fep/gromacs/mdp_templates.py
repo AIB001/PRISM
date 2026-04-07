@@ -213,8 +213,10 @@ def write_fep_mdps(
     # Get electrostatics and VDW parameters from PRISM config
     elec_cfg = prism_config.get("electrostatics", {})
     vdw_cfg = prism_config.get("vdw", {})
-    rcoulomb = config.get("electrostatics", {}).get("rcoulomb", elec_cfg.get("rcoulomb", 1.0))
-    rvdw = config.get("vdw", {}).get("rvdw", vdw_cfg.get("rvdw", 1.0))
+    # Hybrid ligands can keep long excluded distances between state A/B atoms.
+    # Using at least 1.4 nm avoids grompp failures once equilibration enables dynamics.
+    rcoulomb = max(config.get("electrostatics", {}).get("rcoulomb", elec_cfg.get("rcoulomb", 1.0)), 1.4)
+    rvdw = max(config.get("vdw", {}).get("rvdw", vdw_cfg.get("rvdw", 1.0)), 1.4)
     coulombtype = elec_cfg.get("coulombtype", "PME")
     pme_order = elec_cfg.get("pme_order", 4)
     fourierspacing = elec_cfg.get("fourierspacing", 0.16)
@@ -227,7 +229,13 @@ def write_fep_mdps(
 
     # Get constraints from PRISM config
     constraints_cfg = prism_config.get("constraints", {})
-    constraints_type = constraints_cfg.get("type", "h-bonds")
+    configured_constraints = constraints_cfg.get("type")
+    # Hybrid bonded terms can be zeroized in one state, which makes hydrogen-bond
+    # constraints ill-defined. Override the standard h-bonds default for FEP legs.
+    if configured_constraints in (None, "", "h-bonds"):
+        constraints_type = "none"
+    else:
+        constraints_type = configured_constraints
     constraints_algorithm = constraints_cfg.get("algorithm", "lincs")
 
     schedule = _generate_lambda_schedule(

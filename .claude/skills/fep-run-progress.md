@@ -95,5 +95,5 @@ Window XX: 🔄 Running (X minutes)
 ## FEP System Locations
 
 Main test systems:
-- 42-38 system: `/data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/42-38/CHARMM-GUI/GMX_PROLIG_FEP`
-- p38-19-24 system: `/data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/p38-19-24/rtf_fep_output/GMX_PROLIG_FEP`
+- 42-38 system (CHARMM-GUI): `/data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/42-38/CHARMM-GUI/GMX_PROLIG_FEP`
+- p38-19-24 system (RTF): `/data2/gxf1212/work/PRISM/tests/gxf/FEP/unit_test/p38-19-24/charmm36_jul2022-mut_rtf/GMX_PROLIG_FEP`

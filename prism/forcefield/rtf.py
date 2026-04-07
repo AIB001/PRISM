@@ -62,9 +62,12 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
 
         # RTF data
         self.rtf_atoms = {}  # name -> {type, charge}
+        self.rtf_masses = {}  # atom_type -> mass
         self.rtf_bonds = []  # [(atom1, atom2), ...]
         self.rtf_angles = []  # [(atom1, atom2, atom3), ...]
         self.rtf_dihedrals = []  # [(atom1, atom2, atom3, atom4), ...]
+        self.auto_angles = False
+        self.auto_dihedrals = False
 
         # PRM parameters (type-based)
         self.prm_bond_params = {}  # (type1, type2) -> (k_b, b0)
@@ -163,6 +166,20 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
             if not line or line.startswith("*"):
                 continue
 
+            if line.startswith("MASS"):
+                parts = line.split()
+                if len(parts) >= 4:
+                    atom_type = parts[2]
+                    mass = float(parts[3])
+                    self.rtf_masses[atom_type] = mass
+                continue
+
+            if line.upper().startswith("AUTO"):
+                upper = line.upper()
+                self.auto_angles = "ANGLE" in upper
+                self.auto_dihedrals = "DIHE" in upper
+                continue
+
             # Section detection
             if line.startswith("ATOM"):
                 in_atoms = True
@@ -234,8 +251,49 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
 
         print(f"  - Found {len(self.rtf_atoms)} atoms")
         print(f"  - Found {len(self.rtf_bonds)} bonds")
+        if self.auto_angles and not self.rtf_angles:
+            self.rtf_angles = self._autogenerate_angles()
+        if self.auto_dihedrals and not self.rtf_dihedrals:
+            self.rtf_dihedrals = self._autogenerate_dihedrals()
         print(f"  - Found {len(self.rtf_angles)} angles")
         print(f"  - Found {len(self.rtf_dihedrals)} dihedrals")
+
+    def _build_bond_graph(self):
+        """Return an undirected adjacency map from RTF bonds."""
+        graph = {atom_name: set() for atom_name in self.rtf_atoms}
+        for atom1, atom2 in self.rtf_bonds:
+            if atom1 in graph and atom2 in graph:
+                graph[atom1].add(atom2)
+                graph[atom2].add(atom1)
+        return graph
+
+    def _autogenerate_angles(self):
+        """Generate CHARMM AUTO ANGLES from the bond graph."""
+        graph = self._build_bond_graph()
+        angles = set()
+        for center, neighbors in graph.items():
+            ordered_neighbors = sorted(neighbors)
+            for idx, atom1 in enumerate(ordered_neighbors):
+                for atom3 in ordered_neighbors[idx + 1 :]:
+                    angles.add((atom1, center, atom3))
+        return sorted(angles)
+
+    def _autogenerate_dihedrals(self):
+        """Generate CHARMM AUTO DIHE torsions from the bond graph."""
+        graph = self._build_bond_graph()
+        dihedrals = set()
+        for atom2, neighbors2 in graph.items():
+            for atom3 in neighbors2:
+                if atom2 >= atom3:
+                    continue
+                for atom1 in graph[atom2] - {atom3}:
+                    for atom4 in graph[atom3] - {atom2}:
+                        if atom1 == atom4:
+                            continue
+                        forward = (atom1, atom2, atom3, atom4)
+                        reverse = tuple(reversed(forward))
+                        dihedrals.add(min(forward, reverse))
+        return sorted(dihedrals)
 
     def _parse_prm(self):
         """Parse PRM file for force field parameters"""
@@ -282,19 +340,25 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                     k_theta = float(parts[3])  # kcal/mol/rad^2
                     theta0 = float(parts[4])  # degrees
                     self.prm_angle_params[(type1, type2, type3)] = (k_theta, theta0)
+                    self.prm_angle_params[(type3, type2, type1)] = (k_theta, theta0)
 
             elif section == "dihedrals":
                 parts = line.split()
                 if len(parts) >= 7:
                     type1, type2, type3, type4 = parts[0], parts[1], parts[2], parts[3]
                     k = float(parts[4])  # kcal/mol
-                    phi0 = float(parts[5])  # degrees
-                    multiplicity = int(float(parts[6]))  # CHARMM uses int but stored as float
+                    multiplicity = int(float(parts[5]))  # periodicity
+                    phi0 = float(parts[6])  # degrees
 
                     key = (type1, type2, type3, type4)
                     if key not in self.prm_dihedral_params:
                         self.prm_dihedral_params[key] = []
                     self.prm_dihedral_params[key].append((k, phi0, multiplicity))
+
+                    reverse_key = (type4, type3, type2, type1)
+                    if reverse_key not in self.prm_dihedral_params:
+                        self.prm_dihedral_params[reverse_key] = []
+                    self.prm_dihedral_params[reverse_key].append((k, phi0, multiplicity))
 
         print(f"  - Found {len(self.prm_bond_params)//2} bond parameters")
         print(f"  - Found {len(self.prm_angle_params)} angle parameters")
@@ -366,8 +430,9 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                 atom_id += 1
                 atom_type = atom_data["type"]
                 charge = atom_data["charge"]
+                mass = self.rtf_masses.get(atom_type, 12.01000)
                 f.write(f"{atom_id:5d} {atom_type:>10s}      1    {self.moleculetype_name}   {atom_name:>4s}")
-                f.write(f"{atom_id:5d}  {charge:10.6f}   12.01000\n")
+                f.write(f"{atom_id:5d}  {charge:10.6f}   {mass:8.5f}\n")
 
             # Bonds
             if self.rtf_bonds:
@@ -389,12 +454,11 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                         param_key = (type1, type2)
                         if param_key in self.prm_bond_params:
                             k_b, b0 = self.prm_bond_params[param_key]
-                            # Convert CHARMM to GROMACS units:
-                            # k_b: kcal/mol/Å^2 -> kJ/mol/nm^2 = (k_b * 4.184) * 100
-                            # b0: Å -> nm = b0 / 10
-                            k_gromacs = k_b * 418.4  # kJ/mol/nm^2
+                            # CHARMM harmonic bonds omit the 1/2 prefactor used by
+                            # GROMACS funct=1, so the force constant doubles here.
+                            k_gromacs = k_b * 836.8  # kcal/mol/A^2 -> kJ/mol/nm^2
                             b0_gromacs = b0 / 10.0  # nm
-                            f.write(f"{id1:5d} {id2:5d}     1   {k_gromacs:12.6f}  {b0_gromacs:12.6f}\n")
+                            f.write(f"{id1:5d} {id2:5d}     1   {b0_gromacs:12.6f}  {k_gromacs:12.6f}\n")
                         else:
                             # Write placeholder if parameters not found
                             f.write(f"{id1:5d} {id2:5d}     1\n")
@@ -420,12 +484,10 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                         param_key = (type1, type2, type3)
                         if param_key in self.prm_angle_params:
                             k_theta, theta0 = self.prm_angle_params[param_key]
-                            # Convert CHARMM to GROMACS units:
-                            # k_theta: kcal/mol/rad^2 -> kJ/mol/rad^2 = k_theta * 4.184
-                            # theta0: degrees -> radians = theta0 * pi / 180
-                            k_gromacs = k_theta * 4.184  # kJ/mol/rad^2
-                            theta0_gromacs = theta0 * 3.14159265359 / 180.0  # radians
-                            f.write(f"{id1:5d} {id2:5d} {id3:5d}     1   {k_gromacs:12.6f}  {theta0_gromacs:12.6f}\n")
+                            # CHARMM harmonic angles omit the 1/2 prefactor used by
+                            # GROMACS funct=1, so the force constant doubles here.
+                            k_gromacs = k_theta * 8.368  # kcal/mol/rad^2 -> kJ/mol/rad^2
+                            f.write(f"{id1:5d} {id2:5d} {id3:5d}     1   {theta0:12.6f}  {k_gromacs:12.6f}\n")
                         else:
                             # Write placeholder if parameters not found
                             f.write(f"{id1:5d} {id2:5d} {id3:5d}     1\n")
@@ -456,15 +518,9 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                         if param_key in self.prm_dihedral_params:
                             # Write each term in the Fourier series
                             for k, phi0, multiplicity in self.prm_dihedral_params[param_key]:
-                                # Convert CHARMM to GROMACS units:
-                                # k: kcal/mol -> kJ/mol = k * 4.184
-                                # phi0: degrees -> radians = phi0 * pi / 180
-                                # multiplicity: integer
-                                # CHARMM function type 9 (periodic) -> GROMACS function type 9
                                 k_gromacs = k * 4.184  # kJ/mol
-                                phi0_gromacs = phi0 * 3.14159265359 / 180.0  # radians
                                 f.write(
-                                    f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9   {k_gromacs:12.6f}  {phi0_gromacs:12.6f}      {multiplicity:12.6f}\n"
+                                    f"{id1:5d} {id2:5d} {id3:5d} {id4:5d}     9   {phi0:12.6f}  {k_gromacs:12.6f}  {multiplicity:5d}\n"
                                 )
                         else:
                             # Write placeholder if parameters not found

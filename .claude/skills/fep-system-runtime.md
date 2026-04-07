@@ -43,7 +43,7 @@ type: fep
 **遇到性能问题时首先检查**：
 1. GPU 是否启用？（`nvidia-smi` 检查利用率）
 2. MDP 参数是否正确？（特别是 `calc-lambda-neighbors`）
-3. 线程配置是否优化？（`-ntmpi 1 -ntomp 8`）
+3. 线程配置是否优化？（`-ntmpi 1 -ntomp 12`）
 4. 不要怀疑 GROMACS 或常用参数值，优先认为是建模/topology/MDP参数的问题
 
 **GPU 配置要求**：
@@ -55,7 +55,7 @@ type: fep
 -update gpu     # 约束更新使用 GPU
 
 # 线程配置（CRITICAL）
--ntmpi 1 -ntomp 8   # 单MPI进程，多OpenMP线程（GPU优化）
+-ntmpi 1 -ntomp 12   # 单MPI进程，多OpenMP线程（GPU优化）
 # ❌ 不要使用 -ntmpi 2 -ntomp 2（会降低GPU利用率）
 # ❌ 不要使用 -ntmpi 4 -ntomp 2（这是CPU模式配置）
 ```
@@ -78,7 +78,7 @@ type: fep
 1. `calc-lambda-neighbors = -1` → 计算所有 lambda 状态，性能暴跌（27-73倍差异）
 2. GPU 未启用 → CPU 模式性能低下
 3. 执行模式选择不当 → 未充分利用多 GPU
-4. 线程配置错误 → 使用 `-ntmpi 2 -ntomp 2` 而非 `-ntmpi 1 -ntomp 8`
+4. 线程配置错误 → 使用 `-ntmpi 2 -ntomp 2` 而非 `-ntmpi 1 -ntomp 12`
 
 **实际性能数据**（calc-lambda-neighbors的影响）：
 - ❌ `calc-lambda-neighbors = -1`：
@@ -256,7 +256,7 @@ for gpu_id in $(seq 0 $((NUM_GPUS-1))); do
 
         cd bound/$window_dir
         gmx mdrun -deffnm prod -nb gpu -bonded gpu -pme gpu \
-            -ntmpi 1 -ntomp 8 -gpu_id $gpu_id &
+            -ntmpi 1 -ntomp 12 -gpu_id $gpu_id &
         cd ../..
     done
 done
@@ -300,7 +300,7 @@ mpirun -np $NUM_GPUS gmx_mpi mdrun \
     -deffnm prod \
     -replex 1000 \
     -nb gpu -bonded gpu -pme gpu \
-    -ntomp 8
+    -ntomp 12
 ```
 
 **性能预期**：
@@ -371,7 +371,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 **常见问题**：
 - ❌ `calc-lambda-neighbors = -1` → 改为 1
 - ❌ 脚本中没有 `-nb gpu -bonded gpu -pme gpu` → 添加
-- ❌ 使用 `-ntmpi 4 -ntomp 2`（CPU 模式）→ 改为 `-ntmpi 1 -ntomp 8`
+- ❌ 使用 `-ntmpi 4 -ntomp 2`（CPU 模式）→ 改为 `-ntmpi 1 -ntomp 12`
 
 ### 快速验证脚本
 
@@ -456,7 +456,7 @@ done
 **实现方式**：
 1. **4 个 GPU 并行运行多个 lambda 窗口**
 2. **每个 GPU 运行 1-2 个窗口**（不是每个窗口用4个GPU）
-3. **每个窗口获得更多 CPU 资源**（通过 `-ntomp 8`）
+3. **每个窗口获得更多 CPU 资源**（通过 `-ntomp 12`）
 4. **所有窗口并行执行**，快速完成
 
 **GPU 分配策略**：
@@ -470,14 +470,14 @@ done
 
 # 每个 window 使用：
 # - CUDA_VISIBLE_DEVICES=<gpu_id>  # 指定GPU
-# -ntmpi 1 -ntomp 8                 # 单MPI进程，8个OpenMP线程
+# -ntmpi 1 -ntomp 12                 # 单MPI进程，8个OpenMP线程
 # -nb gpu -bonded gpu -pme gpu      # GPU加速
 ```
 
 **为什么这样配置**：
 - 每个 window 独占一个 GPU，避免 GPU 间通信开销
 - `-ntmpi 1` 避免 MPI 进程间通信开销
-- `-ntomp 8` 充分利用 CPU 核心，保持 GPU 忙碌
+- `-ntomp 12` 充分利用 CPU 核心，保持 GPU 忙碌
 - 并行执行多个 windows，总吞吐量最大化
 
 ### 大致性能评估
@@ -597,14 +597,14 @@ def generate_mdrun_command(has_gpu, gpu_available_on_system):
     """根据系统配置生成 mdrun 命令"""
     if has_gpu and gpu_available_on_system:
         # 有 GPU 且系统支持：不要回退
-        return """gmx mdrun -nb gpu -bonded gpu -pme gpu -ntmpi 1 -ntomp 8 || {
+        return """gmx mdrun -nb gpu -bonded gpu -pme gpu -ntmpi 1 -ntomp 12 || {
             echo "Error: GPU available but mdrun failed"
             echo "Check forcefield, topology, and MDP parameters"
             exit 1
         }"""
     else:
         # 无 GPU 或系统不支持：允许回退
-        return """gmx mdrun -nb gpu -bonded gpu -pme gpu -ntmpi 1 -ntomp 8 || \
+        return """gmx mdrun -nb gpu -bonded gpu -pme gpu -ntmpi 1 -ntomp 12 || \
             gmx mdrun -ntmpi 1 -ntomp 10"""
 ```
 
@@ -627,7 +627,7 @@ gmx grompp -f mdps/prod_00.mdp -c input/conf.gro \
 # 运行（GPU 模式）
 cd $window_dir
 gmx mdrun -deffnm prod -nb gpu -bonded gpu -pme gpu \
-    -ntmpi 1 -ntomp 8 -gpu_id 0 -nsteps 100
+    -ntmpi 1 -ntomp 12 -gpu_id 0 -nsteps 100
 
 # 检查输出
 ls -lh prod.*  # 应该看到 .gro, .xtc, .edr, .dhdl.xvg
@@ -802,7 +802,7 @@ ls -lh bound/window_*/replica_exchange.xvg
 ### GPU 配置
 - [ ] `calc-lambda-neighbors = 1`（不是 -1）
 - [ ] 脚本包含 `-nb gpu -bonded gpu -pme gpu`
-- [ ] 使用 `-ntmpi 1 -ntomp 8`（GPU 优化）
+- [ ] 使用 `-ntmpi 1 -ntomp 12`（GPU 优化）
 
 ### 执行模式
 - [ ] 配置文件明确 `execution.mode`

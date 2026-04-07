@@ -71,11 +71,31 @@ Key rules for FEP:
 
 ### Multi-Force Field Support
 **Supported Force Fields**:
-- **GAFF/CGenFF**: Position-specific atom types (ca, c3, ha, hc) - full matching
+- **GAFF/GAFF2**: Position-specific atom types (ca, c3, ha, hc) - full matching
+- **CGenFF**: CHARMM General Force Field - full matching
+- **RTF**: CHARMM Residue Topology File format - full matching
 - **OpenFF**: Generic types (output_0, output_1) - distance + element + charge only
 - **OPLS-AA**: Sequential types (opls_800, opls_801) - distance + element + charge only
 
 **Implementation**: `DistanceAtomMapper._should_ignore_atom_type()` auto-detects force field type
+
+### RTF (CHARMM) Force Field Support
+**Status**: ✅ Fully supported (as of 2026-04-07)
+
+**Key fixes applied**:
+1. **Hybrid topology bond merging** (`prism/fep/gromacs/itp_builder.py`):
+   - Fixed over-aggressive zeroing of bonded terms when atom types change between states
+   - Now only zeros parameters when a term is missing in one state (not when both states have valid parameters)
+   - Prevents artificial bond breaking that caused molecular collapse during EM
+
+2. **Coordinate unit conversion** (`prism/fep/modeling/hybrid_package.py`):
+   - Fixed Å→nm conversion for PDB/MOL2 coordinates (divide by 10.0)
+   - GRO coordinates already in nm, no conversion needed
+
+**Test system**: `tests/gxf/FEP/unit_test/p38-19-24/` (p38α MAPK, ligands 19→24)
+- Protein FF: charmm36-jul2022
+- Ligand FF: RTF
+- Status: ✅ EM + NVT passing for both bound/unbound legs
 
 ### MOL2 Coordinate Support
 **Feature**: Unified PDB/MOL2/GRO coordinate handling via `_load_structure_coordinates()`

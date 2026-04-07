@@ -667,6 +667,31 @@ if [[ "${{EXECUTION_MODE}}" != "standard" && "${{EXECUTION_MODE}}" != "repex" ]]
     exit 1
 fi
 
+export OMP_NUM_THREADS="${{OMP_NUM_THREADS:-{omp_threads}}}"
+export OMP_PROC_BIND="${{OMP_PROC_BIND:-close}}"
+export OMP_PLACES="${{OMP_PLACES:-cores}}"
+
+GPU_COUNT={num_gpus}
+
+resolve_gpu_id() {{
+    if [ -n "${{PRISM_GPU_ID:-}}" ]; then
+        printf '%s\n' "${{PRISM_GPU_ID}}"
+        return 0
+    fi
+
+    if [ -n "${{GMX_GPU_ID:-}}" ]; then
+        printf '%s\n' "${{GMX_GPU_ID}}"
+        return 0
+    fi
+
+    if [ -n "${{CUDA_VISIBLE_DEVICES:-}}" ] && [[ "${{CUDA_VISIBLE_DEVICES}}" != *,* ]]; then
+        printf '%s\n' "${{CUDA_VISIBLE_DEVICES}}"
+        return 0
+    fi
+
+    printf '%s\n' 0
+}}
+
 # Resolve a run target to its on-disk leg directory.
 resolve_leg_dir() {{
     local target="$1"
@@ -705,12 +730,19 @@ run_leg() {{
         echo "Error: Leg directory not found for target: ${{target_name}}"
         return 1
     }}
+    local gpu_id
+    gpu_id=$(resolve_gpu_id)
+    local cpu_offset="${{PRISM_CPU_OFFSET:-$((gpu_id * OMP_NUM_THREADS))}}"
+    export CUDA_VISIBLE_DEVICES="${{gpu_id}}"
 
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
     echo "║                    PRISM-FEP ${{target_name}} LEG                                   ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo ""
+    echo "GPU assignment: physical GPU ${{gpu_id}} (visible as local GPU 0)"
+    echo "OpenMP threads: ${{OMP_NUM_THREADS}}"
+    echo "CPU pin offset: ${{cpu_offset}}"
 
     cd "${{leg_dir}}"
 
@@ -725,11 +757,11 @@ run_leg() {{
         echo "✓ EM already completed, skipping..."
     elif [ -f ${{BUILD_DIR}}/em.tpr ]; then
         echo "EM checkpoint found, resuming..."
-        gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/em -cpi ${{BUILD_DIR}}/em.cpt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} -pin on -pinoffset "${{cpu_offset}}" -pinstride 1 -v
     else
         echo "Running energy minimization..."
         gmx grompp -f ${{MDP_DIR}}/em.mdp -c ${{INPUT_DIR}}/conf.gro -p topol.top -o ${{BUILD_DIR}}/em.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp {omp_threads} -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/em -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} -pin on -pinoffset "${{cpu_offset}}" -pinstride 1 -v
     fi
 
     # Check EM convergence
@@ -753,19 +785,19 @@ run_leg() {{
             echo "NVT checkpoint found, resuming on GPU..."
             (
                 cd ${{BUILD_DIR}}
-                gmx mdrun -deffnm nvt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -cpi nvt.cpt -v
+                gmx mdrun -deffnm nvt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -cpi nvt.cpt -v
             )
         else
             echo "⚠️  Previous NVT run failed (no checkpoint), cleaning up and restarting..."
             rm -f ${{BUILD_DIR}}/nvt.* 2>/dev/null || true
             echo "Running NVT equilibration..."
             gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 20
-            gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -v
+            gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -v
         fi
     else
         echo "Running NVT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/nvt.mdp -c ${{BUILD_DIR}}/em.gro -r ${{BUILD_DIR}}/em.gro -p topol.top -o ${{BUILD_DIR}}/nvt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/nvt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -v
     fi
 
     # NPT equilibration (must run to completion)
@@ -777,7 +809,7 @@ run_leg() {{
             echo "NPT checkpoint found, resuming on GPU..."
             (
                 cd ${{BUILD_DIR}}
-                gmx mdrun -deffnm npt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -cpi npt.cpt -v
+                gmx mdrun -deffnm npt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -cpi npt.cpt -v
             )
         else
             # NPT TPR exists but no checkpoint - previous run failed, clean up and restart
@@ -785,12 +817,12 @@ run_leg() {{
             rm -f ${{BUILD_DIR}}/npt.* 2>/dev/null || true
             echo "Running NPT equilibration..."
             gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -v
+            gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -v
         fi
     else
         echo "Running NPT equilibration..."
         gmx grompp -f ${{MDP_DIR}}/npt.mdp -c ${{BUILD_DIR}}/nvt.gro -r ${{BUILD_DIR}}/nvt.gro -t ${{BUILD_DIR}}/nvt.cpt -p topol.top -o ${{BUILD_DIR}}/npt.tpr -maxwarn 20
-        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -v
+        gmx mdrun -deffnm ${{BUILD_DIR}}/npt -ntmpi 1 -ntomp ${{OMP_NUM_THREADS}} ${{MDRUN_GPU_ARGS}} -gpu_id 0 -pinoffset "${{cpu_offset}}" -pinstride 1 -v
     fi
 
     echo "Running FEP production for all lambda windows..."

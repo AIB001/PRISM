@@ -16,7 +16,6 @@ type: fep
 - **Availability**: LSP tools available in Claude Code tool context only
 - **Fallback**: Use `Grep` tool when LSP tools are unavailable
 
-
 ## 核心职责
 
 测试 PRISM 的所有力场生成器是否都能正确生成 PRISM 格式，并能够与 FEP 模块无缝集成。验证从"普通建模 → FEP 模式"的完整工作流。
@@ -53,6 +52,7 @@ FEP 模块**只关心 PRISM 格式**，不关心原始文件类型。
 | Both | `BothForceFieldGenerator` | `LIG.both2gmx` | 服务器 (SwissParam) | ✅ |
 | CGenFF | `CGenFFForceFieldGenerator` | `LIG.cgenff2gmx` | 本地/网站 | ✅ |
 | CHARMM-GUI | `CHARMMLegacyGenerator` | `LIG.charmm2gmx` | 本地 | ✅ |
+| RTF | `RTFForceFieldGenerator` | `LIG.rtf2gmx` | 本地 (CHARMM RTF) | ✅ |
 
 ## PRISM 标准输出格式
 
@@ -76,6 +76,7 @@ output_dir/LIG.<ff>2gmx/
 | 力场 | 测试文件 | 测试案例 | 状态 | 测试命令 |
 |------|----------|----------|------|----------|
 | **CHARMM-GUI** | `test_charmm_gui_generator.py` | 39-8 + 42-38 | ✅ **已验证** (灰色原子已修复) | `python test_39_8_pdb_only.py`<br>`python test_42_38_gray_atom.py` |
+| **RTF** | `test_run_fep.py` | p38-19-24 | ✅ **已验证** (2026-04-07) | `cd tests/gxf/FEP/unit_test/p38-19-24 && python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf` |
 | OpenFF | `test_openff_fep_mapping.py` | oMeEtPh-EtPh | ✅ **已验证** | `pytest test_openff_fep_mapping.py::TestOpenFFWithFEPMapping::test_end_to_end_fep_mapping` |
 | GAFF | `test_gaff_fep_integration.py` | oMeEtPh-EtPh | ⚠️ 需要创建 | - |
 | GAFF2 | `test_gaff2_fep_integration.py` | oMeEtPh-EtPh | ⚠️ 需要创建 | - |
@@ -176,69 +177,6 @@ def test_<ff>_fep_e2e(tmp_path):
 ```bash
 # GAFF
 
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-prism protein.pdb oMeEtPh.mol2 -o output_gaff \
-  -lff gaff \
-  --fep \
-  --mutant EtPh.mol2
-
-# OpenFF
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-prism protein.pdb oMeEtPh.mol2 -o output_openff \
-  -lff openff \
-  --fep \
-  --mutant EtPh.mol2
-
-# OPLS-AA
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-prism protein.pdb oMeEtPh.mol2 -o output_opls \
-  -lff opls \
-  --fep \
-  --mutant EtPh.mol2
-```
-
-**预期输出**：
-```
-output_<ff>/
-├── reference/
-│   └── LIG.<ff>2gmx/      # 参考配体的力场
-├── mutant/
-│   └── LIG.<ff>2gmx/      # 突变配体的力场
-└── GMX_PROLIG_FEP/        # FEP 系统文件
-    ├── bound/
-    ├── unbound/
-    └── common/
-```
-
 ## 关键验证点
 
 ### 1. PRISM 格式验证
@@ -279,174 +217,6 @@ output_<ff>/
 **详细HTML检查方法**：
 ```bash
 # 1. 检查灰色原子
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-grep "rgb(200, 200, 200)" output/mapping.html  # 应该返回0
-
-# 2. 检查unknown classification
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-grep '"classification": "unknown"' output/mapping.html  # 应该返回0
-
-# 3. 检查原子数量
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-grep -o "const ATOMS_A = \[" output/mapping.html
-# 然后数组长度应该等于 len(atoms_a)
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-
-# 4. 检查原子属性完整性
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-grep -A3 "const ATOMS_A" output/mapping.html | head -10
-# 每个原子应该有：
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - name: 原子名称（如 "N", "C1", "H1"）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - element: 元素符号（如 "N", "C", "H"）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - charge: 非零电荷（如 -0.463, 0.07）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - type: 原子类型（如 "NG1T1", "CG3C51"）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - classification: "common" 或 "transformed" 或 "surrounding"
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# - fepColor: 颜色值（不应该有 rgb(200, 200, 200)）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-
-# 5. 示例：正确格式的原子数据
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-{"id": "A1", "name": "N", "element": "N", "x": 217.73, "y": 63.84,
- "radius": 14, "charge": -0.463, "type": "NG1T1",
- "classification": "common", "fepColor": "rgb(204, 229, 77)",
- "elementColor": "#3050F8"}
-```
 
 ### 7. 前端Warning机制（新增）
 当出现以下情况时，HTML必须在**ligand可视化附近**显示warning框：
@@ -517,446 +287,6 @@ grep -A3 "const ATOMS_A" output/mapping.html | head -10
 6. **MMFF** - SwissParam 快速参数化
 7. **MATCH** - SwissParam 高质量参数
 
-## 现有测试文件状态（2026-03-29 更新）
-
-| 测试文件 | 力场/系统 | 测试数据 | 状态 | 说明 |
-|----------|----------|----------|------|------|
-| `examples/test_charmm_gui_generator.py` | CHARMM-GUI | 39-8 系统 | ✅ **已验证** | **HTML 生成成功** (74KB) |
-| `tests/test_openff_fep_mapping.py` | OpenFF | oMeEtPh-EtPh | ⚠️ 未验证 | 需要实际运行测试 |
-| `examples/test_e2e_prism_fep.py` | CGenFF (网站) | 39-8 系统 | ⚠️ 被跳过 | 缺少 CGenFF 网站文件 (*_gmx.pdb/top) |
-| `examples/test_cgenff_compatibility.py` | - | 39-8, 25-36 | ⚠️ 未验证 | 只检测文件格式，未测试 FEP 集成 |
-
-**✅ 已验证成功**：
-- CHARMM-GUI → PRISM → FEP 映射 → HTML 可视化
-- 测试数据：`39-8/output/39-8_charmm_gui_prism.html` (74KB)
-- 映射结果：25 common, 13+13 transformed
-
-## 当前真实情况（2026-03-29）
-
-### ❌ 所有测试都未通过！
-
-**测试代码问题**：
-1. `test_charmm_gui_generator.py` - 缺少 `resolve_fep_case_dir` 函数，无法运行
-2. `test_e2e_prism_fep.py` - 被 pytest.skip 跳过（缺少文件）
-3. `test_openff_fep_mapping.py` - 未实际运行验证
-
-**测试数据状态**：
-- ✅ CHARMM-GUI 数据存在（`39-8/39/gromacs/LIG.itp`）
-- ✅ OpenFF 测试数据存在（`oMeEtPh-EtPh/*.mol2`）
-- ❌ CGenFF 网站数据缺失（`*_gmx.pdb`, `*_gmx.top`）
-
-### 🎯 下一步行动（优先级排序）
-
-#### 立即可做（今天）
-
-**1. 修复 CHARMM-GUI 测试**（推荐起点）
-```bash
-# 问题：缺少 resolve_fep_case_dir 函数
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# 解决：直接使用硬编码路径
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# 从项目根目录运行: cd /path/to/prism/
-# 修复 test_charmm_gui_generator.py 中的导入错误
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# 运行测试验证 HTML 生成
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-```
-
-**2. 运行 OpenFF 测试**
-```bash
-cd /data2/gxf1212/work/PRISM
-pytest tests/test_openff_fep_mapping.py::TestOpenFFWithFEPMapping::test_end_to_end_fep_mapping -v -s
-# 验证是否能生成 HTML
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-```
-
-#### 需要额外工作
-
-**3. 创建 GAFF 集成测试**
-- 使用 `oMeEtPh-EtPh` 测试数据
-- 复用 CHARMM-GUI 测试模板
-- 验证 GAFF → PRISM → FEP 流程
-
-**4. 获取 CGenFF 网站文件**（可选）
-- 访问 https://cgenff.paramchem.org/
-- 上传 39 和 8 的配体结构
-- 下载 `*_gmx.pdb` 和 `*_gmx.top`
-
-## 快速验证脚本（实际可运行）
-
-```bash
-#!/bin/bash
-# 快速验证 FEP + 力场集成的准备工作
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-
-cd /data2/gxf1212/work/PRISM
-
-echo "=== FEP + 力场集成现状检查 ==="
-
-# 1. 检查力场生成器
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-echo "1. 检查力场生成器..."
-python -c "
-from prism.forcefield import list_available_generators
-gens = list_available_generators()
-for name in gens:
-    print(f'  ✓ {name}')
-" 2>&1 | grep -v "Warning\|PyMBAR\|JAX"
-
-# 2. 检查测试数据
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-echo "2. 检查测试数据..."
-echo "  CHARMM-GUI (39-8):"
-ls 39-8/39/gromacs/LIG.itp 2>/dev/null && echo "    ✓ Ligand 39: LIG.itp 存在" || echo "    ✗ Ligand 39: 缺失"
-ls 39-8/8/gromacs/LIG.itp 2>/dev/null && echo "    ✓ Ligand 8: LIG.itp 存在" || echo "    ✗ Ligand 8: 缺失"
-
-echo "  OpenFF (oMeEtPh-EtPh):"
-ls oMeEtPh-EtPh/oMeEtPh.mol2 2>/dev/null && echo "    ✓ oMeEtPh.mol2 存在" || echo "    ✗ oMeEtPh.mol2 缺失"
-ls oMeEtPh-EtPh/EtPh.mol2 2>/dev/null && echo "    ✓ EtPh.mol2 存在" || echo "    ✗ EtPh.mol2 缺失"
-
-# 3. 尝试运行测试（会失败，但能看到错误）
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-echo "3. 尝试运行测试..."
-echo "  OpenFF 测试:"
-pytest tests/test_openff_fep_mapping.py::TestOpenFFWithFEPMapping::test_end_to_end_fep_mapping -v 2>&1 | head -5
-
-echo "  CHARMM-GUI 测试:"
-python examples/test_charmm_gui_generator.py 2>&1 | head -5
-
-echo "=== 检查完成 ==="
-```
-
-## 常见问题
-
-### Q1: 某个力场生成失败
-**原因**：依赖未安装或网络问题
-**解决**：
-```bash
-# GAFF/GAFF2
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-mamba install -c conda-forge ambertools
-
-# OpenFF
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-mamba install -c conda-forge openff-toolkit openff-interchange
-
-# 检查服务器连接
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-ping ligpargen.org
-ping swissparam.ch
-```
-
-### Q2: HTML中出现灰色原子
-**症状**：FEP classification模式下某些原子显示为灰色（未着色），classification为"unknown"
-
-**根本原因**：
-- **Bug位置**：`prism/fep/visualize/molecule.py`
-- **问题**：RDKit的`Chem.AddHs()`添加隐式氢原子，创建了额外的原子（如"Atom32", "Atom33"）
-- **影响**：这些额外原子的名字无法匹配到原始原子，导致匹配失败 → 灰色显示
-
-**✅ 已修复** (2026-03-29):
-1. 移除`pdb_to_mol()`中的`Chem.AddHs()`调用
-2. 移除`prepare_mol_with_charges_and_labels()`fallback路径中的`Chem.AddHs()`调用
-3. 对于CHARMM-GUI文件，跳过SMILES往返转换，直接使用PDB分子
-
-**验证方法**：
-```bash
-# 运行测试确认无灰色原子
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-# 从项目根目录运行: cd /path/to/prism/
-python test_39_8_pdb_only.py  # 39-8系统（复杂，2个突变点）
-python test_42_38_gray_atom.py  # 42-38系统（简单，1个突变点）
-
-# 检查HTML
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-grep "rgb(200, 200, 200)" output/39-8_pdb_only.html  # 应该返回0
-grep '"classification": "unknown"' output/42-38_regression.html  # 应该返回0
-```
-
-**如果仍然出现灰色原子**（极少数情况）：
-```python
-# 检查映射覆盖率
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-total_a = len(mapping.common) + len(mapping.transformed_a) + len(mapping.surrounding_a)
-total_b = len(mapping.common) + len(mapping.transformed_b) + len(mapping.surrounding_b)
-
-if total_a != len(atoms_a):
-    print(f"⚠️  配体A有 {len(atoms_a) - total_a} 个原子未分类")
-
-if total_b != len(atoms_b):
-    print(f"⚠️  配体B有 {len(atoms_b) - total_b} 个原子未分类")
-
-# 检查电荷为0的原子
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-zero_charge = [a for a in atoms_a + atoms_b if abs(a.charge) < 0.001]
-print(f"电荷为0的原子: {len(zero_charge)}")
-```
-
-**其他解决方案**：
-- 检查输入文件（ITP/GRO）是否正确
-- 确认原子类型和电荷参数完整
-- 尝试调整 `dist_cutoff` 和 `charge_cutoff`
-
-### Q3: PNG可视化失败
-**症状**：`ValueError: Depict error: Substructure match with reference not found`
-
-**根本原因**：
-- RDKit无法找到两个分子的公共子结构
-- 分子结构差异太大（如多突变点）
-- MOL2/PDB文件的原子名称不匹配
-
-**解决方案（已修复）**：
-- 代码已添加降级处理（`prism/fep/visualize/mapping.py`）
-- 当2D对齐失败时，使用默认坐标生成PNG
-- 显示warning但不影响HTML生成
-
-**预防措施**：
-- 优先使用简单系统（如42-38单突变点）测试
-- 检查MOL2和PDB文件的原子名称是否一致
-- 如果PNG不是必需的，可以跳过，只生成HTML
-
-### Q4: FEP mapping 结果不对
-**原因**：原子类型不匹配或坐标问题
-**调试**：
-```python
-# 检查原子类型
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-for atom in atoms_a:
-    print(f"{atom.name}: type={atom.atom_type}, elem={atom.element}")
-
-# 检查坐标
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-for atom in atoms_a[:3]:
-    print(f"{atom.name}: coord={atom.coord}")
-
-# 尝试不同的 cutoff
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-mapper = DistanceAtomMapper(dist_cutoff=1.0)  # 放宽阈值
-```
-
-### Q5: CLI `--fep` 模式不工作
-**原因**：可能是 builder.py 未正确处理参数
-**检查**：
-```bash
-# 查看帮助
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-prism --help | grep -A 5 fep
-
-# 检查是否生成了正确的目录结构
-
-## 📝 Code Search and Navigation
-
-**LSP Tools Preferred**: Use `mcp__cclsp__` tools for code navigation:
-- `mcp__cclsp__find_definition` - Find symbol definitions
-- `mcp__cclsp__find_references` - Find symbol references
-- `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
-- Benefits: More accurate than grep, skips comments/strings, reduces token usage
-- **Availability**: LSP tools available in Claude Code tool context only
-- **Fallback**: Use `Grep` tool when LSP tools are unavailable
-
-ls -la output_*/reference/ output_*/mutant/
-```
-
 ## 相关代码路径
 
 - 力场生成器基类：`prism/forcefield/base.py::ForceFieldGeneratorBase`
@@ -986,3 +316,52 @@ ls -la output_*/reference/ output_*/mutant/
 - [ ] 更新 README
 - [ ] 添加示例脚本
 - [ ] 创建 troubleshooting 指南
+
+## RTF 力场集成状态（2026-04-07）
+
+### 成功标准
+- ✅ **Build 阶段**：能够从 RTF 目录生成完整的 FEP 系统（bound/unbound legs）
+- ✅ **Grompp 验证**：bound/unbound 的 `gmx grompp` 都能通过（maxwarn 10）
+- ✅ **EM 收敛**：bound/unbound 的能量最小化都能收敛（Fmax < 200 kJ/mol/nm）
+- ✅ **NVT 启动**：bound/unbound 的 NVT 都能稳定运行（2 ps smoke test 通过）
+
+### 已修复的关键 Bug
+
+**Bug 1: 混合拓扑键参数过度零化**
+- **位置**: `prism/fep/gromacs/itp_builder.py:807-840`
+- **问题**: 当 A/B 两态原子类型不同时，即使两态都有显式键参数，也会被错误地零化
+- **影响**: 导致分子骨架在 lambda=0 时断裂，unbound leg 在 EM 中塌缩
+- **修复**: 只在某一态缺少显式参数时才补零，保留两态都有的真实键参数
+- **验证**: p38-19-24 系统 bound/unbound EM 都能正常收敛
+
+**Bug 2: 坐标单位转换缺失**
+- **位置**: `prism/fep/modeling/hybrid_package.py:746-791`
+- **问题**: PDB/MOL2 文件使用 Å 单位，但代码未转换为 GROMACS 需要的 nm
+- **影响**: 坐标放大 10 倍，导致"excluded atoms distance > 8 nm"错误
+- **修复**: 在 `_parse_pdb_atoms()` 和 `_parse_mol2_atoms()` 中除以 10.0
+- **验证**: hybrid.gro 中原子间距离恢复正常（< 2 nm）
+
+### 测试系统
+- **路径**: `tests/gxf/FEP/unit_test/p38-19-24/`
+- **蛋白**: p38α MAPK (charmm36-jul2022)
+- **配体**: 19 → 24 (RTF 格式)
+- **输出**: `charmm36_jul2022-mut_rtf/GMX_PROLIG_FEP/`
+
+### 验证命令
+```bash
+cd tests/gxf/FEP/unit_test/p38-19-24
+python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf
+
+# 检查 EM 结果
+grep "Maximum force" charmm36_jul2022-mut_rtf/GMX_PROLIG_FEP/bound/repeat1/build_em.log | tail -1
+grep "Maximum force" charmm36_jul2022-mut_rtf/GMX_PROLIG_FEP/unbound/repeat1/build_em.log | tail -1
+
+# 预期输出：
+# bound: Fmax = 183.2 kJ/mol/nm (7778 steps)
+# unbound: Fmax = 176.8 kJ/mol/nm (8690 steps)
+```
+
+### 当前限制
+- RTF 输入必须是目录格式（包含 .rtf, .prm, .pdb 文件）
+- 需要使用 `--ref-ligand input/19 --mut-ligand input/24` 指定目录路径
+- 自动检测逻辑：扫描 `input/` 下包含 `*.rtf` 文件的子目录
