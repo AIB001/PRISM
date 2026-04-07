@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from prism.fep.gromacs.itp_builder import ITPBuilder
+from prism.gaussian.utils import normalize_element_symbol
 
 try:
     from prism.forcefield.adapters import CGenFFAdapter
@@ -112,16 +113,23 @@ class HybridPackageBuilder:
                 if direct_path.exists():
                     return str(direct_path)
 
-                # Try common PRISM output structures
-                # Priority: openff2gmx > amb2gmx (openff is more specific)
-                for subdir in ["LIG.openff2gmx", "LIG.amb2gmx"]:
+                # Try common PRISM output structures across supported ligand FF backends.
+                for subdir in [
+                    "LIG.openff2gmx",
+                    "LIG.amb2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
                     ff_path = ligand_dir / subdir / "LIG.itp"
                     if ff_path.exists():
                         return str(ff_path)
 
-                raise FileNotFoundError(
-                    f"Cannot find LIG.itp in {ligand_dir} (checked: LIG.itp, LIG.openff2gmx/LIG.itp, LIG.amb2gmx/LIG.itp)"
-                )
+                raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir} or known PRISM ligand subdirectories")
 
             ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
             ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
@@ -174,15 +182,37 @@ class HybridPackageBuilder:
             if direct_path.exists():
                 mutant_gro = direct_path
             else:
-                # Try LIG.amb2gmx/LIG.gro (PRISM output structure)
-                amb2gmx_path = mutant_ligand_dir / "LIG.amb2gmx" / "LIG.gro"
-                if amb2gmx_path.exists():
-                    mutant_gro = amb2gmx_path
+                # Try common PRISM output structures
+                for subdir in [
+                    "LIG.amb2gmx",
+                    "LIG.openff2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
+                    candidate = mutant_ligand_dir / subdir / "LIG.gro"
+                    if candidate.exists():
+                        mutant_gro = candidate
+                        break
+
+        reference_coords_file = hybrid_dir / "mapping_state_a.pdb"
+        if not reference_coords_file.exists():
+            reference_coords_file = seed_gro
+
+        mutant_coords_file = hybrid_dir / "mapping_state_b.pdb"
+        if not mutant_coords_file.exists():
+            mutant_coords_file = mutant_gro
 
         hybrid_gro_content = self._build_hybrid_gro(
             hybrid_itp_content=normalized_itp,
             reference_gro=seed_gro,
             mutant_gro=mutant_gro,
+            reference_coords_file=reference_coords_file,
+            mutant_coords_file=mutant_coords_file,
         )
         (hybrid_dir / self.hybrid_gro_filename).write_text(hybrid_gro_content)
 
@@ -193,8 +223,21 @@ class HybridPackageBuilder:
         # Auto-discover posre file (handle LIG.amb2gmx/ subdirectory)
         ref_posre = reference_ligand_dir / "posre_LIG.itp"
         if not ref_posre.exists():
-            # Try LIG.amb2gmx/posre_LIG.itp (PRISM output structure)
-            ref_posre = reference_ligand_dir / "LIG.amb2gmx" / "posre_LIG.itp"
+            for subdir in [
+                "LIG.amb2gmx",
+                "LIG.openff2gmx",
+                "LIG.opls2gmx",
+                "LIG.mmff2gmx",
+                "LIG.match2gmx",
+                "LIG.both2gmx",
+                "LIG.cgenff2gmx",
+                "LIG.charmm2gmx",
+                "LIG.rtf2gmx",
+            ]:
+                candidate = reference_ligand_dir / subdir / "posre_LIG.itp"
+                if candidate.exists():
+                    ref_posre = candidate
+                    break
 
         if ref_posre.exists():
             shutil.copy2(ref_posre, hybrid_dir / self.hybrid_posre_filename)
@@ -302,11 +345,23 @@ class HybridPackageBuilder:
             if ligand_dir is None:
                 continue
 
-            # Try to find atomtypes_LIG.itp (handle LIG.amb2gmx/ subdirectory)
             atomtypes_file = ligand_dir / "atomtypes_LIG.itp"
             if not atomtypes_file.exists():
-                # Try LIG.amb2gmx/atomtypes_LIG.itp (PRISM output structure)
-                atomtypes_file = ligand_dir / "LIG.amb2gmx" / "atomtypes_LIG.itp"
+                for subdir in [
+                    "LIG.amb2gmx",
+                    "LIG.openff2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
+                    candidate = ligand_dir / subdir / "atomtypes_LIG.itp"
+                    if candidate.exists():
+                        atomtypes_file = candidate
+                        break
 
             if not atomtypes_file.exists():
                 continue
@@ -450,6 +505,22 @@ class HybridPackageBuilder:
 
     def _find_nearby_charmm_ff_dir(self, ligand_dir: Path) -> Optional[Path]:
         """Locate a CHARMM force-field directory near a ligand output directory."""
+
+        def _ff_dir_from_topology(top_path: Path) -> Optional[Path]:
+            for line in top_path.read_text(errors="ignore").splitlines():
+                stripped = line.strip()
+                if not stripped.startswith('#include "') or "forcefield.itp" not in stripped:
+                    continue
+                include_path = stripped.split('"', 2)[1]
+                candidate = Path(include_path)
+                if not candidate.is_absolute():
+                    candidate = (top_path.parent / candidate).resolve()
+                if candidate.exists():
+                    ff_dir = candidate.parent
+                    if any((ff_dir / name).exists() for name in ("ffnonbonded.itp", "charmm36.itp", "forcefield.itp")):
+                        return ff_dir
+            return None
+
         # 1. Direct ligand-local layouts.
         charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_dir)
         if charmm_ff_dir:
@@ -478,10 +549,24 @@ class HybridPackageBuilder:
         for root in search_roots:
             if not root.exists() or not root.is_dir():
                 continue
+            for top_path in root.glob("**/topol.top"):
+                ff_dir = _ff_dir_from_topology(top_path)
+                if ff_dir:
+                    return ff_dir
             for ff_dir in root.glob("**/*.ff"):
                 if not ff_dir.is_dir():
                     continue
                 for candidate in (ff_dir / "ffnonbonded.itp", ff_dir / "charmm36.itp"):
+                    if candidate.exists():
+                        return ff_dir
+
+        # 4. Bundled PRISM CHARMM force fields used by fixture-style test cases.
+        bundled_root = Path(__file__).resolve().parents[2] / "configs" / "forcefield"
+        if bundled_root.exists():
+            for ff_dir in bundled_root.glob("charmm*.ff"):
+                if not ff_dir.is_dir():
+                    continue
+                for candidate in (ff_dir / "ffnonbonded.itp", ff_dir / "charmm36.itp", ff_dir / "forcefield.itp"):
                     if candidate.exists():
                         return ff_dir
 
@@ -618,6 +703,8 @@ class HybridPackageBuilder:
         hybrid_itp_content: str,
         reference_gro: Path,
         mutant_gro: Optional[Path],
+        reference_coords_file: Optional[Path] = None,
+        mutant_coords_file: Optional[Path] = None,
     ) -> str:
         """
         Build hybrid GRO file with coordinates from reference/mutant.
@@ -636,9 +723,17 @@ class HybridPackageBuilder:
         str
             Complete GRO file content
         """
-        ref_coords, ref_box = self._parse_gro_atoms(reference_gro)
-        mut_coords, _ = self._parse_gro_atoms(mutant_gro) if mutant_gro else ({}, None)
+        reference_coord_source = reference_coords_file if reference_coords_file else reference_gro
+        mutant_coord_source = mutant_coords_file if mutant_coords_file else mutant_gro
+
+        ref_coords, _ = self._parse_gro_atoms(reference_coord_source)
+        mut_coords, _ = self._parse_gro_atoms(mutant_coord_source) if mutant_coord_source else ({}, None)
+        _, ref_box = self._parse_gro_atoms(reference_gro)
         hybrid_atoms, correspondence = self._parse_hybrid_atoms(hybrid_itp_content)
+
+        for counter_name in ("_element_index_counters", "_ref_element_index_counters"):
+            if hasattr(self, counter_name):
+                delattr(self, counter_name)
 
         lines = [
             "Hybrid ligand structure",
@@ -956,21 +1051,32 @@ class HybridPackageBuilder:
             print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
             return 0.0, 0.0, 0.0
 
-        # Extract element from atom type (for RTF types like C331 → C, N261 → N)
-        element = self._extract_element_from_atom_type(atom_type)
+        # Prefer atom-name-derived elements for generic/sequential types such as
+        # OPLS/OpenFF, because names like opls_800 do not encode chemistry.
+        element_candidates = []
+        for candidate in (
+            self._extract_element_from_atom_name(atom_name.rstrip("AB")),
+            self._extract_element_from_atom_type(atom_type),
+        ):
+            normalized = normalize_element_symbol(candidate)
+            if normalized and normalized not in element_candidates:
+                element_candidates.append(normalized)
 
-        # Get all atoms of this element from mutant coordinates
         mutant_atoms_by_element = []
-        for mut_name, coord_list in mut_coords.items():
-            if coord_list and coord_list[0]:
-                # Extract element from mutant atom name
-                mut_element = self._extract_element_from_atom_name(mut_name)
-                if mut_element == element:
-                    mutant_atoms_by_element.append((mut_name, coord_list[0]))
+        matched_element = None
+        for element in element_candidates:
+            for mut_name, coord_list in mut_coords.items():
+                if coord_list and coord_list[0]:
+                    mut_element = normalize_element_symbol(self._extract_element_from_atom_name(mut_name))
+                    if mut_element == element:
+                        mutant_atoms_by_element.append((mut_name, coord_list[0]))
+            if mutant_atoms_by_element:
+                matched_element = element
+                break
 
         if not mutant_atoms_by_element:
             print(
-                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, element: {element}), using origin"
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, elements: {element_candidates}), using origin"
             )
             return 0.0, 0.0, 0.0
 
@@ -1016,21 +1122,34 @@ class HybridPackageBuilder:
         - O2D4 → O
         - HGP1 → H
         - DUM_HGP1 → H (dummy atoms)
+
+        Notes
+        -----
+        Generic/sequential types such as ``opls_800`` do not encode the element.
+        Return an empty string for those so callers can fall back to atom-name or
+        structure-derived element identity instead of misclassifying them as oxygen.
         """
-        # Handle dummy atoms: DUM_XYZ → XYZ
         if atom_type.startswith("DUM_"):
             return self._extract_element_from_atom_type(atom_type[4:])
 
-        # For CHARMM/CGenFF types, the first character is the element
-        # Exception: 2-letter elements like Cl, Br
-        two_letter_elements = {"CL", "BR", "SI", "AS", "SE", "TE"}
-        if len(atom_type) >= 2:
-            first_two = atom_type[:2].upper()
-            if first_two in two_letter_elements:
-                return first_two
+        lowered = atom_type.lower()
+        if lowered.startswith(("opls_", "output_")):
+            return ""
 
-        # Default: first character is the element
-        return atom_type[0] if atom_type else "C"
+        token = atom_type.split(".", 1)[0]
+        token = token.split("_", 1)[0]
+        alpha = "".join(ch for ch in token if ch.isalpha())
+        if not alpha:
+            return "C"
+
+        # Prefer the longest valid element prefix (e.g. Cl, Br) before falling back.
+        for length in (2, 1):
+            if len(alpha) >= length:
+                candidate = normalize_element_symbol(alpha[:length])
+                if candidate in {"H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "Si", "As", "Se", "Te"}:
+                    return candidate
+
+        return normalize_element_symbol(alpha[:1])
 
     def _extract_element_from_atom_name(self, atom_name: str) -> str:
         """Extract element symbol from atom name.

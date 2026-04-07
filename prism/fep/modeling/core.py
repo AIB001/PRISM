@@ -362,7 +362,7 @@ class FEPScaffoldBuilder:
         for directory in [hybrid_dir, protein_dir, bound_dir / "input", unbound_dir / "input"]:
             directory.mkdir(parents=True, exist_ok=True)
 
-        return FEPScaffoldLayout(
+        layout = FEPScaffoldLayout(
             root=root,
             common_dir=common_dir,
             hybrid_dir=hybrid_dir,
@@ -370,6 +370,8 @@ class FEPScaffoldBuilder:
             bound_dir=bound_dir,
             unbound_dir=unbound_dir,
         )
+        self.layout = layout
+        return layout
 
     def _replicate_repeat_layout(self, layout: FEPScaffoldLayout) -> None:
         """Create repeat2..N using shared links for static assets."""
@@ -647,7 +649,7 @@ class FEPScaffoldBuilder:
 
     def _write_unbound_topology(self, topol_path: Path) -> None:
         """Write unbound leg topology template."""
-        hybrid_prefix = os.path.relpath(self.layout.common_hybrid_dir, topol_path.parent).replace("\\", "/")
+        hybrid_prefix = os.path.relpath(self.layout.hybrid_dir, topol_path.parent).replace("\\", "/")
         content = "; PRISM-FEP unbound topology template\n"
         defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename
@@ -665,7 +667,7 @@ class FEPScaffoldBuilder:
 
     def _write_bound_topology_template(self, topol_path: Path) -> None:
         """Write bound leg topology template."""
-        hybrid_prefix = os.path.relpath(self.layout.common_hybrid_dir, topol_path.parent).replace("\\", "/")
+        hybrid_prefix = os.path.relpath(self.layout.hybrid_dir, topol_path.parent).replace("\\", "/")
         content = "; PRISM-FEP bound topology template\n"
         defaults_path = topol_path.parent.parent / "common" / "hybrid" / "defaults_hybrid.itp"
         ff_path = topol_path.parent.parent / "common" / "hybrid" / self.hybrid_forcefield_filename

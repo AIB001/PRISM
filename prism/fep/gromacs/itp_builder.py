@@ -11,7 +11,6 @@ ligand ITP files.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -366,6 +365,8 @@ class ITPBuilder:
             mass=record.mass,
             mass_b=record.mass_b,
             is_perturbed=is_perturbed,
+            source_a_index=record.source_a_index,
+            source_b_index=record.source_b_index,
         )
 
     @classmethod
@@ -472,10 +473,10 @@ class ITPBuilder:
             if hasattr(record, "source_b_index") and record.source_b_index is not None:
                 map_b[record.source_b_index] = record.index
 
-        # Fallback: if no source indices available, use name-based mapping
+        # If source indices are incomplete, let the caller explicitly fall back to
+        # name-based mapping instead of returning a different key type here.
         if not map_a or not map_b:
-            print("Warning: source_a_index/source_b_index not available, using name-based mapping", file=sys.stderr)
-            return cls._build_state_name_maps_fallback(hybrid_records)
+            raise ValueError("source_a_index/source_b_index not available")
 
         return map_a, map_b
 
@@ -502,9 +503,15 @@ class ITPBuilder:
 
             if not state_a_dummy:
                 map_a[(record.state_a_type, record.name)] = record.index
-            if not state_b_dummy and record.state_b_type:
+            # Common atoms often do not write explicit B-state columns when the
+            # B-state type/charge/mass are identical to state A. They still need
+            # to participate in B-state bonded-term reconstruction, so mirror the
+            # A-state type into the B-state name map when no explicit B type is
+            # present and the atom is not a dummy in either state.
+            if not state_b_dummy:
                 b_name = record.name_b if record.name_b else record.name
-                map_b[(record.state_b_type, b_name)] = record.index
+                b_type = record.state_b_type if record.state_b_type else record.state_a_type
+                map_b[(b_type, b_name)] = record.index
 
         return map_a, map_b
 
@@ -512,6 +519,7 @@ class ITPBuilder:
     def _parse_source_itp(cls, content: str, structure_file: Optional[str] = None) -> Dict[str, Dict]:
         """Parse atoms and bonded sections from a source ligand ITP."""
         atom_names: Dict[int, str] = {}
+        atom_types: Dict[int, str] = {}
         sections: Dict[str, List[InteractionTerm]] = {key: [] for key in cls._SECTION_ATOM_COUNT}
 
         current_section: Optional[str] = None
@@ -551,6 +559,7 @@ class ITPBuilder:
                     except ValueError:
                         continue
                     atom_names[atom_index] = parts[4]
+                    atom_types[atom_index] = parts[1]
                 continue
 
             atom_count = cls._SECTION_ATOM_COUNT[current_section]
@@ -566,7 +575,7 @@ class ITPBuilder:
             sections[current_section].append(InteractionTerm(atoms=atom_indices, funct=funct, params=params))
 
         atom_names = cls._remap_generic_atom_names(atom_names, sections.get("bonds", []), structure_file)
-        return {"atom_names": atom_names, "sections": sections}
+        return {"atom_names": atom_names, "atom_types": atom_types, "sections": sections}
 
     @classmethod
     def _remap_generic_atom_names(
@@ -718,6 +727,11 @@ class ITPBuilder:
             index_map: Optional[Dict[int, int]],
             name_map: Optional[Dict[Tuple[str, str], int]],
         ) -> None:
+            type_index_map: Dict[str, List[int]] = {}
+            if name_map is not None:
+                for (mapped_type, _mapped_name), hybrid_idx in name_map.items():
+                    type_index_map.setdefault(mapped_type, []).append(hybrid_idx)
+
             for term in terms:
                 hybrid_atoms = []
                 for index in term.atoms:
@@ -729,7 +743,7 @@ class ITPBuilder:
                         hybrid_atoms.append(index_map[index])
                     else:
                         # Use name+type mapping (fallback)
-                        if not atom_types:
+                        if not atom_types or name_map is None:
                             hybrid_atoms = []
                             break
                         atom_name = atom_names.get(index)
@@ -738,10 +752,19 @@ class ITPBuilder:
                             hybrid_atoms = []
                             break
                         key = (atom_type, atom_name)
-                        if key not in name_map:
+                        hybrid_idx = name_map.get(key)
+                        if hybrid_idx is None:
+                            # Generic force fields such as OPLS may rename source ITP atoms
+                            # to generator-local labels (C01/H07/...) while the hybrid ITP
+                            # keeps chemistry-aware names (C10/H7/...). If the atom type is
+                            # unique in the hybrid state, fall back to type-only matching.
+                            candidates = type_index_map.get(atom_type, [])
+                            if len(candidates) == 1:
+                                hybrid_idx = candidates[0]
+                        if hybrid_idx is None:
                             hybrid_atoms = []
                             break
-                        hybrid_atoms.append(name_map[key])
+                        hybrid_atoms.append(hybrid_idx)
                 if not hybrid_atoms:
                     continue
 
@@ -792,7 +815,13 @@ class ITPBuilder:
                 if has_dummy_in_a and section in {"angles", "dihedrals", "impropers"}:
                     params_a = cls._zeroize_params(section, funct, params_a)
             else:
-                params_a = cls._zeroize_params(section, funct, list(term_b.params))  # type: ignore[union-attr]
+                params_a = (
+                    list(term_b.params)
+                    if has_dummy_in_a
+                    else cls._zeroize_params(  # type: ignore[union-attr]
+                        section, funct, list(term_b.params)
+                    )
+                )
 
             if term_b is not None:
                 params_b = list(term_b.params)
@@ -800,14 +829,33 @@ class ITPBuilder:
                 if has_dummy_in_b and section in {"angles", "dihedrals", "impropers"}:
                     params_b = cls._zeroize_params(section, funct, params_b)
             else:
-                params_b = cls._zeroize_params(section, funct, list(term_a.params))  # type: ignore[union-attr]
+                params_b = (
+                    list(term_a.params)
+                    if has_dummy_in_b
+                    else cls._zeroize_params(  # type: ignore[union-attr]
+                        section, funct, list(term_a.params)
+                    )
+                )
 
-            # Special handling for CHARMM bonds/angles/dihedrals with atom type changes
-            # GROMACS cannot automatically perturb these when types differ
+            # Special handling for CHARMM bonds/angles/dihedrals with atom type changes.
+            # Only synthesize explicit zero parameters when a term is missing parameters
+            # altogether; if both states already carry explicit parameters, keep them.
             if section in {"bonds", "angles", "dihedrals"} and atom_types_a_hybrid and atom_types_b_hybrid:
                 if cls._has_type_changes(canonical_atoms, atom_types_a_hybrid, atom_types_b_hybrid):
-                    # For CHARMM-style terms (5-column format without parameters),
-                    # add explicit zero parameters to avoid GROMACS perturbation errors
+                    needs_explicit_params = not params_a or not params_b
+                    if not needs_explicit_params:
+                        output.append(
+                            {
+                                "atoms": canonical_atoms,
+                                "funct": funct,
+                                "params_a": params_a,
+                                "params_b": params_b,
+                            }
+                        )
+                        continue
+
+                    # For CHARMM-style terms written without explicit parameters,
+                    # add explicit zero parameters to avoid GROMACS perturbation errors.
                     if section == "bonds":
                         # funct 1: b0, kb
                         if not params_a:
@@ -943,8 +991,10 @@ class ITPBuilder:
         zero = list(params)
 
         if section == "bonds":
-            # Keep bond force constant for dummy atoms — they must maintain geometry
-            # to avoid instability. Nonbonded interactions are zeroed via DUM_ atomtype.
+            if len(zero) >= 1:
+                zero[0] = "0.000000"
+            if len(zero) >= 2:
+                zero[1] = "0.000000"
             return zero
 
         if section == "angles":

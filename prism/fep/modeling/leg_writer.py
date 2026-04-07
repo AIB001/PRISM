@@ -256,20 +256,21 @@ class LegWriter:
             # Parse GRO format
             hybrid_atoms.append(line)
 
-        # Find ligand atoms in source file (residue name LIG)
+        # Find ligand atoms in source file. Accept both the original LIG residue
+        # name and the staged hybrid molecule name so an existing scaffold can be
+        # refreshed in place after regenerating hybrid.gro.
         ligand_start = -1
         ligand_end = -1
+        ligand_resnames = {"LIG", self.molecule_name}
 
         for i, line in enumerate(source_lines[2:], start=2):  # Skip title and atom count
-            # Check if this is a ligand line (residue name LIG)
             if len(line) > 10:
-                # Try to find "LIG" in the line
-                if "LIG" in line[:15]:  # Check first 15 characters for "LIG"
+                line_head = line[:15]
+                if any(resname in line_head for resname in ligand_resnames):
                     if ligand_start == -1:
                         ligand_start = i
                     ligand_end = i
                 elif ligand_start != -1:
-                    # We've moved past the ligand
                     break
 
         # Replace ligand atoms with hybrid ligand atoms
@@ -339,8 +340,9 @@ class LegWriter:
             with open(target_gro, "w") as f:
                 f.writelines(new_lines)
         else:
-            # No ligand found, copy as-is
-            shutil.copy2(source_gro, target_gro)
+            # No ligand found, copy as-is when writing to a different path.
+            if source_gro.resolve() != target_gro.resolve():
+                shutil.copy2(source_gro, target_gro)
 
     def _compute_ligand_shift(
         self,
