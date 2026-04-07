@@ -79,12 +79,12 @@ class ProteinProcessorMixin:
         ff_name = ff_info.get("name", "").lower() if ff_info else ""
 
         if "opls" in ff_name:
-            # OPLS-AA force field: Convert HSE to HISD to avoid chain splitting
-            # GROMACS pdb2gmx separates HISE (but not HISD/HISH) into individual molecules
-            # This is a workaround for GROMACS OPLS + HISE issue
+            # OPLS-AA force field: Keep HSE as HISE
+            # OPLS-AA pdb2gmx with -merge all can handle HISE correctly
+            # Previous HSE→HISD conversion caused residue numbering bugs
             his_mapping = {
                 "HSD": "HISD",  # δ-protonated histidine
-                "HSE": "HISD",  # ε-protonated → δ-protonated (workaround)
+                "HSE": "HISE",  # ε-protonated histidine (FIXED!)
                 "HSP": "HISH",  # doubly protonated histidine
             }
         elif "charmm" in ff_name:
