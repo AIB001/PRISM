@@ -189,6 +189,24 @@ Git commit message format: `[module] description;xxx`. Don't be too long!
 - **Commit messages**: Should reflect all recent changes in the commit
 - **File creation**: Avoid creating files in root directory
 
+### CPU/GPU资源管理
+
+**CPU核心数要求**:
+- **所有GROMACS任务必须使用14个CPU核心** (`-ntomp 14`)
+- 56核心系统 ÷ 14核心/任务 = 最多4个并行任务
+- **除非有SQM计算**，否则必须保证每个gmx任务使用14核心
+- 更新脚本时使用: `find . -name "run_single_em_nvt.sh" -exec sed -i 's/-ntomp [0-9]*/-ntomp 14/g' {} \;`
+
+**GPU分配**:
+- 系统有8个GPU (GPU 0-7)，通常使用GPU 0-5
+- 每个测试分配独立GPU，避免GPU过载
+- 使用 `CUDA_VISIBLE_DEVICES=N` 指定GPU
+
+**并行任务管理**:
+- 最多同时运行4个FEP测试 (4 × 14 = 56核心)
+- 如果超过4个并行任务，必须停止最不重要的一个
+- 监控命令: `ps aux | grep "gmx mdrun" | grep -v grep | wc -l`
+
 不用每次push；TODO完成了就清掉
 
 尽量复用已有的测试脚本。

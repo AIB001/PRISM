@@ -104,20 +104,24 @@ class HybridPackageBuilder:
 
         # Add bonded sections if needed
         if self._itp_needs_bonded_sections(normalized_itp):
-            # Auto-discover ligand ITP files (handle LIG.amb2gmx/ subdirectory)
+            # Auto-discover ligand ITP files (handle LIG.amb2gmx/ and LIG.openff2gmx/ subdirectories)
             def _resolve_ligand_itp(ligand_dir: Path) -> str:
-                """Resolve ligand ITP path, handling LIG.amb2gmx/ subdirectory."""
+                """Resolve ligand ITP path, handling PRISM output subdirectories."""
                 # Try direct path
                 direct_path = ligand_dir / "LIG.itp"
                 if direct_path.exists():
                     return str(direct_path)
 
-                # Try LIG.amb2gmx/LIG.itp (PRISM output structure)
-                amb2gmx_path = ligand_dir / "LIG.amb2gmx" / "LIG.itp"
-                if amb2gmx_path.exists():
-                    return str(amb2gmx_path)
+                # Try common PRISM output structures
+                # Priority: openff2gmx > amb2gmx (openff is more specific)
+                for subdir in ["LIG.openff2gmx", "LIG.amb2gmx"]:
+                    ff_path = ligand_dir / subdir / "LIG.itp"
+                    if ff_path.exists():
+                        return str(ff_path)
 
-                raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir}")
+                raise FileNotFoundError(
+                    f"Cannot find LIG.itp in {ligand_dir} (checked: LIG.itp, LIG.openff2gmx/LIG.itp, LIG.amb2gmx/LIG.itp)"
+                )
 
             ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
             ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
@@ -652,6 +656,9 @@ class HybridPackageBuilder:
         """
         Parse GRO file and extract atom coordinates.
 
+        Falls back to MOL2/PDB files if GRO parsing fails or returns insufficient coordinates.
+        This handles cases where GRO atom names are truncated (5-char limit) but ITP uses full names.
+
         Returns
         -------
         tuple
@@ -660,6 +667,27 @@ class HybridPackageBuilder:
         if gro_path is None or not gro_path.exists():
             return {}, None
 
+        # Try MOL2 first (preserves full atom names)
+        mol2_path = gro_path.with_suffix(".mol2")
+        if mol2_path.exists():
+            try:
+                coords_by_name = self._parse_mol2_atoms(mol2_path)
+                if coords_by_name:
+                    return coords_by_name, None  # MOL2 doesn't have box info
+            except Exception:
+                pass  # Fall back to GRO
+
+        # Try PDB second (preserves full atom names)
+        pdb_path = gro_path.with_suffix(".pdb")
+        if pdb_path.exists():
+            try:
+                coords_by_name = self._parse_pdb_atoms(pdb_path)
+                if coords_by_name:
+                    return coords_by_name, None  # PDB doesn't have box info
+            except Exception:
+                pass  # Fall back to GRO
+
+        # Parse GRO file (original behavior)
         lines = gro_path.read_text().splitlines()
         if len(lines) < 3:
             return {}, None
@@ -683,6 +711,53 @@ class HybridPackageBuilder:
 
         box_line = lines[2 + natoms] if len(lines) > 2 + natoms else None
         return coords_by_name, box_line
+
+    def _parse_mol2_atoms(self, mol2_path: Path) -> Dict[str, list[Dict[str, float]]]:
+        """Parse MOL2 file and extract atom coordinates by atom name."""
+        coords_by_name = {}
+        in_atoms = False
+
+        for line in mol2_path.read_text().splitlines():
+            if line.startswith("@<TRIPOS>ATOM"):
+                in_atoms = True
+                continue
+            if line.startswith("@<TRIPOS>"):
+                in_atoms = False
+                continue
+            if not in_atoms or not line.strip():
+                continue
+
+            parts = line.split()
+            if len(parts) >= 6:
+                atom_id = parts[1]  # Atom ID (column 2)
+                atom_name = parts[1]  # Atom name (column 2, same as ID in many MOL2 files)
+                x = float(parts[2])
+                y = float(parts[3])
+                z = float(parts[4])
+
+                # Use atom_id as key since it's more likely to match ITP atom names
+                coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+
+        return coords_by_name
+
+    def _parse_pdb_atoms(self, pdb_path: Path) -> Dict[str, list[Dict[str, float]]]:
+        """Parse PDB file and extract atom coordinates by atom name."""
+        coords_by_name = {}
+
+        for line in pdb_path.read_text().splitlines():
+            if not line.startswith("ATOM") and not line.startswith("HETATM"):
+                continue
+            if len(line) < 54:
+                continue
+
+            atom_name = line[12:16].strip()
+            x = float(line[30:38].strip())
+            y = float(line[38:46].strip())
+            z = float(line[46:54].strip())
+
+            coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+
+        return coords_by_name
 
     def _parse_hybrid_atoms(self, hybrid_itp_content: str) -> tuple[list[Dict[str, str]], Dict[str, str]]:
         """

@@ -11,6 +11,7 @@ ligand ITP files.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -31,6 +32,8 @@ class HybridAtomRecord:
     state_b_charge: Optional[float] = None
     mass_b: Optional[float] = None
     name_b: Optional[str] = None  # B-side atom name for correct bonded mapping
+    source_a_index: Optional[int] = None  # Source ligand A atom index (for direct bond mapping)
+    source_b_index: Optional[int] = None  # Source ligand B atom index (for direct bond mapping)
 
 
 @dataclass
@@ -124,7 +127,17 @@ class ITPBuilder:
         ]
 
         for atom in self.hybrid_atoms:
-            # CRITICAL: Add comment for B-side atom name BEFORE the atom line
+            # CRITICAL: Add source index comments for bonded term reconstruction
+            # This ensures build_hybrid_params_from_itps can reconstruct bonded terms
+            # by mapping source ligand atoms to hybrid topology atoms
+            source_a_idx = getattr(atom, "source_a_index", None)
+            source_b_idx = getattr(atom, "source_b_index", None)
+            if source_a_idx is not None:
+                lines.append(f"; source_a_index: {source_a_idx}")
+            if source_b_idx is not None:
+                lines.append(f"; source_b_index: {source_b_idx}")
+
+            # Add comment for B-side atom name BEFORE the atom line
             # This ensures _parse_hybrid_atom_records() can read the comment and
             # associate it with the correct atom
             if atom.name_b:
@@ -238,7 +251,14 @@ class ITPBuilder:
         two source ligand ITP files.
         """
         hybrid_records = cls._parse_hybrid_atom_records(Path(hybrid_itp).read_text())
-        name_map_a, name_map_b = cls._build_state_name_maps(hybrid_records)
+
+        # Try to use index-based mapping first, fallback to name-based if needed
+        try:
+            index_map_a, index_map_b = cls._build_state_index_maps(hybrid_records)
+            use_index_mapping = True
+        except Exception:
+            name_map_a, name_map_b = cls._build_state_name_maps_fallback(hybrid_records)
+            use_index_mapping = False
 
         # Build sets of hybrid indices that are dummy in each state
         dummy_in_a: set = {r.index for r in hybrid_records if r.state_a_type.startswith("DUM_")}
@@ -250,26 +270,51 @@ class ITPBuilder:
         # Remap atom types from source IDs to hybrid IDs
         hybrid_atom_types_a = None
         hybrid_atom_types_b = None
-        if atom_types_a:
-            hybrid_atom_types_a = cls._remap_atom_types_to_hybrid(atom_types_a, source_a["atom_names"], name_map_a)
-        if atom_types_b:
-            hybrid_atom_types_b = cls._remap_atom_types_to_hybrid(atom_types_b, source_b["atom_names"], name_map_b)
+        if use_index_mapping:
+            if atom_types_a:
+                hybrid_atom_types_a = cls._remap_atom_types_to_hybrid_by_index(atom_types_a, index_map_a)
+            if atom_types_b:
+                hybrid_atom_types_b = cls._remap_atom_types_to_hybrid_by_index(atom_types_b, index_map_b)
+        else:
+            if atom_types_a:
+                hybrid_atom_types_a = cls._remap_atom_types_to_hybrid(atom_types_a, source_a["atom_names"], name_map_a)
+            if atom_types_b:
+                hybrid_atom_types_b = cls._remap_atom_types_to_hybrid(atom_types_b, source_b["atom_names"], name_map_b)
 
         hybrid_params: Dict[str, List] = {key: [] for key in cls._SECTION_ATOM_COUNT}
         for section in cls._SECTION_ATOM_COUNT:
-            hybrid_params[section] = cls._merge_section_terms(
-                section=section,
-                terms_a=source_a["sections"].get(section, []),
-                terms_b=source_b["sections"].get(section, []),
-                atom_names_a=source_a["atom_names"],
-                atom_names_b=source_b["atom_names"],
-                name_map_a=name_map_a,
-                name_map_b=name_map_b,
-                dummy_in_a=dummy_in_a,
-                dummy_in_b=dummy_in_b,
-                atom_types_a=hybrid_atom_types_a,
-                atom_types_b=hybrid_atom_types_b,
-            )
+            if use_index_mapping:
+                hybrid_params[section] = cls._merge_section_terms(
+                    section=section,
+                    terms_a=source_a["sections"].get(section, []),
+                    terms_b=source_b["sections"].get(section, []),
+                    atom_names_a=source_a["atom_names"],
+                    atom_names_b=source_b["atom_names"],
+                    atom_types_a=source_a.get("atom_types", {}),
+                    atom_types_b=source_b.get("atom_types", {}),
+                    index_map_a=index_map_a,
+                    index_map_b=index_map_b,
+                    dummy_in_a=dummy_in_a,
+                    dummy_in_b=dummy_in_b,
+                    atom_types_a_hybrid=hybrid_atom_types_a,
+                    atom_types_b_hybrid=hybrid_atom_types_b,
+                )
+            else:
+                hybrid_params[section] = cls._merge_section_terms(
+                    section=section,
+                    terms_a=source_a["sections"].get(section, []),
+                    terms_b=source_b["sections"].get(section, []),
+                    atom_names_a=source_a["atom_names"],
+                    atom_names_b=source_b["atom_names"],
+                    atom_types_a=source_a.get("atom_types", {}),
+                    atom_types_b=source_b.get("atom_types", {}),
+                    name_map_a=name_map_a,
+                    name_map_b=name_map_b,
+                    dummy_in_a=dummy_in_a,
+                    dummy_in_b=dummy_in_b,
+                    atom_types_a_hybrid=hybrid_atom_types_a,
+                    atom_types_b_hybrid=hybrid_atom_types_b,
+                )
         return hybrid_params
 
     @classmethod
@@ -329,6 +374,8 @@ class ITPBuilder:
         records: List[HybridAtomRecord] = []
         in_atoms = False
         name_b_for_next_atom = None  # Store name_b from comment for next atom
+        source_a_index_for_next_atom = None  # Store source_a_index from comment
+        source_b_index_for_next_atom = None  # Store source_b_index from comment
 
         for line in content.splitlines():
             stripped = line.strip()
@@ -338,10 +385,24 @@ class ITPBuilder:
             if stripped.startswith("[") and in_atoms:
                 break
 
-            # Parse name_b from comment (format: "; name_b (state B): XXXX")
-            if in_atoms and stripped.startswith(";") and "name_b (state B):" in stripped:
-                name_b_for_next_atom = stripped.split("name_b (state B):")[-1].strip()
-                continue
+            # Parse source indices from comments
+            if in_atoms and stripped.startswith(";"):
+                if "source_a_index:" in stripped:
+                    try:
+                        source_a_index_for_next_atom = int(stripped.split("source_a_index:")[-1].strip())
+                    except ValueError:
+                        pass
+                    continue
+                if "source_b_index:" in stripped:
+                    try:
+                        source_b_index_for_next_atom = int(stripped.split("source_b_index:")[-1].strip())
+                    except ValueError:
+                        pass
+                    continue
+                # Parse name_b from comment (format: "; name_b (state B): XXXX")
+                if "name_b (state B):" in stripped:
+                    name_b_for_next_atom = stripped.split("name_b (state B):")[-1].strip()
+                    continue
 
             if not in_atoms or not stripped or stripped.startswith(";"):
                 continue
@@ -372,39 +433,78 @@ class ITPBuilder:
                 mass_b=mass_b,
                 name_b=name_b_for_next_atom,  # Use name_b from comment if available
             )
+            # Store source indices if available
+            if source_a_index_for_next_atom is not None:
+                record.source_a_index = source_a_index_for_next_atom
+            if source_b_index_for_next_atom is not None:
+                record.source_b_index = source_b_index_for_next_atom
+
             records.append(record)
             name_b_for_next_atom = None  # Reset for next atom
+            source_a_index_for_next_atom = None  # Reset for next atom
+            source_b_index_for_next_atom = None  # Reset for next atom
 
         return records
 
     @classmethod
-    def _build_state_name_maps(cls, hybrid_records: List[HybridAtomRecord]) -> Tuple[Dict[str, int], Dict[str, int]]:
-        """Build source atom-name to hybrid-index maps for states A and B."""
-        map_a: Dict[str, int] = {}
-        map_b: Dict[str, int] = {}
+    def _build_state_index_maps(cls, hybrid_records: List[HybridAtomRecord]) -> Tuple[Dict[int, int], Dict[int, int]]:
+        """Build source atom index to hybrid index maps using source_a_index/source_b_index fields.
+
+        CRITICAL FIX: Use direct index mapping instead of name-based mapping to prevent self-bonds.
+        This requires HybridAtomRecord to have source_a_index and source_b_index fields set.
+
+        For example:
+        - Source ligand A atom 21 → Hybrid atom 48
+        - Source ligand B atom 27 → Hybrid atom 48
+
+        Returns:
+            Tuple of (index_map_a, index_map_b) where:
+            - index_map_a: {source_a_index: hybrid_index} for state A
+            - index_map_b: {source_b_index: hybrid_index} for state B
+        """
+        map_a: Dict[int, int] = {}
+        map_b: Dict[int, int] = {}
+
+        for record in hybrid_records:
+            # Use source_a_index and source_b_index if available
+            if hasattr(record, "source_a_index") and record.source_a_index is not None:
+                map_a[record.source_a_index] = record.index
+            if hasattr(record, "source_b_index") and record.source_b_index is not None:
+                map_b[record.source_b_index] = record.index
+
+        # Fallback: if no source indices available, use name-based mapping
+        if not map_a or not map_b:
+            print("Warning: source_a_index/source_b_index not available, using name-based mapping", file=sys.stderr)
+            return cls._build_state_name_maps_fallback(hybrid_records)
+
+        return map_a, map_b
+
+    @classmethod
+    def _build_state_name_maps_fallback(
+        cls, hybrid_records: List[HybridAtomRecord]
+    ) -> Tuple[Dict[Tuple[str, str], int], Dict[Tuple[str, str], int]]:
+        """Fallback name-based mapping when source indices are not available."""
+        map_a: Dict[Tuple[str, str], int] = {}
+        map_b: Dict[Tuple[str, str], int] = {}
 
         for record in hybrid_records:
             state_a_dummy = record.state_a_type.startswith("DUM_")
             state_b_dummy = (record.state_b_type or "").startswith("DUM_")
 
             if record.name.endswith("A") and state_b_dummy and not state_a_dummy:
-                map_a[record.name[:-1]] = record.index
+                map_a[(record.state_a_type, record.name[:-1])] = record.index
                 continue
 
             if record.name.endswith("B") and state_a_dummy and not state_b_dummy:
-                map_b[record.name[:-1]] = record.index
+                if record.state_b_type:
+                    map_b[(record.state_b_type, record.name[:-1])] = record.index
                 continue
 
-            # Common atoms: use A-side name for map_a, B-side name for map_b
-            # CRITICAL FIX: For common atoms with different names in A and B (e.g., H03 in A, H04 in B),
-            # we must use the correct B-side atom name when building map_b to ensure bonded parameters
-            # are correctly matched during the merging process.
             if not state_a_dummy:
-                map_a[record.name] = record.index
-            if not state_b_dummy:
-                # Use B-side atom name if available, otherwise fall back to A-side name
+                map_a[(record.state_a_type, record.name)] = record.index
+            if not state_b_dummy and record.state_b_type:
                 b_name = record.name_b if record.name_b else record.name
-                map_b[b_name] = record.index
+                map_b[(record.state_b_type, b_name)] = record.index
 
         return map_a, map_b
 
@@ -596,12 +696,16 @@ class ITPBuilder:
         terms_b: List[InteractionTerm],
         atom_names_a: Dict[int, str],
         atom_names_b: Dict[int, str],
-        name_map_a: Dict[str, int],
-        name_map_b: Dict[str, int],
+        index_map_a: Optional[Dict[int, int]] = None,
+        index_map_b: Optional[Dict[int, int]] = None,
+        name_map_a: Optional[Dict[Tuple[str, str], int]] = None,
+        name_map_b: Optional[Dict[Tuple[str, str], int]] = None,
         dummy_in_a: Optional[set] = None,
         dummy_in_b: Optional[set] = None,
         atom_types_a: Optional[Dict[int, str]] = None,
         atom_types_b: Optional[Dict[int, str]] = None,
+        atom_types_a_hybrid: Optional[Dict[int, str]] = None,
+        atom_types_b_hybrid: Optional[Dict[int, str]] = None,
     ) -> List[Dict]:
         """Merge A/B section terms into hybrid interaction lines."""
         merged: Dict[Tuple, Dict[str, Optional[InteractionTerm]]] = {}
@@ -610,16 +714,34 @@ class ITPBuilder:
             state: str,
             terms: List[InteractionTerm],
             atom_names: Dict[int, str],
-            name_map: Dict[str, int],
+            atom_types: Optional[Dict[int, str]],
+            index_map: Optional[Dict[int, int]],
+            name_map: Optional[Dict[Tuple[str, str], int]],
         ) -> None:
             for term in terms:
                 hybrid_atoms = []
                 for index in term.atoms:
-                    atom_name = atom_names[index]
-                    if atom_name not in name_map:
-                        hybrid_atoms = []
-                        break
-                    hybrid_atoms.append(name_map[atom_name])
+                    if index_map is not None:
+                        # Use direct index mapping (preferred)
+                        if index not in index_map:
+                            hybrid_atoms = []
+                            break
+                        hybrid_atoms.append(index_map[index])
+                    else:
+                        # Use name+type mapping (fallback)
+                        if not atom_types:
+                            hybrid_atoms = []
+                            break
+                        atom_name = atom_names.get(index)
+                        atom_type = atom_types.get(index)
+                        if not atom_name or not atom_type:
+                            hybrid_atoms = []
+                            break
+                        key = (atom_type, atom_name)
+                        if key not in name_map:
+                            hybrid_atoms = []
+                            break
+                        hybrid_atoms.append(name_map[key])
                 if not hybrid_atoms:
                     continue
 
@@ -632,14 +754,30 @@ class ITPBuilder:
                 entry = merged.setdefault(key, {"A": None, "B": None})
                 entry[state] = InteractionTerm(atoms=canonical_atoms, funct=term.funct, params=list(term.params))
 
-        add_terms("A", terms_a, atom_names_a, name_map_a)
-        add_terms("B", terms_b, atom_names_b, name_map_b)
+        add_terms("A", terms_a, atom_names_a, atom_types_a, index_map_a, name_map_a)
+        add_terms("B", terms_b, atom_names_b, atom_types_b, index_map_b, name_map_b)
 
         output: List[Dict] = []
         for key in sorted(merged, key=lambda item: item[0]):
             term_a = merged[key]["A"]
             term_b = merged[key]["B"]
             canonical_atoms, funct, _ = key
+
+            # CRITICAL FIX: Validate no self-bonds exist
+            # Self-bonds occur when both atoms in a bond have the same index (e.g., 48-48)
+            # This is caused by incorrect atom name mapping in _build_state_name_maps
+            if section == "bonds" and len(canonical_atoms) == 2:
+                if canonical_atoms[0] == canonical_atoms[1]:
+                    import sys
+
+                    print(
+                        f"ERROR: Self-bond detected in hybrid topology: {canonical_atoms[0]}-{canonical_atoms[1]}",
+                        file=sys.stderr,
+                    )
+                    print(f"This indicates a bug in atom name mapping. Please report this issue.", file=sys.stderr)
+                    print(f"Term A: {term_a}", file=sys.stderr)
+                    print(f"Term B: {term_b}", file=sys.stderr)
+                    continue  # Skip self-bonds to prevent grompp failure
 
             if section == "pairs":
                 output.append({"atoms": canonical_atoms, "funct": funct})
@@ -666,8 +804,8 @@ class ITPBuilder:
 
             # Special handling for CHARMM bonds/angles/dihedrals with atom type changes
             # GROMACS cannot automatically perturb these when types differ
-            if section in {"bonds", "angles", "dihedrals"} and atom_types_a and atom_types_b:
-                if cls._has_type_changes(canonical_atoms, atom_types_a, atom_types_b):
+            if section in {"bonds", "angles", "dihedrals"} and atom_types_a_hybrid and atom_types_b_hybrid:
+                if cls._has_type_changes(canonical_atoms, atom_types_a_hybrid, atom_types_b_hybrid):
                     # For CHARMM-style terms (5-column format without parameters),
                     # add explicit zero parameters to avoid GROMACS perturbation errors
                     if section == "bonds":
@@ -757,6 +895,32 @@ class ITPBuilder:
             atom_name = source_atom_names.get(source_id)
             if atom_name and atom_name in name_map:
                 hybrid_id = name_map[atom_name]
+                hybrid_atom_types[hybrid_id] = atom_type
+        return hybrid_atom_types
+
+    @staticmethod
+    def _remap_atom_types_to_hybrid_by_index(
+        source_atom_types: Dict[int, str], index_map: Dict[int, int]
+    ) -> Dict[int, str]:
+        """
+        Remap atom types from source ligand IDs to hybrid IDs using direct index mapping.
+
+        Parameters
+        ----------
+        source_atom_types : Dict[int, str]
+            Atom types indexed by source ligand atom IDs
+        index_map : Dict[int, int]
+            Mapping from source atom indices to hybrid atom indices
+
+        Returns
+        -------
+        Dict[int, str]
+            Atom types indexed by hybrid atom IDs
+        """
+        hybrid_atom_types = {}
+        for source_id, atom_type in source_atom_types.items():
+            if source_id in index_map:
+                hybrid_id = index_map[source_id]
                 hybrid_atom_types[hybrid_id] = atom_type
         return hybrid_atom_types
 

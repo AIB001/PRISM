@@ -43,6 +43,12 @@ class HybridAtom:
     is_perturbed : bool, optional
         Whether this atom is perturbed (transformed or surrounding).
         If True, B-state columns MUST be written even if A/B values are identical.
+    source_a_index : Optional[int], optional
+        Original atom index in source ligand A (for ITP bond mapping).
+        This enables direct index-based mapping instead of name-based matching.
+    source_b_index : Optional[int], optional
+        Original atom index in source ligand B (for ITP bond mapping).
+        This enables direct index-based mapping instead of name-based matching.
     """
 
     name: str
@@ -56,6 +62,8 @@ class HybridAtom:
     mass_b: Optional[float] = None
     name_b: Optional[str] = None
     is_perturbed: bool = False
+    source_a_index: Optional[int] = None
+    source_b_index: Optional[int] = None
 
 
 @dataclass
@@ -201,6 +209,8 @@ class HybridTopologyBuilder:
                         element=atom_a.element,
                         mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
                         mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
+                        source_a_index=atom_a.index,  # Store source A index for bond mapping
+                        source_b_index=atom_b.index,  # Store source B index for bond mapping
                     )
                 )
             else:
@@ -237,6 +247,8 @@ class HybridTopologyBuilder:
                         state_b_charge=state_b_charge,  # None for common when charge_strategy != "none"
                         element=atom_a.element,
                         mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
+                        source_a_index=atom_a.index,  # Store source A index for bond mapping
+                        source_b_index=atom_b.index,  # Store source B index for bond mapping
                     )
                 )
             index += 1
@@ -257,6 +269,8 @@ class HybridTopologyBuilder:
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
                     mass_b=self._get_default_mass("DUM"),
                     is_perturbed=True,  # MUST write B-state columns
+                    source_a_index=atom_a.index,  # Store source A index for bond mapping
+                    source_b_index=None,  # No source B index (atom is dummy in B)
                 )
             )
             index += 1
@@ -277,6 +291,8 @@ class HybridTopologyBuilder:
                     mass=self._get_default_mass("DUM"),
                     mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
                     is_perturbed=True,  # MUST write B-state columns
+                    source_a_index=None,  # No source A index (atom is dummy in A)
+                    source_b_index=atom_b.index,  # Store source B index for bond mapping
                 )
             )
             index += 1
@@ -297,6 +313,8 @@ class HybridTopologyBuilder:
                     mass=masses_a.get(atom_a.atom_type, self._get_default_mass(atom_a.element)),
                     mass_b=masses_b.get(atom_b.atom_type, self._get_default_mass(atom_b.element)),
                     is_perturbed=True,  # MUST write B-state columns
+                    source_a_index=atom_a.index,  # Store source A index for bond mapping
+                    source_b_index=atom_b.index,  # Store source B index for bond mapping
                 )
             )
             index += 1

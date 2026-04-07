@@ -120,3 +120,4 @@ prism/*/*/*.backup
 .claude/skills/__pycache__/fep-visualization-check.cpython-310.pyc
 .claude/cclsp.json
 .claude/scheduled_tasks.json
+*/GMX_PROLIG_FEP/_build/*/*.yaml
