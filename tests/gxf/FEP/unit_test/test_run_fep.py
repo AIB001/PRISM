@@ -161,11 +161,11 @@ def test_run_fep(
     # RTF: ligand_path 传子目录（含 .rtf/.prm/.pdb），从 case_name 推断目录名
     if ligand_forcefield.lower() == "rtf":
         if ref_ligand is None or mut_ligand is None:
-            case_name = get_system_name()
-            if "-" in case_name:
-                left, right = case_name.split("-", 1)
-                ref_ligand = f"input/{left}"
-                mut_ligand = f"input/{right}"
+            # Find subdirectories in input/ that contain RTF files
+            input_dirs = sorted([d.name for d in Path("input").iterdir() if d.is_dir() and any(d.glob("*.rtf"))])
+            if len(input_dirs) >= 2:
+                ref_ligand = f"input/{input_dirs[0]}"
+                mut_ligand = f"input/{input_dirs[1]}"
             else:
                 print(f"❌ RTF 模式需要手动指定 --ref-ligand 和 --mut-ligand（目录路径）")
                 return False
@@ -199,9 +199,13 @@ def test_run_fep(
     # 输出目录：默认使用 <protein_ff>-mut_<ligand_ff>
     output_dir = _default_case_dir(protein_ff, ligand_forcefield)
 
-    # RTF passes directories; all paths prefixed with "input/"
-    ref_ligand_path = f"input/{ref_ligand}"
-    mut_ligand_path = f"input/{mut_ligand}"
+    # RTF already has "input/" prefix; others need it added
+    if ligand_forcefield.lower() == "rtf":
+        ref_ligand_path = ref_ligand
+        mut_ligand_path = mut_ligand
+    else:
+        ref_ligand_path = f"input/{ref_ligand}"
+        mut_ligand_path = f"input/{mut_ligand}"
 
     # Protein PDB: support both receptor.pdb and protein.pdb
     protein_path = "input/receptor.pdb"

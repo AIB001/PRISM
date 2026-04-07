@@ -291,6 +291,12 @@ class LegWriter:
             # editconf shifts the whole system box; hybrid.gro still has original ff coords
             dx, dy, dz = self._compute_ligand_shift(source_lines, ligand_start, ligand_end, hybrid_atoms)
 
+            # Parse box size from source GRO (last line)
+            box_line = source_lines[-1].strip().split()
+            box_x = float(box_line[0]) if len(box_line) >= 1 else 10.0
+            box_y = float(box_line[1]) if len(box_line) >= 2 else box_x
+            box_z = float(box_line[2]) if len(box_line) >= 3 else box_x
+
             # GRO split: [resnum+resname, atomname, atomidx, x, y, z]
             for i, hybrid_line in enumerate(hybrid_atoms):
                 parts = hybrid_line.split()
@@ -301,6 +307,20 @@ class LegWriter:
                         x = float(parts[3]) + dx
                         y = float(parts[4]) + dy
                         z = float(parts[5]) + dz
+
+                        # Apply PBC wrapping to keep coordinates inside the box [0, box)
+                        while x < 0:
+                            x += box_x
+                        while x >= box_x:
+                            x -= box_x
+                        while y < 0:
+                            y += box_y
+                        while y >= box_y:
+                            y -= box_y
+                        while z < 0:
+                            z += box_z
+                        while z >= box_z:
+                            z -= box_z
 
                         new_line = f"{residue_number:5d}{self.molecule_name:<5s}{atom_name:>5s}{atom_idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}\n"
                         new_lines.append(new_line)

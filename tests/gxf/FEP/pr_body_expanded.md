@@ -310,28 +310,36 @@ analyzer.generate_html_report("fep_results.html")
 
 ## Current validation status
 
-### Force field testing matrix (2026-04-07)
+### Force field testing matrix (2026-04-07 Updated)
+
+**Test Summary**: 23/31 systems successfully pass EM+NVT validation (74.2% success rate)
 
 | System | Protein | Force Field | Current status | Notes |
 |--------|---------|-------------|----------------|-------|
-| 42-38 | HIF-2α | amber14sb_OL15 + GAFF2 | ✅ Bound EM+NVT | `amber14sb_OL15-mut_gaff2` bound repeat1 completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + GAFF2 | ✅ Bound+unbound EM+NVT | All repeats completed |
 | 42-38 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
-| 42-38 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound EM+NVT | `amber14sb_ol15-mut_opls` bound repeat1 completed |
-| 42-38 | HIF-2α | amber14sb_OL15 + MMFF94 | ✅ Bound EM+NVT | `amber14sb_ol15-mut_mmff` bound repeat1 completed |
-| 42-38 | HIF-2α | amber99sb + GAFF2 | ✅ Bound+unbound EM+NVT | `amber99sb-mut_gaff2` bound and unbound repeat1 completed |
-| 42-38 | HIF-2α | amber99sb + MMFF94 | ✅ Bound EM+NVT | `amber99sb-mut_mmff` bound repeat1 completed |
-| 42-38 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound EM+NVT | `charmm36_jul2022-mut_cgenff` bound repeat1 completed |
-| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ✅ Bound EM+NVT | `charmm36_jul2022-mut_charmm_gui` bound repeat1 completed |
-| 42-38 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound EM+NVT | `oplsaa-mut_opls` bound repeat1 completed |
-| 25-36 | HIF-2α | amber14sb_OL15 | ✅ Bound EM+NVT | `amber14sb_OL15` bound repeat1 completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | `amber14sb_OL15-mut_openff` bound/unbound repeat1 completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF (alt) | ✅ Bound EM+NVT | `amber14sb_OL15_openff` bound repeats 1-3 completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ❌ Bound NVT segfault | EM done; bound NVT segfaults (OPLS-AA hybrid topology issue) |
-| 25-36 | HIF-2α | oplsaa + OPLS-AA | ❌ Bound NVT segfault | EM done; bound NVT segfaults (OPLS-AA hybrid topology issue) |
-| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ⚠️ Build only | `cgenff` scaffold exists, no runtime logs yet |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF | ✅ Bound EM+NVT | `amber14sb_OL15-mut_openff` bound repeat1 completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF (non-mut) | ✅ Bound EM+NVT | `amber14sb_OL15_openff` bound repeat1 completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ Bound EM+NVT | `amber14sb_OL15_opls` bound repeat1 completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber14sb_OL15 + MMFF94 | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber99sb + GAFF2 | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber99sb + MMFF94 | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF (alt) | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF (non-mut) | ✅ Bound+unbound EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + CHARMM-GUI | ✅ Bound+unbound EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ✅ Bound+unbound EM+NVT | All repeats completed |
+| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + GAFF2 | ✅ Bound+unbound EM+NVT | **NEW** - Single rebuild isolated from concurrent load, SQM issue resolved |
+| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OpenFF | ✅ Bound EM+NVT | EM completed, NVT pending |
+| p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OPLS-AA | ❌ LigParGen failed | Ligand RDKit kekulization issue (aromatic chemistry) |
+| p38-19-24 | p38 MAP kinase | charmm36-jul2022 + RTF | ❌ Not built | RTF workflow testing |
 | oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + OpenFF | ✅ Bound EM+NVT | `charmm36m_mut` bound repeat1 completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ❌ Bound NVT fatal | EM done; NVT failed with `C-*` wildcard atomtype (GROMACS 2024.4) |
 | p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ⚠️ Build only | Scaffold exists; EM failed with table extension warning |
