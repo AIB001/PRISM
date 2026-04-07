@@ -339,12 +339,12 @@ analyzer.generate_html_report("fep_results.html")
 | p38-19-24 | p38 MAP kinase | amber14sb_OL15 + GAFF2 | ✅ Bound+unbound EM+NVT | **NEW** - Single rebuild isolated from concurrent load, SQM issue resolved |
 | p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OpenFF | ✅ Bound EM+NVT | EM completed, NVT pending |
 | p38-19-24 | p38 MAP kinase | amber14sb_OL15 + OPLS-AA | ❌ LigParGen failed | Ligand RDKit kekulization issue (aromatic chemistry) |
-| p38-19-24 | p38 MAP kinase | charmm36-jul2022 + RTF | ❌ Not built | RTF workflow testing |
+| p38-19-24 | p38 MAP kinase | charmm36-jul2022 + RTF | ⚠️ Build only | Builds successfully; EM fails with bad water contacts (system prep issue) |
 | oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + OpenFF | ✅ Bound EM+NVT | `charmm36m_mut` bound repeat1 completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ❌ Bound NVT fatal | EM done; NVT failed with `C-*` wildcard atomtype (GROMACS 2024.4) |
 | p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ⚠️ Build only | Scaffold exists; EM failed with table extension warning |
 | p38-19-24 | p38α MAPK | amber14sb_OL15 + OPLS-AA | ⚠️ Build only | Scaffold exists, no runtime logs yet |
-| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ❌ Hybrid.gro bug | Bound EM done; hybrid.gro has coordinate generation bug (RTF atom naming mismatch) |
+| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ⚠️ Build only | Builds successfully; EM fails with bad water contacts (system prep issue) |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
@@ -376,9 +376,9 @@ analyzer.generate_html_report("fep_results.html")
 - OPLS-AA (oplsaa) + OPLS-AA ✅
 
 **Known issues requiring fixes**:
-1. **RTF coordinate generation bug**: hybrid.gro fails to resolve State B atom coordinates due to atom naming mismatch (RTF uses numbered names like C331, MOL2 uses generic names like C)
-2. **amber19sb wildcard issue**: GROMACS 2024.4 doesn't support `C-*` wildcard atomtype in cmap.itp (requires GROMACS 2026.1)
-3. **OPLS-AA segfault**: Hybrid topology with OPLS-AA force field causes runtime segfaults during NVT
+1. **amber19sb wildcard issue**: GROMACS 2024.4 doesn't support `C-*` wildcard atomtype in cmap.itp (requires GROMACS 2026.1)
+2. **OPLS-AA segfault**: Hybrid topology with OPLS-AA force field causes runtime segfaults during NVT
+3. **RTF/p38-19-24 EM failure**: System builds successfully but EM fails with bad water contacts (potential solvation/ion placement issue)
 - Remaining runtime issues are concentrated in **25-36 OPLS / OPLSAA**, **oMeEtPh-EtPh amber19sb**, and **p38-19-24** paths
 
 ## Review guidance
