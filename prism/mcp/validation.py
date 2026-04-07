@@ -4,7 +4,7 @@ import os
 import re
 import json
 
-from ._common import _StdoutToStderr, _ensure_prism_importable, logger
+from ._common import logger
 
 
 def _validate_ligand(ligand_path: str) -> dict:
@@ -100,7 +100,6 @@ def _parse_topology_molecules(topol_path: str) -> list:
 
 
 def register(mcp):
-
     @mcp.tool()
     def validate_input_files(protein_path: str, ligand_path: str) -> str:
         """Pre-build validation of protein PDB and ligand files.
@@ -145,11 +144,37 @@ def register(mcp):
             has_end = False
 
             standard_aa = {
-                "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY",
-                "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER",
-                "THR", "TRP", "TYR", "VAL",
+                "ALA",
+                "ARG",
+                "ASN",
+                "ASP",
+                "CYS",
+                "GLN",
+                "GLU",
+                "GLY",
+                "HIS",
+                "ILE",
+                "LEU",
+                "LYS",
+                "MET",
+                "PHE",
+                "PRO",
+                "SER",
+                "THR",
+                "TRP",
+                "TYR",
+                "VAL",
                 # Common protonation variants
-                "HID", "HIE", "HIP", "HSD", "HSE", "HSP", "CYX", "ASH", "GLH", "LYN",
+                "HID",
+                "HIE",
+                "HIP",
+                "HSD",
+                "HSE",
+                "HSP",
+                "CYX",
+                "ASH",
+                "GLH",
+                "LYN",
             }
 
             with open(protein_path, "r") as f:
@@ -170,10 +195,7 @@ def register(mcp):
             else:
                 prot["valid"] = True
 
-            his_residues = {
-                (c, s) for c, s, r in residue_ids
-                if r in ("HIS", "HID", "HIE", "HIP", "HSD", "HSE", "HSP")
-            }
+            his_residues = {(c, s) for c, s, r in residue_ids if r in ("HIS", "HID", "HIE", "HIP", "HSD", "HSE", "HSP")}
 
             ignore_res = {"HOH", "WAT", "SOL", "NA", "CL", "K", "MG", "CA", "ZN"}
             non_standard = residue_names - standard_aa - ignore_res
@@ -418,11 +440,26 @@ def register(mcp):
                 result["warnings"].append("System has no ions (no NA/CL entry in [ molecules ])")
 
             if not any(
-                n for n in mol_names
-                if n not in (
-                    "Protein", "Protein_chain_A", "SOL", "HOH", "WAT",
-                    "NA", "CL", "K", "Na+", "Cl-", "SOD", "CLA", "TIP3", "SPC",
-                ) and not n.startswith("Protein")
+                n
+                for n in mol_names
+                if n
+                not in (
+                    "Protein",
+                    "Protein_chain_A",
+                    "SOL",
+                    "HOH",
+                    "WAT",
+                    "NA",
+                    "CL",
+                    "K",
+                    "Na+",
+                    "Cl-",
+                    "SOD",
+                    "CLA",
+                    "TIP3",
+                    "SPC",
+                )
+                and not n.startswith("Protein")
             ):
                 result["warnings"].append("No ligand found in topology (no non-protein/solvent/ion molecule)")
 

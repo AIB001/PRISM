@@ -1,0 +1,158 @@
+<body>
+<div class="container">
+    <div class="header">
+        <h1>{title}</h1>
+    </div>
+
+    <div class="toolbar">
+        <h3 class="toolbar-title">Display Options</h3>
+        <div class="toolbar-content">
+            <div class="toolbar-left">
+                <div class="toolbar-row">
+                    <strong>Coloring Mode:</strong>
+                    <div class="toggle-buttons">
+                        <input type="radio" name="colorMode" value="fep" id="mode-fep" checked>
+                        <label for="mode-fep" class="toggle-btn">FEP Classification</label>
+                        <input type="radio" name="colorMode" value="element" id="mode-element">
+                        <label for="mode-element" class="toggle-btn">Element</label>
+                    </div>
+                    <label><input type="checkbox" id="toggle-charges"> Show Charges</label>
+                    <label><input type="checkbox" id="toggle-labels" checked> Show Labels</label>
+                </div>
+                <div class="toolbar-row">
+                    <strong>Legend:</strong>
+                    <div class="legend-content-inline">
+                        <div class="legend-tab-content active" id="legend-fep">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="color-box common"></div>
+                                    <span><strong>Common:</strong> {common_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed A:</strong> {transformed_a_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box transformed"></div>
+                                    <span><strong>Transformed B:</strong> {transformed_b_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding A:</strong> {surrounding_a_count}</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="color-box surrounding"></div>
+                                    <span><strong>Surrounding B:</strong> {surrounding_b_count}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="legend-tab-content" id="legend-element">
+                            <div class="legend-items">
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #909090; border-color: #666;">C</div>
+                                    <span>Carbon</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #3050F8; border-color: #1030D0;">N</div>
+                                    <span>Nitrogen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #FF0D0D; border-color: #CC0000;">O</div>
+                                    <span>Oxygen</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FFC832; border-color: #CC9900; color: #333;">S</div>
+                                    <span>Sulfur</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #FF8000; border-color: #CC6600; color: #333;">P</div>
+                                    <span>Phosphorus</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #90E050; border-color: #60B020; color: #333;">F</div>
+                                    <span>Fluorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #1FF01F; border-color: #00C000; color: #333;">Cl</div>
+                                    <span>Chlorine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #A62929; border-color: #801010;">Br</div>
+                                    <span>Bromine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box dark-bg" style="background: #940094; border-color: #600060;">I</div>
+                                    <span>Iodine</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="element-box light-bg" style="background: #E8E8E8; border-color: #999; color: #333;">H</div>
+                                    <span>Hydrogen</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="toolbar-row">
+                    <strong>Controls:</strong> Drag to pan | Scroll to zoom | Hover for atom info
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <div class="toolbar-buttons">
+                    <button onclick="resetView()">Reset View</button>
+                    <button onclick="exportPNG()">Export PNG</button>
+                    <button class="secondary" onclick="scrollToAtomDetails()">View Atom Details</button>
+                    <button class="secondary" onclick="window.print()">Print</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {config_panel_html}
+
+    <div class="canvas-container">
+        <div class="molecule-label molecule-label-a">{ligand_a_name}</div>
+        <div class="molecule-label molecule-label-b">{ligand_b_name}</div>
+        <canvas id="canvas" width="1400" height="700"></canvas>
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+
+    <div class="atom-list" id="atom-list">
+        <h3>Atom Details & Statistics</h3>
+
+        <div class="stats-summary">
+            <div class="stat-item">
+                <div class="stat-value">{total_transformed}</div>
+                <div class="stat-label">Transformed Atoms</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{total_surrounding}</div>
+                <div class="stat-label">Surrounding Atoms</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{common_count}</div>
+                <div class="stat-label">Common Atoms</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{total_atoms}</div>
+                <div class="stat-label">Total Atoms</div>
+            </div>
+        </div>
+
+        <table class="atom-table" id="atom-table">
+            <thead>
+                <tr>
+                    <th>Ligand A: {ligand_a_name}</th>
+                    <th>Element</th>
+                    <th>Charge</th>
+                    <th>Classification</th>
+                    <th style="border-left: 2px solid #ddd;">Ligand B: {ligand_b_name}</th>
+                    <th>Element</th>
+                    <th>Charge</th>
+                    <th>Classification</th>
+                </tr>
+            </thead>
+            <tbody id="atom-table-body">
+                <!-- Table content will be populated by JavaScript -->
+            </tbody>
+        </table>
+    </div>

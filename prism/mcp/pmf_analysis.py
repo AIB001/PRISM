@@ -7,7 +7,6 @@ from ._common import _StdoutToStderr, _ensure_prism_importable, logger
 
 
 def register(mcp):
-
     @mcp.tool()
     def analyze_pmf(
         pmf_dir: str,
@@ -38,7 +37,6 @@ def register(mcp):
             with _StdoutToStderr():
                 _ensure_prism_importable()
                 from prism.pmf.analysis import PMFAnalyzer
-                import numpy as np
 
                 analyzer = PMFAnalyzer(pmf_dir, verbose=True)
                 combined = {"success": True, "pmf_dir": pmf_dir}
@@ -72,7 +70,10 @@ def register(mcp):
                         "failed_windows": validation["failed_windows"],
                     }
                 except FileNotFoundError:
-                    combined["umbrella_validation"] = {"status": "not_available", "reason": "Umbrella directory not found"}
+                    combined["umbrella_validation"] = {
+                        "status": "not_available",
+                        "reason": "Umbrella directory not found",
+                    }
                 except Exception as e:
                     combined["umbrella_validation"] = {"status": "error", "reason": str(e)}
 
@@ -136,6 +137,7 @@ def register(mcp):
             # Convert any remaining numpy types
             def _convert(obj):
                 import numpy as np
+
                 if isinstance(obj, (np.integer,)):
                     return int(obj)
                 if isinstance(obj, (np.floating,)):

@@ -5,25 +5,7 @@ Only tests methods that do NOT require GROMACS (file parsing, text processing).
 
 import pytest
 from prism.utils.system import SystemBuilder
-
-
-# ---------------------------------------------------------------------------
-# Helper: build a minimal PDB ATOM line
-# ---------------------------------------------------------------------------
-def _atom_line(serial, name, resname, chain, resseq, x=0.0, y=0.0, z=0.0):
-    """Build a correctly formatted PDB ATOM record."""
-    return (
-        f"ATOM  {serial:5d} {name:<4s} {resname:<3s} {chain}{resseq:4d}    "
-        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {name[0]:>2s}  \n"
-    )
-
-
-def _hetatm_line(serial, name, resname, chain, resseq, x=0.0, y=0.0, z=0.0):
-    """Build a correctly formatted PDB HETATM record."""
-    return (
-        f"HETATM{serial:5d} {name:<4s} {resname:<3s} {chain}{resseq:4d}    "
-        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {name[0]:>2s}  \n"
-    )
+from prism.utils.pdb_utils import _atom_line, _hetatm_line
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +91,12 @@ class TestRenameHisForCmap:
         ff_dir = tmp_path / "amber19sb.ff"
         ff_dir.mkdir()
         (ff_dir / "cmap.itp").write_text("; cmap data\n")
+        # Add aminoacids.rtp with HIE definition
+        (ff_dir / "aminoacids.rtp").write_text("""
+[ HIE ]
+ [ atoms ]
+  N    N       -0.4157
+""")
 
         pdb = tmp_path / "test.pdb"
         pdb.write_text(_atom_line(1, "N", "HIS", "A", 10) + _atom_line(2, "CA", "HIS", "A", 10) + "END\n")
@@ -164,6 +152,12 @@ class TestRenameHisForCmap:
         ff_dir = tmp_path / "amber19sb.ff"
         ff_dir.mkdir()
         (ff_dir / "cmap.itp").write_text("; cmap\n")
+        # Add aminoacids.rtp with HIE definition
+        (ff_dir / "aminoacids.rtp").write_text("""
+[ HIE ]
+ [ atoms ]
+  N    N       -0.4157
+""")
 
         pdb = tmp_path / "test.pdb"
         pdb.write_text(

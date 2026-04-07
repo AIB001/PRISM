@@ -15,6 +15,126 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 
+def format_atom_line(
+    serial: int,
+    name: str,
+    resname: str,
+    chain: str,
+    resseq: int,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    occupancy: float = 1.00,
+    temp_factor: float = 0.00,
+    element: Optional[str] = None,
+) -> str:
+    """
+    Build a correctly formatted PDB ATOM record.
+
+    Parameters
+    ----------
+    serial : int
+        Atom serial number
+    name : str
+        Atom name (e.g., 'CA', 'N', 'CB')
+    resname : str
+        Residue name (e.g., 'ALA', 'HIS', 'LIG')
+    chain : str
+        Chain identifier (single character)
+    resseq : int
+        Residue sequence number
+    x, y, z : float
+        Coordinates in Angstroms
+    occupancy : float
+        Occupancy value (default: 1.00)
+    temp_factor : float
+        Temperature factor (default: 0.00)
+    element : str, optional
+        Element symbol (right-justified in columns 77-78).
+        If None, derived from first character of atom name.
+
+    Returns
+    -------
+    str
+        Properly formatted 80-character PDB ATOM line
+
+    Notes
+    -----
+    PDB ATOM record format (columns 1-80, 1-indexed):
+        1-6:   "ATOM  " (record name, left-justified)
+        7-11:  Atom serial number (right-justified)
+        13-16: Atom name (left-justified)
+        17:    Alternate location (blank)
+        18-20: Residue name (right-justified)
+        22:    Chain identifier
+        23-26: Residue sequence number (right-justified)
+        27:    Insertion code (blank)
+        31-38: X coordinate (right-justified, 8.3 format)
+        39-46: Y coordinate (right-justified, 8.3 format)
+        47-54: Z coordinate (right-justified, 8.3 format)
+        55-60: Occupancy (right-justified, 6.2 format)
+        61-66: Temperature factor (right-justified, 6.2 format)
+        73-76: Segment identifier (blank, left-justified)
+        77-78: Element symbol (right-justified, 2 chars)
+        79-80: Charge (blank)
+
+    Examples
+    --------
+    >>> format_atom_line(1, "CA", "ALA", "A", 10, 1.0, 2.0, 3.0)
+    'ATOM      1  CA   ALA A  10       1.000   2.000   3.000  1.00  0.00           C  '
+    """
+    if element is None:
+        element = name[0] if name else " "
+
+    return (
+        f"ATOM  {serial:5d} {name:<4s} {resname:>3s} {chain}{resseq:4d}    "
+        f"{x:8.3f}{y:8.3f}{z:8.3f}  {occupancy:5.2f}  {temp_factor:5.2f}           {element:>2s}  \n"
+    )
+
+
+def format_hetatm_line(
+    serial: int,
+    name: str,
+    resname: str,
+    chain: str,
+    resseq: int,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+    occupancy: float = 1.00,
+    temp_factor: float = 0.00,
+    element: Optional[str] = None,
+) -> str:
+    """
+    Build a correctly formatted PDB HETATM record.
+
+    Parameters are identical to format_atom_line(), except this creates
+    a HETATM record instead of ATOM.
+
+    Returns
+    -------
+    str
+        Properly formatted 80-character PDB HETATM line
+
+    Examples
+    --------
+    >>> format_hetatm_line(1, "CA", "LIG", "A", 1, 1.0, 2.0, 3.0)
+    'HETATM    1  CA   LIG A   1       1.000   2.000   3.000  1.00  0.00           C  '
+    """
+    if element is None:
+        element = name[0] if name else " "
+
+    return (
+        f"HETATM{serial:5d} {name:<4s} {resname:>3s} {chain}{resseq:4d}    "
+        f"{x:8.3f}{y:8.3f}{z:8.3f}  {occupancy:5.2f}  {temp_factor:5.2f}           {element:>2s}  \n"
+    )
+
+
+# Backward compatibility aliases for test code
+_atom_line = format_atom_line
+_hetatm_line = format_hetatm_line
+
+
 def renumber_residues(
     input_pdb: str,
     output_pdb: str,

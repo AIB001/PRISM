@@ -8,6 +8,18 @@ PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Pytho
 
 **Documentation Repository**: `/home/gxf1212/data/work/PRISM-Tutorial` - Official documentation and tutorials for PRISM
 
+## Code Search and Navigation
+
+**📝 LSP Tools Preferred**: For code navigation, use LSP tools over grep when available:
+- **LSP tools** (`mcp__cclsp__` series): Semantic understanding, direct symbol location
+  - `mcp__cclsp__find_definition` - Find symbol definitions accurately
+  - `mcp__cclsp__find_references` - Find all symbol references
+  - `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
+  - Benefits: More accurate, skips comments/strings, reduces token usage
+- **Grep**: Text search requiring human interpretation
+- **Availability**: LSP tools available in Claude Code tool context only
+- **Fallback**: Use `Grep` tool when LSP tools are unavailable
+
 ## Quick Start
 
 ### Installation
@@ -64,6 +76,57 @@ output_dir = system.build()
 - **Modularity**: Clean separation between force field generators, system building, and simulation
 - **GPU support**: Optimized GROMACS commands for GPU acceleration
 - **Resume capability**: Check for existing files and resume from checkpoints
+- **Naming consistency**: Follow standardized naming conventions (see `NAMING_CONVENTIONS.md`)
+
+## Standard Naming Conventions
+
+**CRITICAL**: All new code MUST follow the standardized naming conventions defined in `NAMING_CONVENTIONS.md`.
+
+### Key Rules
+
+1. **System Directories**: Always use `GMX_PROLIG_*` prefix
+   - ✅ `GMX_PROLIG_MD/`, `GMX_PROLIG_FEP/`, `GMX_PROLIG_PMF/`
+   - ❌ `FEP_SYSTEM/`, `output/`, `my_system/`
+
+2. **Force Field Directories**: Use `ffgen.get_output_dir_name()` method
+   - ✅ `ff_dir = output_dir / ffgen.get_output_dir_name()`
+   - ❌ `ff_dir = output_dir / "LIG.amb2gmx"`
+
+3. **Test Directories**: Use descriptive, forcefield-specific names
+   - ✅ `gaff_test/`, `openff_test/`, `test_42_38/`
+   - ❌ `gaff2_e2e_test/`, `ligand_42/`, `test_output_final/`
+
+4. **Never hardcode paths**:
+   - ✅ `prism_dir = ligand_output / ffgen.get_output_dir_name()`
+   - ❌ `prism_dir = "output/LIG.amb2gmx"`
+
+5. **No nested duplicate system directories**:
+   - ✅ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff/GMX_PROLIG_FEP/`
+   - ❌ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff_pkgfix2/GMX_PROLIG_FEP/GMX_PROLIG_FEP/`
+
+6. **Case directory naming must stay simple and readable**:
+   - ✅ `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`)
+   - ❌ `*_pkgfix*`, `*_final*`, `*_new*`, or other ad-hoc suffixes
+
+### Examples
+
+```python
+# ✅ Correct - Using standardized methods
+ffgen = GAFFForceFieldGenerator(ligand_path="lig.mol2", output_dir="gaff_test")
+ffgen.run()
+prism_dir = Path(ffgen.output_dir) / ffgen.get_output_dir_name()
+
+# ✅ Correct - Standard system naming
+builder = FEPScaffoldBuilder(output_dir="GMX_PROLIG_FEP")
+
+# ❌ Wrong - Hardcoded path
+prism_dir = "gaff_test/LIG.amb2gmx"
+
+# ❌ Wrong - Non-standard naming
+builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
+```
+
+**See `NAMING_CONVENTIONS.md` for complete specification.**
 
 ## Common Issues
 
@@ -73,6 +136,11 @@ output_dir = system.build()
 4. **Ion addition failures**: Ensure system contains water molecules, check GROMACS can find solvent groups
 5. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
 6. **Memory errors**: Large systems may require more RAM during parameterization
+
+## Module-Specific Documentation
+
+- **FEP Module**: See `prism/fep/CLAUDE.md` for FEP-specific guidelines and troubleshooting
+- **PMF Module**: See `prism/pmf/CLAUDE.md` for PMF-specific guidelines
 
 ## Entry Points
 
@@ -85,36 +153,60 @@ output_dir = system.build()
 
 Test data in `test/4xb4/` contains complete protein-ligand example. MDP templates generated dynamically based on configuration.
 
-Git commit message format: `[module] description;xxx`. Don't be too long!
+### FEP System Testing
 
-## FEbuilder Ligand Conversion (AMBER → CHARMM)
+**Comprehensive FEP validation**: Use `tests/gxf/FEP/unit_test/test_run_fep.py` for complete FEP system testing:
+- System building and directory structure validation
+- Topology and coordinate file verification
+- Grompp validation for both bound/unbound legs
+- Mapping HTML quality checks
+- Atom classification validation
 
-### Quick Start
+**Usage** (works for all test systems):
 ```bash
-# Environment setup
-conda activate /home/gxf1212/.conda/envs/prism
-pip install -e .  # Enables prism package imports system-wide
+# 42-38 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/42-38
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield gaff2
 
-# Batch convert all ligands to CHARMM/NAMD format
-python test/modeling/FEbuilder_FF/AMBER/generate_charmm_ff.py
+# 25-36 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/25-36
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield opls
+
+# oMeEtPh-EtPh system (T4 lysozyme L99A)
+cd tests/gxf/FEP/unit_test/oMeEtPh-EtPh
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield openff
+
+# p38-19-24 system (p38α MAPK)
+cd tests/gxf/FEP/unit_test/p38-19-24
+python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf
 ```
 
-### Process & Implementation
+Git commit message format: `[module] description;xxx`. Don't be too long!
 
-**Conversion Pipeline**: `mol2` → `GAFF` (via antechamber/tleap) → `CHARMM RTF/PRM` (via `AmberToCharmmConverter`)
+## Development Notes
 
-1. **GAFFForceFieldGenerator** populates `test/modeling/FEbuilder_FF/AMBER/_build/<name>/LIG.amb2gmx/` with GROMACS-format files
-2. **AmberToCharmmConverter** converts GAFF parameters to CHARMM topology (RTF) and parameters (PRM) files
-3. Output: `<name>.rtf`, `<name>.prm`, `<name>.pdb`, `<name>_3D.mol2` in the AMBER directory
+- **LSP vs grep**: Prefer LSP tools (mcp__cclsp*) for symbol finding - more accurate, skips comments/strings
+- **Commit messages**: Should reflect all recent changes in the commit
+- **File creation**: Avoid creating files in root directory
 
-### Important: Atom Type Naming for FEP
+### CPU/GPU资源管理
 
-When converting multiple ligands for FEP (free energy perturbation) calculations, **each molecule gets a unique residue-name prefix** to avoid VMD psfgen type conflicts:
-- Molecule `38.mol2` → types like `38_ca`, `38_c3`, `38_sy` (residue name "38")
-- Molecule `42.mol2` → types like `42_ca`, `42_c3`, `42_sy` (residue name "42")
+**CPU核心数要求**:
+- **所有GROMACS任务必须使用14个CPU核心** (`-ntomp 14`)
+- 56核心系统 ÷ 14核心/任务 = 最多4个并行任务
+- **除非有SQM计算**，否则必须保证每个gmx任务使用14核心
+- 更新脚本时使用: `find . -name "run_single_em_nvt.sh" -exec sed -i 's/-ntomp [0-9]*/-ntomp 14/g' {} \;`
 
-This prevents "duplicate type key" warnings when loading multiple force field topologies simultaneously in VMD.
+**GPU分配**:
+- 系统有8个GPU (GPU 0-7)，通常使用GPU 0-5
+- 每个测试分配独立GPU，避免GPU过载
+- 使用 `CUDA_VISIBLE_DEVICES=N` 指定GPU
 
-**Customization**:
-- Single molecule with custom residue name: `python generate_charmm_ff.py --resname XXX path/to/ligand.mol2`
-- Force regeneration: add `--overwrite` flag (requires AmberTools installed)
+**并行任务管理**:
+- 最多同时运行4个FEP测试 (4 × 14 = 56核心)
+- 如果超过4个并行任务，必须停止最不重要的一个
+- 监控命令: `ps aux | grep "gmx mdrun" | grep -v grep | wc -l`
+
+不用每次push；TODO完成了就清掉
+
+尽量复用已有的测试脚本。

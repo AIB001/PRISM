@@ -30,15 +30,15 @@ PUBLICATION_FONTS = {
     "bar_annotation": 14,  # Bar chart annotations - very small to prevent overlap
 }
 
-# 标准panel尺寸定义 - 确保所有单个panel图片字体相对大小一致
+# Standard panel sizes to keep font scaling consistent across single-panel figures.
 STANDARD_PANEL_SIZES = {
-    "single": (8, 6),  # 单panel标准尺寸 - 所有单个图片统一使用
-    "horizontal": (12, 6),  # 水平排列两panel (1x2)
-    "vertical": (8, 12),  # 垂直排列两panel (2x1)
-    "quad": (12, 10),  # 2x2四panel
-    "wide": (16, 6),  # 宽format单panel (特殊情况)
-    "tall": (8, 10),  # 高format单panel (特殊情况)
-    "distribution": (12, 8),  # 分布图专用 - 增加高度改善比例
+    "single": (8, 6),  # Standard single-panel size
+    "horizontal": (12, 6),  # Two horizontal panels (1x2)
+    "vertical": (8, 12),  # Two vertical panels (2x1)
+    "quad": (12, 10),  # 2x2 grid
+    "wide": (16, 6),  # Wide single-panel layout
+    "tall": (8, 10),  # Tall single-panel layout
+    "distribution": (12, 8),  # Distribution plots with extra height
 }
 
 # Color palettes for scientific publications
@@ -127,17 +127,17 @@ def get_publication_style(style_type: str = "default") -> Dict[str, Any]:
 
 def get_standard_figsize(panel_type: str = "single") -> Tuple[float, float]:
     """
-    获取标准panel尺寸，确保所有图片字体相对大小一致。
+    Return the standard panel size for consistent font scaling.
 
     Parameters
     ----------
     panel_type : str
-        Panel类型: 'single', 'horizontal', 'vertical', 'quad', 'wide', 'tall'
+        Panel type: 'single', 'horizontal', 'vertical', 'quad', 'wide', 'tall'
 
     Returns
     -------
     tuple
-        标准figure尺寸 (width, height)
+        Standard figure size (width, height)
     """
     if panel_type in STANDARD_PANEL_SIZES:
         return STANDARD_PANEL_SIZES[panel_type]
@@ -245,6 +245,47 @@ def setup_publication_figure(
         ax.set_title(title)  # Empty by default
 
     return fig, ax
+
+
+def setup_publication_subplots(
+    nrows: int = 1,
+    ncols: int = 1,
+    figsize: Optional[Tuple[float, float]] = None,
+    panel_type: str = "single",
+    style_type: str = "default",
+    **kwargs,
+):
+    """
+    Create publication-ready subplot grids with the shared PRISM style.
+
+    Parameters
+    ----------
+    nrows : int
+        Number of subplot rows.
+    ncols : int
+        Number of subplot columns.
+    figsize : tuple, optional
+        Figure size in inches. If None, uses the standard size for panel_type.
+    panel_type : str
+        Panel type for standard sizing.
+    style_type : str
+        Publication style preset.
+    **kwargs : dict
+        Extra keyword arguments passed to ``plt.subplots``.
+
+    Returns
+    -------
+    tuple
+        ``(figure, axes)`` returned by ``plt.subplots``.
+    """
+    if figsize is None:
+        figsize = get_standard_figsize(panel_type)
+
+    plt.style.use("default")
+    with plt.rc_context(get_publication_style(style_type)):
+        fig, axes = plt.subplots(nrows, ncols, figsize=figsize, **kwargs)
+
+    return fig, axes
 
 
 def apply_publication_style(style_type: str = "default"):
@@ -393,6 +434,66 @@ def style_axes_for_publication(ax, spine_width=1.5, tick_width=1.5, tick_length=
     # Style grid
     ax.grid(True, alpha=grid_alpha, linewidth=1.0, linestyle="-")
     ax.set_axisbelow(True)
+
+
+def set_publication_labels(
+    ax,
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    title: str = "",
+    *,
+    fontfamily: str = "Times New Roman",
+):
+    """
+    Apply consistent publication-style labels to an axis.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axis to format.
+    xlabel : str, optional
+        X-axis label.
+    ylabel : str, optional
+        Y-axis label.
+    title : str
+        Axis title.
+    fontfamily : str
+        Font family for labels and title.
+    """
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily=fontfamily)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=PUBLICATION_FONTS["axis_label"], fontweight="bold", fontfamily=fontfamily)
+    if title:
+        ax.set_title(title, fontsize=PUBLICATION_FONTS["title"], fontweight="bold", fontfamily=fontfamily)
+
+    ax.tick_params(axis="both", labelsize=PUBLICATION_FONTS["tick_label"])
+    return ax
+
+
+def add_corner_annotation(
+    ax,
+    text: str,
+    *,
+    x: float = 0.02,
+    y: float = 0.98,
+    fontsize: int = 10,
+    facecolor: str = "white",
+    alpha: float = 0.8,
+):
+    """
+    Add a small statistics box in the upper-left corner of an axis.
+    """
+    ax.text(
+        x,
+        y,
+        text,
+        transform=ax.transAxes,
+        verticalalignment="top",
+        fontsize=fontsize,
+        bbox=dict(boxstyle="round", facecolor=facecolor, alpha=alpha),
+    )
+    return ax
 
 
 def save_publication_figure(fig, save_path, dpi=300, format="png", bbox_inches="tight", transparent=False):

@@ -12,8 +12,8 @@ from .export import DataExporter
 
 # from .multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
 from .parallel import ParallelProcessor
-from .trajectory import TrajectoryManager
-from .trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
+from ..trajectory import TrajectoryManager, TrajectoryProcessor
+from ..trajectory.processor import process_trajectory_simple, batch_process_trajectories
 from .visualize import Visualizer
 
 # Create default processor instance

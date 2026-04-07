@@ -7,7 +7,7 @@ from typing import List
 from ..core.config import AnalysisConfig
 
 # Import and apply global publication style
-from ..plots.publication_utils import apply_publication_style
+from .publication_utils import apply_publication_style
 
 apply_publication_style()
 

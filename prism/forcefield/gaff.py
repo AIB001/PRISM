@@ -106,6 +106,17 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         """Get the output directory name for GAFF"""
         return "LIG.amb2gmx"
 
+    @property
+    def capabilities(self):
+        """GAFF force field capabilities"""
+        return {
+            "supports_fep": True,
+            "supports_pmf": True,
+            "requires_external": False,
+            "has_protein_ff": False,
+            "charge_method": "AM1-BCC" if self.charge_mode == "bcc" else "gas-phase",
+        }
+
     def run(self):
         """Run the GAFF force field generation workflow"""
         print(f"\n{'='*60}")
@@ -163,13 +174,15 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
         return importlib.util.find_spec("rdkit.Chem") is not None
 
     def _detect_file_format(self):
-        """Detect input file format (MOL2 or SDF)"""
+        """Detect input file format (MOL2, SDF, or PDB)."""
         file_ext = os.path.splitext(self.ligand_path)[1].lower()
 
         if file_ext == ".mol2":
             return "mol2"
         elif file_ext in [".sdf", ".sd"]:
             return "sdf"
+        elif file_ext == ".pdb":
+            return "pdb"
         else:
             print(f"Warning: Unknown file extension '{file_ext}', assuming MOL2 format")
             return "mol2"
@@ -387,6 +400,9 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
 
         if self.file_format == "mol2":
             self._process_mol2_format(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
+        elif self.file_format == "pdb":
+            print("Processing PDB format...")
+            self._process_pdb_format_direct(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
         else:
             # For SDF files, use direct antechamber conversion
             # This is the only method implemented in gaff2.py
@@ -651,6 +667,10 @@ quit
             content = f.read()
 
         for mol_name in self.possible_molecule_names:
+            # Numeric ligand ids such as "38" must not be replaced globally, or
+            # atom indices/reference ids inside ACPYPE-generated topologies get corrupted.
+            if mol_name.isdigit():
+                continue
             if mol_name != "LIG":
                 content = re.sub(r"\b{}\b".format(re.escape(mol_name)), "LIG", content)
 
@@ -673,6 +693,8 @@ quit
             mol_content = "[ moleculetype ]\n" + mol_match.group(1).strip()
 
             for mol_name in self.possible_molecule_names:
+                if mol_name.isdigit():
+                    continue
                 if mol_name != "LIG":
                     mol_content = re.sub(r"\b{}\b".format(re.escape(mol_name)), "LIG", mol_content)
 
@@ -759,6 +781,31 @@ quit
             "mol2",
             "-c",
             self.charge_mode,  # Use configured charge mode
+            "-s",
+            "2",
+        ]
+        if self.net_charge != 0:
+            cmd.extend(["-nc", str(self.net_charge)])
+        self.run_command(cmd)
+
+        self._process_mol2_intermediate(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
+
+    def _process_pdb_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
+        """Process PDB format files with direct antechamber conversion."""
+        print(f"Processing PDB format (direct method) with {self.charge_mode.upper()} charges...")
+
+        cmd = [
+            "antechamber",
+            "-i",
+            self.ligand_path,
+            "-fi",
+            "pdb",
+            "-o",
+            amber_mol2,
+            "-fo",
+            "mol2",
+            "-c",
+            self.charge_mode,
             "-s",
             "2",
         ]

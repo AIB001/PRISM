@@ -15,7 +15,7 @@ from matplotlib.ticker import MultipleLocator
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 
-from .publication_utils import (
+from .core.publication_utils import (
     get_publication_style,
     get_standard_figsize,
     save_publication_figure,

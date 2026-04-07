@@ -730,7 +730,7 @@ def plot_multi_trajectory_clustering(
     rows = (n_trajs + cols - 1) // cols
 
     if figsize is None:
-        # 使用标准尺寸计算多panel尺寸
+        # Use the standard panel size to scale the multi-panel figure.
         base_width, base_height = get_standard_figsize("single")
         figsize = (base_width * cols * 0.8, base_height * rows * 0.8)
 

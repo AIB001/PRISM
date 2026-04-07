@@ -331,6 +331,35 @@ quit
         # Continue with prep file generation
         self._process_mol2_intermediate(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
 
+    def _process_pdb_format_direct(self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file):
+        """Process PDB format files with direct antechamber conversion using GAFF2."""
+        print(f"Processing PDB format (direct method) with {self.charge_mode.upper()} charges and GAFF2 atom types...")
+
+        ff_dir = os.path.dirname(amber_mol2)
+
+        cmd = [
+            "antechamber",
+            "-i",
+            self.ligand_path,
+            "-fi",
+            "pdb",
+            "-o",
+            amber_mol2,
+            "-fo",
+            "mol2",
+            "-c",
+            self.charge_mode,
+            "-s",
+            "2",
+            "-at",
+            self._get_atom_type_flag(),
+        ]
+        if self.net_charge != 0:
+            cmd.extend(["-nc", str(self.net_charge)])
+        self.run_command(cmd, cwd=ff_dir)
+
+        self._process_mol2_intermediate(amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file)
+
     def _process_mol2_intermediate(
         self, amber_mol2, prep_file, frcmod_file, prmtop_file, rst7_file, charge_method=None
     ):

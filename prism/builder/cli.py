@@ -9,10 +9,21 @@ Extracted from the original monolithic builder.py for maintainability.
 """
 
 import os
+import re
 import sys
 import argparse
 
 from .core import PRISMBuilder
+
+
+def _slug_case_token(value: str) -> str:
+    token = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower())
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token or "case"
+
+
+def _default_fep_output_dir(forcefield: str, ligand_forcefield: str) -> str:
+    return f"{_slug_case_token(forcefield)}-mut_{_slug_case_token(ligand_forcefield)}"
 
 
 def main():
@@ -340,6 +351,37 @@ Example usage:
         "--rest2-cutoff", type=float, default=0.5, help="Pocket detection cutoff in nm for REST2 (default: 0.5)"
     )
 
+    # FEP (Free Energy Perturbation) options
+    fep_group = parser.add_argument_group("FEP (Free Energy Perturbation) options")
+    fep_group.add_argument(
+        "--fep",
+        action="store_true",
+        help="Enable FEP mode for relative binding free energy calculations between reference and mutant ligands",
+    )
+    fep_group.add_argument(
+        "--mutant",
+        "-mut",
+        type=str,
+        default=None,
+        help="Mutant ligand file for FEP calculations (required when --fep is enabled)",
+    )
+    fep_group.add_argument("--fep-config", type=str, default=None, help="Path to FEP configuration YAML file")
+    fep_group.add_argument(
+        "--distance-cutoff",
+        type=float,
+        default=0.6,
+        help="Distance cutoff for atom mapping in Angstroms (default: 0.6)",
+    )
+    fep_group.add_argument(
+        "--charge-strategy",
+        choices=["ref", "mut", "mean"],
+        default="mean",
+        help="Charge strategy for common atoms: ref (reference), mut (mutant), or mean (average) (default: mean)",
+    )
+    fep_group.add_argument(
+        "--lambda-windows", type=int, default=11, help="Number of lambda windows for FEP calculations (default: 11)"
+    )
+
     args = parser.parse_args()
 
     # Handle --export-config option
@@ -624,6 +666,9 @@ pressure_coupling:
     elif args.config:
         kwargs["config_path"] = args.config
 
+    if args.fep and args.output == "prism_output":
+        args.output = _default_fep_output_dir(args.forcefield, args.ligand_forcefield)
+
     # Create and run PRISM Builder
     builder = PRISMBuilder(
         args.protein,
@@ -653,6 +698,12 @@ pressure_coupling:
         mmpbsa_mode=args.mmpbsa,  # MMPBSA mode flag
         mmpbsa_traj_ns=args.mmpbsa_traj if args.mmpbsa else None,  # Trajectory-based MMPBSA length (ns)
         gmx2amber=args.gmx2amber if args.mmpbsa else False,  # AMBER MMPBSA.py backend
+        fep_mode=args.fep if hasattr(args, "fep") else False,  # FEP mode flag
+        mutant_ligand=args.mutant if hasattr(args, "mutant") else None,  # Mutant ligand for FEP
+        fep_config=args.fep_config if hasattr(args, "fep_config") else None,  # FEP config file
+        distance_cutoff=args.distance_cutoff if hasattr(args, "distance_cutoff") else 0.6,  # Atom mapping cutoff
+        charge_strategy=args.charge_strategy if hasattr(args, "charge_strategy") else "mean",  # Charge strategy
+        lambda_windows=args.lambda_windows if hasattr(args, "lambda_windows") else 11,  # Lambda windows
         **kwargs,
     )
 

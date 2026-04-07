@@ -1,0 +1,1261 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Hybrid topology package builder for FEP calculations.
+
+This module handles the assembly of hybrid ligand force field files (ITP, GRO, atomtypes)
+from reference and mutant ligand components.
+"""
+
+import shutil
+from pathlib import Path
+from typing import Dict, Optional
+
+from prism.fep.gromacs.itp_builder import ITPBuilder
+from prism.gaussian.utils import normalize_element_symbol
+
+try:
+    from prism.forcefield.adapters import CGenFFAdapter
+except ImportError:
+    # Fallback for backward compatibility
+    class CGenFFAdapter:
+        @classmethod
+        def find_charmm_ff_dir(cls, lig_ff_path):
+            charmm_ff = lig_ff_path / "charmm36.ff"
+            return charmm_ff if charmm_ff.exists() else None
+
+
+class HybridPackageBuilder:
+    """
+    Builder for hybrid ligand force field packages.
+
+    Assembles hybrid.itp, atomtypes_hybrid.itp, ff_hybrid.itp, hybrid.gro,
+    and ligand_seed.pdb from reference and mutant ligand directories.
+    """
+
+    def __init__(
+        self,
+        hybrid_itp_filename: str = "hybrid.itp",
+        hybrid_atomtypes_filename: str = "atomtypes_hybrid.itp",
+        hybrid_forcefield_filename: str = "ff_hybrid.itp",
+        hybrid_defaults_filename: str = "defaults_hybrid.itp",
+        hybrid_posre_filename: str = "posre_hybrid.itp",
+        hybrid_gro_filename: str = "hybrid.gro",
+        molecule_name: str = "HYB",
+    ):
+        """
+        Initialize with customizable filenames.
+
+        Parameters
+        ----------
+        hybrid_itp_filename : str
+            Filename for hybrid ITP file (default: "hybrid.itp")
+        hybrid_atomtypes_filename : str
+            Filename for hybrid atomtypes file (default: "atomtypes_hybrid.itp")
+        hybrid_forcefield_filename : str
+            Filename for hybrid forcefield file (default: "ff_hybrid.itp")
+        hybrid_defaults_filename : str
+            Filename for hybrid defaults file (default: "defaults_hybrid.itp")
+        hybrid_posre_filename : str
+            Filename for hybrid position restraint file (default: "posre_hybrid.itp")
+        hybrid_gro_filename : str
+            Filename for hybrid GRO file (default: "hybrid.gro")
+        molecule_name : str
+            Molecule name for hybrid topology (default: "HYB")
+        """
+        # Filenames for hybrid assets
+        self.hybrid_itp_filename = hybrid_itp_filename
+        self.hybrid_atomtypes_filename = hybrid_atomtypes_filename
+        self.hybrid_forcefield_filename = hybrid_forcefield_filename
+        self.hybrid_defaults_filename = hybrid_defaults_filename
+        self.hybrid_posre_filename = hybrid_posre_filename
+        self.hybrid_gro_filename = hybrid_gro_filename
+        self.molecule_name = molecule_name
+
+    def prepare_hybrid_package_from_components(
+        self,
+        hybrid_dir: Path,
+        hybrid_itp: Path,
+        reference_ligand_dir: Path,
+        mutant_ligand_dir: Optional[Path],
+        seed_gro: Path,
+    ) -> None:
+        """
+        Build complete hybrid ligand package from components.
+
+        Parameters
+        ----------
+        hybrid_dir : Path
+            Output directory for hybrid assets
+        hybrid_itp : Path
+            Path to hybrid ITP file (atom mapping)
+        reference_ligand_dir : Path
+            Directory containing reference ligand force field
+        mutant_ligand_dir : Optional[Path]
+            Directory containing mutant ligand force field (None for single-topology)
+        seed_gro : Path
+            Reference GRO file for coordinates
+        """
+        # Normalize and write hybrid ITP
+        normalized_itp = self._normalize_hybrid_itp(hybrid_itp.read_text(), self.molecule_name)
+        normalized_itp = self._dedupe_moleculetype_sections(normalized_itp)
+        hybrid_itp_output = hybrid_dir / self.hybrid_itp_filename
+        hybrid_itp_output.write_text(normalized_itp)
+
+        # Add bonded sections if needed
+        if self._itp_needs_bonded_sections(normalized_itp):
+            # Auto-discover ligand ITP files (handle LIG.amb2gmx/ and LIG.openff2gmx/ subdirectories)
+            def _resolve_ligand_itp(ligand_dir: Path) -> str:
+                """Resolve ligand ITP path, handling PRISM output subdirectories."""
+                # Try direct path
+                direct_path = ligand_dir / "LIG.itp"
+                if direct_path.exists():
+                    return str(direct_path)
+
+                # Try common PRISM output structures across supported ligand FF backends.
+                for subdir in [
+                    "LIG.openff2gmx",
+                    "LIG.amb2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
+                    ff_path = ligand_dir / subdir / "LIG.itp"
+                    if ff_path.exists():
+                        return str(ff_path)
+
+                raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir} or known PRISM ligand subdirectories")
+
+            ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
+            ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
+
+            # Extract atom types for CHARMM force field dihedral handling
+            atom_types_a = self._parse_atom_types_from_itp(ligand_a_itp)
+            atom_types_b = self._parse_atom_types_from_itp(ligand_b_itp)
+
+            ITPBuilder.write_complete_hybrid_itp(
+                output_path=str(hybrid_itp_output),
+                hybrid_itp=str(hybrid_itp_output),
+                ligand_a_itp=ligand_a_itp,
+                ligand_b_itp=ligand_b_itp,
+                molecule_name=self.molecule_name,
+                atom_types_a=atom_types_a,
+                atom_types_b=atom_types_b,
+            )
+            # Read back the newly written complete ITP for subsequent atomtypes collection
+            normalized_itp = self._dedupe_moleculetype_sections(hybrid_itp_output.read_text())
+            hybrid_itp_output.write_text(normalized_itp)
+
+        # Build atomtypes file
+        atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
+        base_ff_atomtypes = self._collect_cgenff_base_atomtypes(reference_ligand_dir, mutant_ligand_dir)
+        atomtypes_content = self._build_hybrid_atomtypes_itp(normalized_itp, atomtypes, base_ff_atomtypes)
+        (hybrid_dir / self.hybrid_atomtypes_filename).write_text(atomtypes_content)
+
+        defaults_block = self._extract_defaults_block(reference_ligand_dir, mutant_ligand_dir)
+        (hybrid_dir / self.hybrid_defaults_filename).write_text(defaults_block)
+
+        cgenff_supplement = self._build_cgenff_hybrid_bonded_itp(reference_ligand_dir, mutant_ligand_dir)
+        if cgenff_supplement:
+            (hybrid_dir / "cgenff_bonded_hybrid.itp").write_text(cgenff_supplement)
+
+        # Build force field file WITHOUT [ defaults ] block.
+        # The standalone unbound topology includes defaults_hybrid.itp before
+        # this file; PRISM-built bound/unbound topologies already carry the
+        # forcefield defaults and only need atomtypes here.
+        ff_hybrid = f'#include "{self.hybrid_atomtypes_filename}"\n'
+        if cgenff_supplement:
+            ff_hybrid += '#include "cgenff_bonded_hybrid.itp"\n'
+        (hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
+
+        # Build hybrid GRO file
+        # Auto-discover mutant GRO file (handle LIG.amb2gmx/ subdirectory)
+        mutant_gro = None
+        if mutant_ligand_dir:
+            # Try direct path
+            direct_path = mutant_ligand_dir / "LIG.gro"
+            if direct_path.exists():
+                mutant_gro = direct_path
+            else:
+                # Try common PRISM output structures
+                for subdir in [
+                    "LIG.amb2gmx",
+                    "LIG.openff2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
+                    candidate = mutant_ligand_dir / subdir / "LIG.gro"
+                    if candidate.exists():
+                        mutant_gro = candidate
+                        break
+
+        reference_coords_file = hybrid_dir / "mapping_state_a.pdb"
+        if not reference_coords_file.exists():
+            reference_coords_file = seed_gro
+
+        mutant_coords_file = hybrid_dir / "mapping_state_b.pdb"
+        if not mutant_coords_file.exists():
+            mutant_coords_file = mutant_gro
+
+        hybrid_gro_content = self._build_hybrid_gro(
+            hybrid_itp_content=normalized_itp,
+            reference_gro=seed_gro,
+            mutant_gro=mutant_gro,
+            reference_coords_file=reference_coords_file,
+            mutant_coords_file=mutant_coords_file,
+        )
+        (hybrid_dir / self.hybrid_gro_filename).write_text(hybrid_gro_content)
+
+        # Convert to PDB for visualization
+        (hybrid_dir / "ligand_seed.pdb").write_text(self._gro_to_pdb(hybrid_dir / self.hybrid_gro_filename))
+
+        # Copy position restraints if available
+        # Auto-discover posre file (handle LIG.amb2gmx/ subdirectory)
+        ref_posre = reference_ligand_dir / "posre_LIG.itp"
+        if not ref_posre.exists():
+            for subdir in [
+                "LIG.amb2gmx",
+                "LIG.openff2gmx",
+                "LIG.opls2gmx",
+                "LIG.mmff2gmx",
+                "LIG.match2gmx",
+                "LIG.both2gmx",
+                "LIG.cgenff2gmx",
+                "LIG.charmm2gmx",
+                "LIG.rtf2gmx",
+            ]:
+                candidate = reference_ligand_dir / subdir / "posre_LIG.itp"
+                if candidate.exists():
+                    ref_posre = candidate
+                    break
+
+        if ref_posre.exists():
+            shutil.copy2(ref_posre, hybrid_dir / self.hybrid_posre_filename)
+
+        # Write topology template
+        self._write_hybrid_top_template(hybrid_dir / "hybrid.top")
+
+    def _normalize_hybrid_itp(self, content: str, molecule_name: str) -> str:
+        """
+        Normalize hybrid ITP content.
+
+        - Replace moleculetype name with molecule_name
+        - Normalize atom lines to ensure consistent formatting
+        """
+        lines = []
+        in_moleculetype = False
+        in_atoms = False
+
+        for line in content.splitlines():
+            stripped = line.strip()
+
+            if stripped.lower() == "[ moleculetype ]":
+                in_moleculetype = True
+                lines.append(line)
+                continue
+
+            if in_moleculetype and stripped and not stripped.startswith(";"):
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    lines.append(f"{molecule_name}  {parts[1]}")
+                    in_moleculetype = False
+                    continue
+
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                lines.append(line)
+                continue
+
+            if in_atoms and stripped.startswith("["):
+                in_atoms = False
+
+            if in_atoms and stripped and not stripped.startswith(";"):
+                lines.append(self._normalize_hybrid_atom_line(line))
+                continue
+
+            lines.append(line)
+
+        return "\n".join(lines) + "\n"
+
+    def _normalize_hybrid_atom_line(self, line: str) -> str:
+        """Normalize hybrid atom line formatting."""
+        return line.rstrip()
+
+    def _dedupe_moleculetype_sections(self, content: str) -> str:
+        """Keep only the first ``[ moleculetype ]`` block in a hybrid ITP.
+
+        Some historical hybrid ITPs have been observed to carry a duplicated
+        ``[ moleculetype ]`` header/name block, which makes GROMACS report
+        ``moleculetype HYB is redefined``. The valid hybrid topology must only
+        contain a single such block before the bonded sections.
+        """
+
+        lines = content.splitlines()
+        cleaned = []
+        seen_moleculetype = False
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip().lower()
+
+            if stripped == "[ moleculetype ]":
+                if seen_moleculetype:
+                    i += 1
+                    while i < len(lines):
+                        current = lines[i].strip()
+                        if current.startswith("["):
+                            break
+                        i += 1
+                    continue
+
+                seen_moleculetype = True
+
+            cleaned.append(line)
+            i += 1
+
+        return "\n".join(cleaned) + "\n"
+
+    def _itp_needs_bonded_sections(self, content: str) -> bool:
+        """Check if ITP file is missing bonded sections."""
+        lower = content.lower()
+        return "[ bonds ]" not in lower and "[ angles ]" not in lower and "[ dihedrals ]" not in lower
+
+    def _collect_atomtypes(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> Dict[str, str]:
+        """
+        Collect atomtype definitions from ligand directories.
+
+        Returns
+        -------
+        Dict[str, str]
+            Mapping of atomtype name to full definition line
+        """
+        atomtypes = {}
+        for ligand_dir in [reference_ligand_dir, mutant_ligand_dir]:
+            if ligand_dir is None:
+                continue
+
+            atomtypes_file = ligand_dir / "atomtypes_LIG.itp"
+            if not atomtypes_file.exists():
+                for subdir in [
+                    "LIG.amb2gmx",
+                    "LIG.openff2gmx",
+                    "LIG.opls2gmx",
+                    "LIG.mmff2gmx",
+                    "LIG.match2gmx",
+                    "LIG.both2gmx",
+                    "LIG.cgenff2gmx",
+                    "LIG.charmm2gmx",
+                    "LIG.rtf2gmx",
+                ]:
+                    candidate = ligand_dir / subdir / "atomtypes_LIG.itp"
+                    if candidate.exists():
+                        atomtypes_file = candidate
+                        break
+
+            if not atomtypes_file.exists():
+                continue
+
+            for atomtype_name, line in self._parse_atomtypes_file(atomtypes_file).items():
+                atomtypes.setdefault(atomtype_name, line)
+        return atomtypes
+
+    def _parse_atomtypes_file(self, atomtypes_file: Path) -> Dict[str, str]:
+        """Parse atomtypes ITP file."""
+        atomtypes = {}
+        in_section = False
+        for line in atomtypes_file.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atomtypes ]":
+                in_section = True
+                continue
+            if stripped.startswith("[") and in_section:
+                break
+            if not in_section or not stripped or stripped.startswith(";"):
+                continue
+            parts = stripped.split()
+            atomtypes[parts[0]] = stripped
+        return atomtypes
+
+    def _parse_atom_types_from_itp(self, itp_path: str) -> Dict[int, str]:
+        """
+        Parse atom types from ligand ITP file.
+
+        Returns
+        -------
+        Dict[int, str]
+            Mapping of atom ID to atom type
+        """
+        atom_types = {}
+        in_atoms = False
+        for line in Path(itp_path).read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if not in_atoms or not stripped or stripped.startswith(";"):
+                continue
+            parts = stripped.split()
+            if len(parts) >= 2:
+                try:
+                    atom_id = int(parts[0])
+                    atom_type = parts[1]
+                    atom_types[atom_id] = atom_type
+                except ValueError:
+                    continue
+        return atom_types
+
+    def _build_cgenff_hybrid_bonded_itp(
+        self,
+        reference_ligand_dir: Path,
+        mutant_ligand_dir: Optional[Path],
+    ) -> str:
+        """Merge ligand-specific CGenFF bonded supplements when present."""
+        supplement_files = []
+        for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
+            for candidate in (
+                ligand_dir / "cgenff_bonded_LIG.itp",
+                ligand_dir / "LIG.amb2gmx" / "cgenff_bonded_LIG.itp",
+            ):
+                if candidate.exists():
+                    supplement_files.append(candidate)
+                    break
+
+        if not supplement_files:
+            return ""
+
+        section_names = ("bondtypes", "pairtypes", "angletypes", "dihedraltypes")
+        merged = {section: [] for section in section_names}
+        seen = {section: set() for section in section_names}
+        current_section = None
+
+        for file_path in supplement_files:
+            for raw_line in file_path.read_text().splitlines():
+                stripped = raw_line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    current_section = stripped.strip("[] ").lower()
+                    continue
+                if current_section not in merged:
+                    continue
+                if not stripped or stripped.startswith(";"):
+                    continue
+                if raw_line not in seen[current_section]:
+                    merged[current_section].append(raw_line.rstrip() + "\n")
+                    seen[current_section].add(raw_line)
+
+        parts = [
+            "; Auto-generated hybrid CGenFF supplement\n",
+            "; Merged from ligand-specific bonded supplement files.\n",
+            "\n",
+        ]
+        wrote_any = False
+        for section in section_names:
+            lines = merged[section]
+            if not lines:
+                continue
+            wrote_any = True
+            parts.append(f"[ {section} ]\n")
+            parts.extend(lines)
+            parts.append("\n")
+        return "".join(parts) if wrote_any else ""
+
+    def _collect_cgenff_base_atomtypes(
+        self,
+        reference_ligand_dir: Path,
+        mutant_ligand_dir: Optional[Path],
+    ) -> set[str]:
+        atomtypes = set()
+        for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
+            charmm_ff_dir = self._find_nearby_charmm_ff_dir(ligand_dir)
+
+            if not charmm_ff_dir:
+                continue
+
+            for candidate in (
+                charmm_ff_dir / "ffnonbonded.itp",
+                charmm_ff_dir / "charmm36.itp",
+            ):
+                if not candidate.exists():
+                    continue
+                in_section = False
+                for line in candidate.read_text().splitlines():
+                    stripped = line.strip()
+                    if stripped.lower() == "[ atomtypes ]":
+                        in_section = True
+                        continue
+                    if in_section and stripped.startswith("["):
+                        break
+                    if not in_section or not stripped or stripped.startswith(";"):
+                        continue
+                    atomtypes.add(stripped.split()[0])
+                break
+        return atomtypes
+
+    def _find_nearby_charmm_ff_dir(self, ligand_dir: Path) -> Optional[Path]:
+        """Locate a CHARMM force-field directory near a ligand output directory."""
+
+        def _ff_dir_from_topology(top_path: Path) -> Optional[Path]:
+            for line in top_path.read_text(errors="ignore").splitlines():
+                stripped = line.strip()
+                if not stripped.startswith('#include "') or "forcefield.itp" not in stripped:
+                    continue
+                include_path = stripped.split('"', 2)[1]
+                candidate = Path(include_path)
+                if not candidate.is_absolute():
+                    candidate = (top_path.parent / candidate).resolve()
+                if candidate.exists():
+                    ff_dir = candidate.parent
+                    if any((ff_dir / name).exists() for name in ("ffnonbonded.itp", "charmm36.itp", "forcefield.itp")):
+                        return ff_dir
+            return None
+
+        # 1. Direct ligand-local layouts.
+        charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_dir)
+        if charmm_ff_dir:
+            return charmm_ff_dir
+
+        # 2. Nested layouts such as LIG.amb2gmx/charmm*.ff.
+        for subdir in ligand_dir.glob("LIG.*"):
+            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(subdir)
+            if charmm_ff_dir:
+                return charmm_ff_dir
+
+        # 3. Nearby system build layouts. MMFF/SwissParam cases often keep the
+        # force field under bound|unbound/repeat*/<ff>.ff rather than the ligand dir.
+        search_roots = []
+        seen_roots = set()
+        for candidate in [ligand_dir, *ligand_dir.parents[:4]]:
+            if candidate not in seen_roots:
+                search_roots.append(candidate)
+                seen_roots.add(candidate)
+            for sibling_name in ("GMX_PROLIG_FEP", "GMX_PROLIG_MD", "bound", "unbound", "common"):
+                sibling = candidate / sibling_name
+                if sibling not in seen_roots:
+                    search_roots.append(sibling)
+                    seen_roots.add(sibling)
+
+        for root in search_roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for top_path in root.glob("**/topol.top"):
+                ff_dir = _ff_dir_from_topology(top_path)
+                if ff_dir:
+                    return ff_dir
+            for ff_dir in root.glob("**/*.ff"):
+                if not ff_dir.is_dir():
+                    continue
+                for candidate in (ff_dir / "ffnonbonded.itp", ff_dir / "charmm36.itp"):
+                    if candidate.exists():
+                        return ff_dir
+
+        # 4. Bundled PRISM CHARMM force fields used by fixture-style test cases.
+        bundled_root = Path(__file__).resolve().parents[2] / "configs" / "forcefield"
+        if bundled_root.exists():
+            for ff_dir in bundled_root.glob("charmm*.ff"):
+                if not ff_dir.is_dir():
+                    continue
+                for candidate in (ff_dir / "ffnonbonded.itp", ff_dir / "charmm36.itp", ff_dir / "forcefield.itp"):
+                    if candidate.exists():
+                        return ff_dir
+
+        return None
+
+    def _build_hybrid_atomtypes_itp(
+        self,
+        hybrid_itp_content: str,
+        source_atomtypes: Dict[str, str],
+        base_forcefield_atomtypes: Optional[set[str]] = None,
+    ) -> str:
+        """
+        Build atomtypes ITP file for hybrid ligand.
+
+        Extracts used atomtypes from hybrid ITP and generates definitions,
+        including dummy atomtypes (DUM_*) with zero LJ parameters.
+        """
+        used_types = self._parse_used_atomtypes(hybrid_itp_content)
+        base_forcefield_atomtypes = base_forcefield_atomtypes or set()
+        lines = [
+            "[ atomtypes ]",
+            "; merged atomtypes for hybrid ligand",
+        ]
+
+        written = set()
+        dummy_requests = set()
+
+        # Collect real and dummy atomtypes.
+        # Real atomtypes are written here so unbound leg (ligand-only, no protein FF)
+        # can find them. Bound leg topology inlines them separately from PRISM build,
+        # so duplication is avoided by grompp's deduplication (same values = no error).
+        real_requests = set()
+        for atomtype in used_types:
+            if atomtype.startswith("DUM_"):
+                dummy_requests.add(atomtype)
+            else:
+                real_requests.add(atomtype)
+
+        # Write real atomtypes first
+        for atomtype in sorted(real_requests):
+            if atomtype in written:
+                continue
+            base_line = source_atomtypes.get(atomtype)
+            if base_line and atomtype not in base_forcefield_atomtypes:
+                lines.append(base_line)
+                written.add(atomtype)
+
+        # Write dummy atomtypes
+        for dummy_atomtype in sorted(dummy_requests):
+            if dummy_atomtype in written:
+                continue
+            base_type = dummy_atomtype[4:]
+            base_line = source_atomtypes.get(base_type)
+            bond_type = base_type
+            if base_line:
+                bond_type = base_line.split()[1]
+            lines.append(
+                f"{dummy_atomtype:<8s} {bond_type:<8s} 0.00000 0.00000 A 0.00000e+00 0.00000e+00 ; dummy from {base_type}"
+            )
+            written.add(dummy_atomtype)
+
+        # Check for missing atomtypes
+        missing_non_dummy = sorted(
+            atomtype
+            for atomtype in used_types
+            if not atomtype.startswith("DUM_")
+            and atomtype not in source_atomtypes
+            and atomtype not in base_forcefield_atomtypes
+        )
+        if missing_non_dummy:
+            raise ValueError(f"Missing atomtype definitions for: {', '.join(missing_non_dummy)}")
+
+        return "\n".join(lines) + "\n"
+
+    def _extract_defaults_block(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> str:
+        """
+        Extract [ defaults ] block from ligand topologies.
+
+        Falls back to inference if not found.
+        """
+        defaults_blocks = []
+        for ligand_dir in [reference_ligand_dir, mutant_ligand_dir]:
+            if ligand_dir is None:
+                continue
+            top_file = ligand_dir / "LIG.top"
+            if not top_file.exists():
+                continue
+            block = self._parse_defaults_block(top_file.read_text())
+            if block:
+                defaults_blocks.append(block)
+
+        if not defaults_blocks:
+            return self._infer_defaults_block(reference_ligand_dir, mutant_ligand_dir)
+
+        first = defaults_blocks[0]
+        for block in defaults_blocks[1:]:
+            if block != first:
+                raise ValueError("Inconsistent [ defaults ] blocks between ligand topologies")
+        return first
+
+    def _infer_defaults_block(self, reference_ligand_dir: Path, mutant_ligand_dir: Optional[Path]) -> str:
+        """Infer [ defaults ] block from atomtype naming conventions."""
+        atomtypes = self._collect_atomtypes(reference_ligand_dir, mutant_ligand_dir)
+        if atomtypes and all(name.startswith("opls_") or name.startswith("DUM_opls_") for name in atomtypes):
+            return (
+                "[ defaults ]\n"
+                "; nbfunc        comb-rule       gen-pairs       fudgeLJ fudgeQQ\n"
+                "1               3               yes             0.5     0.5\n"
+            )
+        return (
+            "[ defaults ]\n"
+            "; nbfunc        comb-rule       gen-pairs       fudgeLJ fudgeQQ\n"
+            "1               2               yes             0.5     0.8333\n"
+        )
+
+    def _parse_defaults_block(self, top_content: str) -> str:
+        """Parse [ defaults ] block from topology file."""
+        lines = []
+        in_section = False
+        for line in top_content.splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ defaults ]":
+                in_section = True
+                lines.append(line)
+                continue
+            if in_section:
+                if stripped.startswith("[") or stripped.startswith("#include"):
+                    break
+                lines.append(line)
+        return "\n".join(lines) + "\n" if lines else ""
+
+    def _build_hybrid_gro(
+        self,
+        hybrid_itp_content: str,
+        reference_gro: Path,
+        mutant_gro: Optional[Path],
+        reference_coords_file: Optional[Path] = None,
+        mutant_coords_file: Optional[Path] = None,
+    ) -> str:
+        """
+        Build hybrid GRO file with coordinates from reference/mutant.
+
+        Parameters
+        ----------
+        hybrid_itp_content : str
+            Content of hybrid ITP file
+        reference_gro : Path
+            Reference ligand GRO file
+        mutant_gro : Optional[Path]
+            Mutant ligand GRO file (None for single-topology)
+
+        Returns
+        -------
+        str
+            Complete GRO file content
+        """
+        reference_coord_source = reference_coords_file if reference_coords_file else reference_gro
+        mutant_coord_source = mutant_coords_file if mutant_coords_file else mutant_gro
+
+        ref_coords, _ = self._parse_gro_atoms(reference_coord_source)
+        mut_coords, _ = self._parse_gro_atoms(mutant_coord_source) if mutant_coord_source else ({}, None)
+        _, ref_box = self._parse_gro_atoms(reference_gro)
+        hybrid_atoms, correspondence = self._parse_hybrid_atoms(hybrid_itp_content)
+
+        for counter_name in ("_element_index_counters", "_ref_element_index_counters"):
+            if hasattr(self, counter_name):
+                delattr(self, counter_name)
+
+        lines = [
+            "Hybrid ligand structure",
+            f"{len(hybrid_atoms):5d}",
+        ]
+
+        for idx, atom in enumerate(hybrid_atoms, start=1):
+            x, y, z = self._resolve_hybrid_atom_coordinates(atom, ref_coords, mut_coords, correspondence)
+            lines.append(f"{1:5d}{self.molecule_name:<5s}{atom['name']:>5s}{idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}")
+
+        lines.append(self._normalize_box_line(ref_box))
+        return "\n".join(lines) + "\n"
+
+    def _parse_gro_atoms(self, gro_path: Optional[Path]) -> tuple[Dict[str, list[Dict[str, float]]], Optional[str]]:
+        """
+        Parse GRO file and extract atom coordinates.
+
+        Falls back to MOL2/PDB files if GRO parsing fails or returns insufficient coordinates.
+        This handles cases where GRO atom names are truncated (5-char limit) but ITP uses full names.
+
+        Returns
+        -------
+        tuple
+            (atom_coords_by_name, box_line)
+        """
+        if gro_path is None or not gro_path.exists():
+            return {}, None
+
+        # Try MOL2 first (preserves full atom names)
+        # Check in same directory as GRO
+        mol2_path = gro_path.with_suffix(".mol2")
+        if mol2_path.exists():
+            try:
+                coords_by_name = self._parse_mol2_atoms(mol2_path)
+                if coords_by_name:
+                    return coords_by_name, None  # MOL2 doesn't have box info
+            except Exception:
+                pass  # Fall back to GRO
+
+        # Try PDB second (preserves full atom names)
+        pdb_path = gro_path.with_suffix(".pdb")
+        if pdb_path.exists():
+            try:
+                coords_by_name = self._parse_pdb_atoms(pdb_path)
+                if coords_by_name:
+                    return coords_by_name, None  # PDB doesn't have box info
+            except Exception:
+                pass  # Fall back to GRO
+
+        # Parse GRO file directly
+        # RTF/CGenFF-generated GRO files already contain full atom names (e.g., H28, C29)
+        # No need to search input directory for alternative files
+        lines = gro_path.read_text().splitlines()
+        if len(lines) < 3:
+            return {}, None
+
+        natoms = int(lines[1].strip())
+        coords_by_name = {}
+
+        for i in range(2, 2 + natoms):
+            if i >= len(lines):
+                break
+            line = lines[i]
+            if len(line) < 44:
+                continue
+
+            atom_name = line[10:15].strip()
+            x = float(line[20:28])
+            y = float(line[28:36])
+            z = float(line[36:44])
+
+            coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+
+        box_line = lines[2 + natoms] if len(lines) > 2 + natoms else None
+        return coords_by_name, box_line
+
+    def _parse_mol2_atoms(self, mol2_path: Path) -> Dict[str, list[Dict[str, float]]]:
+        """Parse MOL2 file and extract atom coordinates by atom name.
+
+        MOL2 files use Angstroms (Å), GROMACS uses nanometers (nm).
+        Converts coordinates from Å to nm (divide by 10).
+        """
+        coords_by_name = {}
+        in_atoms = False
+
+        for line in mol2_path.read_text().splitlines():
+            if line.startswith("@<TRIPOS>ATOM"):
+                in_atoms = True
+                continue
+            if line.startswith("@<TRIPOS>"):
+                in_atoms = False
+                continue
+            if not in_atoms or not line.strip():
+                continue
+
+            parts = line.split()
+            if len(parts) >= 6:
+                atom_id = parts[1]  # Atom ID (column 2)
+                atom_name = parts[1]  # Atom name (column 2, same as ID in many MOL2 files)
+                x = float(parts[2]) / 10.0  # Å → nm
+                y = float(parts[3]) / 10.0  # Å → nm
+                z = float(parts[4]) / 10.0  # Å → nm
+
+                # Use atom_id as key since it's more likely to match ITP atom names
+                coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+
+        return coords_by_name
+
+    def _parse_pdb_atoms(self, pdb_path: Path) -> Dict[str, list[Dict[str, float]]]:
+        """Parse PDB file and extract atom coordinates by atom name.
+
+        PDB files use Angstroms (Å), GROMACS uses nanometers (nm).
+        Converts coordinates from Å to nm (divide by 10).
+        """
+        coords_by_name = {}
+
+        for line in pdb_path.read_text().splitlines():
+            if not line.startswith("ATOM") and not line.startswith("HETATM"):
+                continue
+            if len(line) < 54:
+                continue
+
+            atom_name = line[12:16].strip()
+            x = float(line[30:38].strip()) / 10.0  # Å → nm
+            y = float(line[38:46].strip()) / 10.0  # Å → nm
+            z = float(line[46:54].strip()) / 10.0  # Å → nm
+
+            coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+
+        return coords_by_name
+
+    def _parse_hybrid_atoms(self, hybrid_itp_content: str) -> tuple[list[Dict[str, str]], Dict[str, str]]:
+        """
+        Parse [ atoms ] section from hybrid ITP.
+
+        Also extracts FEbuilder correspondence comments.
+
+        Returns
+        -------
+        tuple[list[Dict[str, str]], Dict[str, str]]
+            (List of atom dictionaries, correspondence map)
+            correspondence map: state A name -> state B name
+        """
+        atoms = []
+        correspondence = {}
+        in_atoms = False
+        pending_correspondence = None
+
+        for line in hybrid_itp_content.splitlines():
+            stripped = line.strip()
+
+            # Check for FEbuilder correspondence comment
+            if stripped.startswith(";") and "name_b (state B):" in stripped:
+                pending_correspondence = stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if not in_atoms or not stripped or stripped.startswith(";"):
+                continue
+
+            parts = stripped.split()
+            if len(parts) < 5:
+                continue
+
+            atom_name = parts[4]
+            atoms.append(
+                {
+                    "name": atom_name,
+                    "type": parts[1],
+                    "resname": parts[3],
+                }
+            )
+
+            # Record correspondence if available
+            if pending_correspondence:
+                correspondence[atom_name] = pending_correspondence
+                pending_correspondence = None
+
+        return atoms, correspondence
+
+    def _resolve_hybrid_atom_coordinates(
+        self,
+        atom: Dict[str, str],
+        ref_coords: Dict[str, list[Dict[str, float]]],
+        mut_coords: Dict[str, list[Dict[str, float]]],
+        correspondence: Dict[str, str],
+        resolved_coords: list[tuple[float, float, float]] = None,
+    ) -> tuple[float, float, float]:
+        """
+        Resolve coordinates for a hybrid atom.
+
+        For dual-topology FEP:
+        - Real atoms in state A get coordinates from reference
+        - Real atoms in state B (DUM_ in state A) get coordinates from mutant
+        - If FEbuilder correspondence exists, use corresponding atom coordinates from mutant
+        - Strategy 5: Sequential index matching for duplicate atom names (H, C, N, etc.)
+
+        Parameters
+        ----------
+        atom : Dict[str, str]
+            Atom dictionary with keys: name, type, resname
+        ref_coords : Dict[str, list[Dict[str, float]]]
+            Reference ligand coordinates (by atom name)
+        mut_coords : Dict[str, list[Dict[str, float]]]
+            Mutant ligand coordinates (by atom name)
+        correspondence : Dict[str, str]
+            FEbuilder correspondence map (state A name -> state B name)
+        resolved_coords : list[tuple[float, float, float]]
+            List of already-resolved coordinates for centroid fallback
+
+        Returns
+        -------
+        tuple[float, float, float]
+            (x, y, z) coordinates
+        """
+        atom_name = atom["name"]
+        atom_type = atom["type"]
+
+        # Strategy 1: Try reference coordinates first (state A atoms)
+        if atom_name in ref_coords and ref_coords[atom_name]:
+            coord = ref_coords[atom_name][0]
+            return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 1b: Hybrid state-A names are often tagged with a trailing
+        # "A" (for example C01A/H02A), while the source ligand GRO keeps the
+        # original untagged atom names. Reuse the reference coordinates for
+        # those transformed-A atoms instead of dropping them at the origin.
+        if atom_name.endswith("A"):
+            base_name = atom_name[:-1]
+            if base_name in ref_coords and ref_coords[base_name]:
+                coord = ref_coords[base_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 1c: Handle simple element names (HA, OA, CA, N, F)
+        # where reference has numbered names (H5, O19, C21, N15, F26)
+        # Match by element prefix using sequential indexing
+        if atom_name.isalpha() and len(atom_name) <= 3:
+            # Extract element from atom name
+            element = self._extract_element_from_atom_name(atom_name)
+
+            # Find all reference atoms with this element prefix
+            ref_atoms_by_element = []
+            for ref_name, coord_list in ref_coords.items():
+                if coord_list and coord_list[0]:
+                    ref_element = self._extract_element_from_atom_name(ref_name)
+                    if ref_element == element:
+                        ref_atoms_by_element.append((ref_name, coord_list[0]))
+
+            # Use sequential index matching
+            if not hasattr(self, "_ref_element_index_counters"):
+                self._ref_element_index_counters = {}
+
+            counter_key = f"{element}_reference"
+            current_idx = self._ref_element_index_counters.get(counter_key, 0)
+
+            if current_idx < len(ref_atoms_by_element):
+                coord = ref_atoms_by_element[current_idx][1]
+                self._ref_element_index_counters[counter_key] = current_idx + 1
+                return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 2: For dummy atoms (state A), try mutant coordinates with multiple name variants
+        if atom_type.startswith("DUM_"):
+            # Try direct name match first
+            if atom_name in mut_coords and mut_coords[atom_name]:
+                coord = mut_coords[atom_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+            # Try removing single B suffix (C0BB → C0B)
+            # Note: Only remove ONE "B" if atom name ends with "B"
+            base_name = atom_name[:-1] if atom_name.endswith("B") else atom_name
+            if base_name in mut_coords and mut_coords[base_name]:
+                coord = mut_coords[base_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+            # Try adding B suffix (C0B → C0BB)
+            b_name = f"{atom_name}B"
+            if b_name in mut_coords and mut_coords[b_name]:
+                coord = mut_coords[b_name][0]
+                return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 3: Use FEbuilder correspondence mapping
+        if atom_name in correspondence:
+            corresponding_name_b = correspondence[atom_name]
+
+            # Try exact correspondence name
+            if corresponding_name_b in mut_coords and mut_coords[corresponding_name_b]:
+                coord = mut_coords[corresponding_name_b][0]
+                return coord["x"], coord["y"], coord["z"]
+
+            # Try with B suffix variations
+            for suffix in ["", "B"]:
+                candidate_name = f"{corresponding_name_b}{suffix}"
+                if candidate_name in mut_coords and mut_coords[candidate_name]:
+                    coord = mut_coords[candidate_name][0]
+                    return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 4: Reverse correspondence lookup (B → A)
+        # Check if this atom name appears as a value in correspondence
+        for atom_a, atom_b in correspondence.items():
+            if atom_name == atom_b:
+                # Try atom_a from reference
+                if atom_a in ref_coords and ref_coords[atom_a]:
+                    coord = ref_coords[atom_a][0]
+                    return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 5: Sequential index matching for duplicate atom names
+        # For cases where atom names are all H, C, N, O, F, etc. (no numbering)
+        # Match by sequential occurrence in the coordinate file
+        if not mut_coords:
+            # No mutant coordinates available
+            print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
+            return 0.0, 0.0, 0.0
+
+        # Prefer atom-name-derived elements for generic/sequential types such as
+        # OPLS/OpenFF, because names like opls_800 do not encode chemistry.
+        element_candidates = []
+        for candidate in (
+            self._extract_element_from_atom_name(atom_name.rstrip("AB")),
+            self._extract_element_from_atom_type(atom_type),
+        ):
+            normalized = normalize_element_symbol(candidate)
+            if normalized and normalized not in element_candidates:
+                element_candidates.append(normalized)
+
+        mutant_atoms_by_element = []
+        matched_element = None
+        for element in element_candidates:
+            for mut_name, coord_list in mut_coords.items():
+                if coord_list and coord_list[0]:
+                    mut_element = normalize_element_symbol(self._extract_element_from_atom_name(mut_name))
+                    if mut_element == element:
+                        mutant_atoms_by_element.append((mut_name, coord_list[0]))
+            if mutant_atoms_by_element:
+                matched_element = element
+                break
+
+        if not mutant_atoms_by_element:
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, elements: {element_candidates}), using origin"
+            )
+            return 0.0, 0.0, 0.0
+
+        # Use sequential index matching: track how many of each element we've matched
+        if not hasattr(self, "_element_index_counters"):
+            self._element_index_counters = {}
+
+        counter_key = f"{element}_mutant"
+        current_idx = self._element_index_counters.get(counter_key, 0)
+
+        if current_idx < len(mutant_atoms_by_element):
+            # Use the current atom's coordinates
+            coord = mutant_atoms_by_element[current_idx][1]
+            self._element_index_counters[counter_key] = current_idx + 1
+            return coord["x"], coord["y"], coord["z"]
+        else:
+            # Ran out of atoms of this element
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}, element: {element}), using origin"
+            )
+            return 0.0, 0.0, 0.0
+
+        # Fallback: Use centroid of resolved atoms (if available)
+        if resolved_coords and len(resolved_coords) > 0:
+            import numpy as np
+
+            centroid = np.mean(resolved_coords, axis=0)
+            print(
+                f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using centroid ({centroid[0]:.3f}, {centroid[1]:.3f}, {centroid[2]:.3f})"
+            )
+            return centroid[0], centroid[1], centroid[2]
+
+        # Ultimate fallback: origin
+        print(f"  ⚠ Warning: Could not resolve coordinates for {atom_name} (type: {atom_type}), using origin")
+        return 0.0, 0.0, 0.0
+
+    def _extract_element_from_atom_type(self, atom_type: str) -> str:
+        """Extract element symbol from atom type.
+
+        Examples:
+        - C331 → C
+        - N261 → N
+        - O2D4 → O
+        - HGP1 → H
+        - DUM_HGP1 → H (dummy atoms)
+
+        Notes
+        -----
+        Generic/sequential types such as ``opls_800`` do not encode the element.
+        Return an empty string for those so callers can fall back to atom-name or
+        structure-derived element identity instead of misclassifying them as oxygen.
+        """
+        if atom_type.startswith("DUM_"):
+            return self._extract_element_from_atom_type(atom_type[4:])
+
+        lowered = atom_type.lower()
+        if lowered.startswith(("opls_", "output_")):
+            return ""
+
+        token = atom_type.split(".", 1)[0]
+        token = token.split("_", 1)[0]
+        alpha = "".join(ch for ch in token if ch.isalpha())
+        if not alpha:
+            return "C"
+
+        # Prefer the longest valid element prefix (e.g. Cl, Br) before falling back.
+        for length in (2, 1):
+            if len(alpha) >= length:
+                candidate = normalize_element_symbol(alpha[:length])
+                if candidate in {"H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "Si", "As", "Se", "Te"}:
+                    return candidate
+
+        return normalize_element_symbol(alpha[:1])
+
+    def _extract_element_from_atom_name(self, atom_name: str) -> str:
+        """Extract element symbol from atom name.
+
+        Examples:
+        - C4 → C
+        - N11 → N
+        - H6 → H
+        - F26 → F
+        """
+        # For atom names, the first character is the element
+        # Exception: 2-letter elements like Cl, Br
+        two_letter_elements = {"CL", "BR", "SI", "AS", "SE", "TE"}
+        if len(atom_name) >= 2:
+            first_two = atom_name[:2].upper()
+            if first_two in two_letter_elements:
+                return first_two
+
+        # Default: first character is the element
+        return atom_name[0] if atom_name else "C"
+
+    def _normalize_box_line(self, box_line: Optional[str]) -> str:
+        """Normalize GRO box line."""
+        if box_line is None:
+            return "   5.00000   5.00000   5.00000"
+        return box_line.strip()
+
+    def _parse_used_atomtypes(self, hybrid_itp_content: str) -> set[str]:
+        """
+        Extract all atomtypes used in hybrid ITP [ atoms ] section.
+
+        Returns
+        -------
+        set[str]
+            Set of atomtype names
+        """
+        used_types = set()
+        in_atoms = False
+
+        for line in hybrid_itp_content.splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if not in_atoms or not stripped or stripped.startswith(";"):
+                continue
+
+            parts = stripped.split()
+            if len(parts) >= 2:
+                used_types.add(parts[1])  # typeA
+            if len(parts) >= 9:
+                used_types.add(parts[8])  # typeB (dual-topology)
+
+        return used_types
+
+    def _looks_like_float(self, value: str) -> bool:
+        """Check if string looks like a float."""
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
+
+    def _write_hybrid_top_template(self, output_path: Path) -> None:
+        """Write hybrid topology template file."""
+        content = f"""
+; Hybrid ligand topology template
+; This file is for reference only - actual topology is built by PRISM
+
+#include "{self.hybrid_forcefield_filename}"
+#include "{self.hybrid_itp_filename}"
+
+[ system ]
+Hybrid ligand
+
+[ molecules ]
+{self.molecule_name}  1
+"""
+        output_path.write_text(content.lstrip())
+
+    def _gro_to_pdb(self, gro_file: Path) -> str:
+        """
+        Convert GRO file to PDB format.
+
+        Simple conversion for visualization purposes.
+        """
+        lines = gro_file.read_text().splitlines()
+        pdb_lines = ["REMARK   Generated from LIG.gro for PRISM-FEP scaffold"]
+        atom_lines = lines[2:-1]
+
+        for serial, line in enumerate(atom_lines, start=1):
+            if len(line) < 44:
+                continue
+            resnum = int(line[:5].strip())
+            resname = line[5:10].strip() or "LIG"
+            atom_name = line[10:15].strip() or f"A{serial}"
+            x = float(line[20:28].strip()) * 10.0
+            y = float(line[28:36].strip()) * 10.0
+            z = float(line[36:44].strip()) * 10.0
+            element = "".join([c for c in atom_name if c.isalpha()])[:1].upper() or "C"
+            pdb_lines.append(
+                f"HETATM{serial:5d} {atom_name:>4s} {resname:>3s} A{resnum:4d}    "
+                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element:>2s}"
+            )
+
+        pdb_lines.append("END")
+        return "\n".join(pdb_lines) + "\n"

@@ -16,8 +16,8 @@ if "OMP_NUM_THREADS" not in os.environ:
 
 # Core infrastructure components (maintain backward compatibility)
 from .core.config import AnalysisConfig, convert_numpy_types
-from .core.trajectory import TrajectoryManager
-from .core.trajectory_processor import TrajectoryProcessor, process_trajectory_simple, batch_process_trajectories
+from .trajectory import TrajectoryManager, TrajectoryProcessor
+from .trajectory.processor import process_trajectory_simple, batch_process_trajectories
 
 # from .core.multisys import MultiSystemAnalyzer  # TODO: Fix MDTraj conversion
 from .core.export import DataExporter

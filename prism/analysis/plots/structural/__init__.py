@@ -3,12 +3,12 @@
 """
 Structural visualization subpackage.
 
-This module provides modular plotting functions for structural analysis,
-organized by functionality.
+This module provides modular plotting functions for structural analysis.
+RMSD, contact, and hbond functions are re-exported from their canonical packages.
 """
 
-# Import all functions from submodules
-from .rmsd_rmsf_plots import (
+# Import RMSD functions from canonical package
+from ..rmsd import (
     plot_rmsd_time_series,
     plot_rmsf_per_residue,
     plot_rmsd_rmsf_combined,
@@ -18,16 +18,22 @@ from .rmsd_rmsf_plots import (
     plot_multi_chain_rmsf_example_style,
 )
 
-from .contact_hbond_plots import (
+# Import contact functions from canonical package
+from ..contact import (
     generate_publication_contact_plots,
     plot_contact_probability_barplot,
     plot_contact_probability_heatmap,
     plot_contact_distance_distribution,
-    plot_hydrogen_bond_analysis,
     plot_key_residue_distances,
+)
+
+# Import hbond functions from canonical package
+from ..hbond import (
+    plot_hydrogen_bond_analysis,
     plot_hydrogen_bond_stability,
 )
 
+# Import dihedral/SASA functions (stay in structural/)
 from .dihedral_sasa_plots import (
     plot_ramachandran,
     plot_dihedral_time_series,
@@ -35,6 +41,7 @@ from .dihedral_sasa_plots import (
     plot_property_distribution,
 )
 
+# Import specialized functions (stay in structural/)
 from .specialized_plots import plot_violin_comparison, plot_distance_time_series, plot_magnesium_coordination
 
 __all__ = [

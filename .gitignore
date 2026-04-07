@@ -79,6 +79,9 @@ Thumbs.db
 
 # Claude Code
 .claude/
+!.claude/
+!.claude/skills/
+!.claude/skills/**
 
 # Empty cache directory
 cache/
@@ -107,5 +110,14 @@ tests/*
 .ruff_cache
 .qoder
 .playwright*
+.history
 
-
+prism/*/*.backup
+prism/*/*/*.backup
+.mcp.json
+.serena
+.*.pid
+.claude/skills/__pycache__/fep-visualization-check.cpython-310.pyc
+.claude/cclsp.json
+.claude/scheduled_tasks.json
+*/GMX_PROLIG_FEP/_build/*/*.yaml

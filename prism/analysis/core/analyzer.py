@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple, Dict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .config import AnalysisConfig
-from .trajectory import TrajectoryManager
+from ..trajectory import TrajectoryManager
 from ..calc.contacts import ContactAnalyzer
 from ..calc.distance import DistanceAnalyzer
 from ..calc.hbonds import HBondAnalyzer

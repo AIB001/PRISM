@@ -12,7 +12,12 @@ from typing import Dict, List, Optional, Tuple
 import logging
 
 # Import publication utilities
-from ..publication_utils import get_publication_style, PUBLICATION_FONTS, apply_publication_style, get_standard_figsize
+from ..core.publication_utils import (
+    get_publication_style,
+    PUBLICATION_FONTS,
+    apply_publication_style,
+    get_standard_figsize,
+)
 # Import residue formatting utility
 
 # Apply global publication style on import

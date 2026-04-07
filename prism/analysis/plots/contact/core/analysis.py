@@ -411,7 +411,7 @@ def plot_grouped_contact_bars(
             if separate_panels:
                 base_path = Path(output_path)
 
-                # 避免重复添加后缀
+                # Avoid appending the suffix more than once.
 
                 if "_grouped_bars" not in base_path.stem:
                     separate_path = base_path.parent / f"{base_path.stem}_grouped_bars{base_path.suffix}"
@@ -489,7 +489,7 @@ def plot_key_residue_contacts(key_residue_results: Dict, output_path: str, title
 
         n_rows = (n_residues + n_cols - 1) // n_cols
 
-        # 使用标准尺寸计算多panel尺寸
+        # Use the standard panel size to scale the multi-panel figure.
 
         base_width, base_height = get_standard_figsize("single")
 

@@ -143,6 +143,8 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             return "mol2"
         elif file_ext in [".sdf", ".sd", ".mol"]:
             return "mol"
+        elif file_ext == ".pdb":
+            return "pdb"
         else:
             print(f"Warning: Unknown file extension '{file_ext}', assuming MOL format")
             return "mol"
@@ -376,23 +378,18 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         return files
 
     def _align_coordinates(self, gro_file):
-        """
-        Align LigParGen output coordinates to input structure
-
-        Parameters:
-        -----------
-        gro_file : str
-            Path to LigParGen GRO file
-        """
+        """Align LigParGen output coordinates to the input structure."""
         print("Aligning coordinates to input structure...")
 
+        temp_pdb = gro_file.replace(".gro", "_temp.pdb")
         try:
             from rdkit import Chem
-            from rdkit.Chem import rdMolAlign
+            from rdkit.Chem import rdFMCS, rdMolAlign
 
-            # Load input molecule
             if self.file_format == "mol2":
                 mol_input = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
+            elif self.file_format == "pdb":
+                mol_input = Chem.MolFromPDBFile(self.ligand_path, removeHs=False)
             else:
                 mol_input = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
 
@@ -400,30 +397,50 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 print("Warning: Could not load input molecule for alignment")
                 return
 
-            # Load LigParGen output (convert GRO to PDB first)
-            temp_pdb = gro_file.replace(".gro", "_temp.pdb")
             self._convert_gro_to_pdb(gro_file, temp_pdb)
-
             mol_lpg = Chem.MolFromPDBFile(temp_pdb, removeHs=False)
-
             if mol_lpg is None:
                 print("Warning: Could not load LigParGen output for alignment")
-                os.remove(temp_pdb)
                 return
 
-            # Perform alignment
-            rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input)
-            print(f"Alignment RMSD: {rmsd:.3f} Å")
+            rmsd = None
+            try:
+                rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input)
+                print(f"Alignment RMSD: {rmsd:.3f} Å")
+            except Exception as direct_err:
+                print(f"Direct alignment failed: {direct_err}")
+                heavy_input = Chem.RemoveHs(mol_input)
+                heavy_lpg = Chem.RemoveHs(mol_lpg)
+                mcs = rdFMCS.FindMCS(
+                    [heavy_input, heavy_lpg],
+                    atomCompare=rdFMCS.AtomCompare.CompareElements,
+                    bondCompare=rdFMCS.BondCompare.CompareAny,
+                    ringMatchesRingOnly=True,
+                    completeRingsOnly=True,
+                    timeout=10,
+                )
+                if not mcs.smartsString:
+                    raise ValueError("MCS-based alignment failed: no common scaffold found")
 
-            # Write aligned structure back to PDB, then convert to GRO
+                patt = Chem.MolFromSmarts(mcs.smartsString)
+                input_match = heavy_input.GetSubstructMatch(patt)
+                lpg_match = heavy_lpg.GetSubstructMatch(patt)
+                if not input_match or not lpg_match:
+                    raise ValueError("MCS-based alignment failed: no substructure match found")
+
+                atom_map = list(zip(lpg_match, input_match))
+                rmsd = rdMolAlign.AlignMol(mol_lpg, mol_input, atomMap=atom_map)
+                print(f"Alignment RMSD (MCS fallback, {len(atom_map)} heavy atoms): {rmsd:.3f} Å")
+
             Chem.MolToPDBFile(mol_lpg, temp_pdb)
             self._convert_pdb_to_gro(temp_pdb, gro_file)
-
-            os.remove(temp_pdb)
             print("Coordinate alignment completed")
 
         except Exception as e:
             print(f"Warning: Coordinate alignment failed: {e}")
+        finally:
+            if os.path.exists(temp_pdb):
+                os.remove(temp_pdb)
 
     def _convert_gro_to_pdb(self, gro_file, pdb_file):
         """Convert GRO to PDB format"""
@@ -521,6 +538,9 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
         # Create position restraints file
         self._create_position_restraints(os.path.join(self.lig_ff_dir, "LIG.gro"))
+
+        # Normalize total charge to nearest integer
+        self._normalize_charges()
 
         print("Standardization complete")
 
@@ -680,6 +700,164 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
             print("Temporary files removed")
+
+    def _normalize_charges(self):
+        """
+        Normalize the total OPLS ligand charge to the nearest integer.
+
+        LigParGen can emit a slightly non-integer total charge (for example
+        ``-0.0001``). This method uses two strategies based on the magnitude
+        of the error:
+        1. Small error (< 0.01): apply the correction to the atom with the
+           largest absolute charge.
+        2. Larger error (>= 0.01): scale all atomic charges proportionally.
+
+        This preserves an integer total charge while minimizing distortion of
+        the original charge distribution.
+        """
+        itp_path = os.path.join(self.lig_ff_dir, "LIG.itp")
+        if not os.path.exists(itp_path):
+            return
+
+        # Parse atom charges from the ITP file.
+        atoms = []
+        with open(itp_path, "r") as f:
+            in_atom_section = False
+            for line in f:
+                if line.startswith("[ atoms ]"):
+                    in_atom_section = True
+                    continue
+                if in_atom_section:
+                    if line.startswith("["):
+                        # Entered a new section; stop reading atom records.
+                        break
+                    line = line.strip()
+                    if not line or line.startswith(";"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 7:
+                        try:
+                            nr = int(parts[0])
+                            atom_type = parts[1]
+                            resnr = int(parts[2])
+                            residue = parts[3]
+                            atom_name = parts[4]
+                            cgnr = int(parts[5])
+                            charge = float(parts[6])
+                            mass = float(parts[7])
+                            atoms.append(
+                                {
+                                    "nr": nr,
+                                    "type": atom_type,
+                                    "resnr": resnr,
+                                    "residue": residue,
+                                    "name": atom_name,
+                                    "cgnr": cgnr,
+                                    "charge": charge,
+                                    "mass": mass,
+                                    "line_start": line,
+                                }
+                            )
+                        except (ValueError, IndexError) as e:
+                            # Ignore malformed atom rows.
+                            continue
+
+        if not atoms:
+            print("  Warning: No atoms found in ITP file, skipping charge normalization")
+            return
+
+        # Compute the current total charge.
+        current_total = sum(atom["charge"] for atom in atoms)
+
+        # Round to the nearest integer charge.
+        target_charge = round(current_total)
+
+        # No correction is needed if the charge is already effectively integer.
+        if abs(current_total - target_charge) < 1e-10:
+            print(f"  Total charge is already integer: {current_total:.6f}")
+            return
+
+        # Compute the correction that must be applied.
+        charge_error = target_charge - current_total
+        print(f"  Normalizing charges: {current_total:.6f} → {target_charge:.6f} (Δ = {charge_error:+.6f})")
+
+        # Choose the correction strategy based on the magnitude of the error.
+        if abs(charge_error) < 0.01:
+            # Small error: apply it to the atom with the largest absolute charge.
+            max_charge_atom = max(atoms, key=lambda a: abs(a["charge"]))
+            max_charge_atom["charge"] += charge_error
+            print(
+                f"  Applied small correction to atom {max_charge_atom['name']} "
+                f"(charge: {max_charge_atom['charge'] - charge_error:.6f} → "
+                f"{max_charge_atom['charge']:.6f})"
+            )
+        else:
+            # Larger error: rescale all charges proportionally.
+            scale_factor = target_charge / current_total
+            for atom in atoms:
+                atom["charge"] *= scale_factor
+            print(f"  Applied proportional scaling (factor: {scale_factor:.6f}) to all atoms")
+
+        # Rewrite the ITP file with the corrected charges.
+        with open(itp_path, "r") as f:
+            lines = f.readlines()
+
+        # Replace atom rows inside the [ atoms ] section.
+        atom_dict = {atom["nr"]: atom for atom in atoms}
+        new_lines = []
+        in_atom_section = False
+
+        for line in lines:
+            if line.strip().startswith("[ atoms ]"):
+                in_atom_section = True
+                new_lines.append(line)
+            elif in_atom_section:
+                if line.strip().startswith("["):
+                    # Entered a new section.
+                    in_atom_section = False
+                    new_lines.append(line)
+                elif line.strip() and not line.strip().startswith(";"):
+                    # Replace atom records while preserving the surrounding file layout.
+                    parts = line.split()
+                    if len(parts) >= 8:
+                        try:
+                            nr = int(parts[0])
+                            if nr in atom_dict:
+                                atom = atom_dict[nr]
+                                # Rebuild the row while keeping the original column layout.
+                                new_line = (
+                                    f"{atom['nr']:>6}  "
+                                    f"{atom['type']:<10}  "
+                                    f"{atom['resnr']:>4}  "
+                                    f"{atom['residue']:<5}  "
+                                    f"{atom['name']:<5}  "
+                                    f"{atom['cgnr']:>4}  "
+                                    f"{atom['charge']:>8.6f}  "
+                                    f"{atom['mass']:>8.3f}\n"
+                                )
+                                new_lines.append(new_line)
+                                continue
+                        except (ValueError, IndexError):
+                            pass
+                    # Keep the original line if it cannot be rewritten.
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+
+        # Write the updated file back to disk.
+        with open(itp_path, "w") as f:
+            f.writelines(new_lines)
+
+        # Validate the corrected total charge.
+        verified_total = sum(atom["charge"] for atom in atoms)
+        print(f"  ✓ Verified total charge: {verified_total:.6f}")
+
+        # Confirm the normalization reached the intended integer charge.
+        if abs(verified_total - target_charge) > 1e-6:
+            print(
+                f"  ⚠ Warning: Charge normalization may have issues "
+                f"(target: {target_charge:.6f}, actual: {verified_total:.6f})"
+            )
 
 
 if __name__ == "__main__":

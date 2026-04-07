@@ -1,0 +1,691 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Multi-Estimator HTML Report Generator for FEP Analysis
+
+Generates comprehensive HTML reports comparing multiple estimators (TI/BAR/MBAR).
+Includes comparison tables, tab-based switching, and complete analysis for each estimator.
+"""
+
+from pathlib import Path
+from typing import Union, TYPE_CHECKING
+from datetime import datetime
+
+from .. import plots
+from .multi_quality import build_quality_warnings_section
+
+if TYPE_CHECKING:
+    from ..core.models import FEResults
+
+
+class MultiEstimatorReportGenerator:
+    """
+    Generate HTML reports comparing multiple estimators (TI/BAR/MBAR)
+
+    Creates comprehensive HTML reports with:
+    - Comparison table showing results from all estimators
+    - Warning banner if results diverge significantly (>1 kcal/mol)
+    - Tab-based switching between estimators
+    - Complete analysis for each estimator (Summary, Lambda Profiles, etc.)
+    - Overlap matrix only shown for MBAR (others show placeholder message)
+
+    Parameters
+    ----------
+    multi_results : MultiEstimatorResults
+        Results object containing data from multiple estimators
+
+    Examples
+    --------
+    >>> from prism.fep.analysis import FEPMultiEstimatorAnalyzer, MultiEstimatorReportGenerator
+    >>> analyzer = FEPMultiEstimatorAnalyzer(
+    ...     bound_dir='fep/bound',
+    ...     unbound_dir='fep/unbound',
+    ...     estimators=['TI', 'BAR', 'MBAR']
+    ... )
+    >>> results = analyzer.analyze()
+    >>> generator = MultiEstimatorReportGenerator(results)
+    >>> html_path = generator.generate('comparison_report.html')
+    """
+
+    def __init__(self, multi_results):
+        """
+        Initialize multi-estimator report generator
+
+        Parameters
+        ----------
+        multi_results : MultiEstimatorResults
+            Results from multiple estimators
+        """
+        self.multi_results = multi_results
+        self.template_style = "modern"
+
+    def generate(self, output_path: Union[str, Path]) -> Path:
+        """
+        Generate HTML report with estimator comparison and tab switching
+
+        If only one estimator is present, delegates to HTMLReportGenerator
+        to avoid code duplication and ensure consistent formatting.
+
+        Parameters
+        ----------
+        output_path : str or Path
+            Path to output HTML file
+
+        Returns
+        -------
+        Path
+            Path to generated HTML file
+        """
+        # If only one estimator, use the standard HTMLReportGenerator
+        # to avoid code duplication and ensure all plots are included
+        if len(self.multi_results.methods) == 1:
+            # Get the single estimator's results
+            estimator_name = list(self.multi_results.methods.keys())[0]
+            single_results = self.multi_results.methods[estimator_name]
+
+            # Use HTMLReportGenerator for single estimator
+            # This ensures all existing plots and features are included
+            from .html import HTMLReportGenerator
+
+            single_generator = HTMLReportGenerator(single_results)
+            return single_generator.generate(output_path)
+
+        # Multiple estimators: use multi-estimator format
+        html_content = self._generate_html()
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w") as f:
+            f.write(html_content)
+
+        return output_path
+
+    def _generate_html(self) -> str:
+        """Generate complete HTML document with comparison and tabs"""
+        # Load templates
+        from .html import _load_template
+
+        css_content = _load_template("styles.css")
+        js_content = _load_template("script.js")
+
+        # Build warning banner (if diverged)
+        warning_banner = self._build_warning_banner()
+
+        # Build comparison table
+        comparison_section = self._build_comparison_section()
+
+        # Build estimator tabs
+        estimator_tabs_content = self._build_estimator_tabs_content()
+
+        # Build complete HTML
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FEP Analysis - Multi-Estimator Comparison</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+{css_content}
+    </style>
+    <script>
+{js_content}
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧪 FEP Analysis - Multi-Estimator Comparison</h1>
+            <div class="subtitle">
+                Generated on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            </div>
+        </header>
+
+{warning_banner}
+
+        {comparison_section}
+
+        <div class="card">
+            <h2>🔬 Detailed Analysis by Estimator</h2>
+
+            <div class="tab-buttons">
+                {self._build_tab_buttons()}
+            </div>
+
+{estimator_tabs_content}
+        </div>
+
+        <div class="footer">
+            <p>Generated by PRISM FEP Analyzer (Multi-Estimator Mode)</p>
+            <p>{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+        </div>
+    </div>
+</body>
+</html>"""
+        return html
+
+    def _build_tab_buttons(self) -> str:
+        """Build tab button HTML for estimator switching"""
+        buttons = []
+        for i, estimator in enumerate(self.multi_results.methods.keys()):
+            # Add 'active' class to first button
+            active_class = " active" if i == 0 else ""
+            # Use format() to avoid f-string backslash issues
+            buttons.append(
+                '<button class="tab-btn{active}" onclick="showEstimatorTab(\'{est}\')">{est}</button>'.format(
+                    active=active_class, est=estimator
+                )
+            )
+        return "".join(buttons)
+
+    def _build_warning_banner(self) -> str:
+        """Build warning banner if results diverged"""
+        if not self.multi_results.comparison.get("diverged", False):
+            return ""
+
+        return f"""
+        <div class="card" style="background: #fff3cd; border-left: 4px solid #dc3545; margin-bottom: 20px;">
+            <h3 style="color: #856404; margin-top: 0;">⚠️ Warning: Estimator Results Diverge</h3>
+            <p style="margin-bottom: 10px;">
+                Results from different estimators diverge significantly:
+                <strong>range = {self.multi_results.comparison["delta_g_range"]:.2f} kcal/mol</strong>
+            </p>
+            <p style="margin-bottom: 0;">
+                This may indicate:
+            </p>
+            <ul style="margin-top: 0; margin-bottom: 0;">
+                <li>Insufficient sampling (check overlap matrix)</li>
+                <li>Poor convergence (check time convergence)</li>
+                <li>Inappropriate lambda spacing</li>
+                <li>System far from equilibrium</li>
+            </ul>
+            <p style="margin-top: 10px; margin-bottom: 0;">
+                <strong>💡 Recommendation:</strong> Use the estimator with the best sampling quality
+                (usually MBAR with good overlap matrix) and consider extending simulation time.
+            </p>
+        </div>
+        """
+
+    def _build_comparison_section(self) -> str:
+        """Build comparison section with table"""
+        rows = ""
+        for name, results in self.multi_results.methods.items():
+            # Use repeat-to-repeat stderr if available (more reliable), otherwise use method error
+            if results.n_repeats > 1:
+                repeat_stats = results.metadata.get("repeat_statistics", {})
+                error_value = repeat_stats.get("ddG_stderr", 0.0)
+            else:
+                error_value = results.delta_g_error
+
+            rows += f"""
+                    <tr>
+                        <td><strong>{name}</strong></td>
+                        <td class="value">{results.delta_g:.2f}</td>
+                        <td class="value">± {error_value:.2f}</td>
+                        <td class="value">{results.delta_g_bound:.2f}</td>
+                        <td class="value">{results.delta_g_unbound:.2f}</td>
+                    </tr>
+            """
+
+        # Add statistics row
+        comp = self.multi_results.comparison
+        stats_row = f"""
+                    <tr style="border-top: 2px solid #666; font-weight: bold; background: #e8f5e9;">
+                        <td>Statistics</td>
+                        <td class="value">{comp["delta_g_mean"]:.2f}</td>
+                        <td class="value">std = {comp["delta_g_std"]:.2f}</td>
+                        <td class="value">range = {comp["delta_g_range"]:.2f}</td>
+                        <td class="value">-</td>
+                    </tr>
+        """
+
+        # Determine error type for explanation
+        first_result = list(self.multi_results.methods.values())[0]
+        error_type = "Repeat-to-repeat stderr" if first_result.n_repeats > 1 else "Method error"
+
+        return f"""
+        <div class="card">
+            <h2>📊 Results Comparison</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Estimator</th>
+                        <th>ΔΔG (kcal/mol)</th>
+                        <th>Error (kcal/mol)</th>
+                        <th>Bound ΔG (kcal/mol)</th>
+                        <th>Unbound ΔG (kcal/mol)</th>
+                    </tr>
+                </thead>
+                <tbody>
+{rows}
+{stats_row}
+                </tbody>
+            </table>
+            <p style="margin-top: 15px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                <strong>💡 Error Type:</strong> {error_type} - {
+                    'Standard error from multiple independent repeats (n={}). '.format(first_result.n_repeats)
+                    if first_result.n_repeats > 1
+                    else 'Method-intrinsic error from MBAR/TI/BAR estimator. '
+                }
+                <strong>💡 Tip:</strong> Click estimator tabs below to see detailed analysis for each method.
+                {
+            "<br><strong>⚠️ Agreement:</strong> "
+            + comp["agreement"]
+            + " - Results "
+            + (
+                "agree well"
+                if comp["agreement"] == "good"
+                else "show moderate divergence"
+                if comp["agreement"] == "moderate"
+                else "diverge significantly"
+            )
+            + "."
+        }
+            </p>
+        </div>
+        """
+
+    def _build_estimator_tabs_content(self) -> str:
+        """Build tab content for each estimator"""
+        tabs_content = ""
+
+        # Get first estimator name as default
+        estimator_names = list(self.multi_results.methods.keys())
+        default_estimator = estimator_names[0] if estimator_names else "MBAR"
+
+        for i, (estimator_name, results) in enumerate(self.multi_results.methods.items()):
+            is_default = estimator_name == default_estimator
+            tabs_content += self._build_single_estimator_tab(estimator_name, results, is_default)
+
+        return tabs_content
+
+    def _build_single_estimator_tab(self, estimator_name: str, results: "FEResults", is_default: bool) -> str:
+        """
+        Build complete tab content for one estimator
+
+        Structure must match original HTML:
+        1. Quality Warnings (conditional)
+        2. Detailed Results (2-column: stats table + box plot)
+        3. Lambda Profiles (4 plots in 2x2 grid)
+        4. Convergence Diagnostics (Time convergence)
+        5. Bootstrap Analysis (2-column: histogram + table)
+        6. Overlap Matrix (placeholder for TI/BAR, real for MBAR)
+        """
+        # 1. Quality Warnings (conditional display)
+        quality_warnings = build_quality_warnings_section(estimator_name, results)
+
+        # 2. Detailed Results Section (2-column grid)
+        detailed_results = self._build_detailed_results_section(estimator_name, results)
+
+        # 2. Lambda Profiles (4 plots in 2x2 grid)
+        lambda_profiles = getattr(results, "lambda_profiles", None)
+        lambda_divs, lambda_scripts = plots.build_lambda_plots_html(lambda_profiles, estimator_name, plot_suffix=True)
+        lambda_section = f"""
+        <div class="card">
+            <h2>📈 Free Energy Profiles (λ-dependent)</h2>
+            <div class="equal-grid two-col">
+                {lambda_divs[0]}  <!-- dg-bound-plot -->
+                {lambda_divs[1]}  <!-- dg-unbound-plot -->
+            </div>
+            <div class="equal-grid two-col" style="margin-top:16px;">
+                {lambda_divs[2]}  <!-- dhdl-bound-plot (TI only) -->
+                {lambda_divs[3]}  <!-- dhdl-unbound-plot (TI only) -->
+            </div>
+        </div>
+        {lambda_scripts}
+        """
+
+        # 3. Time Convergence + Bootstrap Analysis (2-column layout)
+        time_conv_html = plots.build_time_convergence_html(
+            getattr(results, "time_convergence", None), plot_suffix=f"-{estimator_name}"
+        )
+        bootstrap_html = plots.build_bootstrap_html(
+            getattr(results, "bootstrap", None), plot_suffix=f"-{estimator_name}"
+        )
+
+        diagnostics_section = f"""
+        <div class="card">
+            <h2>📊 Diagnostics</h2>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        📈 Time Convergence
+                    </h3>
+                    {time_conv_html}
+                </div>
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        🔄 Bootstrap Analysis
+                    </h3>
+                    {bootstrap_html}
+                </div>
+            </div>
+        </div>
+        """
+
+        # 4. Overlap Matrix
+        if estimator_name == "MBAR":
+            overlap_html = plots.build_overlap_matrix_html(
+                getattr(results, "lambda_profiles", None),
+                estimator_name,
+                plot_suffix=f"-{estimator_name}",
+            ) or self._build_overlap_matrix_placeholder("MBAR")
+        else:
+            overlap_html = """
+            <div class="alert">
+                <strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>
+                Switch to <strong>MBAR</strong> tab to view overlap matrix and assess sampling quality.
+            </div>
+            """
+
+        overlap_section = f"""
+        <div class="card">
+            <h2>📊 Overlap Matrix ({estimator_name})</h2>
+            {overlap_html}
+        </div>
+        """
+
+        # Combine all sections in correct order
+        return f"""
+        <div id="estimator-{estimator_name}" class="tab-content" style="display: {"block" if is_default else "none"};">
+            {quality_warnings}
+            {detailed_results}
+            {lambda_section}
+            {overlap_section}
+            {diagnostics_section}
+        </div>
+        """
+
+    def _build_detailed_results_section(self, estimator_name: str, results: "FEResults") -> str:
+        """
+        Build Detailed Results section (2-column grid)
+
+        Left: Multiple Repeats Statistics table
+        Right: Outlier Detection box plot
+        """
+        # Check if we have multiple repeats
+        has_repeats = (
+            hasattr(results, "n_repeats")
+            and hasattr(results, "repeat_results")
+            and results.n_repeats > 1
+            and results.repeat_results
+        )
+
+        if not has_repeats:
+            return ""
+
+        # Build repeats table (left column)
+        stats = results.metadata.get("repeat_statistics", {})
+        repeats_table = plots.build_repeats_table_html(results.repeat_results, results.n_repeats, stats)
+
+        # Build outlier plot (right column)
+        outlier_html = plots.build_repeats_outlier_plot_html(results.repeat_results, plot_suffix=f"-{estimator_name}")
+
+        return f"""
+        <div class="card">
+            <h2>📋 Detailed Results</h2>
+            <div class="equal-grid two-col">
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        📊 Multiple Repeats Statistics
+                    </h3>
+                    {repeats_table}
+                </div>
+                <div style="min-width:0;width:100%;">
+                    <h3 style="color: #333; margin-bottom: 15px; font-size: 1.2em;">
+                        🎯 Outlier Detection
+                    </h3>
+                    {outlier_html}
+                </div>
+            </div>
+        </div>
+        """
+
+    def _build_overlap_matrix_section(self, estimator_name: str, results: "FEResults") -> str:
+        """
+        Build Overlap Matrix section (single column card)
+
+        MBAR: Shows real overlap matrix plot
+        TI/BAR: Shows placeholder message
+        """
+        if estimator_name == "MBAR":
+            return self._build_mbar_overlap_matrix_section(results)
+        else:
+            return f"""
+            <div class="card">
+                <h2>📊 Overlap Matrix ({estimator_name})</h2>
+                <div class="alert">
+                    <strong>ℹ️ Note:</strong> Overlap matrix is only available for MBAR estimator.<br>
+                    Switch to <strong>MBAR</strong> tab to view overlap matrix and assess sampling quality.
+                </div>
+            </div>
+            """
+
+    def _build_mbar_overlap_matrix_section(self, results: "FEResults") -> str:
+        """Build overlap matrix section for MBAR with actual Plotly heatmap"""
+        import json as _json
+        import numpy as np
+
+        # Extract overlap matrix from lambda profiles
+        lambda_profiles = getattr(results, "lambda_profiles", None)
+        if not lambda_profiles:
+            return self._build_overlap_matrix_placeholder("MBAR")
+
+        # Get bound leg overlap matrix (use first repeat if multiple)
+        bound_data = lambda_profiles.get("bound", {})
+        if isinstance(bound_data, list):
+            if not bound_data or not bound_data[0]:
+                return self._build_overlap_matrix_placeholder("MBAR")
+            overlap_matrix = bound_data[0].get("overlap_matrix")
+        else:
+            overlap_matrix = bound_data.get("overlap_matrix")
+
+        if not overlap_matrix:
+            return self._build_overlap_matrix_placeholder("MBAR")
+
+        # Convert to numpy array
+        overlap = np.array(overlap_matrix)
+        n_states = overlap.shape[0]
+
+        # Create Plotly heatmap
+        heatmap_data = [
+            {
+                "z": overlap.tolist(),
+                "x": [f"λ{i}" for i in range(n_states)],
+                "y": [f"λ{i}" for i in range(n_states)],
+                "colorscale": [
+                    [0.0, "rgb(0,0,131)"],
+                    [0.1, "rgb(0,0,255)"],
+                    [0.3, "rgb(0,191,255)"],
+                    [0.5, "rgb(0,255,255)"],
+                    [0.7, "rgb(255,255,0)"],
+                    [0.9, "rgb(255,127,0)"],
+                    [1.0, "rgb(255,0,0)"],
+                ],
+                "colorbar": {
+                    "title": "Overlap",
+                    "titleside": "right",
+                    "thickness": 15,
+                },
+                "type": "heatmap",
+                "reversescale": False,
+            }
+        ]
+
+        layout = {
+            "title": {
+                "text": "MBAR Overlap Matrix - Phase Space Overlap Between Lambda States",
+                "x": 0.5,
+                "xanchor": "center",
+                "font": {"size": 16},
+            },
+            "xaxis": {"title": "Lambda State", "side": "bottom"},
+            "yaxis": {"title": "Lambda State", "side": "left"},
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "margin": {"l": 80, "r": 80, "t": 60, "b": 60},
+            "width": 600,
+            "height": 600,
+        }
+
+        plot_id = "mbar-overlap-matrix-plot"
+
+        return f"""
+                <div class="card">
+                    <h2>📊 Overlap Matrix (MBAR)</h2>
+                    <div id="{plot_id}" style="min-height:600px;"></div>
+                    <p style="margin-top:15px;font-size:0.9em;color:#666;">
+                        <strong>📊 Interpretation:</strong> Overlap matrix shows the phase space overlap between adjacent lambda windows.
+                        <br>Values closer to 1.0 (red) indicate good overlap, while values near 0.0 (blue) suggest poor sampling.
+                        <br>Ideally, all off-diagonal elements should be > 0.1 for reliable MBAR estimates.
+                    </p>
+                </div>
+                <script>
+                    Plotly.newPlot('{plot_id}', {_json.dumps(heatmap_data)}, {_json.dumps(layout)}, {{responsive:true}});
+                </script>
+        """
+
+    def _build_overlap_matrix_placeholder(self, estimator_name: str) -> str:
+        """Build placeholder message for non-MBAR estimators"""
+        return f"""
+                <div class="card">
+                    <h2>📊 Overlap Matrix ({estimator_name})</h2>
+                    <div class="alert">
+                        <strong>ℹ️ Info:</strong> Overlap matrix visualization is only available for MBAR estimator.
+                        <br>Switch to the <strong>MBAR</strong> tab to view overlap matrix and assess sampling quality.
+                        <br><br>
+                        <em>Why MBAR only?</em><br>
+                        MBAR uses a matrix of overlap weights between all lambda states, while TI and BAR
+                        use local approximations. This makes MBAR more robust but also more computationally expensive.
+                    </div>
+                </div>
+        """
+
+    def _build_repeats_outlier_plot_for_estimator(self, results: "FEResults") -> str:
+        """Build outlier detection box plot for one estimator's results"""
+        import json as _json
+
+        if not hasattr(results, "n_repeats") or results.n_repeats <= 1:
+            return ""
+
+        if not hasattr(results, "repeat_results") or not results.repeat_results:
+            return ""
+
+        # Extract data for box plot
+        bound_values = [r["bound"] for r in results.repeat_results]
+        unbound_values = [r["unbound"] for r in results.repeat_results]
+
+        # Build box plot traces
+        box_traces = [
+            {
+                "x": ["Bound"] * len(bound_values),
+                "y": bound_values,
+                "name": "Bound",
+                "type": "box",
+                "marker": {"color": "rgba(76,175,80,0.7)"},
+                "boxpoints": "outliers",
+                "jitter": 0.3,
+                "pointpos": 0,
+            },
+            {
+                "x": ["Unbound"] * len(unbound_values),
+                "y": unbound_values,
+                "name": "Unbound",
+                "type": "box",
+                "marker": {"color": "rgba(244,67,54,0.7)"},
+                "boxpoints": "outliers",
+                "jitter": 0.3,
+                "pointpos": 0,
+            },
+        ]
+
+        layout = {
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(255,255,255,0.8)",
+            "margin": {"l": 70, "r": 30, "t": 45, "b": 60},
+            "title": {"text": "Repeat Outlier Detection"},
+            "xaxis": {"title": "Measurement Type"},
+            "yaxis": {"title": "ΔG (kcal/mol)"},
+            "showlegend": False,
+            "boxmode": "group",
+        }
+
+        plot_id = f"repeats-outlier-plot-{results.metadata.get('estimator', 'unknown')}"
+
+        return f"""
+                <div class="card">
+                    <h3>📊 Multiple Repeats Statistics</h3>
+                    <div id="{plot_id}" style="min-height:350px;"></div>
+                    <p style="margin-top:15px;font-size:0.9em;color:#666;">
+                        <strong>📊 Interpretation:</strong> Box plots show the distribution across repeats.
+                        Points beyond whiskers are potential outliers.
+                    </p>
+                </div>
+                <script>
+                    Plotly.newPlot('{plot_id}', {_json.dumps(box_traces)}, {_json.dumps(layout)}, {{responsive:true}});
+                </script>
+        """
+
+    def _build_repeats_table_for_estimator(self, results: "FEResults") -> str:
+        """Build repeats table HTML for one estimator's results"""
+        if not hasattr(results, "n_repeats") or results.n_repeats <= 1:
+            return ""
+
+        if not hasattr(results, "repeat_results") or not results.repeat_results:
+            return ""
+
+        # Build table rows for each repeat
+        rows_html = ""
+        for r in results.repeat_results:
+            rows_html += f"""
+                        <tr>
+                            <td>{r["repeat"]}</td>
+                            <td class="value">{r["bound"]:.2f}</td>
+                            <td class="value">{r["unbound"]:.2f}</td>
+                            <td class="value">{r["ddG"]:.2f}</td>
+                        </tr>
+            """
+
+        # Add statistics rows (ave and stderr)
+        stats = results.metadata.get("repeat_statistics", {})
+        if stats:
+            rows_html += f"""
+                        <tr style="border-top: 2px solid #666; font-weight: bold; background: #e8f5e9;">
+                            <td>ave</td>
+                            <td class="value">{stats.get("bound_mean", 0):.2f}</td>
+                            <td class="value">{stats.get("unbound_mean", 0):.2f}</td>
+                            <td class="value">{stats.get("ddG_mean", 0):.2f}</td>
+                        </tr>
+                        <tr style="font-weight: bold; background: #e8f5e9;">
+                            <td>stderr</td>
+                            <td class="value">{stats.get("bound_stderr", 0):.2f}</td>
+                            <td class="value">{stats.get("unbound_stderr", 0):.2f}</td>
+                            <td class="value">{stats.get("ddG_stderr", 0):.2f}</td>
+                        </tr>
+            """
+
+        return f"""
+                <div class="card">
+                    <h3>📊 Multiple Repeats Statistics ({results.metadata.get("estimator", "")})</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Repeats</th>
+                                <th>Bound ΔG (kcal/mol)</th>
+                                <th>Unbound ΔG (kcal/mol)</th>
+                                <th>ΔΔG (kcal/mol)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+{rows_html}
+                        </tbody>
+                    </table>
+                    <p style="margin-top: 15px; font-size: 0.9em; color: #666; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                        <strong>📐 Formula:</strong> ΔΔG = Bound - Unbound<br>
+                        <strong>📊 stderr:</strong> Standard error of the mean (σ/√n)<br>
+                        <strong>🔢 n_repeats:</strong> {results.n_repeats}
+                    </p>
+                </div>
+        """

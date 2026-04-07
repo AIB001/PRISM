@@ -249,7 +249,7 @@ class HTMLBuilder:
         .color-gradient-container {
             position: relative;
             width: 100%;
-            margin: 15px 0 25px 0;  /* 底部增加空间 */
+            margin: 15px 0 25px 0;  /* Extra bottom spacing */
         }
         .color-gradient {
             height: 40px;

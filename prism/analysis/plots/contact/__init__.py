@@ -29,6 +29,15 @@ from .heatmap.probability import plot_contact_heatmap_annotated
 # Import from timeseries
 from .timeseries.contacts import plot_contact_numbers_timeseries, plot_residue_distance_timeseries
 
+# Import from probability (moved from structural/)
+from .probability import (
+    generate_publication_contact_plots,
+    plot_contact_probability_barplot,
+    plot_contact_probability_heatmap,
+    plot_contact_distance_distribution,
+    plot_key_residue_distances,
+)
+
 __all__ = [
     # Violin plots
     "plot_comparison_contact_distances_violin",
@@ -46,4 +55,10 @@ __all__ = [
     "plot_key_residue_contacts",
     "plot_key_residue_contact_distribution",
     "plot_contact_distances_raincloud",
+    # Probability plots (moved from structural/)
+    "generate_publication_contact_plots",
+    "plot_contact_probability_barplot",
+    "plot_contact_probability_heatmap",
+    "plot_contact_distance_distribution",
+    "plot_key_residue_distances",
 ]
