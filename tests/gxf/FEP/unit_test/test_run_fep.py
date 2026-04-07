@@ -93,6 +93,7 @@ _LFF_CONFIG_MAP = {
     "oplsaa": ("case_opls.yaml", "case_opls.yaml"),
     "oplsaam": ("case_oplsaam.yaml", "case_oplsaam.yaml"),
     "cgenff": ("case_charmm.yaml", "fep_charmm.yaml"),
+    "rtf": ("case_rtf.yaml", "fep_rtf.yaml"),
 }
 
 _LFF_FF_MAP = {
@@ -146,7 +147,9 @@ def _resolve_configs(ligand_forcefield: str, forcefield: str):
     return case_cfg, fep_cfg, protein_ff, water_model
 
 
-def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_ligand=None, mut_ligand=None):
+def test_run_fep(
+    forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_ligand=None, mut_ligand=None, forcefield_paths=None
+):
     """测试完整的 FEP 流程（run_fep）"""
 
     system_name = get_system_name()
@@ -155,15 +158,29 @@ def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_lig
     print(f"{system_name} 系统 FEP 完整流程测试 ({forcefield} / {ligand_forcefield})")
     print("=" * 70)
 
-    # 自动检测配体文件
-    if ref_ligand is None or mut_ligand is None:
-        ref_ligand, mut_ligand = auto_detect_ligands()
+    # RTF: ligand_path 传子目录（含 .rtf/.prm/.pdb），从 case_name 推断目录名
+    if ligand_forcefield.lower() == "rtf":
+        if ref_ligand is None or mut_ligand is None:
+            case_name = get_system_name()
+            if "-" in case_name:
+                left, right = case_name.split("-", 1)
+                ref_ligand = f"input/{left}"
+                mut_ligand = f"input/{right}"
+            else:
+                print(f"❌ RTF 模式需要手动指定 --ref-ligand 和 --mut-ligand（目录路径）")
+                return False
+        print(f"  Reference ligand dir: {ref_ligand}")
+        print(f"  Mutant ligand dir:    {mut_ligand}")
+    else:
+        # 自动检测配体文件
+        if ref_ligand is None or mut_ligand is None:
+            ref_ligand, mut_ligand = auto_detect_ligands()
 
-    if ref_ligand is None or mut_ligand is None:
-        print(f"❌ 无法检测到配体文件")
-        print(f"   请确保 input/ 目录包含两个配体文件：")
-        print(f"   - *_3d_pdb.mol2 或 *.pdb 或 *.mol2")
-        return False
+        if ref_ligand is None or mut_ligand is None:
+            print(f"❌ 无法检测到配体文件")
+            print(f"   请确保 input/ 目录包含两个配体文件：")
+            print(f"   - *_3d_pdb.mol2 或 *.pdb 或 *.mol2")
+            return False
 
     print(f"  Reference ligand: {ref_ligand}")
     print(f"  Mutant ligand:    {mut_ligand}")
@@ -182,9 +199,18 @@ def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_lig
     # 输出目录：默认使用 <protein_ff>-mut_<ligand_ff>
     output_dir = _default_case_dir(protein_ff, ligand_forcefield)
 
+    # RTF passes directories; all paths prefixed with "input/"
+    ref_ligand_path = f"input/{ref_ligand}"
+    mut_ligand_path = f"input/{mut_ligand}"
+
+    # Protein PDB: support both receptor.pdb and protein.pdb
+    protein_path = "input/receptor.pdb"
+    if not Path(protein_path).exists():
+        protein_path = "input/protein.pdb"
+
     builder = PRISMBuilder(
-        protein_path="input/receptor.pdb",
-        ligand_paths=[f"input/{ref_ligand}"],
+        protein_path=protein_path,
+        ligand_paths=[ref_ligand_path],
         output_dir=output_dir,
         ligand_forcefield=ligand_forcefield,
         config_path=f"configs/{case_cfg}",
@@ -192,8 +218,9 @@ def test_run_fep(forcefield="amber14sb_OL15", ligand_forcefield="gaff2", ref_lig
         water_model=water_model,
         overwrite=True,
         fep_mode=True,
-        mutant_ligand=f"input/{mut_ligand}",
+        mutant_ligand=mut_ligand_path,
         fep_config=f"configs/{fep_cfg}",
+        forcefield_path=forcefield_paths,
     )
 
     print(f"\n[Step 1] 运行 PRISMBuilder.run()...")
@@ -352,9 +379,19 @@ def main():
     )
     parser.add_argument("--ref-ligand", default=None, help="Reference ligand 文件名（默认：自动检测）")
     parser.add_argument("--mut-ligand", default=None, help="Mutant ligand 文件名（默认：自动检测）")
+    parser.add_argument(
+        "--forcefield-path",
+        "-ffp",
+        action="append",
+        dest="forcefield_paths",
+        default=None,
+        help="CGenFF 预生成目录路径（cgenff 力场时必须提供两个，ref 在前，mut 在后）",
+    )
 
     args = parser.parse_args()
-    success = test_run_fep(args.forcefield, args.ligand_forcefield, args.ref_ligand, args.mut_ligand)
+    success = test_run_fep(
+        args.forcefield, args.ligand_forcefield, args.ref_ligand, args.mut_ligand, args.forcefield_paths
+    )
     sys.exit(0 if success else 1)
 
 

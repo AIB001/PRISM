@@ -139,9 +139,9 @@ def _load_structure_coordinates(
                 try:
                     atom_name = line[12:16].strip()
                     atom_id = int(line[6:11].strip())
-                    x = float(line[30:38].strip())
-                    y = float(line[38:46].strip())
-                    z = float(line[46:54].strip())
+                    x = float(line[30:38].strip()) / 10.0  # Å → nm
+                    y = float(line[38:46].strip()) / 10.0  # Å → nm
+                    z = float(line[46:54].strip()) / 10.0  # Å → nm
                 except (ValueError, IndexError):
                     continue
 
@@ -170,9 +170,9 @@ def _load_structure_coordinates(
                 try:
                     atom_id = int(parts[0])
                     atom_name = parts[1]
-                    x = float(parts[2])
-                    y = float(parts[3])
-                    z = float(parts[4])
+                    x = float(parts[2]) / 10.0  # Å → nm
+                    y = float(parts[3]) / 10.0  # Å → nm
+                    z = float(parts[4]) / 10.0  # Å → nm
                 except ValueError:
                     continue
 

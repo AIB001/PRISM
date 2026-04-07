@@ -135,13 +135,15 @@ class FEPWorkflowMixin:
             print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
             print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
 
-            ref_visual_coord_source = self.ligand_paths[0] if self.ligand_paths else ref_gro
-            if not os.path.exists(ref_visual_coord_source):
-                ref_visual_coord_source = ref_gro
+            def _resolve_coord_source(path: str, fallback: str) -> str:
+                """If path is a directory (RTF), find PDB inside; else use as-is."""
+                if path and os.path.isdir(path):
+                    pdbs = list(Path(path).glob("*.pdb"))
+                    return str(pdbs[0]) if pdbs else fallback
+                return path if path and os.path.exists(path) else fallback
 
-            mut_visual_coord_source = self.mutant_ligand or mut_gro
-            if not os.path.exists(mut_visual_coord_source):
-                mut_visual_coord_source = mut_gro
+            ref_visual_coord_source = _resolve_coord_source(self.ligand_paths[0] if self.ligand_paths else "", ref_gro)
+            mut_visual_coord_source = _resolve_coord_source(self.mutant_ligand or "", mut_gro)
 
             # Use user-provided, receptor-aligned ligand coordinates for mapping whenever
             # available. Generated LIG.gro coordinates can differ from the aligned input
