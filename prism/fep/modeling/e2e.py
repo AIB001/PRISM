@@ -11,10 +11,8 @@ from ligand files to FEP simulation systems.
 from pathlib import Path
 from typing import Optional
 
-from prism.fep.common.io import read_ligand_from_prism
-from prism.fep.core.mapping import DistanceAtomMapper
 from prism.fep.modeling.core import FEPScaffoldBuilder
-from prism.forcefield.registry import resolve_ligand_artifact, discover_ligand_directory
+from prism.fep.modeling.hybrid_service import HybridBuildService
 
 
 def build_fep_system_from_prism_ligands(
@@ -72,88 +70,39 @@ def build_fep_system_from_prism_ligands(
     ...     mutant_ligand_dir="ligand_b_ff",
     ... )
     """
-    # Step 1: Read PRISM ligands
-    print(f"[1/3] Reading PRISM ligands...")
+    hybrid_service = HybridBuildService(
+        dist_cutoff=dist_cutoff,
+        charge_cutoff=charge_cutoff,
+        charge_common="mean",
+        charge_reception="surround",
+    )
 
-    # Auto-discover PRISM output directories (handle LIG.amb2gmx/ subdirectory)
-    def _resolve_prism_ligand_dir(ligand_dir: str) -> tuple:
-        """Resolve PRISM ligand directory, handling LIG.amb2gmx/ subdirectory."""
-        ligand_path = Path(ligand_dir)
-
-        discovered_dir = discover_ligand_directory(ligand_path)
-        if discovered_dir is not None:
-            itp_file = discovered_dir / "LIG.itp"
-            gro_file = discovered_dir / "LIG.gro"
-            if itp_file.exists() and gro_file.exists():
-                return str(itp_file), str(gro_file)
-
-        itp_file = resolve_ligand_artifact(ligand_path, "LIG.itp")
-        gro_file = resolve_ligand_artifact(ligand_path, "LIG.gro")
-        if itp_file is not None and gro_file is not None:
-            return str(itp_file), str(gro_file)
-
-        raise FileNotFoundError(
-            f"Cannot find LIG.itp in {ligand_dir}. Expected direct PRISM files or a known ligand forcefield subdirectory."
-        )
-
-    itp_ref, gro_ref = _resolve_prism_ligand_dir(reference_ligand_dir)
-    itp_mut, gro_mut = _resolve_prism_ligand_dir(mutant_ligand_dir)
-
-    lig_ref = read_ligand_from_prism(itp_file=itp_ref, gro_file=reference_coord_file or gro_ref)
-    lig_mut = read_ligand_from_prism(itp_file=itp_mut, gro_file=mutant_coord_file or gro_mut)
-    print(f"  ✓ Reference: {len(lig_ref)} atoms")
-    print(f"  ✓ Mutant: {len(lig_mut)} atoms")
-
-    # Step 2: Perform atom mapping (if hybrid ITP not provided)
+    # Step 1: Build or validate hybrid topology
     if hybrid_itp is None:
-        print(f"[2/3] Performing atom mapping...")
-        mapper = DistanceAtomMapper(
-            dist_cutoff=dist_cutoff,
-            charge_cutoff=charge_cutoff,
+        print(f"[1/3] Building hybrid topology from mapping...")
+
+        temp_hybrid_dir = FEPScaffoldBuilder._normalize_output_dir(output_dir) / "temp_hybrid"
+        temp_hybrid_dir.mkdir(parents=True, exist_ok=True)
+
+        hybrid_result = hybrid_service.build_from_forcefield_dirs(
+            reference_ligand_dir=reference_ligand_dir,
+            mutant_ligand_dir=mutant_ligand_dir,
+            hybrid_output_dir=str(temp_hybrid_dir),
+            reference_coord_source=reference_coord_file,
+            mutant_coord_source=mutant_coord_file,
+            molecule_name="HYB",
         )
-        mapping = mapper.map(lig_ref, lig_mut)
-        print(f"  ✓ Common: {len(mapping.common)}")
-        print(f"  ✓ Transformed (ref): {len(mapping.transformed_a)}")
-        print(f"  ✓ Transformed (mut): {len(mapping.transformed_b)}")
 
-        # Generate hybrid ITP from mapping
-        from prism.fep.gromacs.itp_builder import ITPBuilder
-        import tempfile
-
-        # Create temporary file for hybrid ITP
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".itp", delete=False) as f:
-            hybrid_itp = f.name
-
-        # Use existing hybrid ITP from backup as template
-        # (This is a workaround - ideally we'd generate from mapping directly)
-        import os
-
-        test_dir = Path(os.getcwd())  # Assume running from test directory
-        backup_hybrid = test_dir / "gaff_test_output/GMX_PROLIG_FEP.backup/common/hybrid/hybrid.itp"
-        if not backup_hybrid.exists():
-            # Try alternative path (if running from project root)
-            backup_hybrid = Path(
-                "tests/gxf/FEP/unit_test/oMeEtPh-EtPh/gaff_test_output/GMX_PROLIG_FEP.backup/common/hybrid/hybrid.itp"
-            )
-
-        if backup_hybrid.exists():
-            # Use backup hybrid ITP as template
-            ITPBuilder.write_complete_hybrid_itp(
-                output_path=hybrid_itp,
-                hybrid_itp=str(backup_hybrid),
-                ligand_a_itp=itp_ref,
-                ligand_b_itp=itp_mut,
-                molecule_name="HYB",
-            )
-            print(f"  ✓ Hybrid ITP: {hybrid_itp} (from template)")
-        else:
-            # Fallback: use simple atom mapping without bonded terms
-            # (Not recommended for production)
-            raise FileNotFoundError(
-                f"Cannot find hybrid ITP template at {backup_hybrid}. " f"Please provide an existing hybrid ITP file."
-            )
+        # Use the generated hybrid ITP
+        hybrid_itp = str(hybrid_result.hybrid_itp)
+        print(f"  ✓ Hybrid ITP: {hybrid_itp} (generated from mapping)")
+        print(f"  ✓ Common: {len(hybrid_result.mapping.common)}")
+        print(f"  ✓ Transformed (ref): {len(hybrid_result.mapping.transformed_a)}")
+        print(f"  ✓ Transformed (mut): {len(hybrid_result.mapping.transformed_b)}")
+        print(f"[2/3] Hybrid topology ready")
     else:
-        print(f"[2/3] Using existing hybrid ITP: {hybrid_itp}")
+        print(f"[1/3] Using existing hybrid ITP: {hybrid_itp}")
+        print(f"[2/3] Hybrid topology ready")
 
     # Step 3: Build FEP scaffold
     print(f"[3/3] Building FEP scaffold...")

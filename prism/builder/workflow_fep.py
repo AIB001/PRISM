@@ -12,18 +12,15 @@ FEP scaffold.
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple
 
 from ..utils.colors import (
     print_header,
     print_step,
     print_success,
     print_error,
-    print_warning,
     path,
 )
 from ..utils.system.topology import _parse_atomtypes, _should_vendor_forcefield
-from ..fep.common.coordinates import nm_xyz_to_angstrom
 from ..forcefield.registry import (
     get_forcefield_output_subdirs,
     iter_existing_ligand_output_dirs,
@@ -65,7 +62,6 @@ class FEPWorkflowMixin:
     def run_fep(self):
         """Run the FEP workflow: build standard MD systems, generate hybrid topology, create FEP scaffold"""
         from ..fep.modeling import FEPScaffoldBuilder
-        from ..fep.gromacs.itp_builder import ITPBuilder
 
         print_header("PRISM FEP Builder Workflow")
 
@@ -113,7 +109,7 @@ class FEPWorkflowMixin:
             unbound_system_dir = os.path.join(unbound_output, "GMX_PROLIG_MD")
             print_success(f"Unbound system built: {unbound_system_dir}")
 
-            # Phase 3: Generate hybrid topology
+            # Phase 3: Generate hybrid topology via service
             print_step(3, 5, "Generating hybrid topology via atom mapping")
 
             # ref_ff_dir was saved in Phase 1
@@ -122,26 +118,13 @@ class FEPWorkflowMixin:
             self._generate_mutant_ligand_ff(self.mutant_ligand, mut_ff_output)
             mut_ff_dir = self._resolve_generated_ligand_ff_dir(mut_ff_output)
 
-            # Build hybrid topology using ITPBuilder
+            # Build hybrid topology using HybridBuildService
+            from ..fep.modeling.hybrid_service import HybridBuildService
+
             hybrid_output = os.path.join(fep_output, "common/hybrid")
             os.makedirs(hybrid_output, exist_ok=True)
 
-            # Read ligand atoms from ITP and GRO files
-            from ..fep.io import read_ligand_from_prism
-            from ..fep.core.hybrid_topology import HybridTopologyBuilder, LigandTopologyInput
-
-            # Debug: Check if files exist
-            ref_itp = self._resolve_ligand_ff_artifact(ref_ff_dir, "LIG.itp")
-            ref_gro = self._resolve_ligand_ff_artifact(ref_ff_dir, "LIG.gro")
-            mut_itp = self._resolve_ligand_ff_artifact(mut_ff_dir, "LIG.itp")
-            mut_gro = self._resolve_ligand_ff_artifact(mut_ff_dir, "LIG.gro")
-
-            print(f"\n  Checking force field files:")
-            print(f"    ref_itp exists: {os.path.exists(ref_itp)} - {ref_itp}")
-            print(f"    ref_gro exists: {os.path.exists(ref_gro)} - {ref_gro}")
-            print(f"    mut_itp exists: {os.path.exists(mut_itp)} - {mut_itp}")
-            print(f"    mut_gro exists: {os.path.exists(mut_gro)} - {mut_gro}")
-
+            # Resolve coordinate sources (MOL2 > PDB > GRO)
             def _resolve_coord_source(path: str, fallback: str) -> str:
                 """If path is a directory (RTF), find PDB inside; else use as-is."""
                 if path and os.path.isdir(path):
@@ -149,150 +132,68 @@ class FEPWorkflowMixin:
                     return str(pdbs[0]) if pdbs else fallback
                 return path if path and os.path.exists(path) else fallback
 
-            ref_visual_coord_source = _resolve_coord_source(self.ligand_paths[0] if self.ligand_paths else "", ref_gro)
-            mut_visual_coord_source = _resolve_coord_source(self.mutant_ligand or "", mut_gro)
+            ref_visual_coord_source = _resolve_coord_source(
+                self.ligand_paths[0] if self.ligand_paths else "", ref_ff_dir
+            )
+            mut_visual_coord_source = _resolve_coord_source(self.mutant_ligand or "", mut_ff_dir)
 
-            # Use user-provided, receptor-aligned ligand coordinates for mapping whenever
-            # available. Generated LIG.gro coordinates can differ from the aligned input
-            # geometry and degrade the atom mapping and HTML report quality.
-            ref_mapping_coord_source = ref_visual_coord_source if os.path.exists(ref_visual_coord_source) else ref_gro
-            mut_mapping_coord_source = mut_visual_coord_source if os.path.exists(mut_visual_coord_source) else mut_gro
-            if not os.path.exists(ref_mapping_coord_source):
-                raise FileNotFoundError(f"Reference ligand coordinates not found: {ref_mapping_coord_source}")
-            if not os.path.exists(mut_mapping_coord_source):
-                raise FileNotFoundError(f"Mutant ligand coordinates not found: {mut_mapping_coord_source}")
+            print(f"  Building hybrid topology:")
+            print(f"    Reference FF: {ref_ff_dir}")
+            print(f"    Mutant FF:    {mut_ff_dir}")
+            print(f"    Output dir:   {hybrid_output}")
 
-            print("  Mapping coordinate sources:")
-            print(f"    Reference coords: {ref_mapping_coord_source}")
-            print(f"    Mutant coords:    {mut_mapping_coord_source}")
-
-            ref_atoms = read_ligand_from_prism(itp_file=ref_itp, gro_file=ref_mapping_coord_source, state="a")
-
-            mut_atoms = read_ligand_from_prism(itp_file=mut_itp, gro_file=mut_mapping_coord_source, state="b")
-
-            # Perform atom mapping
-            from ..fep.core.mapping import DistanceAtomMapper
-
-            mapper = DistanceAtomMapper(
+            hybrid_service = HybridBuildService(
                 dist_cutoff=self.distance_cutoff,
                 charge_cutoff=self.charge_cutoff,
                 charge_common=self.charge_strategy,
                 charge_reception=self.charge_reception,
             )
-            mapping = mapper.map(ref_atoms, mut_atoms)
 
-            # Debug: Print mapping results
-            print(f"  Debug: Mapping results:")
-            print(f"    Common: {len(mapping.common)}")
-            print(f"    Transformed A: {len(mapping.transformed_a)}")
-            print(f"    Transformed B: {len(mapping.transformed_b)}")
-            print(f"    Surrounding A: {len(mapping.surrounding_a)}")
-            print(f"    Surrounding B: {len(mapping.surrounding_b)}")
-            if mapping.transformed_a:
-                print(f"    Transformed A atoms:")
-                for atom in mapping.transformed_a:
-                    print(f"      {atom.name}: type={atom.atom_type}, charge={atom.charge}")
-            if mapping.transformed_b:
-                print(f"    Transformed B atoms:")
-                for atom in mapping.transformed_b:
-                    print(f"      {atom.name}: type={atom.atom_type}, charge={atom.charge}")
-
-            # Build hybrid topology
-            hybrid_builder = HybridTopologyBuilder(charge_strategy=self.charge_strategy)
-
-            # Read ITP parameters for hybrid topology building
-            ref_itp_data = ITPBuilder._parse_source_itp(Path(ref_itp).read_text())
-            mut_itp_data = ITPBuilder._parse_source_itp(Path(mut_itp).read_text())
-
-            params_a = LigandTopologyInput(
-                masses={},
-                bonds=ref_itp_data["sections"].get("bonds", []),
-                pairs=ref_itp_data["sections"].get("pairs", []),
-                angles=ref_itp_data["sections"].get("angles", []),
-                dihedrals=ref_itp_data["sections"].get("dihedrals", []),
-                impropers=ref_itp_data["sections"].get("impropers", []),
-            )
-            params_b = LigandTopologyInput(
-                masses={},
-                bonds=mut_itp_data["sections"].get("bonds", []),
-                pairs=mut_itp_data["sections"].get("pairs", []),
-                angles=mut_itp_data["sections"].get("angles", []),
-                dihedrals=mut_itp_data["sections"].get("dihedrals", []),
-                impropers=mut_itp_data["sections"].get("impropers", []),
-            )
-
-            hybrid_atoms = hybrid_builder.build(mapping, params_a, params_b, ref_atoms, mut_atoms)
-            print(f"  Debug: hybrid_atoms count = {len(hybrid_atoms)}")
-            transformed_atoms = [a for a in hybrid_atoms if a.name.endswith("A") or a.name.endswith("B")]
-            print(f"  Debug: transformed atoms with A/B suffix: {len(transformed_atoms)}")
-            for atom in transformed_atoms:
-                print(f"    {atom.name}: A_type={atom.state_a_type}, B_type={atom.state_b_type}")
-
-            # Build hybrid bonded parameters from source ITPs
-            # First write a temporary atoms-only ITP
-            temp_itp = os.path.join(hybrid_output, "hybrid_atoms_temp.itp")
-            ITPBuilder(hybrid_atoms, {}).write_itp(temp_itp, molecule_name="HYB")
-            print(f"  Debug: temp_itp written: {os.path.exists(temp_itp)}")
-
-            # Then build complete hybrid ITP with bonded terms
-            hybrid_itp = os.path.join(hybrid_output, "hybrid.itp")
-            # Extract atom types for CHARMM force field dihedral handling
-            from prism.fep.modeling.hybrid_package import HybridPackageBuilder
-
-            hybrid_pkg_builder = HybridPackageBuilder()
-            atom_types_a = hybrid_pkg_builder._parse_atom_types_from_itp(ref_itp)
-            atom_types_b = hybrid_pkg_builder._parse_atom_types_from_itp(mut_itp)
-
-            hybrid_params = ITPBuilder.write_complete_hybrid_itp(
-                output_path=hybrid_itp,
-                hybrid_itp=temp_itp,
-                ligand_a_itp=ref_itp,
-                ligand_b_itp=mut_itp,
+            hybrid_result = hybrid_service.build_from_forcefield_dirs(
+                reference_ligand_dir=ref_ff_dir,
+                mutant_ligand_dir=mut_ff_dir,
+                hybrid_output_dir=hybrid_output,
+                reference_coord_source=ref_visual_coord_source,
+                mutant_coord_source=mut_visual_coord_source,
                 molecule_name="HYB",
-                ligand_a_structure=ref_mapping_coord_source,
-                ligand_b_structure=mut_mapping_coord_source,
-                atom_types_a=atom_types_a,
-                atom_types_b=atom_types_b,
-            )
-            print(f"  Debug: hybrid.itp written: {os.path.exists(hybrid_itp)}")
-            if os.path.exists(hybrid_itp):
-                print(f"  Debug: hybrid.itp size: {os.path.getsize(hybrid_itp)} bytes")
-
-            print_success(f"Hybrid topology: {hybrid_itp}")
-
-            # Generate hybrid ligand structure file
-            hybrid_gro = os.path.join(hybrid_output, "hybrid.gro")
-            self._generate_hybrid_gro(hybrid_gro, hybrid_atoms, ref_atoms, mut_atoms)
-            print_success(f"Hybrid structure: {hybrid_gro}")
-
-            # Re-read atoms from HYBRID ITP + HYBRID GRO for correct atom names AND coordinates in mapping files
-            # (Individual ligand ITPs have generic names like H, O, C, N
-            #  but hybrid ITP has specific names like HA, OA, C, H1, H2, C1, N, ...)
-            # The hybrid GRO file contains coordinates with hybrid atom names, ensuring proper matching.
-            # This ensures mapping files have atom names that match the hybrid topology,
-            # allowing proper coordinate lookup during hybrid GRO generation.
-            hybrid_atoms_for_mapping_a = read_ligand_from_prism(
-                itp_file=hybrid_itp,
-                gro_file=hybrid_gro,  # Use hybrid GRO (with hybrid atom names) instead of individual ligand GRO
-                state="a",
-            )
-            hybrid_atoms_for_mapping_b = read_ligand_from_prism(
-                itp_file=hybrid_itp,
-                gro_file=hybrid_gro,  # Use hybrid GRO (with hybrid atom names) instead of individual ligand GRO
-                state="b",
             )
 
-            # Export an interactive mapping report into the final FEP output
-            # so CLI users can inspect the hybridization result without running
-            # a separate visualization helper.
-            # Note: Called after hybrid topology creation to ensure hybrid.itp and hybrid.gro exist
-            self._generate_fep_mapping_html(
+            hybrid_itp = str(hybrid_result.hybrid_itp)
+            hybrid_gro = str(hybrid_result.hybrid_gro)
+            mapping = hybrid_result.mapping
+
+            print(f"  Hybrid topology:")
+            print(f"    ITP:  {hybrid_itp}")
+            print(f"    GRO:  {hybrid_gro}")
+            print(f"    Common: {len(mapping.common)}")
+            print(f"    Transformed (ref): {len(mapping.transformed_a)}")
+            print(f"    Transformed (mut): {len(mapping.transformed_b)}")
+
+            # Export mapping HTML via MappingReportService
+            from ..fep.visualize.reporting import MappingReportService
+
+            report_service = MappingReportService(
+                distance_cutoff=self.distance_cutoff,
+                charge_cutoff=self.charge_cutoff,
+                charge_strategy=self.charge_strategy,
+                charge_reception=self.charge_reception,
+            )
+
+            report_service.generate_fep_mapping_html(
                 output_dir=hybrid_output,
                 ref_coord_source=ref_visual_coord_source,
                 mut_coord_source=mut_visual_coord_source,
                 mapping=mapping,
-                ref_atoms=hybrid_atoms_for_mapping_a,  # Use hybrid atoms with correct names
-                mut_atoms=hybrid_atoms_for_mapping_b,  # Use hybrid atoms with correct names
+                ref_atoms=hybrid_result.ref_atoms,
+                mut_atoms=hybrid_result.mut_atoms,
+                fep_config=self.fep_config,
+                config_file=self.config_file,
+                ligand_forcefield=self.ligand_forcefield,
+                forcefield_paths=self.forcefield_paths,
+                distance_cutoff=self.distance_cutoff,
+                charge_cutoff=self.charge_cutoff,
+                charge_strategy=self.charge_strategy,
+                charge_reception=self.charge_reception,
             )
 
             # Phase 4: Create FEP scaffold with complete systems
@@ -373,429 +274,6 @@ class FEPWorkflowMixin:
             if md_dir.is_dir():
                 shutil.rmtree(md_dir)
                 print(f"  ✓ Removed intermediate system directory: {md_dir}")
-
-    def _generate_fep_mapping_html(
-        self,
-        output_dir: str,
-        ref_coord_source: str,
-        mut_coord_source: str,
-        mapping,
-        ref_atoms,
-        mut_atoms,
-    ) -> None:
-        """Write a default mapping HTML report for CLI-based FEP builds."""
-        try:
-            from ..fep.visualize.html import visualize_mapping_html
-        except Exception as exc:
-            print_warning(f"Skipping FEP mapping HTML generation: {exc}")
-            return
-
-        html_path = os.path.join(output_dir, "mapping.html")
-
-        # Default: use the original mapped ligand atoms as the single source of
-        # truth for classification. Do not recompute mapping from hybrid state
-        # atoms here.
-        from ..fep.io import read_mol2_atoms, write_ligand_to_pdb
-
-        html_mapping = mapping
-        html_atoms_a = ref_atoms
-        html_atoms_b = mut_atoms
-
-        ref_pdb = os.path.join(output_dir, "mapping_state_a.pdb")
-        mut_pdb = os.path.join(output_dir, "mapping_state_b.pdb")
-        write_ligand_to_pdb(html_atoms_a, ref_pdb, residue_name="LIG")
-        write_ligand_to_pdb(html_atoms_b, mut_pdb, residue_name="LIG")
-
-        print(f"  DEBUG MOL2 detection:")
-        print(f"    ref_coord_source: {ref_coord_source}")
-        print(f"    mut_coord_source: {mut_coord_source}")
-        print(f"    ref_coord_source suffix: {Path(ref_coord_source).suffix}")
-        print(f"    mut_coord_source suffix: {Path(mut_coord_source).suffix}")
-
-        if Path(ref_coord_source).suffix == ".mol2":
-            ref_mol2 = str(Path(ref_coord_source).absolute()) if Path(ref_coord_source).exists() else ref_coord_source
-        elif Path(ref_coord_source).suffix == ".pdb":
-            ref_mol2 = str(Path(ref_coord_source).with_suffix(".mol2"))
-            if not Path(ref_mol2).exists():
-                ref_mol2 = None
-        else:
-            ref_mol2 = None
-
-        if Path(mut_coord_source).suffix == ".mol2":
-            mut_mol2 = str(Path(mut_coord_source).absolute()) if Path(mut_coord_source).exists() else mut_coord_source
-        elif Path(mut_coord_source).suffix == ".pdb":
-            mut_mol2 = str(Path(mut_coord_source).with_suffix(".mol2"))
-            if not Path(mut_mol2).exists():
-                mut_mol2 = None
-        else:
-            mut_mol2 = None
-
-        print(f"    ref_mol2: {ref_mol2}")
-        print(f"    mut_mol2: {mut_mol2}")
-
-        from ..fep.core.mapping import DistanceAtomMapper
-
-        html_mapper = DistanceAtomMapper(
-            dist_cutoff=self.distance_cutoff,
-            charge_cutoff=self.charge_cutoff,
-            charge_common=self.charge_strategy,
-            charge_reception=self.charge_reception,
-        )
-
-        # For generic sequential force fields such as OPLS/OpenFF, the original
-        # aligned MOL2 files are a better source for HTML mapping than the
-        # parameterized topology output. If the MOL2-derived mapping is clearly
-        # better, use it for visualization only.
-        if ref_mol2 and mut_mol2:
-            try:
-                mol2_atoms_a = read_mol2_atoms(ref_mol2)
-                mol2_atoms_b = read_mol2_atoms(mut_mol2)
-                mol2_mapping = html_mapper.map(mol2_atoms_a, mol2_atoms_b)
-                if len(mol2_mapping.common) > len(html_mapping.common):
-                    html_mapping = mol2_mapping
-                    html_atoms_a = mol2_atoms_a
-                    html_atoms_b = mol2_atoms_b
-                    write_ligand_to_pdb(html_atoms_a, ref_pdb, residue_name="LIG")
-                    write_ligand_to_pdb(html_atoms_b, mut_pdb, residue_name="LIG")
-                    print(
-                        "  Using MOL2-derived mapping for HTML "
-                        f"({len(mol2_mapping.common)} common vs {len(mapping.common)})"
-                    )
-            except Exception as exc:
-                print_warning(f"Could not build MOL2-derived HTML mapping: {exc}")
-        html_config = None
-        if self.fep_config:
-            try:
-                from ..fep.config import FEPConfig
-
-                html_config = FEPConfig(self.config_file, self.fep_config).get_html_config()
-            except Exception as exc:
-                print_warning(f"Could not load FEP HTML config: {exc}")
-
-        if html_config is None:
-            html_config = {}
-
-        ff_cfg = dict(html_config.get("forcefield", {}))
-        ff_type = ff_cfg.get("type", getattr(self, "ligand_forcefield", "unknown"))
-        ff_cfg["type"] = self._describe_mapping_forcefield(ff_type)
-        html_config["forcefield"] = ff_cfg
-
-        ligand_a_name = Path(ref_coord_source).stem or "Ligand A"
-        ligand_b_name = Path(mut_coord_source).stem or "Ligand B"
-
-        try:
-            visualize_mapping_html(
-                mapping=html_mapping,
-                pdb_a=ref_pdb,
-                pdb_b=mut_pdb,
-                mol2_a=ref_mol2,
-                mol2_b=mut_mol2,
-                atoms_a=html_atoms_a,
-                atoms_b=html_atoms_b,
-                output_path=html_path,
-                title=f"FEP Mapping: {ligand_a_name} -> {ligand_b_name}",
-                ligand_a_name=ligand_a_name,
-                ligand_b_name=ligand_b_name,
-                config=html_config,
-            )
-            print_success(f"Mapping HTML: {html_path}")
-        except Exception as exc:
-            print_warning(f"Failed to generate FEP mapping HTML: {exc}")
-
-    def _describe_mapping_forcefield(self, ff_type: str) -> str:
-        """Return a user-facing force-field label for mapping HTML."""
-        base = str(ff_type).upper()
-        lig_ff_lower = getattr(self, "ligand_forcefield", "").lower()
-
-        # Handle both "cgenff" and "charmm-gui" force field types
-        if lig_ff_lower not in ["cgenff", "charmm-gui"]:
-            return base
-
-        ff_paths = [Path(p) for p in (getattr(self, "forcefield_paths", None) or [])]
-        if ff_paths and all((path / "charmm36.ff" / "charmm36.itp").exists() for path in ff_paths):
-            return "CGENFF (CHARMM-GUI)"
-        elif ff_paths and all((path / "gromacs" / "LIG.itp").exists() for path in ff_paths):
-            return "CGENFF (CHARMM-GUI)"
-        return "CGENFF (WEBSITE)"
-
-    def _resolve_cgenff_mapping_topology(self, cgenff_path: str) -> str:
-        """Return the source topology file that best represents the original CGenFF ligand."""
-        path = Path(cgenff_path)
-        resolved_itp = resolve_ligand_artifact(path, "LIG.itp")
-        if resolved_itp is not None:
-            return str(resolved_itp)
-        gmx_tops = sorted(path.glob("*_gmx.top"))
-        if gmx_tops:
-            return str(gmx_tops[0])
-        top_files = [candidate for candidate in sorted(path.glob("*.top")) if candidate.name != "LIG.top"]
-        if top_files:
-            return str(top_files[0])
-        raise FileNotFoundError(f"No suitable CGenFF topology file found under {cgenff_path}")
-
-    def _prepare_mapping_visualization_inputs(
-        self, coord_source: str, output_dir: str, stem: str
-    ) -> Tuple[str, Optional[str]]:
-        """Return a PDB path plus optional MOL2 template for mapping HTML generation."""
-        source_path = Path(coord_source)
-        suffix = source_path.suffix.lower()
-
-        if suffix == ".pdb":
-            mol2_candidates = [
-                source_path.with_suffix(".mol2"),
-                source_path.with_name(f"{source_path.stem}_3D.mol2"),
-                source_path.with_name(f"{source_path.stem.lower()}_3D.mol2"),
-            ]
-            for mol2_candidate in mol2_candidates:
-                if mol2_candidate.exists():
-                    return str(source_path), str(mol2_candidate)
-            return str(source_path), None
-
-        if suffix == ".mol2":
-            try:
-                from rdkit import Chem
-
-                mol = Chem.MolFromMol2File(str(source_path), sanitize=False, removeHs=False)
-                if mol is None:
-                    raise ValueError(f"RDKit could not parse {source_path}")
-
-                pdb_path = Path(output_dir) / f"{stem}.pdb"
-                Chem.MolToPDBFile(mol, str(pdb_path))
-                return str(pdb_path), str(source_path)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to prepare PDB for mapping visualization from {source_path}: {exc}"
-                ) from exc
-
-        if suffix == ".gro":
-            # Convert GRO to PDB using simple conversion (MDAnalysis writes incorrect elements)
-            # Force custom conversion to ensure proper element symbols
-            pdb_path = Path(output_dir) / f"{stem}.pdb"
-            with open(source_path) as f:
-                lines = f.readlines()
-            with open(pdb_path, "w") as out:
-                # Skip header (first 2 lines) and footer (last line)
-                for i, line in enumerate(lines[2:-1]):
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        # GRO format: resid_resname atom_name atom_id x y z
-                        # resid and resname are combined (e.g., "1HYB")
-                        resid_resname = parts[0]
-                        atom_name = parts[1]
-                        atom_id = parts[2]
-                        z_raw = float(parts[5]) if len(parts) > 5 else 0.0
-                        x, y, z = nm_xyz_to_angstrom(float(parts[3]), float(parts[4]), z_raw)
-                        # Split resid and resname
-                        # resid is the numeric part, resname is the alphabetic part
-                        resid = ""
-                        resname = ""
-                        for char in resid_resname:
-                            if char.isdigit():
-                                resid += char
-                            else:
-                                resname += char
-                        # Extract element symbol BEFORE modifying resname
-                        # Element is first character (uppercase), or first two if second is lowercase
-                        atom_element = atom_name[0].upper()
-                        if len(atom_name) > 1 and atom_name[1].islower():
-                            atom_element = atom_name[:2].capitalize()
-                        # Handle special cases
-                        if atom_name.upper().startswith("CL"):
-                            atom_element = "Cl"
-                        elif atom_name.upper().startswith("BR"):
-                            atom_element = "Br"
-                        # Write PDB format
-                        out.write(
-                            f"ATOM  {atom_id:>5} {atom_name:<4} {resname:>3} {resid:>4}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atom_element:>2}\n"
-                        )
-                out.write("END\n")
-            return str(pdb_path), None
-
-        raise RuntimeError(f"Unsupported coordinate source for mapping visualization: {coord_source}")
-
-    def _generate_state_specific_pdb(self, gro_file: str, output_dir: str, stem: str, state: str = "a") -> str:
-        """
-        Generate state-specific PDB file from hybrid GRO file.
-
-        Filters atoms by state:
-        - State "a": Includes common atoms + transformed atoms ending with digit+"A" (e.g., "00A", "01A")
-        - State "b": Includes common atoms + transformed atoms ending with digit+"B" (e.g., "00B", "01B")
-
-        Common atoms don't follow the digit+A/B pattern (e.g., C0A, C02, H11).
-
-        Args:
-            gro_file: Path to hybrid GRO file
-            output_dir: Output directory
-            stem: Output file stem
-            state: "a" for state A, "b" for state B
-
-        Returns:
-            Path to generated PDB file
-        """
-
-        pdb_path = Path(output_dir) / f"{stem}.pdb"
-        with open(gro_file) as f:
-            lines = f.readlines()
-
-        with open(pdb_path, "w") as out:
-            # Skip header (first 2 lines) and footer (last line)
-            for i, line in enumerate(lines[2:-1]):
-                parts = line.split()
-                if len(parts) >= 5:
-                    # GRO format: resid_resname atom_name atom_id x y z
-                    resid_resname = parts[0]
-                    atom_name = parts[1]
-                    atom_id = parts[2]
-                    z_raw = float(parts[5]) if len(parts) > 5 else 0.0
-                    x, y, z = nm_xyz_to_angstrom(float(parts[3]), float(parts[4]), z_raw)
-
-                    # Filter by state
-                    # Transformed atoms end with "A" or "B" (e.g., "00A", "01B", "C0EA", "O0MB")
-                    # Common atoms don't end with "A" or "B", except for the special case "C0A"
-                    # Note: "C0A" is a common atom even though it ends with "A"
-                    is_transformed_a = atom_name.endswith("A") and atom_name != "C0A"
-                    is_transformed_b = atom_name.endswith("B")
-                    is_common = not (is_transformed_a or is_transformed_b)
-
-                    if state == "a":
-                        # State A: include common atoms + transformed A atoms
-                        if not (is_common or is_transformed_a):
-                            continue
-                    else:  # state == "b"
-                        # State B: include common atoms + transformed B atoms
-                        if not (is_common or is_transformed_b):
-                            continue
-
-                    # Split resid and resname
-                    resid = ""
-                    resname = ""
-                    for char in resid_resname:
-                        if char.isdigit():
-                            resid += char
-                        else:
-                            resname += char
-
-                    # Extract element symbol
-                    atom_element = atom_name[0].upper()
-                    if len(atom_name) > 1 and atom_name[1].islower():
-                        atom_element = atom_name[:2].capitalize()
-                    # Handle special cases
-                    if atom_name.upper().startswith("CL"):
-                        atom_element = "Cl"
-                    elif atom_name.upper().startswith("BR"):
-                        atom_element = "Br"
-
-                    # Write PDB format
-                    out.write(
-                        f"ATOM  {atom_id:>5} {atom_name:<4} {resname:>3} {resid:>4}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {atom_element:>2}\n"
-                    )
-            out.write("END\n")
-
-        return str(pdb_path)
-
-    def _generate_hybrid_gro(self, output_gro: str, hybrid_atoms: list, ref_atoms: list, mut_atoms: list) -> None:
-        """
-        Generate hybrid ligand GRO file with dummy atoms
-
-        Parameters
-        ----------
-        output_gro : str
-            Output path for hybrid GRO file
-        hybrid_atoms : list
-            List of HybridAtom objects from hybrid topology
-        ref_atoms : list
-            Reference ligand atoms with coordinates already aligned to the mapping source
-        mut_atoms : list
-            Mutant ligand atoms with coordinates already aligned to the mapping source
-        """
-        ref_coord_map = {atom.name: atom.coord for atom in ref_atoms}
-        mut_coord_map = {atom.name: atom.coord for atom in mut_atoms}
-        ref_coord_by_index = {atom.index: atom.coord for atom in ref_atoms}
-        mut_coord_by_index = {atom.index: atom.coord for atom in mut_atoms}
-
-        # Generate hybrid coordinates
-        hybrid_atoms_data = []
-        for hatom in hybrid_atoms:
-            coord = None
-
-            # Prefer explicit source indices. This is robust for OpenFF/OPLS-style
-            # generic atom names where multiple atoms are all named H/C/N/O/F.
-            source_a_index = getattr(hatom, "source_a_index", None)
-            source_b_index = getattr(hatom, "source_b_index", None)
-            if source_a_index is not None and source_a_index in ref_coord_by_index:
-                coord = ref_coord_by_index[source_a_index]
-            elif source_b_index is not None and source_b_index in mut_coord_by_index:
-                coord = mut_coord_by_index[source_b_index]
-
-            # Fall back to name-based matching for older hybrid objects that do not
-            # carry source index metadata.
-            if coord is None:
-                if hatom.name.endswith("A"):
-                    base_name = hatom.name[:-1]
-                    coord = ref_coord_map.get(base_name)
-                elif hatom.name.endswith("B"):
-                    base_name = hatom.name[:-1]
-                    coord = mut_coord_map.get(base_name)
-                else:
-                    coord = ref_coord_map.get(hatom.name)
-
-            if coord is None:
-                coord = [0.0, 0.0, 0.0]
-
-            hybrid_atoms_data.append({"index": hatom.index, "name": hatom.name, "coord": coord})
-
-        # Write hybrid GRO file
-        with open(output_gro, "w") as f:
-            f.write("Hybrid ligand structure generated by PRISM-FEP\n")
-            f.write(f"{len(hybrid_atoms_data)}\n")
-
-            residue_number = 1
-
-            for atom_data in hybrid_atoms_data:
-                idx = atom_data["index"]
-                name = atom_data["name"]
-                x, y, z = atom_data["coord"]
-                # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
-                # residuenum (5 chars) + residuename (5 chars, left-justified)
-                # + atomname (5 chars, right-justified) + atomnumber (5 chars) + x + y + z
-                f.write(f"{residue_number:5d}LIG  {name:>5s}{idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}\n")
-
-            # Write box vectors (use default 1.0 nm, will be replaced by system box)
-            f.write("   1.00000   1.00000   1.00000\n")
-
-    def _parse_gro(self, gro_file: str) -> dict:
-        """Parse GRO file and extract atoms and coordinates"""
-        atoms = []
-        with open(gro_file, "r") as f:
-            lines = f.readlines()
-
-        # Skip title line
-        # Second line is atom count
-        num_atoms = int(lines[1].strip())
-
-        # Parse atom lines using GRO fixed-width columns.
-        for i in range(num_atoms):
-            line = lines[2 + i]
-            try:
-                atom_name = line[10:15].strip()
-                x = float(line[20:28].strip())
-                y = float(line[28:36].strip())
-                z = float(line[36:44].strip())
-                atoms.append({"name": atom_name, "coord": [x, y, z]})
-            except (ValueError, IndexError):
-                # Fall back to split parsing for non-standard whitespace-separated lines
-                parts = line.split()
-                if len(parts) < 6:
-                    continue
-                try:
-                    atom_name = parts[1].strip()
-                    x = float(parts[3])
-                    y = float(parts[4])
-                    z = float(parts[5])
-                    atoms.append({"name": atom_name, "coord": [x, y, z]})
-                except (ValueError, IndexError):
-                    continue
-
-        return {"atoms": atoms}
 
     def _read_box_size(self, gro_file: str) -> tuple:
         """Read box size from GRO file last line"""
