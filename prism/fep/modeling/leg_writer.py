@@ -80,6 +80,11 @@ class LegWriter:
         # Copy and modify topology to use hybrid ligand
         self.copy_and_modify_topology(topol_top, leg_dir / "topol.top")
 
+        if hybrid_gro.exists():
+            removed_sol = self.prune_overlapping_solvent(leg_dir / "input" / "conf.gro", leg_dir / "topol.top")
+            if removed_sol:
+                print(f"  ✓ Removed {removed_sol} overlapping SOL molecules after hybrid replacement")
+
         # Unbound leg topology from ligand-only builder may miss solvent/ion counts;
         # rebuild [ molecules ] from generated coordinate file to keep topology consistent.
         if leg_name == "unbound":
@@ -386,6 +391,90 @@ class LegWriter:
         shift = tuple(sum(source_coords[a][i] - hybrid_coords[a][i] for a in common) / n for i in range(3))
         print(f"  ✓ Ligand coord shift: ({shift[0]:+.3f}, {shift[1]:+.3f}, {shift[2]:+.3f}) nm " f"[{n} common atoms]")
         return shift
+
+    def prune_overlapping_solvent(self, conf_gro: Path, topol_top: Path, clash_cutoff_nm: float = 0.23) -> int:
+        """Remove solvent molecules whose atoms overlap with hybrid heavy atoms."""
+        lines = conf_gro.read_text().splitlines()
+        if len(lines) < 4:
+            return 0
+
+        atom_lines = lines[2:-1]
+        box_line = lines[-1]
+
+        parsed = []
+        for raw in atom_lines:
+            if len(raw) < 44:
+                parsed.append(None)
+                continue
+            try:
+                parsed.append(
+                    {
+                        "line": raw,
+                        "resnr": int(raw[0:5]),
+                        "resname": raw[5:10].strip(),
+                        "atomname": raw[10:15].strip(),
+                        "atomnr": int(raw[15:20]),
+                        "x": float(raw[20:28]),
+                        "y": float(raw[28:36]),
+                        "z": float(raw[36:44]),
+                    }
+                )
+            except ValueError:
+                parsed.append(None)
+
+        hybrid_heavy = [
+            a for a in parsed if a and a["resname"] == self.molecule_name and not a["atomname"].startswith("H")
+        ]
+        if not hybrid_heavy:
+            return 0
+
+        solvent_residues = set()
+        cutoff2 = clash_cutoff_nm * clash_cutoff_nm
+        for atom in parsed:
+            if not atom or atom["resname"] != "SOL":
+                continue
+            for lig in hybrid_heavy:
+                dx = atom["x"] - lig["x"]
+                dy = atom["y"] - lig["y"]
+                dz = atom["z"] - lig["z"]
+                if dx * dx + dy * dy + dz * dz < cutoff2:
+                    solvent_residues.add(atom["resnr"])
+                    break
+
+        if not solvent_residues:
+            return 0
+
+        kept = [a for a in parsed if not a or a["resnr"] not in solvent_residues]
+        new_atom_lines = [a["line"] for a in kept if a]
+        new_lines = [lines[0], str(len(new_atom_lines)), *new_atom_lines, box_line]
+        conf_gro.write_text("\n".join(new_lines) + "\n")
+        self._decrement_molecule_count(topol_top, "SOL", len(solvent_residues))
+        return len(solvent_residues)
+
+    def _decrement_molecule_count(self, topol_top: Path, molecule_name: str, removed_count: int) -> None:
+        """Decrease a `[ molecules ]` entry after deleting solvent molecules."""
+        if removed_count <= 0 or not topol_top.exists():
+            return
+
+        lines = topol_top.read_text().splitlines()
+        in_molecules = False
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.lower() == "[ molecules ]":
+                in_molecules = True
+                continue
+            if in_molecules and stripped.startswith("["):
+                break
+            if not in_molecules or not stripped or stripped.startswith(";"):
+                continue
+            parts = stripped.split()
+            if len(parts) >= 2 and parts[0] == molecule_name:
+                new_count = int(parts[1]) - removed_count
+                if new_count < 0:
+                    raise ValueError(f"Cannot decrement {molecule_name} below zero in {topol_top}")
+                lines[idx] = re.sub(rf"^{re.escape(parts[0])}\s+\d+", f"{parts[0]}        {new_count}", line)
+                topol_top.write_text("\n".join(lines) + "\n")
+                return
 
     def copy_and_modify_topology(self, source_top: Path, target_top: Path) -> None:
         """
