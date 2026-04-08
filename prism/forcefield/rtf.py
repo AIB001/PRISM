@@ -8,6 +8,7 @@ This module processes CGenFF RTF+PRM files and converts them
 to PRISM-standardized GROMACS format.
 """
 
+import math
 import os
 from pathlib import Path
 from typing import Dict, Tuple
@@ -73,6 +74,7 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
         self.prm_bond_params = {}  # (type1, type2) -> (k_b, b0)
         self.prm_angle_params = {}  # (type1, type2, type3) -> (k_theta, theta0)
         self.prm_dihedral_params = {}  # (type1, type2, type3, type4) -> list of (k, phi0, multiplicity)
+        self.prm_nonbonded_params = {}  # atom_type -> (epsilon_kcal, rmin_half_angstrom)
 
         print(f"\nInitialized RTF Force Field Generator:")
         print(f"  RTF file: {self.rtf_file}")
@@ -318,7 +320,10 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
             elif line.startswith("DIHEDRALS") or line.startswith("DIHE"):
                 section = "dihedrals"
                 continue
-            elif line.startswith("NONBONDED") or line.startswith("IMPROPER"):
+            elif line.startswith("NONBONDED"):
+                section = "nonbonded"
+                continue
+            elif line.startswith("IMPROPER"):
                 section = None  # Skip these sections for now
                 continue
 
@@ -360,9 +365,34 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                         self.prm_dihedral_params[reverse_key] = []
                     self.prm_dihedral_params[reverse_key].append((k, phi0, multiplicity))
 
+            elif section == "nonbonded":
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                keyword = parts[0].upper()
+                if keyword in {
+                    "CUTNB",
+                    "CTOFNB",
+                    "CTONNB",
+                    "EPS",
+                    "E14FAC",
+                    "WMIN",
+                    "HBOND",
+                }:
+                    continue
+
+                atom_type = parts[0]
+                try:
+                    epsilon = float(parts[2])  # kcal/mol, usually negative in CHARMM PRM
+                    rmin_half = float(parts[3])  # Angstrom
+                except ValueError:
+                    continue
+                self.prm_nonbonded_params[atom_type] = (epsilon, rmin_half)
+
         print(f"  - Found {len(self.prm_bond_params)//2} bond parameters")
         print(f"  - Found {len(self.prm_angle_params)} angle parameters")
         print(f"  - Found {len(self.prm_dihedral_params)} dihedral parameter sets")
+        print(f"  - Found {len(self.prm_nonbonded_params)} non-bonded atomtype parameters")
 
     def _parse_pdb(self) -> Dict[str, Tuple[float, float, float]]:
         """Parse PDB file for coordinates"""
@@ -539,8 +569,14 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
             f.write(";name   bond_type     mass     charge   ptype   sigma         epsilon       Amb\n")
 
             for atom_type in sorted(unique_types):
-                # Default parameters (should be parsed from PRM file in full implementation)
-                f.write(f"{atom_type:>6s}  {atom_type:>6s}  12.01000  0.00000  A   3.39967e-01  4.57730e-01\n")
+                mass = self.rtf_masses.get(atom_type, 12.01000)
+                epsilon_kcal, rmin_half = self.prm_nonbonded_params.get(atom_type, (-0.0700, 1.9924))
+                epsilon_kj = abs(epsilon_kcal) * 4.184
+                rmin = 2.0 * rmin_half
+                sigma_nm = (rmin / math.pow(2.0, 1.0 / 6.0)) / 10.0
+                f.write(
+                    f"{atom_type:>6s}  {atom_type:>6s}  {mass:8.5f}  0.00000  A   {sigma_nm:11.5e}  {epsilon_kj:11.5e}\n"
+                )
 
     def _generate_posre_file(self, output_dir: str):
         """Generate position restraints file"""
