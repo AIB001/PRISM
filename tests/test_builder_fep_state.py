@@ -7,6 +7,7 @@ import pytest
 
 from prism.builder.workflow_fep import FEPWorkflowMixin
 from prism.fep.modeling import e2e
+from prism.fep.modeling.hybrid_service import HybridBuildService
 from prism.fep.visualize.reporting import MappingReportService
 
 
@@ -248,3 +249,46 @@ def test_e2e_build_uses_hybrid_service_instead_of_template_fallback(monkeypatch,
     assert calls["build"]["mutant_ligand_dir"] == "mut_ff"
     assert calls["scaffold"]["hybrid_itp"].endswith("temp_hybrid/hybrid.itp")
     assert result == DummyLayout.root
+
+
+def test_hybrid_service_reuses_hybrid_package_gro_builder(tmp_path):
+    hybrid_itp = tmp_path / "hybrid.itp"
+    hybrid_itp.write_text("[ moleculetype ]\nHYB 3\n")
+    output_gro = tmp_path / "hybrid.gro"
+    calls = {}
+
+    class DummyPackageBuilder:
+        def _build_hybrid_gro(self, **kwargs):
+            calls["kwargs"] = kwargs
+            return "Hybrid ligand structure\n    0\n   1.00000   1.00000   1.00000\n"
+
+    reference_gro = tmp_path / "ref.gro"
+    mutant_gro = tmp_path / "mut.gro"
+    reference_coords = tmp_path / "ref_coords.gro"
+    mutant_coords = tmp_path / "mut_coords.gro"
+    reference_itp = tmp_path / "ref.itp"
+    mutant_itp = tmp_path / "mut.itp"
+    for path in (reference_gro, mutant_gro, reference_coords, mutant_coords, reference_itp, mutant_itp):
+        path.write_text("stub\n")
+
+    result = HybridBuildService.write_hybrid_gro(
+        output_gro,
+        pkg_builder=DummyPackageBuilder(),
+        hybrid_itp=hybrid_itp,
+        reference_gro=reference_gro,
+        mutant_gro=mutant_gro,
+        reference_coords_file=reference_coords,
+        mutant_coords_file=mutant_coords,
+        reference_itp=reference_itp,
+        mutant_itp=mutant_itp,
+    )
+
+    assert result == output_gro
+    assert calls["kwargs"]["hybrid_itp_content"] == hybrid_itp.read_text()
+    assert calls["kwargs"]["reference_gro"] == reference_gro
+    assert calls["kwargs"]["mutant_gro"] == mutant_gro
+    assert calls["kwargs"]["reference_coords_file"] == reference_coords
+    assert calls["kwargs"]["mutant_coords_file"] == mutant_coords
+    assert calls["kwargs"]["reference_itp"] == reference_itp
+    assert calls["kwargs"]["mutant_itp"] == mutant_itp
+    assert output_gro.read_text().startswith("Hybrid ligand structure")
