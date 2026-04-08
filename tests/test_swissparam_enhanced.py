@@ -89,6 +89,31 @@ END
         assert "dihedrals" in rtf_data
         assert len(rtf_data["dihedrals"]) == 2
 
+    def test_parse_rtf_file_ignores_improper_section_when_collecting_bonds(self, tmp_path):
+        """IMPR/IMPRO lines must not leak into the active bond section."""
+        rtf_file = tmp_path / "improper.rtf"
+        rtf_file.write_text(
+            """* Test RTF file with impropers
+ATOM C1 CT 0.0
+ATOM C2 CT 0.0
+ATOM C3 CT 0.0
+ATOM C4 CT 0.0
+ATOM H1 HC 0.0
+ATOM H2 HC 0.0
+
+BOND C1 C2
+IMPR C1 C2 C3 C4
+H1 H2
+DIHE C1 C2 C3 C4
+"""
+        )
+
+        generator = MMFFForceFieldGenerator(ligand_path="test.mol2", output_dir=tempfile.mkdtemp(), overwrite=True)
+        rtf_data = generator._parse_rtf_file(str(rtf_file))
+
+        assert rtf_data["bonds"] == [("C1", "C2")]
+        assert rtf_data["dihedrals"] == [("C1", "C2", "C3", "C4")]
+
     def test_parse_pdb_coordinates(self, sample_pdb_file):
         """Test PDB coordinate parsing"""
         output_dir = tempfile.mkdtemp()

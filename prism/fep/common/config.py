@@ -55,7 +55,7 @@ DEFAULT_EXECUTION_PARAMS = {
     "total_cpus": None,
     "omp_threads": None,
     "use_gpu_pme": True,
-    "use_gpu_update": True,  # Use -update gpu for constraint updates on GPU
+    "use_gpu_update": False,  # FEP mass perturbation is incompatible with -update gpu
     "mdrun_update_mode": "auto",  # auto -> cpu for CHARMM, otherwise follows use_gpu_update
 }
 

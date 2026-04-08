@@ -626,6 +626,11 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                         rtf_data["angles"].append((parts[i], parts[i + 1], parts[i + 2]))
                 continue
 
+            elif line.startswith("IMPR") or line.startswith("IMPRO"):
+                # Improper dihedrals - not parsed into bonds
+                in_atoms = in_bonds = in_angles = in_dihedrals = False
+                continue
+
             elif line.startswith("DIHE") or line.startswith("DIHEDRAL"):
                 in_dihedrals = True
                 in_atoms = in_bonds = in_angles = False

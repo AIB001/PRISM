@@ -30,6 +30,11 @@ class _DummyBuilder(FEPWorkflowMixin):
         self.lig_ff_dirs = [str(tmp_path / "LIG.amb2gmx")]
         self.ligand_forcefield = "gaff2"
         self.forcefield_paths = ["ff_ref", "ff_mut"]
+        self.forcefield = {"name": "amber14sb", "index": None}
+        self.water_model = {"name": "tip3p"}
+        self.gromacs_env = None
+        self.overwrite = False
+        self.config = {"system": {"box_distance": 1.5}}
         self.system_builder = _DummySystemBuilder(self.output_dir)
         self.mdp_generator = _DummyMDPGenerator(self.output_dir)
 
@@ -142,15 +147,43 @@ def test_resolve_generated_ligand_ff_dir_prefers_suffix_one_for_multi_ligand(tmp
     assert builder._resolve_generated_ligand_ff_dir(str(output_dir)).endswith("LIG.sp2gmx_1")
 
 
-def test_resolve_ligand_ff_artifact_uses_nested_registry_dirs(tmp_path):
-    builder = _DummyBuilder(tmp_path)
-    ff_dir = tmp_path / "ff"
-    nested = ff_dir / "LIG.openff2gmx"
-    nested.mkdir(parents=True)
-    (nested / "LIG.gro").write_text("gro")
+def test_build_ligand_only_system_delegates_to_service(monkeypatch, tmp_path):
+    class _DelegatingBuilder(FEPWorkflowMixin):
+        def __init__(self):
+            self.output_dir = str(tmp_path / "original_out")
+            self.lig_ff_dirs = [str(tmp_path / "LIG.amb2gmx")]
+            self.forcefield = {"name": "amber14sb", "index": None}
+            self.water_model = {"name": "tip3p"}
+            self.gromacs_env = None
+            self.overwrite = False
+            self.config = {"system": {"box_distance": 1.5}}
+            self.system_builder = _DummySystemBuilder(self.output_dir)
 
-    resolved = builder._resolve_ligand_ff_artifact(str(ff_dir), "LIG.gro")
-    assert resolved.endswith("LIG.openff2gmx/LIG.gro")
+        def generate_ligand_forcefield(self):
+            ff_dir = tmp_path / "generated_ff" / "LIG.amb2gmx"
+            ff_dir.mkdir(parents=True, exist_ok=True)
+            self.lig_ff_dirs = [str(ff_dir)]
+
+    builder = _DelegatingBuilder()
+    calls = {}
+
+    class DummyLigandOnlySystemBuilder:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+
+        def build(self, **kwargs):
+            calls["build"] = kwargs
+
+    monkeypatch.setattr("prism.fep.modeling.LigandOnlySystemBuilder", DummyLigandOnlySystemBuilder)
+
+    builder._build_ligand_only_system(str(tmp_path / "fep_unbound"), box_size=(4.0, 5.0, 6.0))
+
+    assert calls["init"]["system_builder"] is builder.system_builder
+    assert calls["init"]["forcefield"] == builder.forcefield
+    assert calls["init"]["water_model"] == builder.water_model
+    assert calls["build"]["output_dir"] == str(tmp_path / "fep_unbound")
+    assert calls["build"]["ligand_ff_dir"].endswith("generated_ff/LIG.amb2gmx")
+    assert calls["build"]["box_size"] == (4.0, 5.0, 6.0)
 
 
 def test_mapping_report_service_preserves_cgenff_origin_labels(tmp_path):

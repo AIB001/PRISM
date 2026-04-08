@@ -20,29 +20,10 @@ from ..utils.colors import (
     print_error,
     path,
 )
-from ..utils.system.topology import _parse_atomtypes, _should_vendor_forcefield
 from ..forcefield.registry import (
     get_forcefield_output_subdirs,
     iter_existing_ligand_output_dirs,
-    resolve_ligand_artifact,
 )
-
-try:
-    from ..forcefield.adapters import CGenFFAdapter
-except ImportError:
-    # Fallback if adapters not available
-    class CGenFFAdapter:
-        @classmethod
-        def should_include_ligand_atomtypes(cls, ff_name, lig_ff_path):
-            return not (ff_name.startswith("charmm") and (lig_ff_path / "charmm36.ff").exists())
-
-        @classmethod
-        def is_charmm_forcefield(cls, ff_name):
-            return ff_name.lower().startswith("charmm")
-
-        @classmethod
-        def detect(cls, lig_ff_path):
-            return (lig_ff_path / "charmm36.ff").exists()
 
 
 class FEPWorkflowMixin:
@@ -124,18 +105,10 @@ class FEPWorkflowMixin:
             hybrid_output = os.path.join(fep_output, "common/hybrid")
             os.makedirs(hybrid_output, exist_ok=True)
 
-            # Resolve coordinate sources (MOL2 > PDB > GRO)
-            def _resolve_coord_source(path: str, fallback: str) -> str:
-                """If path is a directory (RTF), find PDB inside; else use as-is."""
-                if path and os.path.isdir(path):
-                    pdbs = list(Path(path).glob("*.pdb"))
-                    return str(pdbs[0]) if pdbs else fallback
-                return path if path and os.path.exists(path) else fallback
-
-            ref_visual_coord_source = _resolve_coord_source(
-                self.ligand_paths[0] if self.ligand_paths else "", ref_ff_dir
+            ref_visual_coord_source = str(
+                HybridBuildService.resolve_coord_source(self.ligand_paths[0] if self.ligand_paths else "", ref_ff_dir)
             )
-            mut_visual_coord_source = _resolve_coord_source(self.mutant_ligand or "", mut_ff_dir)
+            mut_visual_coord_source = str(HybridBuildService.resolve_coord_source(self.mutant_ligand or "", mut_ff_dir))
 
             print(f"  Building hybrid topology:")
             print(f"    Reference FF: {ref_ff_dir}")
@@ -348,213 +321,18 @@ class FEPWorkflowMixin:
         self.generate_ligand_forcefield()
         self.output_dir = original_output
 
-        model_dir = Path(output_dir) / "GMX_PROLIG_MD"
-        model_dir.mkdir(exist_ok=True, parents=True)
+        from ..fep.modeling import LigandOnlySystemBuilder
 
-        ligand_ff_dir = Path(self.lig_ff_dirs[0])
-        ligand_gro = Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.gro"))
-
-        print_step(2, 5, "Creating ligand-only topology")
-
-        # Copy force field to working directory (same as bound system)
-        ff_name = self.forcefield["name"]
-        water_model = self.water_model["name"]
-        ff_idx = self.forcefield.get("index")
-        ff_info = None
-        use_ions_itp = "ions.itp"  # Default to old-style
-
-        # If no index, try to find it by name
-        if not ff_idx and self.gromacs_env:
-            ff_name = self.forcefield.get("name")
-            if ff_name:
-                ff_name_lower = ff_name.lower()
-                if ff_name_lower in self.gromacs_env.force_field_names:
-                    ff_idx = self.gromacs_env.force_field_names[ff_name_lower]
-
-        if ff_idx and self.gromacs_env:
-            # Get force field info from environment
-            if ff_idx in self.gromacs_env.force_fields:
-                ff_info = self.gromacs_env.force_fields[ff_idx]
-
-        # Determine which ion file to use (check before copying)
-        if ff_info and "path" in ff_info:
-            ff_path = Path(ff_info["path"])
-            if ff_path.exists() and ff_path.is_dir():
-                water_specific_ions = f"ions_{water_model}.itp"
-                generic_ions = "ions.itp"
-
-                # Check in force field directory
-                if (ff_path / water_specific_ions).exists():
-                    use_ions_itp = water_specific_ions
-                    print(f"  Using water-specific ion file: {water_specific_ions}")
-                elif (ff_path / generic_ions).exists():
-                    use_ions_itp = generic_ions
-                    print(f"  Using generic ion file: {generic_ions}")
-                else:
-                    # Neither exists - keep default and warn
-                    print(f"  ⚠ Warning: Neither {water_specific_ions} nor {generic_ions} found in {ff_path}")
-                    print(f"  Will attempt to use {use_ions_itp} (may fail at grompp)")
-
-        if ff_info and "dir" in ff_info:
-            ff_basename = ff_info["dir"]
-            local_ff_dir = Path(model_dir) / ff_basename
-
-            ff_path = Path(ff_info.get("path", ""))
-            if not ff_path.exists() or not ff_path.is_dir():
-                print(f"Warning: Force field path not found: {ff_path}")
-                print(f"Using force field from system search paths: {ff_name}")
-            else:
-                # Validate force field completeness (support both old and new force field structures)
-                required_files = ["forcefield.itp", "ffbonded.itp", "ffnonbonded.itp"]
-
-                # Add the detected ion file to required files
-                if use_ions_itp:
-                    required_files.append(use_ions_itp)
-
-                missing = [f for f in required_files if not (ff_path / f).exists()]
-                if missing:
-                    raise RuntimeError(
-                        f"Force field is incomplete: {ff_info['name']}\n"
-                        f"Missing files: {', '.join(missing)}\n"
-                        f"Force field path: {ff_path}\n"
-                        f"Source: {ff_info.get('source', 'unknown')}\n"
-                        f"Please check your force field installation."
-                    )
-
-                if _should_vendor_forcefield(ff_info, model_dir):
-                    # Copy if not exists, or validate and replace if incomplete
-                    need_copy = not local_ff_dir.exists()
-                    if not need_copy and self.overwrite:
-                        missing_local = [f for f in required_files if not (local_ff_dir / f).exists()]
-                        if missing_local:
-                            print(f"Existing force field copy is incomplete, replacing...")
-                            shutil.rmtree(local_ff_dir)
-                            need_copy = True
-
-                    if need_copy:
-                        shutil.copytree(ff_path, local_ff_dir)
-                        source_str = ff_info.get("source", ff_path)
-                        print(f"Copied force field to working directory: {local_ff_dir}")
-                        print(f"  Source: {source_str}")
-                    else:
-                        print(f"Using existing force field copy: {local_ff_dir}")
-                else:
-                    print(f"Using installed force field in place: {ff_path}")
-
-        topol_path = model_dir / "topol.top"
-        # Compute ligand include paths relative to the working model directory.
-        # This must work for both legacy single-ligand layouts (output_dir/LIG.*)
-        # and newer multi-ligand layouts (output_dir/Ligand_Forcefield/LIG.*).
-        ligand_rel_dir = os.path.relpath(ligand_ff_dir, model_dir)
-        cgenff_supplement = None
-        main_atomtypes = set()
-        if CGenFFAdapter.is_charmm_forcefield(ff_name) and CGenFFAdapter.detect(ligand_ff_dir):
-            main_ff_dir = model_dir / f"{ff_name}.ff"
-            if not main_ff_dir.exists() and ff_info and ff_info.get("path"):
-                main_ff_dir = Path(ff_info["path"])
-            ffnonbonded = main_ff_dir / "ffnonbonded.itp"
-            if ffnonbonded.exists():
-                main_atomtypes = _parse_atomtypes(ffnonbonded)
-            charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_ff_dir)
-            cgenff_supplement = self.system_builder._build_cgenff_parameter_supplement(
-                lig_ff_path=ligand_ff_dir,
-                lig_itp_path=Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.itp")),
-                charmm_ff_dir=charmm_ff_dir,
-                main_bonded_files=[
-                    p for p in [main_ff_dir / "ffbonded.itp", main_ff_dir / "ffmissingdihedrals.itp"] if p.exists()
-                ],
-                main_nonbonded_files=[p for p in [ffnonbonded] if p.exists()],
-            )
-
-        with open(topol_path, "w") as f:
-            f.write("; Ligand-only topology for FEP unbound leg\n")
-            f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
-            atomtypes_lines = []
-            atomtypes_itp_path = resolve_ligand_artifact(ligand_ff_dir, "atomtypes_LIG.itp")
-            include_ligand_atomtypes = CGenFFAdapter.should_include_ligand_atomtypes(ff_name, ligand_ff_dir)
-            if include_ligand_atomtypes and atomtypes_itp_path is not None and atomtypes_itp_path.exists():
-                for line in atomtypes_itp_path.read_text().splitlines():
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith(";") or stripped.startswith("["):
-                        continue
-                    atomtype = stripped.split()[0]
-                    if atomtype not in main_atomtypes:
-                        atomtypes_lines.append(line)
-            if atomtypes_lines:
-                f.write("\n; Include ligand-specific atomtypes\n")
-                f.write("[ atomtypes ]\n")
-                for line in atomtypes_lines:
-                    f.write(f"{line}\n")
-                f.write("\n")
-            if cgenff_supplement is not None:
-                f.write(f'#include "{ligand_rel_dir}/{cgenff_supplement.name}"\n')
-            f.write(f'#include "{ligand_rel_dir}/LIG.itp"\n')
-            f.write(f'#include "{ff_name}.ff/{water_model}.itp"\n')
-            if use_ions_itp:
-                f.write(f'#include "{ff_name}.ff/{use_ions_itp}"\n\n')
-            else:
-                # No ion file found - write comment and let grompp fail with clear error
-                f.write(f"; WARNING: No ion file found for {ff_name} with water model {water_model}\n")
-                f.write(f'#include "{ff_name}.ff/ions.itp"  ; This will likely fail\n\n')
-            f.write("[ system ]\n")
-            f.write("Ligand in water\n\n")
-            f.write("[ molecules ]\n")
-            # Read the actual moleculetype name from the ligand ITP file
-            # This handles the multi-ligand renaming (LIG -> LIG_N) correctly
-            ligand_itp = Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.itp"))
-            ligand_mol_name = self._read_moleculetype_name(ligand_itp)
-            f.write(f"{ligand_mol_name:<8} 1\n")
-
-        shutil.copy(ligand_gro, model_dir / "lig.gro")
-
-        print_step(3, 5, "Creating simulation box")
-        boxed_gro = model_dir / "lig_newbox.gro"
-        if box_size:
-            print(f"  Using specified box size: {box_size[0]:.3f} x {box_size[1]:.3f} x {box_size[2]:.3f} nm")
-            self.system_builder._run_command(
-                [
-                    self.system_builder.gmx_command,
-                    "editconf",
-                    "-f",
-                    str(model_dir / "lig.gro"),
-                    "-o",
-                    str(boxed_gro),
-                    "-bt",
-                    "cubic",
-                    "-box",
-                    str(box_size[0]),
-                    str(box_size[1]),
-                    str(box_size[2]),
-                    "-c",
-                ],
-                work_dir=str(model_dir),
-            )
-        else:
-            box_distance = self.config.get("system", {}).get("box_distance", 1.5)
-            self.system_builder._run_command(
-                [
-                    self.system_builder.gmx_command,
-                    "editconf",
-                    "-f",
-                    str(model_dir / "lig.gro"),
-                    "-o",
-                    str(boxed_gro),
-                    "-bt",
-                    "cubic",
-                    "-d",
-                    str(box_distance),
-                    "-c",
-                ],
-                work_dir=str(model_dir),
-            )
-
-        print_step(4, 5, "Solvating system")
-        solvated_gro = self.system_builder._solvate(str(boxed_gro), str(topol_path))
-
-        print_step(5, 5, "Adding ions")
-        self.system_builder._add_ions(solvated_gro, str(topol_path))
-
-        print_success(f"Ligand-only system built in {model_dir}")
+        ligand_builder = LigandOnlySystemBuilder(
+            system_builder=self.system_builder,
+            forcefield=self.forcefield,
+            water_model=self.water_model,
+            gromacs_env=self.gromacs_env,
+            overwrite=self.overwrite,
+            config=self.config,
+            cgenff_supplement_builder=getattr(self.system_builder, "_build_cgenff_parameter_supplement", None),
+        )
+        ligand_builder.build(output_dir=output_dir, ligand_ff_dir=self.lig_ff_dirs[0], box_size=box_size)
 
     def _resolve_generated_ligand_ff_dir(self, output_dir: str) -> str:
         """Return the generated ligand force-field directory for the current ligand FF."""
@@ -604,45 +382,6 @@ class FEPWorkflowMixin:
             return str(ref_candidates[0])
         # No explicit _1, use sorted first
         return str(ff_dirs[0])
-
-    def _resolve_ligand_ff_artifact(self, ligand_ff_dir: str, filename: str) -> str:
-        """Resolve an artifact within a generated ligand FF directory."""
-        resolved = resolve_ligand_artifact(ligand_ff_dir, filename)
-        if resolved is None:
-            raise FileNotFoundError(f"Could not find {filename} under ligand FF directory: {ligand_ff_dir}")
-        return str(resolved)
-
-    def _read_moleculetype_name(self, itp_path: Path) -> str:
-        """Read the moleculetype name from a ligand ITP file.
-
-        Parameters
-        ----------
-        itp_path : Path
-            Path to the LIG.itp file.
-
-        Returns
-        -------
-        str
-            The moleculetype name (e.g., LIG or LIG_1).
-
-        Raises
-        ------
-        ValueError
-            If the moleculetype section cannot be parsed.
-        """
-        in_moleculetype = False
-        for raw_line in itp_path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith(";"):
-                continue
-            if line.lower() == "[ moleculetype ]":
-                in_moleculetype = True
-                continue
-            if in_moleculetype:
-                # First non-comment line after [ moleculetype ]
-                # Format: "name  nrexcl"
-                return line.split()[0]
-        raise ValueError(f"Could not parse moleculetype from {itp_path}")
 
     def _generate_mutant_ligand_ff(self, mutant_ligand: str, output_dir: str):
         """Generate force field for mutant ligand"""
