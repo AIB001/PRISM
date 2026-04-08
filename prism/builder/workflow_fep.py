@@ -258,6 +258,23 @@ class FEPWorkflowMixin:
             self._generate_hybrid_gro(hybrid_gro, hybrid_atoms, ref_atoms, mut_atoms)
             print_success(f"Hybrid structure: {hybrid_gro}")
 
+            # Re-read atoms from HYBRID ITP + HYBRID GRO for correct atom names AND coordinates in mapping files
+            # (Individual ligand ITPs have generic names like H, O, C, N
+            #  but hybrid ITP has specific names like HA, OA, C, H1, H2, C1, N, ...)
+            # The hybrid GRO file contains coordinates with hybrid atom names, ensuring proper matching.
+            # This ensures mapping files have atom names that match the hybrid topology,
+            # allowing proper coordinate lookup during hybrid GRO generation.
+            hybrid_atoms_for_mapping_a = read_ligand_from_prism(
+                itp_file=hybrid_itp,
+                gro_file=hybrid_gro,  # Use hybrid GRO (with hybrid atom names) instead of individual ligand GRO
+                state="a",
+            )
+            hybrid_atoms_for_mapping_b = read_ligand_from_prism(
+                itp_file=hybrid_itp,
+                gro_file=hybrid_gro,  # Use hybrid GRO (with hybrid atom names) instead of individual ligand GRO
+                state="b",
+            )
+
             # Export an interactive mapping report into the final FEP output
             # so CLI users can inspect the hybridization result without running
             # a separate visualization helper.
@@ -267,8 +284,8 @@ class FEPWorkflowMixin:
                 ref_coord_source=ref_visual_coord_source,
                 mut_coord_source=mut_visual_coord_source,
                 mapping=mapping,
-                ref_atoms=ref_atoms,
-                mut_atoms=mut_atoms,
+                ref_atoms=hybrid_atoms_for_mapping_a,  # Use hybrid atoms with correct names
+                mut_atoms=hybrid_atoms_for_mapping_b,  # Use hybrid atoms with correct names
             )
 
             # Phase 4: Create FEP scaffold with complete systems
@@ -689,26 +706,37 @@ class FEPWorkflowMixin:
         """
         ref_coord_map = {atom.name: atom.coord for atom in ref_atoms}
         mut_coord_map = {atom.name: atom.coord for atom in mut_atoms}
+        ref_coord_by_index = {atom.index: atom.coord for atom in ref_atoms}
+        mut_coord_by_index = {atom.index: atom.coord for atom in mut_atoms}
 
         # Generate hybrid coordinates
         hybrid_atoms_data = []
         for hatom in hybrid_atoms:
-            # Remove single A/B suffix from hybrid atom name to find original name
-            # Note: Only remove ONE suffix character (A or B), not all trailing As/Bs
-            if hatom.name.endswith("A"):
-                base_name = hatom.name[:-1]  # Remove single 'A'
-                # Transformed A atom (disappearing in state B)
-                # Use coordinates from reference ligand
-                coord = ref_coord_map.get(base_name, [0.0, 0.0, 0.0])
-            elif hatom.name.endswith("B"):
-                base_name = hatom.name[:-1]  # Remove single 'B'
-                # Transformed B atom (appearing in state B)
-                # Use coordinates from mutant ligand
-                coord = mut_coord_map.get(base_name, [0.0, 0.0, 0.0])
-            else:
-                # Common atom
-                # Use coordinates from reference ligand
-                coord = ref_coord_map.get(hatom.name, [0.0, 0.0, 0.0])
+            coord = None
+
+            # Prefer explicit source indices. This is robust for OpenFF/OPLS-style
+            # generic atom names where multiple atoms are all named H/C/N/O/F.
+            source_a_index = getattr(hatom, "source_a_index", None)
+            source_b_index = getattr(hatom, "source_b_index", None)
+            if source_a_index is not None and source_a_index in ref_coord_by_index:
+                coord = ref_coord_by_index[source_a_index]
+            elif source_b_index is not None and source_b_index in mut_coord_by_index:
+                coord = mut_coord_by_index[source_b_index]
+
+            # Fall back to name-based matching for older hybrid objects that do not
+            # carry source index metadata.
+            if coord is None:
+                if hatom.name.endswith("A"):
+                    base_name = hatom.name[:-1]
+                    coord = ref_coord_map.get(base_name)
+                elif hatom.name.endswith("B"):
+                    base_name = hatom.name[:-1]
+                    coord = mut_coord_map.get(base_name)
+                else:
+                    coord = ref_coord_map.get(hatom.name)
+
+            if coord is None:
+                coord = [0.0, 0.0, 0.0]
 
             hybrid_atoms_data.append({"index": hatom.index, "name": hatom.name, "coord": coord})
 
@@ -723,6 +751,11 @@ class FEPWorkflowMixin:
                 idx = atom_data["index"]
                 name = atom_data["name"]
                 x, y, z = atom_data["coord"]
+                # Atom.coord is stored in Angstroms by read_ligand_from_prism;
+                # GRO files require nanometers.
+                x /= 10.0
+                y /= 10.0
+                z /= 10.0
                 # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
                 # residuenum (5 chars) + residuename (5 chars, left-justified)
                 # + atomname (5 chars, right-justified) + atomnumber (5 chars) + x + y + z

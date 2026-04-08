@@ -199,13 +199,14 @@ class HybridPackageBuilder:
                         mutant_gro = candidate
                         break
 
-        reference_coords_file = hybrid_dir / "mapping_state_a.pdb"
-        if not reference_coords_file.exists():
-            reference_coords_file = seed_gro
-
-        mutant_coords_file = hybrid_dir / "mapping_state_b.pdb"
-        if not mutant_coords_file.exists():
-            mutant_coords_file = mutant_gro
+        # IMPORTANT: Do NOT use mapping_state_a.pdb/mapping_state_b.pdb as coordinate sources!
+        # These mapping files are generated for HTML visualization and may have
+        # generic atom names that don't match the hybrid topology atom names.
+        # Always use the original ligand GRO files which have correct atom name → coordinate mappings.
+        # reference_coords_file = hybrid_dir / "mapping_state_a.pdb"  # DISABLED
+        # mutant_coords_file = hybrid_dir / "mapping_state_b.pdb"    # DISABLED
+        reference_coords_file = seed_gro  # Use original reference ligand GRO
+        mutant_coords_file = mutant_gro  # Use original mutant ligand GRO
 
         hybrid_gro_content = self._build_hybrid_gro(
             hybrid_itp_content=normalized_itp,
@@ -971,9 +972,12 @@ class HybridPackageBuilder:
                 coord = ref_coords[base_name][0]
                 return coord["x"], coord["y"], coord["z"]
 
-        # Strategy 1c: Handle simple element names (HA, OA, CA, N, F)
-        # where reference has numbered names (H5, O19, C21, N15, F26)
-        # Match by element prefix using sequential indexing
+        # Strategy 1c: Handle simple element names ONLY (HA, OA, CA, N, F)
+        # WARNING: DO NOT extend this to numbered names (H1, C1, N1, C15A, H12A, etc.)
+        # Numbered atom names are SPECIFIC identifiers, not sequential indices!
+        # H1 is a specific atom name, NOT "the first hydrogen"
+        # C15A is a specific atom name, NOT "the 15th carbon with A suffix"
+        # For numbered names, use source_a_index/source_b_index for explicit mapping instead
         if atom_name.isalpha() and len(atom_name) <= 3:
             # Extract element from atom name
             element = self._extract_element_from_atom_name(atom_name)

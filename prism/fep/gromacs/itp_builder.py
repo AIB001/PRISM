@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
+import re
 from typing import Dict, List, Optional, Tuple
 
 from ..core.hybrid_topology import HybridAtom
@@ -250,6 +252,20 @@ class ITPBuilder:
         two source ligand ITP files.
         """
         hybrid_records = cls._parse_hybrid_atom_records(Path(hybrid_itp).read_text())
+        cls._recover_source_indices_from_mapping_html(
+            hybrid_records,
+            Path(hybrid_itp).with_name("mapping.html"),
+        )
+        source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text(), structure_file=ligand_a_structure)
+        source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text(), structure_file=ligand_b_structure)
+
+        cls._recover_missing_source_indices(
+            hybrid_records,
+            source_a.get("atom_types", {}),
+            source_b.get("atom_types", {}),
+            source_a.get("atom_names", {}),
+            source_b.get("atom_names", {}),
+        )
 
         # Try to use index-based mapping first, fallback to name-based if needed
         try:
@@ -262,9 +278,6 @@ class ITPBuilder:
         # Build sets of hybrid indices that are dummy in each state
         dummy_in_a: set = {r.index for r in hybrid_records if r.state_a_type.startswith("DUM_")}
         dummy_in_b: set = {r.index for r in hybrid_records if (r.state_b_type or "").startswith("DUM_")}
-
-        source_a = cls._parse_source_itp(Path(ligand_a_itp).read_text(), structure_file=ligand_a_structure)
-        source_b = cls._parse_source_itp(Path(ligand_b_itp).read_text(), structure_file=ligand_b_structure)
 
         # Remap atom types from source IDs to hybrid IDs
         hybrid_atom_types_a = None
@@ -315,6 +328,133 @@ class ITPBuilder:
                     atom_types_b_hybrid=hybrid_atom_types_b,
                 )
         return hybrid_params
+
+    @classmethod
+    def _recover_missing_source_indices(
+        cls,
+        hybrid_records: List[HybridAtomRecord],
+        source_atom_types_a: Dict[int, str],
+        source_atom_types_b: Dict[int, str],
+        source_atom_names_a: Dict[int, str],
+        source_atom_names_b: Dict[int, str],
+    ) -> None:
+        """Recover source atom indices for legacy hybrid ITPs missing index comments.
+
+        Older scaffolds may contain only ``name_b`` comments in ``hybrid_atoms_temp.itp``.
+        That forces a weak name-based bonded-term merge and produces large numbers of
+        spurious zero-force terms for generators such as LigParGen, where source ITP
+        atom names are generic but atom types are unique. Recover indices in-place
+        before we choose the mapping strategy.
+        """
+
+        def unique_type_map(source_atom_types: Dict[int, str]) -> Dict[str, int]:
+            buckets: Dict[str, List[int]] = {}
+            for atom_index, atom_type in source_atom_types.items():
+                buckets.setdefault(atom_type, []).append(atom_index)
+            return {atom_type: indices[0] for atom_type, indices in buckets.items() if len(indices) == 1}
+
+        unique_a = unique_type_map(source_atom_types_a)
+        unique_b = unique_type_map(source_atom_types_b)
+        name_to_index_a = {name: idx for idx, name in source_atom_names_a.items()}
+        name_to_index_b = {name: idx for idx, name in source_atom_names_b.items()}
+
+        def normalized_state_a_name(record: HybridAtomRecord) -> str:
+            if record.name.endswith("A") and not record.state_a_type.startswith("DUM_"):
+                return record.name[:-1]
+            return record.name
+
+        for record in hybrid_records:
+            if record.source_a_index is None and not record.state_a_type.startswith("DUM_"):
+                inferred_a = name_to_index_a.get(normalized_state_a_name(record))
+                if inferred_a is None:
+                    inferred_a = unique_a.get(record.state_a_type)
+                record.source_a_index = inferred_a
+
+            state_b_type = record.state_b_type or record.state_a_type or ""
+            if record.source_b_index is None and state_b_type and not state_b_type.startswith("DUM_"):
+                state_b_name = record.name_b or record.name
+                if state_b_name.endswith("B"):
+                    state_b_name = state_b_name[:-1]
+                inferred_b = name_to_index_b.get(state_b_name)
+                if inferred_b is None:
+                    inferred_b = unique_b.get(state_b_type)
+                record.source_b_index = inferred_b
+
+    @classmethod
+    def _recover_source_indices_from_mapping_html(
+        cls, hybrid_records: List[HybridAtomRecord], mapping_html: Path
+    ) -> None:
+        """Recover source indices from mapping.html for legacy scaffolds.
+
+        mapping.html stores the authoritative atom correspondence used to build
+        the hybrid topology. Older hybrid_atoms_temp.itp files may have dropped
+        source index comments entirely; in that case, reconstructing from the
+        saved mapping is more reliable than guessing from atom names or types.
+        """
+        if not mapping_html.exists():
+            return
+        if all(r.source_a_index is not None or r.state_a_type.startswith("DUM_") for r in hybrid_records) and all(
+            r.source_b_index is not None
+            or (r.state_b_type or "").startswith("DUM_")
+            or (r.state_b_type is None and not getattr(r, "name_b", None))
+            for r in hybrid_records
+        ):
+            return
+
+        text = mapping_html.read_text()
+
+        def extract_js_json(name: str):
+            match = re.search(rf"const\\s+{name}\\s*=\\s*(.*?);", text, re.S)
+            if not match:
+                return None
+            return json.loads(match.group(1))
+
+        atoms_a = extract_js_json("ATOMS_A")
+        atoms_b = extract_js_json("ATOMS_B")
+        correspondence = extract_js_json("CORRESPONDENCE")
+        if not atoms_a or not atoms_b or not correspondence:
+            return
+
+        b_match_by_a_source = {}
+        matched_b_positions = set()
+        for a_key, b_key in correspondence.items():
+            if not a_key.startswith("a_") or not b_key.startswith("b_"):
+                continue
+            a_pos = int(a_key.split("_", 1)[1])
+            b_pos = int(b_key.split("_", 1)[1])
+            if a_pos < len(atoms_a) and b_pos < len(atoms_b):
+                b_match_by_a_source[int(atoms_a[a_pos]["sourceIndex"])] = int(atoms_b[b_pos]["sourceIndex"])
+                matched_b_positions.add(b_pos)
+
+        transformed_b_sources = [
+            int(atom["sourceIndex"])
+            for idx, atom in enumerate(atoms_b)
+            if atom.get("classification") == "transformed" and idx not in matched_b_positions
+        ]
+        transformed_b_iter = iter(transformed_b_sources)
+
+        next_a_source = 1
+        for record in hybrid_records:
+            state_a_dummy = record.state_a_type.startswith("DUM_")
+            state_b_type = record.state_b_type or ""
+            state_b_dummy = state_b_type.startswith("DUM_")
+
+            if not state_a_dummy:
+                if record.source_a_index is None:
+                    record.source_a_index = next_a_source
+                if record.source_a_index is not None:
+                    next_a_source = max(next_a_source, record.source_a_index + 1)
+
+            if record.source_b_index is not None:
+                continue
+
+            if not state_a_dummy and not state_b_dummy:
+                if record.source_a_index is not None:
+                    record.source_b_index = b_match_by_a_source.get(record.source_a_index)
+                continue
+
+            if state_a_dummy and state_b_type and not state_b_dummy:
+                record.source_b_index = next(transformed_b_iter, None)
 
     @classmethod
     def write_complete_hybrid_itp(
@@ -589,7 +729,18 @@ class ITPBuilder:
         available, use graph isomorphism on the bond graph to recover the original
         atom naming so bonded terms can be merged against the hybrid topology.
         """
-        if not structure_file or not structure_file.lower().endswith(".mol2"):
+        if not structure_file:
+            return atom_names
+        structure_file_lower = structure_file.lower()
+        if structure_file_lower.endswith(".pdb"):
+            pdb_names = cls._read_pdb_atom_names(structure_file)
+            if pdb_names and len(pdb_names) >= len(atom_names):
+                remapped = {}
+                for itp_idx, atom_name in atom_names.items():
+                    remapped[itp_idx] = pdb_names.get(itp_idx, atom_name)
+                return remapped
+            return atom_names
+        if not structure_file_lower.endswith(".mol2"):
             return atom_names
         if not atom_names or not bond_terms:
             return atom_names
@@ -627,6 +778,22 @@ class ITPBuilder:
                     names[int(parts[0])] = parts[1]
                 except ValueError:
                     continue
+        return names
+
+    @staticmethod
+    def _read_pdb_atom_names(pdb_file: str) -> Dict[int, str]:
+        names: Dict[int, str] = {}
+        with open(pdb_file, "r") as handle:
+            for line in handle:
+                if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                    continue
+                try:
+                    atom_index = int(line[6:11].strip())
+                except ValueError:
+                    continue
+                atom_name = line[12:16].strip()
+                if atom_name:
+                    names[atom_index] = atom_name
         return names
 
     @staticmethod

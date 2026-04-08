@@ -15,6 +15,7 @@
     python ../../test_run_fep.py --forcefield amber14sb_OL15
 """
 
+import os
 import sys
 import argparse
 import re
@@ -204,8 +205,14 @@ def test_run_fep(
         ref_ligand_path = ref_ligand
         mut_ligand_path = mut_ligand
     else:
-        ref_ligand_path = f"input/{ref_ligand}"
-        mut_ligand_path = f"input/{mut_ligand}"
+        if os.path.isabs(ref_ligand) or str(ref_ligand).startswith("input/"):
+            ref_ligand_path = ref_ligand
+        else:
+            ref_ligand_path = f"input/{ref_ligand}"
+        if os.path.isabs(mut_ligand) or str(mut_ligand).startswith("input/"):
+            mut_ligand_path = mut_ligand
+        else:
+            mut_ligand_path = f"input/{mut_ligand}"
 
     # Protein PDB: support both receptor.pdb and protein.pdb
     protein_path = "input/receptor.pdb"
