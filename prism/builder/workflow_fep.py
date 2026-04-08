@@ -74,6 +74,7 @@ class FEPWorkflowMixin:
                 fep_output = normalized_output_dir
             else:
                 fep_output = os.path.join(normalized_output_dir, "GMX_PROLIG_FEP")
+
             os.makedirs(fep_output, exist_ok=True)
 
             root_md_dir = os.path.join(normalized_output_dir, "GMX_PROLIG_MD")
@@ -303,7 +304,6 @@ class FEPWorkflowMixin:
             layout = fep_builder.build_from_components(
                 receptor_pdb=self.protein_path,
                 hybrid_itp=hybrid_itp,
-                hybrid_gro=hybrid_gro,
                 reference_ligand_dir=ref_ff_dir,
                 mutant_ligand_dir=mut_ff_dir,
                 bound_system_dir=bound_system_dir,
@@ -751,11 +751,13 @@ class FEPWorkflowMixin:
                 idx = atom_data["index"]
                 name = atom_data["name"]
                 x, y, z = atom_data["coord"]
-                # Atom.coord is stored in Angstroms by read_ligand_from_prism;
-                # GRO files require nanometers.
-                x /= 10.0
-                y /= 10.0
-                z /= 10.0
+                # read_ligand_from_prism may supply coordinates from either GRO
+                # (historically converted to Angstroms) or PDB/MOL2 (nanometers).
+                # Detect the Angstrom case heuristically and normalize to nm here.
+                if max(abs(x), abs(y), abs(z)) > 10.0:
+                    x /= 10.0
+                    y /= 10.0
+                    z /= 10.0
                 # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
                 # residuenum (5 chars) + residuename (5 chars, left-justified)
                 # + atomname (5 chars, right-justified) + atomnumber (5 chars) + x + y + z

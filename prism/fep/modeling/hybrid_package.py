@@ -118,6 +118,7 @@ class HybridPackageBuilder:
                     "LIG.openff2gmx",
                     "LIG.amb2gmx",
                     "LIG.opls2gmx",
+                    "LIG.sp2gmx",
                     "LIG.mmff2gmx",
                     "LIG.match2gmx",
                     "LIG.both2gmx",
@@ -187,6 +188,7 @@ class HybridPackageBuilder:
                     "LIG.amb2gmx",
                     "LIG.openff2gmx",
                     "LIG.opls2gmx",
+                    "LIG.sp2gmx",
                     "LIG.mmff2gmx",
                     "LIG.match2gmx",
                     "LIG.both2gmx",
@@ -208,12 +210,17 @@ class HybridPackageBuilder:
         reference_coords_file = seed_gro  # Use original reference ligand GRO
         mutant_coords_file = mutant_gro  # Use original mutant ligand GRO
 
+        reference_itp = self._resolve_source_ligand_itp(reference_ligand_dir)
+        mutant_itp = self._resolve_source_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else None
+
         hybrid_gro_content = self._build_hybrid_gro(
             hybrid_itp_content=normalized_itp,
             reference_gro=seed_gro,
             mutant_gro=mutant_gro,
             reference_coords_file=reference_coords_file,
             mutant_coords_file=mutant_coords_file,
+            reference_itp=reference_itp,
+            mutant_itp=mutant_itp,
         )
         (hybrid_dir / self.hybrid_gro_filename).write_text(hybrid_gro_content)
 
@@ -228,6 +235,7 @@ class HybridPackageBuilder:
                 "LIG.amb2gmx",
                 "LIG.openff2gmx",
                 "LIG.opls2gmx",
+                "LIG.sp2gmx",
                 "LIG.mmff2gmx",
                 "LIG.match2gmx",
                 "LIG.both2gmx",
@@ -245,6 +253,30 @@ class HybridPackageBuilder:
 
         # Write topology template
         self._write_hybrid_top_template(hybrid_dir / "hybrid.top")
+
+    def _resolve_source_ligand_itp(self, ligand_dir: Optional[Path]) -> Optional[Path]:
+        """Resolve the primary source ligand ITP from a PRISM ligand directory."""
+        if ligand_dir is None:
+            return None
+        direct = ligand_dir / "LIG.itp"
+        if direct.exists():
+            return direct
+        for subdir in [
+            "LIG.openff2gmx",
+            "LIG.amb2gmx",
+            "LIG.opls2gmx",
+            "LIG.sp2gmx",
+            "LIG.mmff2gmx",
+            "LIG.match2gmx",
+            "LIG.both2gmx",
+            "LIG.cgenff2gmx",
+            "LIG.charmm2gmx",
+            "LIG.rtf2gmx",
+        ]:
+            candidate = ligand_dir / subdir / "LIG.itp"
+            if candidate.exists():
+                return candidate
+        return None
 
     def _normalize_hybrid_itp(self, content: str, molecule_name: str) -> str:
         """
@@ -352,6 +384,7 @@ class HybridPackageBuilder:
                     "LIG.amb2gmx",
                     "LIG.openff2gmx",
                     "LIG.opls2gmx",
+                    "LIG.sp2gmx",
                     "LIG.mmff2gmx",
                     "LIG.match2gmx",
                     "LIG.both2gmx",
@@ -706,6 +739,8 @@ class HybridPackageBuilder:
         mutant_gro: Optional[Path],
         reference_coords_file: Optional[Path] = None,
         mutant_coords_file: Optional[Path] = None,
+        reference_itp: Optional[Path] = None,
+        mutant_itp: Optional[Path] = None,
     ) -> str:
         """
         Build hybrid GRO file with coordinates from reference/mutant.
@@ -727,9 +762,13 @@ class HybridPackageBuilder:
         reference_coord_source = reference_coords_file if reference_coords_file else reference_gro
         mutant_coord_source = mutant_coords_file if mutant_coords_file else mutant_gro
 
-        ref_coords, _ = self._parse_gro_atoms(reference_coord_source)
-        mut_coords, _ = self._parse_gro_atoms(mutant_coord_source) if mutant_coord_source else ({}, None)
-        _, ref_box = self._parse_gro_atoms(reference_gro)
+        ref_coords, ref_coords_by_index, _ = self._parse_gro_atoms(reference_coord_source)
+        mut_coords, mut_coords_by_index, _ = (
+            self._parse_gro_atoms(mutant_coord_source) if mutant_coord_source else ({}, {}, None)
+        )
+        ref_type_index = self._build_unique_type_index_map(reference_itp)
+        mut_type_index = self._build_unique_type_index_map(mutant_itp)
+        ref_box = self._read_gro_box(reference_gro)
         hybrid_atoms, correspondence = self._parse_hybrid_atoms(hybrid_itp_content)
 
         for counter_name in ("_element_index_counters", "_ref_element_index_counters"):
@@ -742,13 +781,66 @@ class HybridPackageBuilder:
         ]
 
         for idx, atom in enumerate(hybrid_atoms, start=1):
-            x, y, z = self._resolve_hybrid_atom_coordinates(atom, ref_coords, mut_coords, correspondence)
+            x, y, z = self._resolve_hybrid_atom_coordinates(
+                atom,
+                ref_coords,
+                mut_coords,
+                correspondence,
+                ref_coords_by_index,
+                mut_coords_by_index,
+                ref_type_index,
+                mut_type_index,
+            )
             lines.append(f"{1:5d}{self.molecule_name:<5s}{atom['name']:>5s}{idx:5d}{x:8.3f}{y:8.3f}{z:8.3f}")
 
         lines.append(self._normalize_box_line(ref_box))
         return "\n".join(lines) + "\n"
 
-    def _parse_gro_atoms(self, gro_path: Optional[Path]) -> tuple[Dict[str, list[Dict[str, float]]], Optional[str]]:
+    def _read_gro_box(self, gro_path: Optional[Path]) -> Optional[str]:
+        """Read the raw box line from a GRO file without coordinate-source fallbacks."""
+        if gro_path is None or not gro_path.exists():
+            return None
+        lines = gro_path.read_text().splitlines()
+        if len(lines) < 3:
+            return None
+        try:
+            natoms = int(lines[1].strip())
+        except ValueError:
+            return None
+        box_idx = 2 + natoms
+        if box_idx >= len(lines):
+            return None
+        return lines[box_idx]
+
+    def _build_unique_type_index_map(self, itp_path: Optional[Path]) -> Dict[str, int]:
+        """Return atomtype -> source atom index for types that occur exactly once."""
+        if itp_path is None or not itp_path.exists():
+            return {}
+        type_to_indices: Dict[str, list[int]] = {}
+        in_atoms = False
+        for line in itp_path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower() == "[ atoms ]":
+                in_atoms = True
+                continue
+            if in_atoms and stripped.startswith("["):
+                break
+            if not in_atoms or not stripped or stripped.startswith(";"):
+                continue
+            parts = stripped.split()
+            if len(parts) < 2:
+                continue
+            try:
+                atom_index = int(parts[0])
+            except ValueError:
+                continue
+            atom_type = parts[1]
+            type_to_indices.setdefault(atom_type, []).append(atom_index)
+        return {atom_type: indices[0] for atom_type, indices in type_to_indices.items() if len(indices) == 1}
+
+    def _parse_gro_atoms(
+        self, gro_path: Optional[Path]
+    ) -> tuple[Dict[str, list[Dict[str, float]]], Dict[int, Dict[str, float]], Optional[str]]:
         """
         Parse GRO file and extract atom coordinates.
 
@@ -761,7 +853,7 @@ class HybridPackageBuilder:
             (atom_coords_by_name, box_line)
         """
         if gro_path is None or not gro_path.exists():
-            return {}, None
+            return {}, {}, None
 
         # Try MOL2 first (preserves full atom names)
         # Check in same directory as GRO
@@ -770,7 +862,7 @@ class HybridPackageBuilder:
             try:
                 coords_by_name = self._parse_mol2_atoms(mol2_path)
                 if coords_by_name:
-                    return coords_by_name, None  # MOL2 doesn't have box info
+                    return coords_by_name, {}, None  # MOL2 doesn't have stable GRO-style indices
             except Exception:
                 pass  # Fall back to GRO
 
@@ -780,7 +872,7 @@ class HybridPackageBuilder:
             try:
                 coords_by_name = self._parse_pdb_atoms(pdb_path)
                 if coords_by_name:
-                    return coords_by_name, None  # PDB doesn't have box info
+                    return coords_by_name, {}, None  # PDB doesn't have stable GRO-style indices
             except Exception:
                 pass  # Fall back to GRO
 
@@ -789,10 +881,11 @@ class HybridPackageBuilder:
         # No need to search input directory for alternative files
         lines = gro_path.read_text().splitlines()
         if len(lines) < 3:
-            return {}, None
+            return {}, {}, None
 
         natoms = int(lines[1].strip())
         coords_by_name = {}
+        coords_by_index = {}
 
         for i in range(2, 2 + natoms):
             if i >= len(lines):
@@ -805,11 +898,13 @@ class HybridPackageBuilder:
             x = float(line[20:28])
             y = float(line[28:36])
             z = float(line[36:44])
+            atom_index = i - 1
 
             coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
+            coords_by_index[atom_index] = {"x": x, "y": y, "z": z}
 
         box_line = lines[2 + natoms] if len(lines) > 2 + natoms else None
-        return coords_by_name, box_line
+        return coords_by_name, coords_by_index, box_line
 
     def _parse_mol2_atoms(self, mol2_path: Path) -> Dict[str, list[Dict[str, float]]]:
         """Parse MOL2 file and extract atom coordinates by atom name.
@@ -882,6 +977,8 @@ class HybridPackageBuilder:
         correspondence = {}
         in_atoms = False
         pending_correspondence = None
+        pending_source_a_index = None
+        pending_source_b_index = None
 
         for line in hybrid_itp_content.splitlines():
             stripped = line.strip()
@@ -889,6 +986,18 @@ class HybridPackageBuilder:
             # Check for FEbuilder correspondence comment
             if stripped.startswith(";") and "name_b (state B):" in stripped:
                 pending_correspondence = stripped.split("name_b (state B):", 1)[1].strip()
+                continue
+            if stripped.startswith(";") and "source_a_index:" in stripped:
+                try:
+                    pending_source_a_index = int(stripped.split("source_a_index:", 1)[1].strip())
+                except ValueError:
+                    pending_source_a_index = None
+                continue
+            if stripped.startswith(";") and "source_b_index:" in stripped:
+                try:
+                    pending_source_b_index = int(stripped.split("source_b_index:", 1)[1].strip())
+                except ValueError:
+                    pending_source_b_index = None
                 continue
 
             if stripped.lower() == "[ atoms ]":
@@ -909,6 +1018,9 @@ class HybridPackageBuilder:
                     "name": atom_name,
                     "type": parts[1],
                     "resname": parts[3],
+                    "source_a_index": pending_source_a_index,
+                    "source_b_index": pending_source_b_index,
+                    "type_b": parts[8] if len(parts) >= 9 else None,
                 }
             )
 
@@ -916,6 +1028,8 @@ class HybridPackageBuilder:
             if pending_correspondence:
                 correspondence[atom_name] = pending_correspondence
                 pending_correspondence = None
+            pending_source_a_index = None
+            pending_source_b_index = None
 
         return atoms, correspondence
 
@@ -925,6 +1039,10 @@ class HybridPackageBuilder:
         ref_coords: Dict[str, list[Dict[str, float]]],
         mut_coords: Dict[str, list[Dict[str, float]]],
         correspondence: Dict[str, str],
+        ref_coords_by_index: Optional[Dict[int, Dict[str, float]]] = None,
+        mut_coords_by_index: Optional[Dict[int, Dict[str, float]]] = None,
+        ref_type_index: Optional[Dict[str, int]] = None,
+        mut_type_index: Optional[Dict[str, int]] = None,
         resolved_coords: list[tuple[float, float, float]] = None,
     ) -> tuple[float, float, float]:
         """
@@ -956,6 +1074,35 @@ class HybridPackageBuilder:
         """
         atom_name = atom["name"]
         atom_type = atom["type"]
+        source_a_index = atom.get("source_a_index")
+        source_b_index = atom.get("source_b_index")
+
+        # Strategy 0: explicit source indices are the only fully reliable mapping
+        # for force fields that reuse generic names like H/C/N/O/F.
+        if source_a_index is not None and ref_coords_by_index and source_a_index in ref_coords_by_index:
+            coord = ref_coords_by_index[source_a_index]
+            return coord["x"], coord["y"], coord["z"]
+
+        if source_b_index is not None and mut_coords_by_index and source_b_index in mut_coords_by_index:
+            coord = mut_coords_by_index[source_b_index]
+            return coord["x"], coord["y"], coord["z"]
+
+        # Strategy 0b: when source indices were not preserved, fall back to
+        # unique atom-type matches from the original source ligand ITP. This is
+        # still explicit enough for force fields that use generic names but
+        # assign a unique type to transformed atoms.
+        if atom_type and ref_type_index and ref_coords_by_index:
+            source_idx = ref_type_index.get(atom_type)
+            if source_idx is not None and source_idx in ref_coords_by_index:
+                coord = ref_coords_by_index[source_idx]
+                return coord["x"], coord["y"], coord["z"]
+
+        state_b_type = atom.get("type_b")
+        if state_b_type and mut_type_index and mut_coords_by_index:
+            source_idx = mut_type_index.get(state_b_type)
+            if source_idx is not None and source_idx in mut_coords_by_index:
+                coord = mut_coords_by_index[source_idx]
+                return coord["x"], coord["y"], coord["z"]
 
         # Strategy 1: Try reference coordinates first (state A atoms)
         if atom_name in ref_coords and ref_coords[atom_name]:

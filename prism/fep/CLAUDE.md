@@ -46,7 +46,213 @@ Key rules for FEP:
 
 ## Common Issues
 
-### Gray Atoms in HTML Visualization
+## Critical Development Constraints
+
+### Atom Name Mapping and Coordinate Handling (CRITICAL)
+
+**Problem Background**:
+- Force field conversion changes atom names (e.g., OPLS-AA: CZ→C, OpenFF: generic types)
+- Mapping phase and visualization phase may use different coordinate sources
+- This causes atom correspondence errors and incorrect visualizations
+
+**Mandatory Requirements**:
+- ✅ **Track atom name changes** during force field conversion
+- ✅ **Coordinate source priority**: MOL2 > PDB > GRO (GRO as fallback only)
+- ✅ **Sanity checks for common atoms**: All common atoms must have same element type
+- ✅ **Chemical validation**: Carbon should not appear at chain ends, hydrogen should not connect to multiple bonds
+
+**Forbidden Practices**:
+- ❌ Using `mapping_state_a.pdb`/`mapping_state_b.pdb` as coordinate sources
+- ❌ Using mapping files for coordinate lookup (always use original ligand GRO files)
+- ❌ Relying on atom name-only matching without considering force field type
+
+**Code Locations**:
+- `prism/fep/io.py::_load_structure_coordinates()` - Unified coordinate handling
+- `prism/fep/modeling/hybrid_package.py::_resolve_hybrid_atom_coordinates()` - Coordinate resolution
+- `prism/builder/workflow_fep.py` (lines 254-272) - Mapping file generation with hybrid ITP atoms
+
+**Verification**:
+```python
+# After hybrid GRO generation, verify:
+unique_coords = len(set(all_coordinates))
+total_atoms = len(all_coordinates)
+zero_coords = sum(1 for c in all_coordinates if c == (0.0, 0.0, 0.0))
+assert unique_coords == total_atoms, "All atoms must have unique coordinates"
+assert zero_coords == 0, "No placeholder (0,0,0) coordinates allowed"
+```
+
+### Testing Parameter Passing Standards (CRITICAL)
+
+**Forbidden Practices**:
+- ❌ **Hardcoding parameters in test files** (e.g., `ligand_a_name=`, `dist_cutoff=`)
+- ❌ **Bypassing YAML configuration** to pass parameters directly to DistanceAtomMapper
+- ❌ **Manual parameter specification** that doesn't reflect real user workflow
+
+**Correct Approach**:
+- ✅ All test files must read configuration through `case.yaml`
+- ✅ All FEP parameters must be passed via YAML files to simulate real user scenarios
+- ✅ Configuration priority: CLI args > fep.yaml > config.yaml > code defaults
+
+**Code Example**:
+```python
+# ❌ WRONG: Manual specification
+mapper = DistanceAtomMapper(dist_cutoff=0.6, charge_cutoff=0.05)
+
+# ✅ CORRECT: Read from YAML
+config = FEPConfig(config_file="case.yaml")
+mapper = DistanceAtomMapper(**config.mapping_params)
+```
+
+**Enforcement**:
+- Test files should only contain `case.yaml` path and expected results
+- All mapping parameters (dist_cutoff, charge_cutoff, etc.) must come from YAML
+- This ensures tests reflect actual user workflow
+
+### Script Generation Constraints (CRITICAL)
+
+**Forbidden Practices**:
+- ❌ **Generate excessive redundant scripts** (standard/repex/local/parallel, etc.)
+- ❌ **Nest scripts inside leg directories** (e.g., `bound/scripts/run.sh`)
+- ❌ **Hardcode temporary values** (e.g., "100 steps") into production code
+
+**Correct Approach**:
+- ✅ Generate at most 2-3 script variants (control via parameters)
+- ✅ Place bound/unbound scripts at sibling level (not nested)
+- ✅ Control parallel vs local via parameters, not separate scripts
+- ✅ Implement short tests via configuration, not hardcoded values
+
+**Script Structure**:
+```
+GMX_PROLIG_FEP/
+├── bound/
+│   ├── run_fep.sh          # Universal script (parameter-controlled)
+│   └── window_00/ to window_N/
+└── unbound/
+    ├── run_fep.sh          # Universal script (parameter-controlled)
+    └── window_00/ to window_N/
+```
+
+**Runtime Flexibility**:
+- System building phase: Control total replica count
+- Runtime phase: Support `--replica-range 1-2`, `--replica 1`, etc.
+- Bound/unbound should use identical script structure
+- Prefer using generated scripts over manual commands
+
+### Visualization Quality Standards
+
+**Mandatory Verification Metrics**:
+- ✅ **Zero gray atoms**: `grep '"classification": "unknown"' mapping.html` returns 0
+- ✅ **Total charge ≈ 0** for neutral molecules
+- ✅ **Mapping coverage**: total = common + transformed + surrounding
+- ✅ **Element consistency**: All common atoms have same element in both states
+- ✅ **Chemical sanity**: No carbons at chain ends, no hydrogens with multiple bonds
+
+**Forbidden Practices**:
+- ❌ Purple backgrounds or flashy styling
+- ❌ Deviating from mapping module style
+- ❌ Debugging via images (must use log analysis instead)
+
+**Frontend Display Requirements**:
+- ✅ YAML parameters shown in collapsible section (non-default values highlighted)
+- ✅ Important parameters have tooltips
+- ✅ Clear title field sources (e.g., `Ligand A: 39`, not `Ligand A: Ligand 39`)
+- ✅ FEP-specific parameters shown (force field type, cutoffs)
+- ✅ General modeling parameters omitted (salt concentration, etc.)
+
+### Force Field-Specific Constraints
+
+**OpenFF/OPLS-AA Limitations**:
+- ❌ **Cannot rely on atom type** for position distinction (use generic types)
+- ✅ **Mapping must ignore atom type**, only use distance + element + charge
+- ✅ Other force fields (GAFF/CGenFF) can use atom type normally
+
+**RTF/CGenFF Requirements**:
+- ✅ **Must integrate original CGenFF files** (toppar_c36_feb26)
+- ✅ GROMACS official charmm36.ff lacks small molecule parameters
+- ✅ RTF priority: MATCH > SwissParam > CGenFF website
+
+**Protonation State Handling**:
+- ✅ **Auto-map residue names based on RTP file** (not hardcoded Amber logic)
+- ✅ Support alias mapping (HID→HSD, HIE→HSE, HIP→HSP)
+- ✅ Warning on unmapped residues, preserve original name
+- ✅ All protonation methods use same utils (PROPKA, etc.)
+
+**Code Example**:
+```python
+# ❌ WRONG: Hardcoded Amber mapping
+if residue_name == "HID":
+    residue_name = "HSD"  # Amber-specific
+
+# ✅ CORRECT: RTP-based auto-mapping
+rtp_file = force_field_path / "aminoacids.rtp"
+if residue_name in rtp_aliases:
+    residue_name = rtp_aliases[residue_name]
+elif residue_name not in available_rtp_names:
+    logger.warning(f"Cannot map {residue_name}, keeping original")
+```
+
+### Engineering Standards (CRITICAL)
+
+**Forbidden Practices**:
+- ❌ **Delete existing HTML and test artifacts** (especially `*_test_output/*.html`)
+- ❌ **Hardcode selection/resname** (e.g., `if 'HA' in u.select_atoms('all').resnames`)
+- ❌ **Use Chinese punctuation** in code (must use English only)
+- ❌ **Read mapping_state_a.pdb as coordinate source** (use original ligand GRO)
+
+**Correct Practices**:
+- ✅ All selections passed via config
+- ✅ Coordinate source priority: original ligand GRO > mapping files
+- ✅ Use hybrid.gro (not mapping files) as coordinate source
+- ✅ Preserve all test artifacts as verification evidence
+
+**Code Quality**:
+- ✅ No hardcoded magic numbers (use configuration)
+- ✅ Clear separation of concerns (no mixed responsibilities)
+- ✅ Consistent naming conventions across modules
+- ✅ Proper error handling and logging
+
+### Hybrid Topology Coordinate Assignment
+
+**Critical Issue**: Incorrect coordinate assignment causes EM crashes (6+ nm bond distances)
+
+**Root Cause**:
+- Hybrid topology atom names: HA, OA, C, H1, H2, C1, N, ... (specific)
+- Mapping file atom names: H, O, C, H, H, C, N, ... (generic)
+- Coordinate lookup fails → placeholder (0,0,0) → EM crash
+
+**Solution Implemented**:
+1. **workflow_fep.py (lines 254-272)**: Read atoms from hybrid ITP for mapping files
+2. **hybrid_package.py (lines 202-208)**: Always use original ligand GRO as coordinate source
+3. **hybrid_package.py (lines 975-982)**: Only support pure element names (HA, OA, CA, N, F)
+
+**Verification After Build**:
+```python
+# Check hybrid.gro has all unique coordinates
+coords = []
+with open("hybrid.gro") as f:
+    for line in f.readlines()[2:-1]:
+        x, y, z = float(line[20:28]), float(line[28:36]), float(line[36:44])
+        coords.append((x, y, z))
+
+assert len(set(coords)) == len(coords), "All coordinates must be unique"
+assert sum(1 for c in coords if c == (0.0, 0.0, 0.0)) == 0, "No placeholder coordinates"
+```
+
+### Documentation and Code Consistency
+
+**Required Consistency**:
+- ✅ Code behavior must match documentation
+- ✅ Parameter names consistent across docs and code
+- ✅ Examples reflect actual usage patterns
+- ❌ No undocumented features or parameters
+
+**Review Checklist**:
+- [ ] All CLAUDE.md files reviewed together
+- [ ] Code examples tested and verified
+- [ ] Parameter documentation complete
+- [ ] No contradictions between different docs
+
+## Legacy Issues (Historical Reference)
 **Symptom**: Some atoms appear gray with `classification: "unknown"`
 
 **Solution**: Usually caused by RDKit `Chem.AddHs()` adding implicit hydrogens. For CHARMM-GUI systems, use PDB files directly (not MOL2) and skip SMILES round-trip.

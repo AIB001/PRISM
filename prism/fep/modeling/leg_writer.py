@@ -402,6 +402,7 @@ class LegWriter:
         # Check if we need to add hybrid atomtypes (for unbound leg)
         hybrid_ff_path = self.output_dir / "common" / "hybrid" / "ff_hybrid.itp"
         needs_hybrid_ff = hybrid_ff_path.exists()
+        self._repair_hybrid_forcefield_include(hybrid_ff_path)
 
         # Replace ligand ITP include with hybrid ligand
         content = re.sub(
@@ -496,6 +497,23 @@ class LegWriter:
                 content = "\n".join(lines) + "\n"
 
         target_top.write_text(content)
+
+    def _repair_hybrid_forcefield_include(self, hybrid_ff_path: Path) -> None:
+        """Backfill stale ff_hybrid.itp files that forgot the CGenFF bonded supplement include."""
+        if not hybrid_ff_path.exists():
+            return
+        supplement = hybrid_ff_path.with_name("cgenff_bonded_hybrid.itp")
+        if not supplement.exists():
+            return
+        content = hybrid_ff_path.read_text()
+        include_line = '#include "cgenff_bonded_hybrid.itp"'
+        if include_line in content:
+            return
+        lines = [line for line in content.splitlines() if line.strip()]
+        if not lines:
+            lines = ['#include "atomtypes_hybrid.itp"']
+        lines.append(include_line)
+        hybrid_ff_path.write_text("\n".join(lines) + "\n")
 
     def _remove_redundant_ligand_moleculetype_entries(self, content: str) -> str:
         """Drop stray HYB/LIG names embedded in a protein `[ moleculetype ]` section."""

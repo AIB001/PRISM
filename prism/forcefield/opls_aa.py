@@ -81,6 +81,41 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         print(f"  Align to input: {self.align_to_input}")
         print(f"  Output directory: {self.output_dir}")
 
+    @staticmethod
+    def _load_rdkit_mol(path, file_format, sanitize=True, remove_hs=False):
+        """Load a ligand with a permissive fallback for aromatic/kekulization edge cases."""
+        from rdkit import Chem
+
+        if file_format == "mol2":
+            loader = Chem.MolFromMol2File
+        elif file_format == "pdb":
+            loader = Chem.MolFromPDBFile
+        else:
+            loader = Chem.MolFromMolFile
+
+        try:
+            mol = loader(path, sanitize=sanitize, removeHs=remove_hs)
+        except Exception:
+            mol = None
+        if mol is not None or sanitize is False:
+            return mol
+
+        try:
+            mol = loader(path, sanitize=False, removeHs=remove_hs)
+        except Exception:
+            mol = None
+        if mol is None:
+            return None
+
+        try:
+            Chem.SanitizeMol(
+                mol,
+                sanitizeOps=Chem.SanitizeFlags.SANITIZE_ALL ^ Chem.SanitizeFlags.SANITIZE_KEKULIZE,
+            )
+        except Exception:
+            pass
+        return mol
+
     def get_output_dir_name(self):
         """Get the output directory name for OPLS-AA"""
         return "LIG.opls2gmx"
@@ -166,6 +201,16 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
         if self.ligand_path.lower().endswith(".pdb"):
             return self.ligand_path
 
+        ligand_path = Path(self.ligand_path)
+        sibling_candidates = [
+            ligand_path.with_name(f"{ligand_path.stem}_with_h.pdb"),
+            ligand_path.with_suffix(".pdb"),
+        ]
+        for candidate in sibling_candidates:
+            if candidate.exists():
+                print(f"Using sibling PDB for LigParGen upload: {candidate.name}")
+                return str(candidate)
+
         # Try to convert to PDB using RDKit
         if not self.rdkit_available:
             print("Warning: RDKit not available for format conversion, uploading original file")
@@ -177,10 +222,7 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             print(f"Converting {self.file_format.upper()} to PDB format for LigParGen...")
 
             # Load molecule
-            if self.file_format == "mol2":
-                mol = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
-            else:  # sdf/mol
-                mol = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
+            mol = self._load_rdkit_mol(self.ligand_path, self.file_format, sanitize=True, remove_hs=False)
 
             if mol is None:
                 print("Warning: Could not load molecule for conversion, uploading original file")
@@ -386,19 +428,14 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
             from rdkit import Chem
             from rdkit.Chem import rdFMCS, rdMolAlign
 
-            if self.file_format == "mol2":
-                mol_input = Chem.MolFromMol2File(self.ligand_path, removeHs=False)
-            elif self.file_format == "pdb":
-                mol_input = Chem.MolFromPDBFile(self.ligand_path, removeHs=False)
-            else:
-                mol_input = Chem.MolFromMolFile(self.ligand_path, removeHs=False)
+            mol_input = self._load_rdkit_mol(self.ligand_path, self.file_format, sanitize=True, remove_hs=False)
 
             if mol_input is None:
                 print("Warning: Could not load input molecule for alignment")
                 return
 
             self._convert_gro_to_pdb(gro_file, temp_pdb)
-            mol_lpg = Chem.MolFromPDBFile(temp_pdb, removeHs=False)
+            mol_lpg = self._load_rdkit_mol(temp_pdb, "pdb", sanitize=True, remove_hs=False)
             if mol_lpg is None:
                 print("Warning: Could not load LigParGen output for alignment")
                 return
@@ -477,9 +514,8 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _convert_pdb_to_gro(self, pdb_file, gro_file):
         """Convert PDB back to GRO format"""
-        from rdkit import Chem
 
-        mol = Chem.MolFromPDBFile(pdb_file, removeHs=False)
+        mol = self._load_rdkit_mol(pdb_file, "pdb", sanitize=True, remove_hs=False)
         if mol is None:
             return
 

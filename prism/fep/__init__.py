@@ -21,6 +21,7 @@ from prism.fep.modeling import FEPScaffoldBuilder
 from prism.fep.analysis import XVGParser, FEstimator
 from prism.fep.io import read_ligand_from_prism, read_mol2_atoms, read_rtf_for_fep
 from prism.fep.config import FEPConfig, read_fep_config, write_fep_config
+from prism.fep.naming import FEPSystemNamer, generate_fep_system_name, validate_fep_system_name
 
 __version__ = "0.1.0"
 __all__ = [
@@ -39,6 +40,10 @@ __all__ = [
     "FEPConfig",
     "read_fep_config",
     "write_fep_config",
+    # Naming
+    "FEPSystemNamer",
+    "generate_fep_system_name",
+    "validate_fep_system_name",
     # GROMACS output
     "ITPBuilder",
     "FEP_PROD_MDP",

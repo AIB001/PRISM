@@ -18,6 +18,141 @@ The visualization module generates HTML and PNG visualizations of atom mapping r
 - **Warning banner**: Alerts for unclassified atoms
 - **Multi-force field support**: GAFF, CGenFF, OpenFF, OPLS-AA
 
+## Critical Quality Constraints
+
+### HTML Generation Quality Standards
+
+**Mandatory Requirements**:
+- ✅ **Zero gray atoms**: All atoms must be classified (no `rgb(200, 200, 200)`)
+- ✅ **Correct atom labels**: Show real names (not "Atom15" placeholders)
+- ✅ **Consistent common counts**: Left and right molecules must have same common atom count
+- ✅ **Element validation**: Common atoms must have same element on both sides
+- ✅ **Chemical sanity**: No carbons at chain ends, no multi-bond hydrogens
+
+**Verification Commands**:
+```bash
+# Check for unclassified atoms
+grep '"classification": "unknown"' mapping.html | wc -l  # Should be 0
+
+# Check for gray atoms
+grep "rgb(200, 200, 200)" mapping.html | wc -l  # Should be 0
+
+# Check for placeholder atom names
+grep "Atom[0-9]+" mapping.html | wc -l  # Should be 0
+```
+
+**Forbidden Practices**:
+- ❌ Using purple or flashy backgrounds
+- ❌ Deviating from mapping module style
+- ❌ Debugging via screenshots (must use log analysis)
+- ❌ Displaying Chinese punctuation (use English only)
+
+### Frontend Layout Requirements
+
+**Control Panel Layout**:
+- ✅ Coloring Mode buttons (FEP Classification / Element)
+- ✅ Legend (mode-specific, not duplicated)
+- ✅ Controls section (Drag to pan, Scroll to zoom, Hover for atom info)
+- ✅ Working Directory display (not highlighted)
+- ✅ Total Charge display (4 decimal places precision)
+
+**YAML Parameters Display**:
+- ✅ Collapsible section showing FEP-specific parameters
+- ✅ Non-default values highlighted
+- ✅ Tooltips for important parameters
+- ✅ Parameters: dist_cutoff, charge_cutoff, force field type
+
+**Layout Constraints**:
+- Coloring Mode: Single-select radio buttons (not two independent button sets)
+- Legend width: Consistent with other panels, not content-stretched
+- Legend: Centered or aligned with controls
+- Avoid extra whitespace in Legend area
+- No奇怪换行 in English text
+
+### Bond Order Rendering Requirements
+
+**MOL2 File Priority**:
+1. **Primary**: Use input MOL2/SDF files (have correct bond orders)
+2. **Fallback**: RDKit sanitization if MOL2 unavailable
+3. **Never**: Trust GRO files for bond orders (no bond info)
+
+**Implementation**:
+```python
+# ✅ CORRECT: Prioritize MOL2 for bond orders
+if mol2_file.exists():
+    assign_bond_orders_from_mol2(mol2_file)
+else:
+    # Fallback to RDKit (may fail for complex molecules)
+    Chem.SanitizeMol(mol)
+```
+
+**Aromatic Ring Rendering**:
+- ✅ Must show alternating single/double bonds
+- ✅ Preserve bond orders from MOL2 template
+- ✅ RDKit MCS matching for template alignment
+- ❌ Don't use RDKit's Kekulize if it changes original bond orders
+
+### Coordinate and Mapping Validation
+
+**Coordinate Source Priority** (CRITICAL):
+1. **MOL2** (highest priority - has bond orders)
+2. **PDB** (secondary - no bond orders but full atom names)
+3. **GRO** (fallback only - 5-char atom name limit)
+
+**Atom Name Matching**:
+- ✅ Track atom name changes during force field conversion
+- ✅ Validate common atoms have same element on both sides
+- ❌ Don't use GRO-only coordinates if MOL2/PDB available
+
+**Mapping Validation Checks**:
+```python
+# Sanity checks for mapping results
+assert common_count_left == common_count_right, "Common counts must match"
+
+for atom_left, atom_right in common_pairs:
+    assert atom_left.element == atom_right.element, "Elements must match"
+    assert atom_left.name != "C" or not is_chain_end(atom_left), "Carbon at chain end?"
+    assert atom_right.name != "H" or not has_multiple_bonds(atom_right), "H with multiple bonds?"
+```
+
+### Visualization-Specific Constraints
+
+**Coloring Mode Implementation**:
+- ✅ FEP Classification: common (gray), transformed A (red), transformed B (blue), surrounding (green)
+- ✅ Element Colors: standard CPK coloring (C=gray, N=blue, O=red, H=white, etc.)
+- ✅ Mode switch must be mutually exclusive (radio buttons, not checkboxes)
+
+**Statistics Panel Requirements**:
+- ✅ Show atom counts: common, transformed A, transformed B, surrounding
+- ✅ Show total charges for both molecules
+- ✅ Show mapping quality score (e.g., "✅ 31 common atoms")
+- ✅ Real-time calculation from atoms (not copied from files)
+
+**Build Log Display**:
+- ✅ Collapsible section at bottom of HTML
+- ✅ Show dist_cutoff, charge_cutoff, and other YAML parameters
+- ✅ Include source index information if available
+- ❌ Don't mix build log with dist_cutoff explanation
+
+### Error Handling and User Feedback
+
+**Warning Banner Triggers**:
+- ⚠️ Gray atoms present (unclassified)
+- ⚠️ Total charge ≠ 0 for neutral molecules
+- ⚠️ Common count mismatch between molecules
+- ⚠️ Placeholder atom names detected
+
+**Error Messages**:
+- ✅ Clear, actionable error messages
+- ✅ Suggestions for fixing common issues
+- ❌ No generic "error occurred" messages
+
+**Debugging Support**:
+- ✅ Include mapping log in HTML for troubleshooting
+- ✅ Show atom names, types, charges in hover tooltips
+- ✅ Display source_a_index and source_b_index when available
+- ❌ Don't expose internal Python errors to end users
+
 ## Key Functions
 
 ### visualize_mapping_html()

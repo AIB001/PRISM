@@ -2,7 +2,7 @@
 
 This PR adds a complete GROMACS-oriented FEP workflow to PRISM and refactors related builder and analysis code so the workflow is maintainable and usable from the main `prism` interface.
 
-The main scope is FEP: atom mapping, hybrid topology construction, scaffold generation, execution scripts, HTML inspection, and analysis/reporting. The PR also includes supporting refactors in the builder, force-field integration, and analysis modules.
+The main scope is FEP: atom mapping, hybrid topology construction, scaffold generation, execution scripts, HTML inspection, analysis/reporting, and standardized output naming. The PR also includes supporting refactors in the builder, force-field integration, and analysis modules.
 
 ## Main Features
 
@@ -34,6 +34,10 @@ The main scope is FEP: atom mapping, hybrid topology construction, scaffold gene
   - **Bound leg**: Protein-ligand complex with hybrid topology
   - **Unbound leg**: Hybrid ligand in water box
   - **Repeat support**: Multiple independent repeats (repeat1, repeat2, ...) for statistical robustness
+- **Standardized default case naming** - Auto-generate force-field-based case directories when users do not pass `-o`
+  - Default format: `<protein_ff>-mut_<ligand_ff>`
+  - Examples: `amber14sb_ol15-mut_gaff2`, `charmm36_jul2022-mut_cgenff`, `oplsaa-mut_opls`
+  - User-specified output directories are still honored unchanged
 - **Force field isolation** - Each repeat gets its own force field copy
   - Prevents cross-contamination between repeats
   - Enables parallel execution without conflicts
@@ -179,7 +183,15 @@ The main scope is FEP: atom mapping, hybrid topology construction, scaffold gene
 Typical CLI usage remains through `prism`, for example:
 
 ```bash
-# GAFF/GAFF2 force fields
+# Auto-generates amber14sb_ol15-mut_gaff2/ when -o is omitted
+prism protein.pdb ligA.mol2 \
+  --fep \
+  --mutant ligB.mol2 \
+  --ligand-forcefield gaff2 \
+  --forcefield amber14sb_OL15 \
+  --fep-config fep.yaml
+
+# GAFF/GAFF2 force fields with custom output directory
 prism protein.pdb ligA.mol2 -o output \
   --fep \
   --mutant ligB.mol2 \
@@ -278,7 +290,7 @@ Analysis features:
 ```python
 import prism as pm
 
-# FEP system building
+# FEP system building with explicit output directory
 system = pm.system(
     protein="protein.pdb",
     ligand="ligA.mol2",
@@ -290,6 +302,18 @@ system = pm.system(
 )
 
 fep_dir = system.build()
+
+# FEP system building with default standardized naming
+default_named_system = pm.system(
+    protein="protein.pdb",
+    ligand="ligA.mol2",
+    mutant="ligB.mol2",
+    ligand_forcefield="gaff2",
+    forcefield="amber14sb_OL15",
+    fep_mode=True
+)
+
+auto_named_dir = default_named_system.build()  # amber14sb_ol15-mut_gaff2
 
 # FEP analysis
 from prism.fep.analysis import FEPAnalyzer
@@ -310,43 +334,36 @@ analyzer.generate_html_report("fep_results.html")
 
 ## Current validation status
 
-### Force field testing matrix (2026-04-07 Updated)
+### Force field testing matrix (2026-04-08 Updated)
 
-**Test Summary**: 21/25 systems successfully pass EM+NVT validation (84.0% success rate for tested systems, 60.0% overall completion including partial tests)
+**Test Summary**: The table below reflects the currently verified smoke-test status in the unit-test workspace. Older aggregate counts were removed because they became stale as additional systems were rechecked and promoted from pending to completed.
 
-| System | Protein | Force Field | Current status | Notes |
-|--------|---------|-------------|----------------|-------|
-| 42-38 | HIF-2α | amber14sb_OL15 + GAFF2 | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
-| 42-38 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | amber14sb_OL15 + MMFF94 | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | amber99sb + GAFF2 | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | amber99sb + MMFF94 | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | amber14sb_OL15 | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF (alt) | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
-| 25-36 | HIF-2α | oplsaa + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF | ✅ Bound+unbound EM+NVT | All repeats completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OpenFF (non-mut) | ✅ Bound+unbound EM+NVT | All repeats completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 + OPLS-AA | ✅ Bound+unbound EM+NVT | All repeats completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + CHARMM-GUI | ✅ Bound+unbound EM+NVT | All repeats completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ✅ Bound+unbound EM+NVT | All repeats completed |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 + GAFF2 | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 + OpenFF | ❌ Not tested | System not built yet |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 + OPLS-AA | ❌ Not tested | System not built yet |
-| p38-19-24 | p38α MAPK | charmm36-jul2022 + RTF | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m + CHARMM-GUI | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | ⚠️ Bound only | Bound EM+NVT completed (multiple repeats), unbound pending |
-| 42-38 | HIF-2α | charmm36-jul2022 + CHARMM-GUI | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| 25-36 | HIF-2α | amber14sb_OL15 + OpenFF | ⚠️ Bound only | Bound EM+NVT completed (multiple repeats), unbound pending |
-| 25-36 | HIF-2α | amber14sb_OL15 + OPLS-AA | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| 25-36 | HIF-2α | charmm36-jul2022 + CGenFF | ⚠️ Bound only | Bound EM+NVT completed, unbound pending |
-| 25-36 | HIF-2α | oplsaa + OPLS-AA | ❌ Not tested | System not built yet |
+| System | Protein | Protein FF | Ligand FF | Status | Bound | Unbound | Notes |
+|--------|---------|------------|-----------|--------|-------|---------|-------|
+| 42-38 | HIF-2α | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
+| 42-38 | HIF-2α | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber14sb_OL15 | MMFF94 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber99sb | GAFF2 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber99sb | MMFF94 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | charmm36-jul2022 | CGenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | charmm36-jul2022 | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | oplsaa | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | — | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | OpenFF (alt) | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | charmm36-jul2022 | CGenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 25-36 | HIF-2α | oplsaa | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OpenFF (non-mut) | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | GAFF2 | ⚠️ | EM+NVT | Pending | Bound EM+NVT completed, unbound pending |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | OpenFF | ❌ | Not tested | Not tested | System not built yet |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | OPLS-AA | ❌ | Not tested | Not tested | System not built yet |
+| p38-19-24 | p38α MAPK | charmm36-jul2022 | RTF | ⚠️ | EM+NVT | Pending | Bound EM+NVT completed, unbound pending |
+| oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | Bound and unbound smoke checks completed |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | — | ⚠️ | EM+NVT | Pending | Bound completed; unbound still pending and not locally rerunnable under GROMACS 2024.4 (amber19sb ff requires 2026+) |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
@@ -366,11 +383,10 @@ analyzer.generate_html_report("fep_results.html")
 - Surrounding atoms: mass_b from B-state atom type
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
-**Current validation snapshot** (2026-04-07 updated):
-- **21 system variants** with completed bound+unbound EM+NVT ✅
-- **9 variants** with bound-only EM+NVT completed ⚠️
-- **4 variants** not yet built or tested ❌
-- **Total: 25 tracked system variants** in the unit-test workspace
+**Current validation snapshot** (2026-04-08 updated):
+- The full matrix is still heterogeneous: some rows reflect newly rechecked 2026-04-08 smoke-test results, while a smaller set of legacy rows remain bound-only or not yet rebuilt.
+- The 25-36 validation set is now fully promoted to bound+unbound EM+NVT smoke-pass status across baseline amber14sb_OL15, OpenFF, OpenFF-alt, mut-OpenFF, mut-OPLS, CGenFF, and oplsaa paths.
+- Remaining work is concentrated in the explicitly marked `⚠️` / `❌` rows above rather than in the 25-36 block.
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
@@ -381,7 +397,7 @@ analyzer.generate_html_report("fep_results.html")
 1. **GPU resource management**: CUDA_VISIBLE_DEVICES causes CPU affinity restrictions; tasks may not optimally utilize all CPU cores
 2. **GPU fallback mechanism**: run_single_em_nvt.sh automatically falls back to CPU mode on GPU errors, causing severe performance degradation
 3. **System completeness**: Some p38-19-24 systems have incomplete directory structures (missing input files)
-4. **Unbound testing**: Most systems have completed bound leg testing, but unbound leg testing is ongoing
+4. **Unbound testing**: Several non-25-36 rows still need explicit unbound smoke validation or reruns
 - Successfully tested force field combinations show robust performance across AMBER, CHARMM, and OPLS-AA families
 
 ## Review guidance
@@ -408,7 +424,9 @@ Suggested review order:
 - `prism/fep/core/` - FEP core functionality and orchestration
 - `prism/fep/modeling/` - Atom mapping and hybrid topology generation
 - `prism/fep/analysis/` - Multi-estimator analysis and reporting
-- `prism/builder/workflow_fep.py` - FEP workflow integration
+- `prism/fep/naming.py` - Standardized FEP case directory naming helpers
+- `prism/fep/__init__.py` - Public exports for naming helpers
+- `prism/builder/workflow_fep.py` - FEP workflow integration and default output naming
 
 ### Force field integration
 - `prism/forcefield/rtf.py` - RTF/PRM parser and GROMACS conversion
@@ -425,5 +443,6 @@ Suggested review order:
 - End-to-end validation with 42-38, p38-19-24, 25-36, and oMeEtPh-EtPh test platforms
 - **New test scripts**:
   - `tests/gxf/FEP/unit_test/42-38/test_gaff2.py` - GAFF2 system rebuild script
-  - `tests/gxf/FEP/unit_test/test_run_fep.py` - Enhanced validation with real grompp execution
+  - `tests/gxf/FEP/unit_test/test_run_fep.py` - Enhanced validation with real grompp execution and support for standardized default output layout
+  - `tests/gxf/FEP/unit_test/test_naming.py` - Unit coverage for standardized FEP naming helpers
 - Updated project documentation and ignore patterns

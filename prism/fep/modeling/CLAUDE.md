@@ -18,6 +18,198 @@ The modeling module orchestrates the complete FEP system building workflow:
 - **Script generation**: Produces run scripts for standard and repex modes
 - **End-to-end workflow**: Automates from ligands to simulation-ready systems
 
+## Critical Development Constraints
+
+### Hybrid Topology Coordinate Assignment (CRITICAL)
+
+**Problem**: Incorrect coordinate assignment causes EM crashes with 6+ nm bond distances
+
+**Root Cause**:
+- Hybrid ITP atom names: HA, OA, C, H1, H2, C1, N, ... (specific)
+- Mapping file atom names: H, O, C, H, H, C, N, ... (generic)
+- Coordinate lookup fails → placeholder (0,0,0) → EM crash
+
+**Mandatory Requirements**:
+1. **workflow_fep.py (lines 254-272)**: Read atoms from hybrid ITP for mapping files
+   ```python
+   # ✅ CORRECT: Read from hybrid ITP
+   hybrid_atoms_for_mapping_a = read_ligand_from_prism(
+       itp_file=hybrid_itp,
+       gro_file=hybrid_gro,
+       state="a"
+   )
+   ```
+
+2. **hybrid_package.py (lines 202-208)**: Always use original ligand GRO as coordinate source
+   ```python
+   # ✅ CORRECT: Always use original ligand GRO
+   reference_coords_file = seed_gro    # NOT mapping_state_a.pdb
+   mutant_coords_file = mutant_gro    # NOT mapping_state_b.pdb
+   ```
+
+3. **hybrid_package.py (lines 975-982)**: Only support pure element names
+   ```python
+   # ✅ CORRECT: Only pure element names (HA, OA, CA, N, F)
+   if atom_name.isalpha() and len(atom_name) <= 3:
+       element = self._extract_element_from_atom_name(atom_name)
+
+   # ❌ WRONG: Don't support numbered names via element sequential matching
+   # if (atom_name.isalpha() and len(atom_name) <= 3) or \
+   #    (not atom_name.isalpha() and atom_name[0].isalpha()):
+   ```
+
+**Verification After Build**:
+```python
+# Check hybrid.gro coordinate uniqueness
+coords = []
+with open("hybrid.gro") as f:
+    for line in f.readlines()[2:-1]:
+        x, y, z = float(line[20:28]), float(line[28:36]), float(line[36:44])
+        coords.append((x, y, z))
+
+assert len(set(coords)) == len(coords), "All atoms must have unique coordinates"
+assert sum(1 for c in coords if c == (0.0, 0.0, 0.0)) == 0, "No placeholder coordinates"
+```
+
+### Coordinate File Handling Standards
+
+**Priority Order** (MUST follow):
+1. **MOL2** - Original ligand coordinates with bond orders
+2. **PDB** - Original ligand coordinates with full atom names
+3. **GRO** - Fallback only (5-char atom name limit)
+
+**Implementation** (hybrid_package.py):
+```python
+# ✅ CORRECT: Priority-based coordinate loading
+def _load_structure_coordinates(coord_path):
+    # Try MOL2 first (preserves full atom names)
+    if coord_path.with_suffix(".mol2").exists():
+        return self._parse_mol2_atoms(coord_path.with_suffix(".mol2"))
+
+    # Try PDB second (preserves full atom names)
+    if coord_path.with_suffix(".pdb").exists():
+        return self._parse_pdb_atoms(coord_path.with_suffix(".pdb"))
+
+    # Fall back to GRO (may have truncated names)
+    return self._parse_gro_atoms(coord_path)
+```
+
+**Forbidden Practices**:
+- ❌ Using `mapping_state_a.pdb`/`mapping_state_b.pdb` as coordinate sources
+- ❌ Prioritizing mapping files over original ligand files
+- ❌ Assuming GRO atom names match hybrid ITP atom names
+
+### Script Generation Standards
+
+**Forbidden Practices**:
+- ❌ Generate excessive redundant scripts (standard/repex/local/parallel all separate)
+- ❌ Nest scripts inside leg directories
+- ❌ Hardcode temporary values (e.g., "100 steps")
+
+**Correct Approach**:
+- ✅ Generate universal scripts controlled by parameters
+- ✅ Place bound/unbound scripts at sibling level
+- ✅ Implement short tests via configuration
+
+**Script Structure**:
+```
+GMX_PROLIG_FEP/
+├── bound/
+│   ├── run_fep.sh          # Universal script (handles all modes)
+│   └── window_00/ to window_N/
+└── unbound/
+    ├── run_fep.sh          # Universal script (handles all modes)
+    └── window_00/ to window_N/
+```
+
+**Runtime Flexibility**:
+- Support `--replica-range 1-2` for partial runs
+- Support `--replica 1` for single replica
+- Support `--mode standard|repex` for mode switching
+- Don't generate separate scripts for each mode
+
+### Testing and Validation Requirements
+
+**Test File Standards**:
+- ✅ All parameters must come from `case.yaml`
+- ❌ No hardcoded parameters in test files
+- ✅ Must simulate real user workflow
+
+**Validation After Build**:
+```python
+# Required validation checks
+assert os.path.exists("hybrid.itp"), "hybrid.itp must exist"
+assert os.path.exists("hybrid.gro"), "hybrid.gro must exist"
+assert os.path.exists("topol.top"), "topol.top must exist"
+
+# Check coordinate uniqueness
+coords = parse_gro("hybrid.gro")
+assert len(set(coords)) == len(coords), "All coordinates must be unique"
+
+# Check for placeholder coordinates
+zero_coords = sum(1 for c in coords if c == (0.0, 0.0, 0.0))
+assert zero_coords == 0, "No placeholder (0,0,0) coordinates allowed"
+```
+
+### Force Field Integration Constraints
+
+**OpenFF/OPLS-AA Limitations**:
+- ❌ Cannot rely on atom type for position distinction
+- ✅ Must ignore atom type in DistanceAtomMapper
+- ✅ Only use distance + element + charge for matching
+
+**RTF/CGenFF Requirements**:
+- ✅ Must integrate original CGenFF files (toppar_c36_feb26)
+- ✅ GROMACS official charmm36.ff lacks small molecule parameters
+- ✅ RTF priority: MATCH > SwissParam > CGenFF website
+
+**Protonation State Handling**:
+- ✅ Auto-map residue names based on RTP file
+- ✅ Support alias mapping (HID→HSD, HIE→HSE)
+- ✅ Warning on unmapped residues
+- ❌ Don't hardcode Amber-specific logic
+
+### Configuration Management
+
+**Parameter Priority** (MUST follow):
+1. CLI arguments (highest)
+2. fep.yaml (FEP-specific)
+3. config.yaml (general)
+4. Code defaults (lowest)
+
+**Required Parameters**:
+- dist_cutoff: Distance cutoff for mapping (default: 0.6 nm)
+- charge_cutoff: Charge cutoff for mapping (default: 0.05)
+- lambda_windows: Number of lambda windows (default: 11)
+- lambda_strategy: decoupled or separated
+
+**Lambda Strategy Clarification**:
+- **decoupled**: Both A and B states transform simultaneously
+- **separated**: Forward (A→B) and reverse (B→A) legs
+- GROMACS only supports single topology (not dual topology)
+
+### Engineering Standards
+
+**Code Quality Requirements**:
+- ✅ No hardcoded magic numbers
+- ✅ Clear separation of concerns
+- ✅ Consistent naming conventions
+- ✅ Proper error handling and logging
+- ❌ No Chinese punctuation in code
+- ❌ No hardcoded selection/resname
+
+**File Organization**:
+- Keep modules focused (no God files >900 lines)
+- Avoid unnecessary abstraction layers
+- Delete unused code (don't keep "just in case")
+- Don't create duplicate functionality
+
+**Documentation Requirements**:
+- ✅ All public functions have docstrings
+- ✅ Complex logic has inline comments
+- ✅ Examples reflect actual usage
+- ❌ No undocumented features
+
 ## Key Classes
 
 ### FEPScaffoldBuilder

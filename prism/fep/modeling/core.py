@@ -241,6 +241,8 @@ class FEPScaffoldBuilder:
                 # Try LIG.amb2gmx/LIG.gro (PRISM output structure)
                 seed_gro = reference_ligand_path / "LIG.amb2gmx" / "LIG.gro"
             if not seed_gro.exists():
+                seed_gro = reference_ligand_path / "LIG.sp2gmx" / "LIG.gro"
+            if not seed_gro.exists():
                 # Try any */LIG.gro pattern
                 gro_files = list(reference_ligand_path.glob("*/LIG.gro"))
                 if gro_files:

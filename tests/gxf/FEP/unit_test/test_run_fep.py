@@ -22,7 +22,7 @@ import re
 import subprocess
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 from prism.builder.core import PRISMBuilder
 
@@ -240,6 +240,8 @@ def test_run_fep(
 
     # 检查输出目录
     fep_dir = Path(output_dir) / "GMX_PROLIG_FEP"
+    if not fep_dir.exists():
+        fep_dir = Path(output_dir)
 
     print(f"\n[Step 2] 检查 FEP 目录结构...")
 
