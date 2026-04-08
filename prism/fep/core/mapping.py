@@ -43,7 +43,7 @@ class Atom:
     element : str
         Element symbol (C, H, N, O, etc.)
     coord : np.ndarray
-        3D coordinates [x, y, z] in Angstroms
+        3D coordinates [x, y, z] in nanometers
     charge : float
         Partial charge from force field parameterization
     atom_type : str
@@ -118,7 +118,7 @@ class DistanceAtomMapper:
     Parameters
     ----------
     dist_cutoff : float, optional
-        Distance threshold in Angstroms (default: 0.6)
+        Distance threshold in nanometers (default: 0.6)
         Smaller values (0.3-0.5) for very similar molecules
         Larger values (0.8-1.0) for structurally divergent molecules
     charge_cutoff : float, optional

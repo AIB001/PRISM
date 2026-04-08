@@ -109,7 +109,7 @@ def visualize_mapping_png(
     Examples
     --------
     >>> from prism.fep.core.mapping import DistanceAtomMapper
-    >>> from prism.fep.io import read_rtf_for_fep
+    >>> from prism.fep.common.io import read_rtf_for_fep
     >>> from prism.fep.visualize import visualize_mapping_png
     >>> lig_a = read_rtf_for_fep('25.rtf', '25.pdb')
     >>> lig_b = read_rtf_for_fep('36.rtf', '36.pdb')

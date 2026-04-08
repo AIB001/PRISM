@@ -12,7 +12,9 @@ import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
+from prism.fep.common.coordinates import angstrom_xyz_to_nm, nm_xyz_to_angstrom
 from prism.fep.gromacs.itp_builder import ITPBuilder
+from prism.forcefield.registry import iter_known_ligand_output_subdirs, resolve_ligand_artifact
 from prism.gaussian.utils import normalize_element_symbol
 
 try:
@@ -105,32 +107,13 @@ class HybridPackageBuilder:
 
         # Add bonded sections if needed
         if self._itp_needs_bonded_sections(normalized_itp):
-            # Auto-discover ligand ITP files (handle LIG.amb2gmx/ and LIG.openff2gmx/ subdirectories)
+
             def _resolve_ligand_itp(ligand_dir: Path) -> str:
                 """Resolve ligand ITP path, handling PRISM output subdirectories."""
-                # Try direct path
-                direct_path = ligand_dir / "LIG.itp"
-                if direct_path.exists():
-                    return str(direct_path)
-
-                # Try common PRISM output structures across supported ligand FF backends.
-                for subdir in [
-                    "LIG.openff2gmx",
-                    "LIG.amb2gmx",
-                    "LIG.opls2gmx",
-                    "LIG.sp2gmx",
-                    "LIG.mmff2gmx",
-                    "LIG.match2gmx",
-                    "LIG.both2gmx",
-                    "LIG.cgenff2gmx",
-                    "LIG.charmm2gmx",
-                    "LIG.rtf2gmx",
-                ]:
-                    ff_path = ligand_dir / subdir / "LIG.itp"
-                    if ff_path.exists():
-                        return str(ff_path)
-
-                raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir} or known PRISM ligand subdirectories")
+                resolved = resolve_ligand_artifact(ligand_dir, "LIG.itp")
+                if resolved is None:
+                    raise FileNotFoundError(f"Cannot find LIG.itp in {ligand_dir} or known PRISM ligand subdirectories")
+                return str(resolved)
 
             ligand_a_itp = _resolve_ligand_itp(reference_ligand_dir)
             ligand_b_itp = _resolve_ligand_itp(mutant_ligand_dir) if mutant_ligand_dir else ligand_a_itp
@@ -175,31 +158,7 @@ class HybridPackageBuilder:
         (hybrid_dir / self.hybrid_forcefield_filename).write_text(ff_hybrid)
 
         # Build hybrid GRO file
-        # Auto-discover mutant GRO file (handle LIG.amb2gmx/ subdirectory)
-        mutant_gro = None
-        if mutant_ligand_dir:
-            # Try direct path
-            direct_path = mutant_ligand_dir / "LIG.gro"
-            if direct_path.exists():
-                mutant_gro = direct_path
-            else:
-                # Try common PRISM output structures
-                for subdir in [
-                    "LIG.amb2gmx",
-                    "LIG.openff2gmx",
-                    "LIG.opls2gmx",
-                    "LIG.sp2gmx",
-                    "LIG.mmff2gmx",
-                    "LIG.match2gmx",
-                    "LIG.both2gmx",
-                    "LIG.cgenff2gmx",
-                    "LIG.charmm2gmx",
-                    "LIG.rtf2gmx",
-                ]:
-                    candidate = mutant_ligand_dir / subdir / "LIG.gro"
-                    if candidate.exists():
-                        mutant_gro = candidate
-                        break
+        mutant_gro = resolve_ligand_artifact(mutant_ligand_dir, "LIG.gro") if mutant_ligand_dir else None
 
         # IMPORTANT: Do NOT use mapping_state_a.pdb/mapping_state_b.pdb as coordinate sources!
         # These mapping files are generated for HTML visualization and may have
@@ -229,26 +188,9 @@ class HybridPackageBuilder:
 
         # Copy position restraints if available
         # Auto-discover posre file (handle LIG.amb2gmx/ subdirectory)
-        ref_posre = reference_ligand_dir / "posre_LIG.itp"
-        if not ref_posre.exists():
-            for subdir in [
-                "LIG.amb2gmx",
-                "LIG.openff2gmx",
-                "LIG.opls2gmx",
-                "LIG.sp2gmx",
-                "LIG.mmff2gmx",
-                "LIG.match2gmx",
-                "LIG.both2gmx",
-                "LIG.cgenff2gmx",
-                "LIG.charmm2gmx",
-                "LIG.rtf2gmx",
-            ]:
-                candidate = reference_ligand_dir / subdir / "posre_LIG.itp"
-                if candidate.exists():
-                    ref_posre = candidate
-                    break
+        ref_posre = resolve_ligand_artifact(reference_ligand_dir, "posre_LIG.itp")
 
-        if ref_posre.exists():
+        if ref_posre and ref_posre.exists():
             shutil.copy2(ref_posre, hybrid_dir / self.hybrid_posre_filename)
 
         # Write topology template
@@ -258,25 +200,7 @@ class HybridPackageBuilder:
         """Resolve the primary source ligand ITP from a PRISM ligand directory."""
         if ligand_dir is None:
             return None
-        direct = ligand_dir / "LIG.itp"
-        if direct.exists():
-            return direct
-        for subdir in [
-            "LIG.openff2gmx",
-            "LIG.amb2gmx",
-            "LIG.opls2gmx",
-            "LIG.sp2gmx",
-            "LIG.mmff2gmx",
-            "LIG.match2gmx",
-            "LIG.both2gmx",
-            "LIG.cgenff2gmx",
-            "LIG.charmm2gmx",
-            "LIG.rtf2gmx",
-        ]:
-            candidate = ligand_dir / subdir / "LIG.itp"
-            if candidate.exists():
-                return candidate
-        return None
+        return resolve_ligand_artifact(ligand_dir, "LIG.itp")
 
     def _normalize_hybrid_itp(self, content: str, molecule_name: str) -> str:
         """
@@ -378,26 +302,8 @@ class HybridPackageBuilder:
             if ligand_dir is None:
                 continue
 
-            atomtypes_file = ligand_dir / "atomtypes_LIG.itp"
-            if not atomtypes_file.exists():
-                for subdir in [
-                    "LIG.amb2gmx",
-                    "LIG.openff2gmx",
-                    "LIG.opls2gmx",
-                    "LIG.sp2gmx",
-                    "LIG.mmff2gmx",
-                    "LIG.match2gmx",
-                    "LIG.both2gmx",
-                    "LIG.cgenff2gmx",
-                    "LIG.charmm2gmx",
-                    "LIG.rtf2gmx",
-                ]:
-                    candidate = ligand_dir / subdir / "atomtypes_LIG.itp"
-                    if candidate.exists():
-                        atomtypes_file = candidate
-                        break
-
-            if not atomtypes_file.exists():
+            atomtypes_file = resolve_ligand_artifact(ligand_dir, "atomtypes_LIG.itp")
+            if atomtypes_file is None or not atomtypes_file.exists():
                 continue
 
             for atomtype_name, line in self._parse_atomtypes_file(atomtypes_file).items():
@@ -459,13 +365,9 @@ class HybridPackageBuilder:
         """Merge ligand-specific CGenFF bonded supplements when present."""
         supplement_files = []
         for ligand_dir in filter(None, [reference_ligand_dir, mutant_ligand_dir]):
-            for candidate in (
-                ligand_dir / "cgenff_bonded_LIG.itp",
-                ligand_dir / "LIG.amb2gmx" / "cgenff_bonded_LIG.itp",
-            ):
-                if candidate.exists():
-                    supplement_files.append(candidate)
-                    break
+            candidate = resolve_ligand_artifact(ligand_dir, "cgenff_bonded_LIG.itp")
+            if candidate is not None:
+                supplement_files.append(candidate)
 
         if not supplement_files:
             return ""
@@ -561,7 +463,10 @@ class HybridPackageBuilder:
             return charmm_ff_dir
 
         # 2. Nested layouts such as LIG.amb2gmx/charmm*.ff.
-        for subdir in ligand_dir.glob("LIG.*"):
+        for subdir_name in iter_known_ligand_output_subdirs():
+            subdir = ligand_dir / subdir_name
+            if not subdir.is_dir():
+                continue
             charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(subdir)
             if charmm_ff_dir:
                 return charmm_ff_dir
@@ -645,8 +550,30 @@ class HybridPackageBuilder:
                 continue
             base_line = source_atomtypes.get(atomtype)
             if base_line and atomtype not in base_forcefield_atomtypes:
+                # Atomtype not in base force field, write it
                 lines.append(base_line)
                 written.add(atomtype)
+            elif base_line and atomtype in base_forcefield_atomtypes:
+                # Atomtype IS in base force field, but we still need to write it if:
+                # 1. source uses bond_type format (needed for ligand topology)
+                # 2. base force field might use incompatible format (e.g., atnum)
+                # Check if source_line uses bond_type format (2nd column is atomtype name, not atomic number)
+                fields = base_line.strip().split()
+                if len(fields) >= 2:
+                    # bond_type format: name bonded_type mass charge ptype sigma epsilon
+                    # atnum format: name atnum mass charge ptype sigma epsilon
+                    # bonded_type is usually string > 3 chars, atnum is integer <= 118
+                    bonded_type = fields[1]
+                    # Heuristic: if 2nd field looks like an atomtype name (not atomic number), write it
+                    # This handles RTF/CGenFF ligands that redefine force field types with bond_type format
+                    try:
+                        atnum = int(bonded_type)
+                        # It's an atomic number, skip (use base force field definition)
+                        pass
+                    except ValueError:
+                        # It's a bonded type name (string), write it to ensure ligand topology compatibility
+                        lines.append(base_line)
+                        written.add(atomtype)
 
         # Write dummy atomtypes
         for dummy_atomtype in sorted(dummy_requests):
@@ -929,9 +856,11 @@ class HybridPackageBuilder:
             if len(parts) >= 6:
                 atom_id = parts[1]  # Atom ID (column 2)
                 atom_name = parts[1]  # Atom name (column 2, same as ID in many MOL2 files)
-                x = float(parts[2]) / 10.0  # Å → nm
-                y = float(parts[3]) / 10.0  # Å → nm
-                z = float(parts[4]) / 10.0  # Å → nm
+                x, y, z = angstrom_xyz_to_nm(
+                    float(parts[2]),
+                    float(parts[3]),
+                    float(parts[4]),
+                )
 
                 # Use atom_id as key since it's more likely to match ITP atom names
                 coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
@@ -953,9 +882,11 @@ class HybridPackageBuilder:
                 continue
 
             atom_name = line[12:16].strip()
-            x = float(line[30:38].strip()) / 10.0  # Å → nm
-            y = float(line[38:46].strip()) / 10.0  # Å → nm
-            z = float(line[46:54].strip()) / 10.0  # Å → nm
+            x, y, z = angstrom_xyz_to_nm(
+                float(line[30:38].strip()),
+                float(line[38:46].strip()),
+                float(line[46:54].strip()),
+            )
 
             coords_by_name.setdefault(atom_name, []).append({"x": x, "y": y, "z": z})
 
@@ -1077,6 +1008,8 @@ class HybridPackageBuilder:
         source_a_index = atom.get("source_a_index")
         source_b_index = atom.get("source_b_index")
 
+        state_b_type = atom.get("type_b")
+
         # Strategy 0: explicit source indices are the only fully reliable mapping
         # for force fields that reuse generic names like H/C/N/O/F.
         if source_a_index is not None and ref_coords_by_index and source_a_index in ref_coords_by_index:
@@ -1097,7 +1030,6 @@ class HybridPackageBuilder:
                 coord = ref_coords_by_index[source_idx]
                 return coord["x"], coord["y"], coord["z"]
 
-        state_b_type = atom.get("type_b")
         if state_b_type and mut_type_index and mut_coords_by_index:
             source_idx = mut_type_index.get(state_b_type)
             if source_idx is not None and source_idx in mut_coords_by_index:
@@ -1399,9 +1331,11 @@ Hybrid ligand
             resnum = int(line[:5].strip())
             resname = line[5:10].strip() or "LIG"
             atom_name = line[10:15].strip() or f"A{serial}"
-            x = float(line[20:28].strip()) * 10.0
-            y = float(line[28:36].strip()) * 10.0
-            z = float(line[36:44].strip()) * 10.0
+            x, y, z = nm_xyz_to_angstrom(
+                float(line[20:28].strip()),
+                float(line[28:36].strip()),
+                float(line[36:44].strip()),
+            )
             element = "".join([c for c in atom_name if c.isalpha()])[:1].upper() or "C"
             pdb_lines.append(
                 f"HETATM{serial:5d} {atom_name:>4s} {resname:>3s} A{resnum:4d}    "

@@ -11,9 +11,10 @@ from ligand files to FEP simulation systems.
 from pathlib import Path
 from typing import Optional
 
-from prism.fep.io import read_ligand_from_prism
+from prism.fep.common.io import read_ligand_from_prism
 from prism.fep.core.mapping import DistanceAtomMapper
 from prism.fep.modeling.core import FEPScaffoldBuilder
+from prism.forcefield.registry import resolve_ligand_artifact, discover_ligand_directory
 
 
 def build_fep_system_from_prism_ligands(
@@ -79,25 +80,20 @@ def build_fep_system_from_prism_ligands(
         """Resolve PRISM ligand directory, handling LIG.amb2gmx/ subdirectory."""
         ligand_path = Path(ligand_dir)
 
-        # Check if LIG.itp is directly in the directory
-        if (ligand_path / "LIG.itp").exists():
-            return str(ligand_path / "LIG.itp"), str(ligand_path / "LIG.gro")
-
-        # Check for LIG.amb2gmx/ subdirectory (PRISM output structure)
-        amb2gmx_dir = ligand_path / "LIG.amb2gmx"
-        if amb2gmx_dir.exists() and (amb2gmx_dir / "LIG.itp").exists():
-            return str(amb2gmx_dir / "LIG.itp"), str(amb2gmx_dir / "LIG.gro")
-
-        # Check for any */LIG.itp pattern
-        itp_files = list(ligand_path.glob("*/LIG.itp"))
-        if itp_files:
-            itp_file = itp_files[0]
-            gro_file = itp_file.parent / "LIG.gro"
-            if gro_file.exists():
+        discovered_dir = discover_ligand_directory(ligand_path)
+        if discovered_dir is not None:
+            itp_file = discovered_dir / "LIG.itp"
+            gro_file = discovered_dir / "LIG.gro"
+            if itp_file.exists() and gro_file.exists():
                 return str(itp_file), str(gro_file)
 
+        itp_file = resolve_ligand_artifact(ligand_path, "LIG.itp")
+        gro_file = resolve_ligand_artifact(ligand_path, "LIG.gro")
+        if itp_file is not None and gro_file is not None:
+            return str(itp_file), str(gro_file)
+
         raise FileNotFoundError(
-            f"Cannot find LIG.itp in {ligand_dir}. " f"Expected patterns: LIG.itp, LIG.amb2gmx/LIG.itp, or */LIG.itp"
+            f"Cannot find LIG.itp in {ligand_dir}. Expected direct PRISM files or a known ligand forcefield subdirectory."
         )
 
     itp_ref, gro_ref = _resolve_prism_ligand_dir(reference_ligand_dir)

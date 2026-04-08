@@ -7,6 +7,8 @@ Utility functions for PRISM simulation module
 
 import os
 
+from prism.forcefield.registry import iter_known_ligand_output_subdirs
+
 
 def validate_gmx_directory(gmx_dir):
     """
@@ -63,7 +65,7 @@ def find_forcefield_dir(output_dir):
     FileNotFoundError
         If no force field directory is found
     """
-    possible_names = ["LIG.amb2gmx", "LIG.openff2gmx", "LIG.gaff2gmx", "LIG.cgenff2gmx"]
+    possible_names = iter_known_ligand_output_subdirs()
 
     # Check in the output directory (same level as GMX_PROLIG_MD)
     for name in possible_names:

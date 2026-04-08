@@ -23,6 +23,12 @@ from ..utils.colors import (
     path,
 )
 from ..utils.system.topology import _parse_atomtypes, _should_vendor_forcefield
+from ..fep.common.coordinates import nm_xyz_to_angstrom
+from ..forcefield.registry import (
+    get_forcefield_output_subdirs,
+    iter_existing_ligand_output_dirs,
+    resolve_ligand_artifact,
+)
 
 try:
     from ..forcefield.adapters import CGenFFAdapter
@@ -125,10 +131,10 @@ class FEPWorkflowMixin:
             from ..fep.core.hybrid_topology import HybridTopologyBuilder, LigandTopologyInput
 
             # Debug: Check if files exist
-            ref_itp = os.path.join(ref_ff_dir, "LIG.itp")
-            ref_gro = os.path.join(ref_ff_dir, "LIG.gro")
-            mut_itp = os.path.join(mut_ff_dir, "LIG.itp")
-            mut_gro = os.path.join(mut_ff_dir, "LIG.gro")
+            ref_itp = self._resolve_ligand_ff_artifact(ref_ff_dir, "LIG.itp")
+            ref_gro = self._resolve_ligand_ff_artifact(ref_ff_dir, "LIG.gro")
+            mut_itp = self._resolve_ligand_ff_artifact(mut_ff_dir, "LIG.itp")
+            mut_gro = self._resolve_ligand_ff_artifact(mut_ff_dir, "LIG.gro")
 
             print(f"\n  Checking force field files:")
             print(f"    ref_itp exists: {os.path.exists(ref_itp)} - {ref_itp}")
@@ -195,8 +201,8 @@ class FEPWorkflowMixin:
             hybrid_builder = HybridTopologyBuilder(charge_strategy=self.charge_strategy)
 
             # Read ITP parameters for hybrid topology building
-            ref_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(ref_ff_dir, "LIG.itp")).read_text())
-            mut_itp_data = ITPBuilder._parse_source_itp(Path(os.path.join(mut_ff_dir, "LIG.itp")).read_text())
+            ref_itp_data = ITPBuilder._parse_source_itp(Path(ref_itp).read_text())
+            mut_itp_data = ITPBuilder._parse_source_itp(Path(mut_itp).read_text())
 
             params_a = LigandTopologyInput(
                 masses={},
@@ -234,14 +240,14 @@ class FEPWorkflowMixin:
             from prism.fep.modeling.hybrid_package import HybridPackageBuilder
 
             hybrid_pkg_builder = HybridPackageBuilder()
-            atom_types_a = hybrid_pkg_builder._parse_atom_types_from_itp(os.path.join(ref_ff_dir, "LIG.itp"))
-            atom_types_b = hybrid_pkg_builder._parse_atom_types_from_itp(os.path.join(mut_ff_dir, "LIG.itp"))
+            atom_types_a = hybrid_pkg_builder._parse_atom_types_from_itp(ref_itp)
+            atom_types_b = hybrid_pkg_builder._parse_atom_types_from_itp(mut_itp)
 
             hybrid_params = ITPBuilder.write_complete_hybrid_itp(
                 output_path=hybrid_itp,
                 hybrid_itp=temp_itp,
-                ligand_a_itp=os.path.join(ref_ff_dir, "LIG.itp"),
-                ligand_b_itp=os.path.join(mut_ff_dir, "LIG.itp"),
+                ligand_a_itp=ref_itp,
+                ligand_b_itp=mut_itp,
                 molecule_name="HYB",
                 ligand_a_structure=ref_mapping_coord_source,
                 ligand_b_structure=mut_mapping_coord_source,
@@ -320,7 +326,7 @@ class FEPWorkflowMixin:
             cleanup_items = [
                 os.path.join(normalized_output_dir, "mdps"),
             ]
-            cleanup_items.extend(str(p) for p in Path(normalized_output_dir).glob("LIG.*") if p.is_dir())
+            cleanup_items.extend(str(p) for p in iter_existing_ligand_output_dirs(normalized_output_dir))
 
             root_md_dir = os.path.join(normalized_output_dir, "GMX_PROLIG_MD")
             if os.path.isdir(root_md_dir) and not os.listdir(root_md_dir):
@@ -515,16 +521,15 @@ class FEPWorkflowMixin:
     def _resolve_cgenff_mapping_topology(self, cgenff_path: str) -> str:
         """Return the source topology file that best represents the original CGenFF ligand."""
         path = Path(cgenff_path)
-        if (path / "LIG.itp").exists():
-            return str(path / "LIG.itp")
+        resolved_itp = resolve_ligand_artifact(path, "LIG.itp")
+        if resolved_itp is not None:
+            return str(resolved_itp)
         gmx_tops = sorted(path.glob("*_gmx.top"))
         if gmx_tops:
             return str(gmx_tops[0])
         top_files = [candidate for candidate in sorted(path.glob("*.top")) if candidate.name != "LIG.top"]
         if top_files:
             return str(top_files[0])
-        if (path / "LIG.top").exists() and (path / "LIG.itp").exists():
-            return str(path / "LIG.itp")
         raise FileNotFoundError(f"No suitable CGenFF topology file found under {cgenff_path}")
 
     def _prepare_mapping_visualization_inputs(
@@ -577,9 +582,8 @@ class FEPWorkflowMixin:
                         resid_resname = parts[0]
                         atom_name = parts[1]
                         atom_id = parts[2]
-                        x = float(parts[3]) * 10  # nm to Å
-                        y = float(parts[4]) * 10
-                        z = float(parts[5]) * 10 if len(parts) > 5 else 0.0
+                        z_raw = float(parts[5]) if len(parts) > 5 else 0.0
+                        x, y, z = nm_xyz_to_angstrom(float(parts[3]), float(parts[4]), z_raw)
                         # Split resid and resname
                         # resid is the numeric part, resname is the alphabetic part
                         resid = ""
@@ -641,9 +645,8 @@ class FEPWorkflowMixin:
                     resid_resname = parts[0]
                     atom_name = parts[1]
                     atom_id = parts[2]
-                    x = float(parts[3]) * 10  # nm to Å
-                    y = float(parts[4]) * 10
-                    z = float(parts[5]) * 10 if len(parts) > 5 else 0.0
+                    z_raw = float(parts[5]) if len(parts) > 5 else 0.0
+                    x, y, z = nm_xyz_to_angstrom(float(parts[3]), float(parts[4]), z_raw)
 
                     # Filter by state
                     # Transformed atoms end with "A" or "B" (e.g., "00A", "01B", "C0EA", "O0MB")
@@ -751,13 +754,6 @@ class FEPWorkflowMixin:
                 idx = atom_data["index"]
                 name = atom_data["name"]
                 x, y, z = atom_data["coord"]
-                # read_ligand_from_prism may supply coordinates from either GRO
-                # (historically converted to Angstroms) or PDB/MOL2 (nanometers).
-                # Detect the Angstrom case heuristically and normalize to nm here.
-                if max(abs(x), abs(y), abs(z)) > 10.0:
-                    x /= 10.0
-                    y /= 10.0
-                    z /= 10.0
                 # GRO format: %5d%-5s%5s%5d%8.3f%8.3f%8.3f
                 # residuenum (5 chars) + residuename (5 chars, left-justified)
                 # + atomname (5 chars, right-justified) + atomnumber (5 chars) + x + y + z
@@ -878,9 +874,7 @@ class FEPWorkflowMixin:
         model_dir.mkdir(exist_ok=True, parents=True)
 
         ligand_ff_dir = Path(self.lig_ff_dirs[0])
-        ligand_gro = ligand_ff_dir / "LIG.gro"
-        if not ligand_gro.exists():
-            raise FileNotFoundError(f"Ligand structure not found: {ligand_gro}")
+        ligand_gro = Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.gro"))
 
         print_step(2, 5, "Creating ligand-only topology")
 
@@ -986,7 +980,7 @@ class FEPWorkflowMixin:
             charmm_ff_dir = CGenFFAdapter.find_charmm_ff_dir(ligand_ff_dir)
             cgenff_supplement = self.system_builder._build_cgenff_parameter_supplement(
                 lig_ff_path=ligand_ff_dir,
-                lig_itp_path=ligand_ff_dir / "LIG.itp",
+                lig_itp_path=Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.itp")),
                 charmm_ff_dir=charmm_ff_dir,
                 main_bonded_files=[
                     p for p in [main_ff_dir / "ffbonded.itp", main_ff_dir / "ffmissingdihedrals.itp"] if p.exists()
@@ -998,10 +992,10 @@ class FEPWorkflowMixin:
             f.write("; Ligand-only topology for FEP unbound leg\n")
             f.write(f'#include "{ff_name}.ff/forcefield.itp"\n')
             atomtypes_lines = []
-            atomtypes_itp = ligand_ff_dir / "atomtypes_LIG.itp"
+            atomtypes_itp_path = resolve_ligand_artifact(ligand_ff_dir, "atomtypes_LIG.itp")
             include_ligand_atomtypes = CGenFFAdapter.should_include_ligand_atomtypes(ff_name, ligand_ff_dir)
-            if include_ligand_atomtypes and atomtypes_itp.exists():
-                for line in atomtypes_itp.read_text().splitlines():
+            if include_ligand_atomtypes and atomtypes_itp_path is not None and atomtypes_itp_path.exists():
+                for line in atomtypes_itp_path.read_text().splitlines():
                     stripped = line.strip()
                     if not stripped or stripped.startswith(";") or stripped.startswith("["):
                         continue
@@ -1029,7 +1023,7 @@ class FEPWorkflowMixin:
             f.write("[ molecules ]\n")
             # Read the actual moleculetype name from the ligand ITP file
             # This handles the multi-ligand renaming (LIG -> LIG_N) correctly
-            ligand_itp = ligand_ff_dir / "LIG.itp"
+            ligand_itp = Path(self._resolve_ligand_ff_artifact(str(ligand_ff_dir), "LIG.itp"))
             ligand_mol_name = self._read_moleculetype_name(ligand_itp)
             f.write(f"{ligand_mol_name:<8} 1\n")
 
@@ -1086,13 +1080,36 @@ class FEPWorkflowMixin:
 
     def _resolve_generated_ligand_ff_dir(self, output_dir: str) -> str:
         """Return the generated ligand force-field directory for the current ligand FF."""
-        # First search top-level (backward compatibility)
-        ff_dirs = [p for p in Path(output_dir).glob("LIG.*") if p.is_dir()]
-        if len(ff_dirs) != 1:
-            # If not found, search Ligand_Forcefield subdirectory (new multi-ligand format)
-            ligand_ff_dir = Path(output_dir) / "Ligand_Forcefield"
-            if ligand_ff_dir.exists():
-                ff_dirs = sorted([p for p in ligand_ff_dir.glob("LIG.*") if p.is_dir()], key=lambda p: p.name)
+        output_path = Path(output_dir)
+        search_roots = [output_path]
+        ligand_ff_dir = output_path / "Ligand_Forcefield"
+        if ligand_ff_dir.exists():
+            search_roots.append(ligand_ff_dir)
+
+        ff_dirs = []
+        seen = set()
+
+        for root in search_roots:
+            forcefield = getattr(self, "ligand_forcefield", None)
+            preferred = iter_existing_ligand_output_dirs(root, forcefield=forcefield) if forcefield else ()
+            for candidate in preferred:
+                if candidate.is_dir() and candidate not in seen:
+                    ff_dirs.append(candidate)
+                    seen.add(candidate)
+            for subdir in get_forcefield_output_subdirs(forcefield) if forcefield else ():
+                for candidate in sorted(root.glob(f"{subdir}*")):
+                    if candidate.is_dir() and candidate not in seen:
+                        ff_dirs.append(candidate)
+                        seen.add(candidate)
+            for candidate in iter_existing_ligand_output_dirs(root):
+                if candidate.is_dir() and candidate not in seen:
+                    ff_dirs.append(candidate)
+                    seen.add(candidate)
+            for candidate in sorted(root.glob("LIG.*")):
+                if candidate.is_dir() and candidate not in seen:
+                    ff_dirs.append(candidate)
+                    seen.add(candidate)
+
         if len(ff_dirs) == 0:
             raise FileNotFoundError(
                 f"Expected at least one generated ligand FF dir in {output_dir}, found {len(ff_dirs)}"
@@ -1109,6 +1126,13 @@ class FEPWorkflowMixin:
             return str(ref_candidates[0])
         # No explicit _1, use sorted first
         return str(ff_dirs[0])
+
+    def _resolve_ligand_ff_artifact(self, ligand_ff_dir: str, filename: str) -> str:
+        """Resolve an artifact within a generated ligand FF directory."""
+        resolved = resolve_ligand_artifact(ligand_ff_dir, filename)
+        if resolved is None:
+            raise FileNotFoundError(f"Could not find {filename} under ligand FF directory: {ligand_ff_dir}")
+        return str(resolved)
 
     def _read_moleculetype_name(self, itp_path: Path) -> str:
         """Read the moleculetype name from a ligand ITP file.

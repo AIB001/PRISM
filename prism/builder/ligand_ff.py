@@ -36,6 +36,7 @@ from ..forcefield.swissparam import (
     HybridMMFFMATCHForceFieldGenerator,
 )
 from ..forcefield.rtf import RTFForceFieldGenerator
+from ..forcefield.registry import get_primary_forcefield_output_subdir
 
 
 class LigandForceFieldMixin:
@@ -46,23 +47,7 @@ class LigandForceFieldMixin:
         print_subheader(f"Generating Ligand Force Fields ({self.ligand_forcefield.upper()})")
         print(f"Processing {number(self.ligand_count)} ligand(s)...")
 
-        # Determine force field suffix based on type
-        if self.ligand_forcefield in ["gaff", "gaff2"]:
-            ff_suffix = "amb2gmx"
-        elif self.ligand_forcefield == "openff":
-            ff_suffix = "openff2gmx"
-        elif self.ligand_forcefield == "cgenff":
-            ff_suffix = "cgenff2gmx"
-        elif self.ligand_forcefield == "charmm-gui":
-            ff_suffix = "charmm2gmx"
-        elif self.ligand_forcefield == "opls":
-            ff_suffix = "opls2gmx"
-        elif self.ligand_forcefield in ["mmff", "match", "hybrid"]:
-            ff_suffix = "sp2gmx"  # SwissParam
-        elif self.ligand_forcefield == "rtf":
-            ff_suffix = "rtf2gmx"  # CHARMM RTF
-        else:
-            ff_suffix = "lig2gmx"
+        primary_output_dir = get_primary_forcefield_output_subdir(self.ligand_forcefield)
 
         # Create base directory for ligand force fields
         # Single ligand: place directly in output_dir (backward compatibility)
@@ -197,9 +182,9 @@ class LigandForceFieldMixin:
             # Single ligand: LIG.xxx2gmx (no suffix, backward compatibility)
             # Multi-ligand: LIG.xxx2gmx_1, LIG.xxx2gmx_2, etc.
             if self.ligand_count == 1:
-                final_ff_dir = os.path.join(ligand_ff_base_dir, f"LIG.{ff_suffix}")
+                final_ff_dir = os.path.join(ligand_ff_base_dir, primary_output_dir)
             else:
-                final_ff_dir = os.path.join(ligand_ff_base_dir, f"LIG.{ff_suffix}_{ligand_num}")
+                final_ff_dir = os.path.join(ligand_ff_base_dir, f"{primary_output_dir}_{ligand_num}")
 
             # Move files from temp directory to final location
             if os.path.exists(final_ff_dir) and self.overwrite:

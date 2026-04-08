@@ -13,15 +13,23 @@ This module implements:
 - FEP simulation setup and analysis tools
 """
 
-from prism.fep.core.mapping import Atom, AtomMapping, DistanceAtomMapper
-from prism.fep.core.hybrid_topology import HybridAtom, HybridTopologyBuilder, LigandTopologyInput
+from prism.fep.core import (
+    Atom,
+    AtomMapping,
+    DistanceAtomMapper,
+    HybridAtom,
+    HybridTopologyBuilder,
+    LigandTopologyInput,
+    build_mass_dict_from_atoms,
+    get_atomic_mass,
+)
 from prism.fep.gromacs.itp_builder import ITPBuilder
 from prism.fep.gromacs.mdp_templates import FEP_PROD_MDP, write_fep_mdps
 from prism.fep.modeling import FEPScaffoldBuilder
 from prism.fep.analysis import XVGParser, FEstimator
-from prism.fep.io import read_ligand_from_prism, read_mol2_atoms, read_rtf_for_fep
-from prism.fep.config import FEPConfig, read_fep_config, write_fep_config
-from prism.fep.naming import FEPSystemNamer, generate_fep_system_name, validate_fep_system_name
+from prism.fep.common.io import read_ligand_from_prism, read_mol2_atoms, read_rtf_for_fep
+from prism.fep.common.config import FEPConfig, read_fep_config, write_fep_config
+from prism.fep.common.naming import FEPSystemNamer, generate_fep_system_name, validate_fep_system_name
 
 __version__ = "0.1.0"
 __all__ = [
@@ -32,6 +40,8 @@ __all__ = [
     "HybridAtom",
     "HybridTopologyBuilder",
     "LigandTopologyInput",
+    "build_mass_dict_from_atoms",
+    "get_atomic_mass",
     # File I/O
     "read_ligand_from_prism",
     "read_mol2_atoms",

@@ -17,6 +17,8 @@ Available force field generators:
 - HybridMMFFMATCHForceFieldGenerator: Hybrid MMFF-based-MATCH force field
 """
 
+from .registry import iter_forcefield_specs
+
 # Try to import all available generators
 __all__ = []
 
@@ -142,94 +144,34 @@ def get_generator_info():
     --------
     dict : Dictionary with generator names and descriptions
     """
+    descriptions = {
+        "gaff": "GAFF force field using AmberTools",
+        "gaff2": "GAFF2 force field using AmberTools (improved version with better torsion parameters)",
+        "openff": "OpenFF force field",
+        "cgenff": "CGenFF (CHARMM General Force Field) - requires web-downloaded files",
+        "charmm-gui": "CHARMM-GUI output converter - processes gromacs/ directory",
+        "rtf": "RTF+PRM force field converter - processes CGenFF RTF/PRM files",
+        "opls": "OPLS-AA force field using LigParGen server",
+        "mmff": "MMFF-based force field using SwissParam API",
+        "match": "MATCH force field using SwissParam API",
+        "hybrid": "Both MMFF-based + MATCH force field using SwissParam API",
+    }
     info = {}
-
-    if "GAFFForceFieldGenerator" in __all__:
-        info["GAFF"] = {
-            "class": "GAFFForceFieldGenerator",
-            "description": "GAFF force field using AmberTools",
-            "output_dir": "LIG.amb2gmx",
-            "dependencies": ["AmberTools (antechamber, parmchk2, tleap)"],
+    for spec in iter_forcefield_specs():
+        if spec.generator_class_name not in __all__:
+            continue
+        info[spec.display_name] = {
+            "class": spec.generator_class_name,
+            "description": descriptions.get(spec.key, spec.display_name),
+            "output_dir": spec.generator_output_subdir,
+            "dependencies": list(spec.dependencies),
         }
-
-    if "GAFF2ForceFieldGenerator" in __all__:
-        info["GAFF2"] = {
-            "class": "GAFF2ForceFieldGenerator",
-            "description": "GAFF2 force field using AmberTools (improved version with better torsion parameters)",
-            "output_dir": "LIG.amb2gmx",
-            "dependencies": ["AmberTools (antechamber, parmchk2, tleap)"],
-        }
-
-    if "OpenFFForceFieldGenerator" in __all__:
-        info["OpenFF"] = {
-            "class": "OpenFFForceFieldGenerator",
-            "description": "OpenFF force field",
-            "output_dir": "LIG.openff2gmx",
-            "dependencies": ["openff-toolkit", "openff-interchange"],
-        }
-
-    if "CGenFFForceFieldGenerator" in __all__:
-        info["CGenFF"] = {
-            "class": "CGenFFForceFieldGenerator",
-            "description": "CGenFF (CHARMM General Force Field) - requires web-downloaded files",
-            "output_dir": "LIG.cgenff2gmx",
-            "dependencies": ["Web download from https://cgenff.com/"],
-        }
-
-    if "CHARMMGUIForceFieldGenerator" in __all__:
-        info["CHARMM-GUI"] = {
-            "class": "CHARMMGUIForceFieldGenerator",
-            "description": "CHARMM-GUI output converter - processes gromacs/ directory",
-            "output_dir": "LIG.charmm2gmx",
-            "dependencies": ["CHARMM-GUI web server (http://charmm-gui.org)"],
-        }
-
-    if "RTFForceFieldGenerator" in __all__:
-        info["RTF"] = {
-            "class": "RTFForceFieldGenerator",
-            "description": "RTF+PRM force field converter - processes CGenFF RTF/PRM files",
-            "output_dir": "LIG.rtf2gmx",
-            "dependencies": ["RTF and PRM files from CGenFF"],
-        }
-
-    if "OPLSAAForceFieldGenerator" in __all__:
-        info["OPLS-AA"] = {
-            "class": "OPLSAAForceFieldGenerator",
-            "description": "OPLS-AA force field using LigParGen server",
-            "output_dir": "LIG.opls2gmx",
-            "dependencies": ["requests", "rdkit (optional, for alignment)"],
-        }
-
-    if "MMFFForceFieldGenerator" in __all__:
-        info["MMFF"] = {
-            "class": "MMFFForceFieldGenerator",
-            "description": "MMFF-based force field using SwissParam API",
-            "output_dir": "LIG.mmff2gmx",
-            "dependencies": ["curl (command-line tool)"],
-        }
-
-    if "MATCHForceFieldGenerator" in __all__:
-        info["MATCH"] = {
-            "class": "MATCHForceFieldGenerator",
-            "description": "MATCH force field using SwissParam API",
-            "output_dir": "LIG.match2gmx",
-            "dependencies": ["curl (command-line tool)"],
-        }
-
-    if "BothForceFieldGenerator" in __all__:
-        info["Both"] = {
-            "class": "BothForceFieldGenerator",
-            "description": "Both MMFF-based + MATCH force field using SwissParam API",
-            "output_dir": "LIG.both2gmx",
-            "dependencies": ["curl (command-line tool)"],
-        }
-
     if "HybridForceFieldGenerator" in __all__:
+        hybrid_spec = next(spec for spec in iter_forcefield_specs() if spec.key == "hybrid")
         info["Hybrid (deprecated)"] = {
             "class": "HybridForceFieldGenerator",
             "description": "Alias for BothForceFieldGenerator (backward compatibility)",
-            "output_dir": "LIG.both2gmx",
-            "dependencies": ["curl (command-line tool)"],
+            "output_dir": hybrid_spec.generator_output_subdir,
+            "dependencies": list(hybrid_spec.dependencies),
         }
-
     return info

@@ -347,7 +347,7 @@ analyzer.generate_html_report("fep_results.html")
 | 42-38 | HIF-2α | amber99sb | GAFF2 | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | 42-38 | HIF-2α | amber99sb | MMFF94 | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | 42-38 | HIF-2α | charmm36-jul2022 | CGenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
-| 42-38 | HIF-2α | charmm36-jul2022 | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | charmm36-jul2022 | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | All repeats completed (verified 2026-04-08) |
 | 42-38 | HIF-2α | oplsaa | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | 25-36 | HIF-2α | amber14sb_OL15 | — | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | 25-36 | HIF-2α | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
@@ -358,12 +358,12 @@ analyzer.generate_html_report("fep_results.html")
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OpenFF (non-mut) | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 | GAFF2 | ⚠️ | EM+NVT | Pending | Bound EM+NVT completed, unbound pending |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 | OpenFF | ❌ | Not tested | Not tested | System not built yet |
-| p38-19-24 | p38α MAPK | amber14sb_OL15 | OPLS-AA | ❌ | Not tested | Not tested | System not built yet |
-| p38-19-24 | p38α MAPK | charmm36-jul2022 | RTF | ⚠️ | EM+NVT | Pending | Bound EM+NVT completed, unbound pending |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08) |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08) |
+| p38-19-24 | p38α MAPK | amber14sb_OL15 | OPLS-AA | ❌ | Not tested | Not tested | System build failed (LigParGen error) |
+| p38-19-24 | p38α MAPK | charmm36-jul2022 | RTF | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08; bound runtime guard enables unconstrained 0.5 fs startup for zeroized H-bonds) |
 | oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | Bound and unbound smoke checks completed |
-| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | — | ⚠️ | EM+NVT | Pending | Bound completed; unbound still pending and not locally rerunnable under GROMACS 2024.4 (amber19sb ff requires 2026+) |
+| oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | — | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08, CPU mode due to CUDA error) |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
@@ -384,9 +384,11 @@ analyzer.generate_html_report("fep_results.html")
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
 **Current validation snapshot** (2026-04-08 updated):
-- The full matrix is still heterogeneous: some rows reflect newly rechecked 2026-04-08 smoke-test results, while a smaller set of legacy rows remain bound-only or not yet rebuilt.
-- The 25-36 validation set is now fully promoted to bound+unbound EM+NVT smoke-pass status across baseline amber14sb_OL15, OpenFF, OpenFF-alt, mut-OpenFF, mut-OPLS, CGenFF, and oplsaa paths.
-- Remaining work is concentrated in the explicitly marked `⚠️` / `❌` rows above rather than in the 25-36 block.
+- **27 system variants** with completed bound+unbound EM+NVT ✅ (+5 p38 systems + amber19sb + 2 charmm-gui)
+- **0 variants** with pending unbound testing ⚠️ (all tested!)
+- **1 variant** with system build failure ❌ (p38-19-24 OPLS: LigParGen error)
+- **Total: 28 tracked system variants** in the unit-test workspace (27 in table + 39-8 platform)
+- Recent additions: p38-19-24 (GAFF2, RTF) and oMeEtPh-EtPh (amber19sb) unbound legs completed; 42-38/oMeEtPh charmm-gui unbound verified
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅

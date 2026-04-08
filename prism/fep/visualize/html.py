@@ -322,7 +322,7 @@ def _generate_canvas_html(
 
         defaults = {"dist_cutoff": 0.6, "charge_cutoff": 0.05, "charge_common": "mean", "charge_reception": "surround"}
         tooltips = {
-            "dist_cutoff": "Maximum distance (Å) between atoms to be considered as common",
+            "dist_cutoff": "Maximum distance (nm) between atoms to be considered as common",
             "charge_cutoff": "Maximum charge difference for common atoms",
             "charge_common": "Charge assignment for common atoms (ref/mut/mean/none)",
             "charge_reception": "Charge reception mode (unique/surround/surround_ext/none)",
@@ -379,7 +379,7 @@ def _generate_canvas_html(
         if fep_cfg:
             all_items.extend(
                 [
-                    make_item("Distance Cutoff", fep_cfg.get("dist_cutoff"), "dist_cutoff", "Å"),
+                    make_item("Distance Cutoff", fep_cfg.get("dist_cutoff"), "dist_cutoff", "nm"),
                     make_item("Charge Cutoff", fep_cfg.get("charge_cutoff"), "charge_cutoff"),
                     make_item("Charge Common", fep_cfg.get("charge_common"), "charge_common"),
                     make_item("Charge Reception", fep_cfg.get("charge_reception"), "charge_reception"),

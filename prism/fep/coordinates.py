@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Compatibility shim for legacy ``prism.fep.naming`` imports."""
+"""Compatibility shim for legacy ``prism.fep.coordinates`` imports."""
 
-from prism.fep.common import naming as _impl
+from prism.fep.common import coordinates as _impl
 
 globals().update({name: getattr(_impl, name) for name in dir(_impl) if not name.startswith("__")})
 

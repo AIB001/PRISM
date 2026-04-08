@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-PRISM-FEP Core Module
+"""Core domain objects and algorithms for PRISM-FEP."""
 
-Core algorithms for FEP calculations including atom mapping and dual topology construction.
-"""
-
-from .mapping import Atom, AtomMapping, DistanceAtomMapper
-from .hybrid_topology import HybridAtom, HybridTopologyBuilder
+from prism.fep.core.atomic import build_mass_dict_from_atoms, get_atomic_mass
+from prism.fep.core.hybrid_topology import HybridAtom, HybridTopologyBuilder, LigandTopologyInput
+from prism.fep.core.mapping import Atom, AtomMapping, DistanceAtomMapper
 
 __all__ = [
     "Atom",
@@ -16,4 +13,7 @@ __all__ = [
     "DistanceAtomMapper",
     "HybridAtom",
     "HybridTopologyBuilder",
+    "LigandTopologyInput",
+    "build_mass_dict_from_atoms",
+    "get_atomic_mass",
 ]

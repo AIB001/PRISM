@@ -14,6 +14,7 @@ import sys
 import argparse
 
 from .core import PRISMBuilder
+from ..fep.naming import generate_fep_system_name
 
 
 def _slug_case_token(value: str) -> str:
@@ -23,7 +24,7 @@ def _slug_case_token(value: str) -> str:
 
 
 def _default_fep_output_dir(forcefield: str, ligand_forcefield: str) -> str:
-    return f"{_slug_case_token(forcefield)}-mut_{_slug_case_token(ligand_forcefield)}"
+    return generate_fep_system_name(forcefield, ligand_forcefield)
 
 
 def main():

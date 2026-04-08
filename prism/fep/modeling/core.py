@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 from prism.fep.gromacs.mdp_templates import write_fep_mdps
+from prism.forcefield.registry import discover_ligand_directory, resolve_ligand_artifact
 from prism.fep.modeling.hybrid_package import HybridPackageBuilder
 from prism.fep.modeling.leg_writer import LegWriter
 from prism.fep.modeling import script_writer
@@ -123,19 +124,9 @@ class FEPScaffoldBuilder:
         FileNotFoundError
             If no ligand ITP file found
         """
-        # Pattern 1: */LIG.itp
-        itp_files = list(base_dir.glob("*/LIG.itp"))
-        if itp_files:
-            return itp_files[0].parent
-
-        # Pattern 2: */*.itp (any ITP file)
-        itp_files = list(base_dir.glob("*/*.itp"))
-        if itp_files:
-            return itp_files[0].parent
-
-        # Pattern 3: LIG.itp in base_dir
-        if (base_dir / "LIG.itp").exists():
-            return base_dir
+        resolved_dir = discover_ligand_directory(base_dir)
+        if resolved_dir is not None:
+            return resolved_dir
 
         raise FileNotFoundError(
             f"Cannot find ligand ITP file in {base_dir}. " f"Expected patterns: */LIG.itp, */*.itp, or LIG.itp"
@@ -235,18 +226,9 @@ class FEPScaffoldBuilder:
         if hybrid_gro:
             seed_gro = Path(hybrid_gro)
         else:
-            # Auto-discover LIG.gro (handle LIG.amb2gmx/ subdirectory)
-            seed_gro = reference_ligand_path / "LIG.gro"
-            if not seed_gro.exists():
-                # Try LIG.amb2gmx/LIG.gro (PRISM output structure)
-                seed_gro = reference_ligand_path / "LIG.amb2gmx" / "LIG.gro"
-            if not seed_gro.exists():
-                seed_gro = reference_ligand_path / "LIG.sp2gmx" / "LIG.gro"
-            if not seed_gro.exists():
-                # Try any */LIG.gro pattern
-                gro_files = list(reference_ligand_path.glob("*/LIG.gro"))
-                if gro_files:
-                    seed_gro = gro_files[0]
+            seed_gro = resolve_ligand_artifact(reference_ligand_path, "LIG.gro")
+            if seed_gro is None:
+                seed_gro = reference_ligand_path / "LIG.gro"
 
         if not seed_gro.exists():
             raise FileNotFoundError(f"Seed GRO file not found: {seed_gro}")

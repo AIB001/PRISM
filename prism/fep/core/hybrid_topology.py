@@ -8,7 +8,7 @@ Hybrid topology construction for GROMACS single-topology FEP.
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 from .mapping import AtomMapping, normalize_charge_reception, Atom
-from ..atomic import get_atomic_mass
+from .atomic import get_atomic_mass
 
 
 @dataclass
@@ -641,7 +641,7 @@ def calculate_total_charge(atoms: List[Union[Atom, HybridAtom]]) -> float:
 
     Examples
     --------
-    >>> from prism.fep.io import read_ligand_from_prism
+    >>> from prism.fep.common.io import read_ligand_from_prism
     >>> atoms = read_ligand_from_prism("LIG.itp", "LIG.gro")
     >>> total = calculate_total_charge(atoms)
     """
