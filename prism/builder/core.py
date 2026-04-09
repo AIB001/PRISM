@@ -155,7 +155,7 @@ class PRISMBuilder(
         fep_config : str, optional
             Path to FEP configuration YAML file.
         distance_cutoff : float, optional
-            Distance cutoff for atom mapping in Angstroms (default: 0.6).
+            Distance cutoff for atom mapping in nanometers (default: 0.6).
         charge_strategy : str, optional
             Charge strategy for common atoms: 'ref', 'mut', or 'mean' (default: 'mean').
         lambda_windows : int, optional

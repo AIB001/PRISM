@@ -134,7 +134,7 @@ class DistanceAtomMapper:
         Strategy for distributing surplus charges (default: 'surround')
         'unique': only unique (non-hydrogen) atoms receive charge
         'surround': only surrounding atoms receive charge
-        'surround_ext': auto-extend to common atoms if charge/atom > 0.02
+        'surround_ext': lower-level hybrid-topology branch; not accepted by the standard DistanceAtomMapper validator
         'none': no charge redistribution
     recharge_hydrogen : bool, optional
         Whether to perturb hydrogen charges (default: False)
