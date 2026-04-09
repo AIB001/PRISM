@@ -121,7 +121,11 @@ prism/*/*/*.backup
 .claude/cclsp.json
 .claude/scheduled_tasks.json
 <<<<<<< HEAD
+<<<<<<< HEAD
 .claude/   # only for main
 =======
 >>>>>>> 0e3984807e53bcfd885980c8d2efc8e5d96e2b68
+=======
+.claude/   # only for main
+>>>>>>> origin/main
 */GMX_PROLIG_FEP/_build/*/*.yaml
