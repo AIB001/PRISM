@@ -177,6 +177,30 @@ def _write_leg_execution_scripts(
     pme_gpu_flag = "-pme gpu" if use_gpu_pme else ""
     standard_script = leg_dir / "run_prod_standard.sh"
     repex_script = leg_dir / "run_prod_repex.sh"
+    runtime_resource_block = f"""\
+    DEFAULT_NUM_GPUS={num_gpus}
+    DEFAULT_PARALLEL_WINDOWS={parallel_windows}
+    DEFAULT_OMP_THREADS={omp_threads}
+
+    get_positive_int() {{
+        local value="$1"
+        local name="$2"
+        if ! [[ "${{value}}" =~ ^[0-9]+$ ]] || [ "${{value}}" -lt 1 ]; then
+            echo "Error: ${{name}} must be a positive integer (got '${{value}}')"
+            exit 1
+        fi
+    }}
+
+    NUM_GPUS="${{PRISM_NUM_GPUS:-${{DEFAULT_NUM_GPUS}}}}"
+    PARALLEL_WINDOWS="${{PRISM_PARALLEL_WINDOWS:-${{DEFAULT_PARALLEL_WINDOWS}}}}"
+    OMP_THREADS="${{PRISM_OMP_THREADS:-${{OMP_NUM_THREADS:-${{DEFAULT_OMP_THREADS}}}}}}"
+
+    get_positive_int "${{NUM_GPUS}}" "PRISM_NUM_GPUS"
+    get_positive_int "${{PARALLEL_WINDOWS}}" "PRISM_PARALLEL_WINDOWS"
+    get_positive_int "${{OMP_THREADS}}" "PRISM_OMP_THREADS/OMP_NUM_THREADS"
+
+    export OMP_NUM_THREADS="${{OMP_THREADS}}"
+    """
 
     standard_content = textwrap.dedent(f"""\
     #!/usr/bin/env bash
@@ -191,6 +215,8 @@ def _write_leg_execution_scripts(
     else
         MDRUN_NSTEPS_ARG=""
     fi
+
+{runtime_resource_block}
     
     UPDATE_MODE="${{PRISM_MDRUN_UPDATE_MODE:-{update_mode}}}"
     case "${{UPDATE_MODE}}" in
@@ -248,9 +274,9 @@ def _write_leg_execution_scripts(
     
     
     echo "Production mode: standard"
-    echo "Concurrent windows: {parallel_windows}"
-    echo "Configured GPUs: {num_gpus}"
-    echo "OpenMP threads per GPU: {omp_threads}"
+    echo "Concurrent windows: ${{PARALLEL_WINDOWS}}"
+    echo "Configured GPUs: ${{NUM_GPUS}}"
+    echo "OpenMP threads per GPU: ${{OMP_THREADS}}"
     echo "CPU affinity: enabled (each GPU gets dedicated CPU cores)"
     
     JOB_COUNT=0
@@ -266,16 +292,16 @@ def _write_leg_execution_scripts(
             continue
         fi
     
-        if [ {parallel_windows} -gt 1 ]; then
+        if [ "${{PARALLEL_WINDOWS}}" -gt 1 ]; then
             running_jobs=$(find "${{LEG_DIR}}" -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
-            while [ "${{running_jobs}}" -ge {parallel_windows} ]; do
+            while [ "${{running_jobs}}" -ge "${{PARALLEL_WINDOWS}}" ]; do
                 sleep 1
                 running_jobs=$(find "${{LEG_DIR}}" -maxdepth 1 -name ".run_*" -type f 2>/dev/null | wc -l)
             done
         fi
     
-        if [ {num_gpus} -gt 1 ]; then
-            gpu_id=$((JOB_COUNT % {num_gpus}))
+        if [ "${{NUM_GPUS}}" -gt 1 ]; then
+            gpu_id=$((JOB_COUNT % NUM_GPUS))
         else
             gpu_id=0
         fi
@@ -288,8 +314,8 @@ def _write_leg_execution_scripts(
             local gpu_id="$5"
     
             export CUDA_VISIBLE_DEVICES="${{gpu_id}}"
-            local cpu_offset=$((gpu_id * {omp_threads}))
-    
+            local cpu_offset=$((gpu_id * OMP_THREADS))
+
             echo "$$" > "${{LEG_DIR}}/.run_${{lambda_idx}}"
             trap 'rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"' EXIT
     
@@ -298,44 +324,44 @@ def _write_leg_execution_scripts(
             elif [ -f "${{window_dir}}/em_short.gro" ]; then
                 echo "  ${{lambda_name}}: lambda-specific EM already completed"
                 if [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
-                    echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
-                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                    echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
+                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
                 else
-                    echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+                    echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
                     gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+                    gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
                 fi
             elif [ -f "${{window_dir}}/em_short.tpr" ]; then
                 echo "  ${{lambda_name}}: resuming lambda-specific EM"
-                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" -v
                 check_em_short "${{window_dir}}" "${{lambda_name}}"
-                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
                 gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
             elif [ -f "${{window_dir}}/npt_short.tpr" ] && [ -f "${{window_dir}}/npt_short.cpt" ]; then
-                echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                echo "  ${{lambda_name}}: resuming NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -cpi "${{window_dir}}/npt_short.cpt" -v ${{MDRUN_NSTEPS_ARG}}
             else
                 echo "  ${{lambda_name}}: starting lambda-specific EM"
                 gmx grompp -f "${{MDP_DIR}}/em_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/em_short.tpr" -maxwarn 20
-                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" -v
                 check_em_short "${{window_dir}}" "${{lambda_name}}"
-                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+                echo "  ${{lambda_name}}: starting NPT short on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
                 gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
-                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
             fi
     
             if [ -f "${{window_dir}}/prod.gro" ]; then
                 echo "  ${{lambda_name}}: production already completed"
             elif [ -f "${{window_dir}}/prod.tpr" ] && [ -f "${{window_dir}}/prod.cpt" ]; then
-                echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
-                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
+                echo "  ${{lambda_name}}: resuming production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
+                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -cpi "${{window_dir}}/prod.cpt" -v ${{MDRUN_NSTEPS_ARG}}
             else
-                echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + {omp_threads} - 1)))"
+                echo "  ${{lambda_name}}: starting production on GPU ${{gpu_id}} (CPUs ${{cpu_offset}}-$((cpu_offset + OMP_THREADS - 1)))"
                 if [ ! -f "${{window_dir}}/prod.tpr" ]; then
                     gmx grompp -f "${{lambda_mdp}}" -c "${{window_dir}}/npt_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/prod.tpr" -maxwarn 20
                 fi
-                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -pinoffset $((gpu_id * {omp_threads})) -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
+                gmx mdrun -deffnm "${{window_dir}}/prod" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -pinoffset "${{cpu_offset}}" -pinstride 1 -v ${{MDRUN_NSTEPS_ARG}}
             fi
     
             rm -f "${{LEG_DIR}}/.run_${{lambda_idx}}"
@@ -343,7 +369,7 @@ def _write_leg_execution_scripts(
             echo "  ${{lambda_name}}: ✓ Complete"
         }}
     
-        if [ {parallel_windows} -gt 1 ]; then
+        if [ "${{PARALLEL_WINDOWS}}" -gt 1 ]; then
             run_window "${{lambda_idx}}" "${{lambda_name}}" "${{lambda_mdp}}" "${{window_dir}}" "${{gpu_id}}" &
             PIDS+=($!)
             JOB_COUNT=$((JOB_COUNT + 1))
@@ -352,7 +378,7 @@ def _write_leg_execution_scripts(
         fi
     done
     
-    if [ {parallel_windows} -gt 1 ]; then
+    if [ "${{PARALLEL_WINDOWS}}" -gt 1 ]; then
         echo "Waiting for all windows to complete..."
         failure=0
         for job_pid in "${{PIDS[@]}}"; do
@@ -380,6 +406,8 @@ def _write_leg_execution_scripts(
     else
         MDRUN_NSTEPS_ARG=""
     fi
+
+{runtime_resource_block}
     
     UPDATE_MODE="${{PRISM_MDRUN_UPDATE_MODE:-{update_mode}}}"
     case "${{UPDATE_MODE}}" in
@@ -435,8 +463,6 @@ def _write_leg_execution_scripts(
         fi
     }}
     
-    NUM_GPUS={num_gpus}
-    
     window_dirs=()
     for lambda_mdp in "${{MDP_DIR}}"/prod_*.mdp; do
         lambda_name=$(basename "${{lambda_mdp}}" .mdp)
@@ -450,13 +476,13 @@ def _write_leg_execution_scripts(
                 if [ ! -f "${{window_dir}}/em_short.tpr" ]; then
                     gmx grompp -f "${{MDP_DIR}}/em_short_${{lambda_idx}}.mdp" -c "${{BUILD_DIR}}/npt.gro" -r "${{BUILD_DIR}}/npt.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/em_short.tpr" -maxwarn 20
                 fi
-                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp {omp_threads} -v
+                gmx mdrun -deffnm "${{window_dir}}/em_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" -v
                 check_em_short "${{window_dir}}" "${{lambda_name}}"
             fi
             if [ ! -f "${{window_dir}}/npt_short.tpr" ]; then
                 gmx grompp -f "${{MDP_DIR}}/npt_short_${{lambda_idx}}.mdp" -c "${{window_dir}}/em_short.gro" -r "${{window_dir}}/em_short.gro" -p "${{LEG_DIR}}/topol.top" -o "${{window_dir}}/npt_short.tpr" -maxwarn 20
             fi
-            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp {omp_threads} ${{MDRUN_GPU_ARGS}} -v ${{MDRUN_NSTEPS_ARG}}
+            gmx mdrun -deffnm "${{window_dir}}/npt_short" -ntmpi 1 -ntomp "${{OMP_THREADS}}" ${{MDRUN_GPU_ARGS}} -v ${{MDRUN_NSTEPS_ARG}}
         fi
     
         if [ ! -f "${{window_dir}}/prod.tpr" ]; then
@@ -480,6 +506,7 @@ def _write_leg_execution_scripts(
     echo "Production mode: repex"
     echo "Replica-exchange windows: ${{num_windows}}"
     echo "Configured GPUs: $NUM_GPUS"
+    echo "OpenMP threads: $OMP_THREADS"
     echo "GPU id string: $gpu_ids"
     
     mpirun -oversubscribe -np "${{num_windows}}" \\
@@ -667,11 +694,49 @@ if [[ "${{EXECUTION_MODE}}" != "standard" && "${{EXECUTION_MODE}}" != "repex" ]]
     exit 1
 fi
 
-export OMP_NUM_THREADS="${{OMP_NUM_THREADS:-{omp_threads}}}"
-export OMP_PROC_BIND="${{OMP_PROC_BIND:-close}}"
-export OMP_PLACES="${{OMP_PLACES:-cores}}"
+    DEFAULT_NUM_GPUS={num_gpus}
+    DEFAULT_PARALLEL_WINDOWS={parallel_windows}
+    DEFAULT_OMP_THREADS={omp_threads}
 
-GPU_COUNT={num_gpus}
+    get_positive_int() {{
+        local value="$1"
+        local name="$2"
+        if ! [[ "${{value}}" =~ ^[0-9]+$ ]] || [ "${{value}}" -lt 1 ]; then
+            echo "Error: ${{name}} must be a positive integer (got '${{value}}')"
+            exit 1
+        fi
+    }}
+
+    GPU_COUNT="${{PRISM_NUM_GPUS:-${{DEFAULT_NUM_GPUS}}}}"
+    PARALLEL_WINDOWS="${{PRISM_PARALLEL_WINDOWS:-${{DEFAULT_PARALLEL_WINDOWS}}}}"
+
+    get_positive_int "${{GPU_COUNT}}" "PRISM_NUM_GPUS"
+    get_positive_int "${{PARALLEL_WINDOWS}}" "PRISM_PARALLEL_WINDOWS"
+
+    if [ -n "${{PRISM_OMP_THREADS:-}}" ]; then
+        export OMP_NUM_THREADS="${{PRISM_OMP_THREADS}}"
+    elif [ -n "${{OMP_NUM_THREADS:-}}" ]; then
+        export OMP_NUM_THREADS="${{OMP_NUM_THREADS}}"
+    elif [ -n "${{PRISM_TOTAL_CPUS:-}}" ]; then
+        get_positive_int "${{PRISM_TOTAL_CPUS}}" "PRISM_TOTAL_CPUS"
+        if [ "${{EXECUTION_MODE}}" = "standard" ]; then
+            ACTIVE_WORKERS="${{GPU_COUNT}}"
+            if [ "${{PARALLEL_WINDOWS}}" -lt "${{ACTIVE_WORKERS}}" ]; then
+                ACTIVE_WORKERS="${{PARALLEL_WINDOWS}}"
+            fi
+        else
+            ACTIVE_WORKERS="${{GPU_COUNT}}"
+        fi
+        export OMP_NUM_THREADS="$((PRISM_TOTAL_CPUS / ACTIVE_WORKERS))"
+        if [ "${{OMP_NUM_THREADS}}" -lt 1 ]; then
+            export OMP_NUM_THREADS=1
+        fi
+    else
+        export OMP_NUM_THREADS="{omp_threads}"
+    fi
+
+    export OMP_PROC_BIND="${{OMP_PROC_BIND:-close}}"
+    export OMP_PLACES="${{OMP_PLACES:-cores}}"
 
 resolve_gpu_id() {{
     if [ -n "${{PRISM_GPU_ID:-}}" ]; then
@@ -742,6 +807,8 @@ run_leg() {{
     echo ""
     echo "GPU assignment: physical GPU ${{gpu_id}} (visible as local GPU 0)"
     echo "OpenMP threads: ${{OMP_NUM_THREADS}}"
+    echo "Configured GPU pool: ${{GPU_COUNT}}"
+    echo "Parallel windows: ${{PARALLEL_WINDOWS}}"
     echo "CPU pin offset: ${{cpu_offset}}"
 
     cd "${{leg_dir}}"
