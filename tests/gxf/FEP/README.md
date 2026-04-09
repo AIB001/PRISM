@@ -377,6 +377,16 @@ analyzer.generate_html_report("fep_results.html")
 
 ### Critical bug fixes validated
 
+**Cutoff radius logic (2026-04-09)** - Fixed MDP template cutoff radius forcing
+- **Problem**: `max(..., 1.4)` in `mdp_templates.py` forced all FEP systems to use 1.4nm cutoff
+- **Impact**: gaff2 bound EM failed to converge (Fmax = 795.69 vs target <200)
+- **Fix**: Removed max(..., 1.4) logic, now uses configured values (default 1.0nm)
+- **Result**: gaff2 bound EM now converges: Fmax < 200 in 5550 steps ✅
+
+**Import errors (2026-04-09)** - Fixed missing imports in topology and ligand_system_service
+- Added `print_info`, `print_warning`, `number`, `print_success`, `path` to `topology.py`
+- Added `print_step`, `print_success`, `resolve_ligand_artifact`, `_should_vendor_forcefield` to `ligand_system_service.py`
+
 **B-state atom validation** - hybrid topologies continue to pass scaffold/grompp validation across the major FEP test systems
 - Added `is_perturbed` flag to track transformed and surrounding atoms
 - Modified ITPBuilder to always write B-state columns (typeB, chargeB, massB)
