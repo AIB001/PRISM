@@ -17,7 +17,7 @@ The main scope is FEP: atom mapping, hybrid topology construction, scaffold gene
 ### FEP workflow
 
 #### Atom mapping and hybrid topology
-- **DistanceAtomMapper** - Distance-based atom mapping with configurable cutoff (default 0.6 Å)
+- **DistanceAtomMapper** - Distance-based atom mapping with configurable cutoff (default 0.6 nm)
   - FEP-specific atom classification: common, transformed (A-only, B-only), surrounding
   - Automatic mapping validation and quality scoring
 - **Single-topology hybrid ligand** - GROMACS A/B-state encoding in single ITP file
@@ -42,7 +42,7 @@ The main scope is FEP: atom mapping, hybrid topology construction, scaffold gene
   - Prevents cross-contamination between repeats
   - Enables parallel execution without conflicts
 - **MDP generation** - Lambda-specific parameter files
-  - 11 lambda windows (default): 4 coulomb + 7 van der Waals (decoupled strategy)
+  - 32 lambda windows by default: 12 Coulomb + 20 van der Waals windows in the decoupled strategy
   - Customizable lambda schedules (linear, nonlinear, quadratic distributions)
   - Separate MDPs for EM, NVT, NPT, and production per lambda window
 - **B-state atom validation** - Ensures all hybrid topologies have proper perturbed atoms
@@ -125,7 +125,7 @@ The main scope is FEP: atom mapping, hybrid topology construction, scaffold gene
 - **Replica exchange support** - Added REX script generation with proper GPU/CPU resource allocation
 
 ### Configuration and parameter handling
-- **charge_cutoff and charge_reception** - Added charge_cutoff config parameter to mapper and charge_reception parameter for flexible charge assignment
+- **charge_cutoff and charge_reception** - Added charge_cutoff config parameter to the mapper and charge_reception parameter for flexible charge assignment (standard user-facing modes: surround, unique, none)
 - **Execution config loading** - Fixed execution config loading and added maxwarn parameter support
 - **Force field selection** - Honor explicit amber14sb selection, fix GROMACS force field selection conflict
 - **Leg topology handling** - Improved leg topology handling and coordinate alignment for bound/unbound systems
@@ -334,13 +334,13 @@ analyzer.generate_html_report("fep_results.html")
 
 ## Current validation status
 
-### Force field testing matrix (2026-04-08 Updated)
+### Force field testing matrix (2026-04-09 Updated)
 
 **Test Summary**: The table below reflects the currently verified smoke-test status in the unit-test workspace. Older aggregate counts were removed because they became stale as additional systems were rechecked and promoted from pending to completed.
 
 | System | Protein | Protein FF | Ligand FF | Status | Bound | Unbound | Notes |
 |--------|---------|------------|-----------|--------|-------|---------|-------|
-| 42-38 | HIF-2α | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | Bound and unbound quick recheck completed (2026-04-09) |
 | 42-38 | HIF-2α | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
 | 42-38 | HIF-2α | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | All repeats completed |
 | 42-38 | HIF-2α | amber14sb_OL15 | MMFF94 | ✅ | EM+NVT | EM+NVT | All repeats completed |
@@ -389,11 +389,12 @@ analyzer.generate_html_report("fep_results.html")
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
 **Current validation snapshot** (2026-04-09 updated):
-- **31 system variants** with completed bound+unbound EM+NVT ✅ (+4 udca-t1-1-lca systems)
-- **0 variants** with pending unbound testing ⚠️ (all tested!)
-- **1 variant** with system build failure ❌ (p38-19-24 OPLS: LigParGen error)
-- **Total: 32 tracked system variants** in the unit-test workspace (31 in table + 39-8 platform)
-- Recent additions: udca-t1-1-lca (GAFF2, OpenFF, OPLS-AA, MMFF94) smoke tests completed
+- **27 system variants** with completed bound+unbound EM+NVT ✅ (all currently listed passing rows)
+- **0 listed variants** with pending unbound testing ⚠️
+- **1 listed variant** with system build failure ❌ (p38-19-24 OPLS: LigParGen error)
+- **Total: 28 tracked variants in the table below**
+- Recent additions: udca-t1-1-lca (GAFF2, OpenFF, OPLS-AA, MMFF94) smoke tests completed (2026-04-09)
+- Recent additions: 42-38 amber14sb_OL15+GAFF2 bound/unbound quick recheck completed (2026-04-09)
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
