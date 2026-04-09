@@ -340,7 +340,7 @@ analyzer.generate_html_report("fep_results.html")
 
 | System | Protein | Protein FF | Ligand FF | Status | Bound | Unbound | Notes |
 |--------|---------|------------|-----------|--------|-------|---------|-------|
-| 42-38 | HIF-2α | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | All repeats completed |
+| 42-38 | HIF-2α | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
 | 42-38 | HIF-2α | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | Bound repeats 1-3 and unbound repeats 1-3 all completed |
 | 42-38 | HIF-2α | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
 | 42-38 | HIF-2α | amber14sb_OL15 | MMFF94 | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
@@ -389,12 +389,12 @@ analyzer.generate_html_report("fep_results.html")
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
 **Current validation snapshot** (2026-04-09 updated):
-- **33 system variants** with completed bound+unbound EM+NVT ✅ (+4 udca-t1-1-lca +2 42-38 verified)
+- **34 system variants** with completed bound+unbound EM+NVT ✅ (+4 udca-t1-1-lca +3 42-38 verified)
 - **0 variants** with pending unbound testing ⚠️ (all tested!)
 - **1 variant** with system build failure ❌ (p38-19-24 OPLS: LigParGen error)
 - **Total: 32 tracked system variants** in the unit-test workspace (31 in table + 39-8 platform)
 - Recent additions: udca-t1-1-lca (GAFF2, OpenFF, OPLS-AA, MMFF94) smoke tests completed (2026-04-09)
-- Recent additions: 42-38 (MMFF94, OPLS-AA) smoke tests verified (2026-04-09)
+- Recent additions: 42-38 (GAFF2, MMFF94, OPLS-AA) smoke tests verified (2026-04-09)
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
