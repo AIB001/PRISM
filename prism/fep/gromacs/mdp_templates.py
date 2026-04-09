@@ -281,10 +281,9 @@ def write_fep_mdps(
     # Get electrostatics and VDW parameters from PRISM config
     elec_cfg = prism_config.get("electrostatics", {})
     vdw_cfg = prism_config.get("vdw", {})
-    # Hybrid ligands can keep long excluded distances between state A/B atoms.
-    # Using at least 1.4 nm avoids grompp failures once equilibration enables dynamics.
-    rcoulomb = max(config.get("electrostatics", {}).get("rcoulomb", elec_cfg.get("rcoulomb", 1.0)), 1.4)
-    rvdw = max(config.get("vdw", {}).get("rvdw", vdw_cfg.get("rvdw", 1.0)), 1.4)
+    # Use configured cutoff values, default to 1.0 nm if not specified
+    rcoulomb = config.get("electrostatics", {}).get("rcoulomb", elec_cfg.get("rcoulomb", 1.0))
+    rvdw = config.get("vdw", {}).get("rvdw", vdw_cfg.get("rvdw", 1.0))
     coulombtype = elec_cfg.get("coulombtype", "PME")
     pme_order = elec_cfg.get("pme_order", 4)
     fourierspacing = elec_cfg.get("fourierspacing", 0.16)

@@ -790,18 +790,35 @@ cp prism/prompts/resources/CLAUDE.md ~/.claude/CLAUDE.md
 
 If you use PRISM in your research, please cite:
 
-```LaTeX
-@software{PRISM,
-  author       = {Institute of Quantitative Biology, Zhejiang University; Theoretical Chemistry Institute, University of Wisconsin-Madison},
-  title        = {PRISM: An Integrated Framework for High-Throughput Protein-Ligand Simulation Setup and Molecular Simulation-Based Drug Virtual Screening},
-  year         = {2025},
-  publisher    = {GitHub},
-  url          = {https://github.com/aib001/PRISM}
+**Paper** (methodology and applications):
+```bibtex
+@article{PRISM,
+  title = {PRISM: A High-Throughput Simulation Infrastructure for CADD Agents},
+  author = {Shi, Zhaoqi and Gao, Xufan and Xu, Mingyu and Zhu, Xuanyi and Wang, Peng and Yang, Yuxuan and Yang, Zaixing and Zhou, Ruhong},
+  year = {2026},
+  doi = {https://doi.org/10.64898/2026.04.02.716083},
+  publisher = {Authorea Preprints},
+  url = {https://doi.org/10.64898/2026.04.02.716083}
 }
 ```
 
+**Code** (software archive):
+```bibtex
+@software{PRISM_Code,
+  author = {Shi, Zhaoqi and Gao, Xufan and Xu, Mingyu and Zhu, Xuanyi and Wang, Peng and Yang, Yuxuan and Yang, Zaixing and Zhou, Ruhong},
+  title = {PRISM: Protein Receptor Interaction Simulation Modeler},
+  year = {2026},
+  doi = {https://doi.org/10.5281/zenodo.19163575},
+  publisher = {Zenodo},
+  url = {https://zenodo.org/records/19163575}
+}
+```
+
+**Links**:
+- Paper: [https://doi.org/10.64898/2026.04.02.716083](https://doi.org/10.64898/2026.04.02.716083)
+- Code: [https://doi.org/10.5281/zenodo.19163575](https://doi.org/10.5281/zenodo.19163575)
+- Local PDF: [tests/gxf/FEP/plan/2026.04.02.716083v1.full.pdf](tests/gxf/FEP/plan/2026.04.02.716083v1.full.pdf)
+
 ## License
 
-
 PRISM is released under the MIT License. Force field parameters are subject to their respective licenses.
-

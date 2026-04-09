@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from prism.forcefield.adapters import CGenFFAdapter
+from prism.forcefield.registry import resolve_ligand_artifact
+from prism.utils.colors import print_step, print_success
+from prism.utils.system.topology import _should_vendor_forcefield
 
 
 @dataclass
