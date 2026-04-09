@@ -255,6 +255,7 @@ def read_pdb_coordinates(
 
             xyz = np.array([x, y, z])
             coords.append((serial, atom_name, xyz))
+            atom_idx = serial
 
             if atom_count is not None and len(coords) >= atom_count:
                 break

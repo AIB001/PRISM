@@ -122,13 +122,15 @@ def _cone_directions(center: np.ndarray, half_angle_deg: float, n: int = 200) ->
     # Uniform sampling on spherical cap: cos(theta) in [cos(half_angle), 1]
     cos_min = np.cos(half_angle)
     cos_theta = np.random.uniform(cos_min, 1.0, size=n)
-    sin_theta = np.sqrt(1.0 - cos_theta ** 2)
+    sin_theta = np.sqrt(1.0 - cos_theta**2)
     phi = np.random.uniform(0, 2 * np.pi, size=n)
 
     # Convert to Cartesian in local frame, then to global
-    dirs = (sin_theta * np.cos(phi))[:, None] * x_axis[None, :] + \
-           (sin_theta * np.sin(phi))[:, None] * y_axis[None, :] + \
-           cos_theta[:, None] * c[None, :]
+    dirs = (
+        (sin_theta * np.cos(phi))[:, None] * x_axis[None, :]
+        + (sin_theta * np.sin(phi))[:, None] * y_axis[None, :]
+        + cos_theta[:, None] * c[None, :]
+    )
 
     # Normalize (should be unit already, but clamp FP noise)
     norms = np.linalg.norm(dirs, axis=1, keepdims=True)
@@ -171,7 +173,7 @@ def _compute_collision_energy_whole_protein(
     Returns total collision count (positive).  MH minimizes this directly:
     lower value = fewer collisions = better exit direction.
     """
-    cutoff_sq = collision_cutoff ** 2
+    cutoff_sq = collision_cutoff**2
 
     # diff[i, j] = protein[j] - ligand[i],  shape (N_lig, N_prot, 3)
     diff = prot_heavy_coords[np.newaxis, :, :] - lig_heavy_coords[:, np.newaxis, :]
@@ -180,8 +182,8 @@ def _compute_collision_energy_whole_protein(
     proj = np.sum(diff * direction, axis=2)
 
     # Perpendicular distance squared:  (N_lig, N_prot)
-    dist_sq = np.sum(diff ** 2, axis=2)
-    perp_sq = np.maximum(dist_sq - proj ** 2, 0.0)  # clamp FP noise
+    dist_sq = np.sum(diff**2, axis=2)
+    perp_sq = np.maximum(dist_sq - proj**2, 0.0)  # clamp FP noise
 
     # Only pairs with perpendicular distance < cutoff can ever collide
     can_collide = perp_sq < cutoff_sq
@@ -457,21 +459,27 @@ class PMFAligner:
 
                 # ── Precompute direction-independent quantities for MH hot path ──
                 # Pairwise distance squared (N_lig, N_prot) — computed once
-                _cross = lig_heavy_coords @ prot_filtered.T           # (N_lig, N_prot)
-                _prot_sq = np.sum(prot_filtered ** 2, axis=1)         # (N_prot,)
-                _lig_sq = np.sum(lig_heavy_coords ** 2, axis=1)      # (N_lig,)
+                _cross = lig_heavy_coords @ prot_filtered.T  # (N_lig, N_prot)
+                _prot_sq = np.sum(prot_filtered**2, axis=1)  # (N_prot,)
+                _lig_sq = np.sum(lig_heavy_coords**2, axis=1)  # (N_lig,)
                 _dist_sq = _prot_sq[np.newaxis, :] - 2.0 * _cross + _lig_sq[:, np.newaxis]
                 _dist_sq = np.maximum(_dist_sq, 0.0)  # clamp FP noise
 
-                _cutoff_sq = self.collision_cutoff ** 2
+                _cutoff_sq = self.collision_cutoff**2
                 _h = self.pull_step_size
                 _max_s = float(max_steps_actual - 1)
                 _eps = 1e-9
 
-                def energy_fn(d,
-                              _lig=lig_heavy_coords, _prot=prot_filtered,
-                              _ds=_dist_sq, _cs=_cutoff_sq,
-                              _step=_h, _ms=_max_s, _e=_eps):
+                def energy_fn(
+                    d,
+                    _lig=lig_heavy_coords,
+                    _prot=prot_filtered,
+                    _ds=_dist_sq,
+                    _cs=_cutoff_sq,
+                    _step=_h,
+                    _ms=_max_s,
+                    _e=_eps,
+                ):
                     proj = _prot @ d
                     proj = proj[np.newaxis, :] - (_lig @ d)[:, np.newaxis]
 
@@ -497,18 +505,20 @@ class PMFAligner:
                     saved_cutoff = self.pocket_cutoff
                     for try_cutoff in [6.0, 8.0, 10.0, 15.0, 20.0]:
                         if self.verbose:
-                            print(f"  Warning: 0 pocket residues at {saved_cutoff:.1f} Å, "
-                                  f"expanding to {try_cutoff:.1f} Å")
+                            print(
+                                f"  Warning: 0 pocket residues at {saved_cutoff:.1f} Å, "
+                                f"expanding to {try_cutoff:.1f} Å"
+                            )
                         self.pocket_cutoff = try_cutoff
-                        pocket_atom_list, pocket_reskeys = self._find_pocket_residues(
-                            protein_atoms, lig_coords)
+                        pocket_atom_list, pocket_reskeys = self._find_pocket_residues(protein_atoms, lig_coords)
                         if pocket_atom_list:
                             break
                     self.pocket_cutoff = saved_cutoff
                     if not pocket_atom_list:
                         raise ValueError(
                             "No pocket residues found even at 20 Å cutoff. "
-                            "Check that the ligand is positioned near the protein.")
+                            "Check that the ligand is positioned near the protein."
+                        )
 
                 pocket_coords = np.array([[a["x"], a["y"], a["z"]] for a in pocket_atom_list])
                 pocket_centroid = np.mean(pocket_coords, axis=0)
@@ -575,8 +585,10 @@ class PMFAligner:
                         candidates_idx.append(idx)
 
                 if self.verbose:
-                    print(f"  Coarse best: {int(coarse_energies[sorted_idx[0]])} collisions "
-                          f"(init: {int(init_energy)})")
+                    print(
+                        f"  Coarse best: {int(coarse_energies[sorted_idx[0]])} collisions "
+                        f"(init: {int(init_energy)})"
+                    )
                     print(f"  Selected {len(candidates_idx)} regions for refinement")
 
                 # Phase 2: Medium refinement (20° cone around each candidate)

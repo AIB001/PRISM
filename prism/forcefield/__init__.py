@@ -77,6 +77,22 @@ try:
 except ImportError as exc:
     _record_import_error("RTFForceFieldGenerator", exc)
 
+# CHARMM-GUI force field
+try:
+    from .charmm_gui import CHARMMGUIForceFieldGenerator
+
+    __all__.append("CHARMMGUIForceFieldGenerator")
+except ImportError:
+    pass
+
+# RTF force field
+try:
+    from .rtf import RTFForceFieldGenerator
+
+    __all__.append("RTFForceFieldGenerator")
+except ImportError:
+    pass
+
 # OPLS-AA force field
 try:
     from .opls_aa import OPLSAAForceFieldGenerator

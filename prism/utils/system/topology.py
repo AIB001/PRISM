@@ -12,11 +12,6 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from prism.forcefield.adapters import CGenFFAdapter
 
-try:
-    from ..colors import print_success, print_warning, print_info, path, number
-except ImportError:
-    from prism.utils.colors import print_success, print_warning, print_info, path, number
-
 
 _PARAM_SECTIONS = {"bondtypes", "pairtypes", "angletypes", "dihedraltypes", "atomtypes"}
 _INSTALLED_FF_SOURCES = {"GMXLIB", "GROMACS installation"}

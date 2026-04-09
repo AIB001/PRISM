@@ -8,7 +8,6 @@ from ._common import _StdoutToStderr, _ensure_prism_importable, logger
 
 
 def register(mcp):
-
     @mcp.tool()
     def process_trajectory(
         input_trajectory: str,

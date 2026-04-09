@@ -9,7 +9,6 @@ from ._common import _StdoutToStderr, _ensure_prism_importable, logger
 
 
 def register(mcp):
-
     @mcp.tool()
     def build_system(
         protein_path: str,
