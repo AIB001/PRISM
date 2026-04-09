@@ -16,8 +16,10 @@ from typing import Dict, Tuple
 # Import the base class
 try:
     from .base import ForceFieldGeneratorBase
+    from .common.units import angstrom_xyz_to_nm
 except ImportError:
     from base import ForceFieldGeneratorBase
+    from common.units import angstrom_xyz_to_nm
 
 
 class RTFForceFieldGenerator(ForceFieldGeneratorBase):
@@ -425,13 +427,14 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
                 if atom_name in coordinates:
                     atom_id += 1
                     x, y, z = coordinates[atom_name]
-                    # Convert Å to nm
-                    x_nm = x / 10.0
-                    y_nm = y / 10.0
-                    z_nm = z / 10.0
+                    # Convert Å to nm using common utility
+                    import numpy as np
+
+                    xyz_angstrom = np.array([x, y, z])
+                    xyz_nm = angstrom_xyz_to_nm(xyz_angstrom)
 
                     f.write(f"{1:5d}{self.moleculetype_name:<5s}{atom_name:>5s}{atom_id:5d}")
-                    f.write(f"{x_nm:8.3f}{y_nm:8.3f}{z_nm:8.3f}\n")
+                    f.write(f"{xyz_nm[0]:8.3f}{xyz_nm[1]:8.3f}{xyz_nm[2]:8.3f}\n")
 
             # Box dimensions (dummy)
             f.write("   5.00000   5.00000   5.00000\n")

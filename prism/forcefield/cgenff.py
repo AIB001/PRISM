@@ -20,8 +20,10 @@ from typing import Dict, List, Tuple
 # Import the base class
 try:
     from .base import ForceFieldGeneratorBase
+    from .common import extract_section_from_content
 except ImportError:
     from base import ForceFieldGeneratorBase
+    from common import extract_section_from_content
 
 
 class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
@@ -399,7 +401,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         with open(self.top_file, "r") as f:
             content = f.read()
 
-        section = self._extract_section(content, "atoms")
+        section = extract_section_from_content(content, "atoms")
         if section:
             for line in section.split("\n"):
                 line = line.strip()
@@ -622,7 +624,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_atoms_section(self, content):
         """Parse [atoms] section"""
-        section = self._extract_section(content, "atoms")
+        section = extract_section_from_content(content, "atoms")
         if not section:
             return
 
@@ -765,7 +767,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_bonds_section(self, content):
         """Parse [bonds] section and expand with bondtype parameters"""
-        section = self._extract_section(content, "bonds")
+        section = extract_section_from_content(content, "bonds")
         if not section:
             return
 
@@ -795,7 +797,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_pairs_section(self, content):
         """Parse [pairs] section"""
-        section = self._extract_section(content, "pairs")
+        section = extract_section_from_content(content, "pairs")
         if not section:
             return
 
@@ -811,7 +813,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
     def _parse_angles_section(self, content):
         """Parse [angles] section"""
-        section = self._extract_section(content, "angles")
+        section = extract_section_from_content(content, "angles")
         if not section:
             return
 
@@ -847,12 +849,6 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
                     else:
                         # Proper dihedral - store all parameters
                         self.dihedrals_proper.append(parts)
-
-    def _extract_section(self, content, section_name):
-        """Extract a specific section from topology"""
-        pattern = rf"\[\s*{section_name}\s*\](.*?)(?=\[|$)"
-        match = re.search(pattern, content, re.DOTALL)
-        return match.group(1) if match else None
 
     def _remove_lone_pairs(self):
         """

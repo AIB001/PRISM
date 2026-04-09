@@ -13,8 +13,10 @@ from pathlib import Path
 # Import the base class
 try:
     from .base import ForceFieldGeneratorBase
+    from .common.units import nm_xyz_to_angstrom
 except ImportError:
     from base import ForceFieldGeneratorBase
+    from common.units import nm_xyz_to_angstrom
 
 # Import color utilities
 try:
@@ -408,10 +410,14 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
             lines = f.readlines()
             for i in range(2, len(lines) - 1):  # Skip header and box
                 # GRO format: columns 20-28, 28-36, 36-44 (nm)
-                x = float(lines[i][20:28])
-                y = float(lines[i][28:36])
-                z = float(lines[i][36:44])
-                gro_coords.append([x * 10, y * 10, z * 10])  # Convert nm → Å
+                import numpy as np
+
+                x_nm = float(lines[i][20:28])
+                y_nm = float(lines[i][28:36])
+                z_nm = float(lines[i][36:44])
+                xyz_nm = np.array([x_nm, y_nm, z_nm])
+                xyz_angstrom = nm_xyz_to_angstrom(xyz_nm)
+                gro_coords.append(xyz_angstrom.tolist())  # Convert nm → Å using common utility
 
         # Match each GRO atom to closest MOL2 atom
         mapping = {}
