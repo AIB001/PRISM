@@ -79,9 +79,6 @@ Thumbs.db
 
 # Claude Code
 .claude/
-!.claude/
-!.claude/skills/
-!.claude/skills/**
 
 # Empty cache directory
 cache/
