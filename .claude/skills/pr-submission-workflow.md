@@ -5,10 +5,10 @@ Document the complete process and requirements for PR submission and description
 ## PR Description File Management
 
 ### Fixed Filename Rule
-**Sole PR Description File**: `tests/gxf/FEP/pr_body_expanded.md`
+**Sole PR Description File**: `tests/gxf/FEP/README.md`
 
 **Strict Rules**:
-- ✅ Keep: `tests/gxf/FEP/pr_body_expanded.md` (fixed name, never rename)
+- ✅ Keep: `tests/gxf/FEP/README.md` (fixed name, never rename)
 - ❌ Delete: All other PR-related .md files (pr_body_update.md, pr_description.md, etc.)
 
 **Important Notes**:
@@ -67,11 +67,11 @@ git push origin gxf
 
 ### 5. Update PR Description (Critical Step)
 ```bash
-gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@tests/gxf/FEP/pr_body_expanded.md
+gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@tests/gxf/FEP/README.md
 ```
 
 **Important**:
-- After each new push, update the PR description using `tests/gxf/FEP/pr_body_expanded.md`
+- After each new push, update the PR description using `tests/gxf/FEP/README.md`
 - PR description should contain the **complete FEP workflow description**, not just the latest changes
 - Reflect **all changes compared to main branch** from the beginning
 - Help colleagues understand the complete work content during review
@@ -172,12 +172,12 @@ gh pr view 4 --json changedFiles --jq '.changedFiles'
 gh pr view 4 --json comments --jq '.comments | length'
 
 # Update PR description
-gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@tests/gxf/FEP/pr_body_expanded.md
+gh api repos/AIB001/PRISM/pulls/4 -X PATCH -F body=@tests/gxf/FEP/README.md
 ```
 
 ## Important Reminders
 
-1. **Fixed filename**: Always use `tests/gxf/FEP/pr_body_expanded.md`, do not change filename
+1. **Fixed filename**: Always use `tests/gxf/FEP/README.md`, do not change filename
 2. **Cleanup old files**: Delete other PR description files before each PR update
 3. **Commit format**: Use `[module] description` format, don't make it too long
 4. **Complete description**: PR description should be complete and detailed, include all accumulated changes

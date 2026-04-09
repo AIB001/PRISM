@@ -11,26 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from prism.forcefield.adapters import CGenFFAdapter
 from prism.forcefield.registry import resolve_ligand_artifact
 from prism.utils.colors import print_step, print_success
 from prism.utils.system.topology import _parse_atomtypes, _should_vendor_forcefield
-
-try:
-    from prism.forcefield.adapters import CGenFFAdapter
-except ImportError:
-
-    class CGenFFAdapter:  # pragma: no cover - compatibility fallback
-        @classmethod
-        def should_include_ligand_atomtypes(cls, ff_name, lig_ff_path):
-            return not (ff_name.startswith("charmm") and (lig_ff_path / "charmm36.ff").exists())
-
-        @classmethod
-        def is_charmm_forcefield(cls, ff_name):
-            return ff_name.lower().startswith("charmm")
-
-        @classmethod
-        def detect(cls, lig_ff_path):
-            return (lig_ff_path / "charmm36.ff").exists()
 
 
 @dataclass

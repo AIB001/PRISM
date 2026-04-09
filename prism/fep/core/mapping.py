@@ -194,9 +194,11 @@ class DistanceAtomMapper:
         3. Identify surrounding atoms - matched atoms with divergent parameters
         4. Apply charge_common strategy to common atoms
 
-        Note: For OpenFF/GAFF force fields, atom_type check is disabled since
-        these force fields use generic types (output_0, output_1, ...) that don't
-        encode positional information like CGenFF (CA, CB, CG, etc.).
+        Note: Generic/sequential atom types skip the state-to-state type
+        compatibility check during surrounding-atom classification. This applies
+        to OpenFF, OPLS-AA, and SwissParam-style types such as ``output_0`` or
+        ``opls_800``. GAFF remains type-aware because its atom types encode
+        chemical environment (for example ``ca`` or ``c3``).
 
         Parameters
         ----------
@@ -213,14 +215,11 @@ class DistanceAtomMapper:
         # Note: We modify the input atom objects in-place to apply charge_common strategy
         # This ensures HTML visualization shows the correct charges
 
-        # Detect if using OpenFF/GAFF (generic atom types)
+        # Detect if the force field uses generic/sequential atom types.
         # OpenFF types are like: output_0, output_1, ...
-        # CGenFF types are like: CA, CB, CG, HA, HB, etc.
+        # OPLS-AA types are like: opls_800, opls_801, ...
+        # CGenFF/GAFF types remain chemically meaningful and are checked later.
         uses_generic_types = self._uses_generic_atom_types(ligand_a, ligand_b)
-
-        if uses_generic_types:
-            # For OpenFF/GAFF: skip atom type check, only use distance + element + charge
-            pass
 
         # Step 1: Distance-based matching
         # Build all valid candidates first, then greedily take the globally best

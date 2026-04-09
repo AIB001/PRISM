@@ -19,8 +19,10 @@ from typing import Dict, List, Tuple
 
 try:
     from .base import ForceFieldGeneratorBase
+    from .common.units import angstrom_to_nm
 except ImportError:
     from base import ForceFieldGeneratorBase
+    from common.units import angstrom_to_nm
 
 
 class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
@@ -491,9 +493,9 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
                 if line.startswith("ATOM") or line.startswith("HETATM"):
                     atom_count += 1
                     atom_name = line[12:16].strip()
-                    x = float(line[30:38].strip()) / 10.0  # Å to nm
-                    y = float(line[38:46].strip()) / 10.0
-                    z = float(line[46:54].strip()) / 10.0
+                    x = angstrom_to_nm(float(line[30:38].strip()))
+                    y = angstrom_to_nm(float(line[38:46].strip()))
+                    z = angstrom_to_nm(float(line[46:54].strip()))
 
                     x_coords.append(x)
                     y_coords.append(y)

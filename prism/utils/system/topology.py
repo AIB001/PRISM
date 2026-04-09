@@ -10,24 +10,12 @@ import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from prism.forcefield.adapters import CGenFFAdapter
+
 try:
     from ..colors import print_success, print_warning, print_info, path, number
 except ImportError:
     from prism.utils.colors import print_success, print_warning, print_info, path, number
-
-try:
-    from prism.forcefield.adapters import CGenFFAdapter
-except ImportError:
-    # Fallback if adapters not available
-    class CGenFFAdapter:
-        @classmethod
-        def detect(cls, lig_ff_path):
-            return (lig_ff_path / "charmm36.ff").exists()
-
-        @classmethod
-        def find_charmm_ff_dir(cls, lig_ff_path):
-            charmm_ff = lig_ff_path / "charmm36.ff"
-            return charmm_ff if charmm_ff.exists() else None
 
 
 _PARAM_SECTIONS = {"bondtypes", "pairtypes", "angletypes", "dihedraltypes", "atomtypes"}

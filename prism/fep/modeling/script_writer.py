@@ -124,7 +124,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
         # Keep the run GPU-resident, but move update/constraint work to CPU for
         # CMAP systems where GPU update groups are more failure-prone.
         update_mode = (
-            "cpu" if uses_cmap_runtime_guard else ("gpu" if bool(exec_config.get("use_gpu_update", True)) else "none")
+            "cpu" if uses_cmap_runtime_guard else ("gpu" if bool(exec_config.get("use_gpu_update", False)) else "none")
         )
 
     update_flag = "" if update_mode == "none" else f"-update {update_mode}"
@@ -529,7 +529,7 @@ def write_root_scripts(layout, config: Optional[dict] = None) -> None:
     execution.mdrun_update_mode : str
         Update/constraint placement for GPU runs: ``auto``, ``gpu``, ``cpu``,
         or ``none``. ``auto`` maps CHARMM to ``cpu`` and other force fields to
-        ``gpu`` unless legacy ``use_gpu_update: false`` disables it.
+        ``none`` by default for non-CHARMM FEP scaffolds unless legacy ``use_gpu_update: true`` enables GPU-side update explicitly.
     execution.mode : str
         Production execution mode: ``standard`` (independent windows) or
         ``repex`` (lambda replica exchange via ``gmx_mpi -multidir``)

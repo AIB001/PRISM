@@ -83,11 +83,11 @@ def read_gro_coordinates(
             # Columns: resid(5) resname(5) atomname(5) atomnr(5) x(8) y(8) z(8) vx(8) vy(8) vz(8)
             # We only need: atomnr, atomname, x, y, z
             try:
+                atom_name = line[10:15].strip()
                 atom_idx = int(line[15:20].strip())
-                atom_name = line[20:25].strip()
-                x_nm = float(line[20:28])
-                y_nm = float(line[28:36])
-                z_nm = float(line[36:44])
+                x_nm = float(line[20:28].strip())
+                y_nm = float(line[28:36].strip())
+                z_nm = float(line[36:44].strip())
             except (ValueError, IndexError) as exc:
                 raise ValueError(f"Malformed GRO line {i+2}: {line.strip()}") from exc
 
@@ -234,9 +234,8 @@ def read_pdb_coordinates(
     coords: List[Tuple[int, str, np.ndarray]] = []
 
     with pdb_path.open("r", encoding="utf-8") as handle:
-        atom_idx = 0
-        for line in handle:
-            line = line.strip()
+        for raw_line in handle:
+            line = raw_line.rstrip("\n")
 
             # Only read ATOM or HETATM records
             if not (line.startswith("ATOM") or line.startswith("HETATM")):
@@ -256,7 +255,6 @@ def read_pdb_coordinates(
 
             xyz = np.array([x, y, z])
             coords.append((serial, atom_name, xyz))
-            atom_idx = serial
 
             if atom_count is not None and len(coords) >= atom_count:
                 break
@@ -321,7 +319,7 @@ def write_gro_coordinates(
             # GRO format: resid(5) resname(5) atomname(5) atomnr(5) x(8) y(8) z(8)
             # We use simplified format with default resid=1
             handle.write(
-                f"{1:5d}{residue_name:5s}{atom_name:5s}{atom_idx:5d}"
+                f"{1:5d}{residue_name:5s}{atom_name:>5s}{atom_idx:5d}"
                 f"{xyz_nm[0]:8.3f}{xyz_nm[1]:8.3f}{xyz_nm[2]:8.3f}\n"
             )
 

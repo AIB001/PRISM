@@ -5,8 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import prism.forcefield as forcefield_module
 from prism.builder.workflow_fep import FEPWorkflowMixin
 from prism.fep.modeling import e2e
+from prism.fep.modeling.core import FEPScaffoldBuilder
 from prism.fep.modeling.hybrid_service import HybridBuildService
 from prism.fep.visualize.reporting import MappingReportService
 
@@ -292,3 +294,47 @@ def test_hybrid_service_reuses_hybrid_package_gro_builder(tmp_path):
     assert calls["kwargs"]["reference_itp"] == reference_itp
     assert calls["kwargs"]["mutant_itp"] == mutant_itp
     assert output_gro.read_text().startswith("Hybrid ligand structure")
+
+
+def test_extract_mapping_summary_reads_machine_readable_counts(tmp_path):
+    hybrid_dir = tmp_path / "common" / "hybrid"
+    hybrid_dir.mkdir(parents=True)
+    (hybrid_dir / "mapping.html").write_text(
+        """
+<script>
+const ATOMS_A = [
+  {"classification": "common"},
+  {"classification": "common"},
+  {"classification": "surrounding"},
+  {"classification": "transformed"}
+];
+const ATOMS_B = [
+  {"classification": "common"},
+  {"classification": "common"},
+  {"classification": "surrounding"}
+];
+const BONDS_A = [];
+</script>
+"""
+    )
+
+    builder = FEPScaffoldBuilder(output_dir=str(tmp_path / "out"))
+    summary = builder._extract_mapping_summary(hybrid_dir)
+
+    assert summary == {
+        "source": "mapping.html",
+        "common_pairs": 2,
+        "surrounding_pairs": 1,
+        "transformed_a": 1,
+        "transformed_b": 0,
+        "state_a": {"common": 2, "surrounding": 1, "transformed": 1},
+        "state_b": {"common": 2, "surrounding": 1, "transformed": 0},
+    }
+
+
+def test_get_generator_info_exposes_import_errors(monkeypatch):
+    monkeypatch.setattr(forcefield_module, "_IMPORT_ERRORS", {"OpenFFForceFieldGenerator": "ImportError: missing dep"})
+
+    info = forcefield_module.get_generator_info()
+
+    assert info["_unavailable"]["OpenFFForceFieldGenerator"] == "ImportError: missing dep"

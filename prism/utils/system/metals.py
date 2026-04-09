@@ -5,6 +5,8 @@
 Metal ion processing utilities for SystemBuilder.
 """
 
+from prism.forcefield.common.units import angstrom_to_nm
+
 
 class MetalProcessorMixin:
     """Mixin for metal ion processing operations."""
@@ -183,7 +185,7 @@ class MetalProcessorMixin:
             atom_num = atom_count + i
             x, y, z = metal["coords"]
             # Convert Angstroms to nm
-            x_nm, y_nm, z_nm = x / 10.0, y / 10.0, z / 10.0
+            x_nm, y_nm, z_nm = angstrom_to_nm(x), angstrom_to_nm(y), angstrom_to_nm(z)
 
             # GRO format line
             line = f"{int(resnum):5d}{resname:5s}{atomname:>5s}{atom_num:5d}{x_nm:8.3f}{y_nm:8.3f}{z_nm:8.3f}\n"

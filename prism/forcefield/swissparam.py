@@ -20,8 +20,10 @@ from typing import Dict, Tuple
 # Import the base class
 try:
     from .base import ForceFieldGeneratorBase
+    from .common.units import angstrom_to_nm
 except ImportError:
     from base import ForceFieldGeneratorBase
+    from common.units import angstrom_to_nm
 
 
 class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
@@ -772,9 +774,9 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
                     atom_id += 1
                     x, y, z = coordinates[atom_name]
                     # Convert Å to nm
-                    x_nm = x / 10.0
-                    y_nm = y / 10.0
-                    z_nm = z / 10.0
+                    x_nm = angstrom_to_nm(x)
+                    y_nm = angstrom_to_nm(y)
+                    z_nm = angstrom_to_nm(z)
 
                     f.write(f"{1:5d}{self.moleculetype_name:<5s}{atom_name:>5s}{atom_id:5d}")
                     f.write(f"{x_nm:8.3f}{y_nm:8.3f}{z_nm:8.3f}\n")

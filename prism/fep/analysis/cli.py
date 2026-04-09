@@ -36,7 +36,7 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv=None) -> argparse.Namespace:
     """
     Parse command-line arguments
 
@@ -177,7 +177,7 @@ For more information, see: https://github.com/your-repo/prism
     utility.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
     utility.add_argument("--version", action="version", version="PRISM-FEP Analysis 0.1.0")
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
@@ -233,7 +233,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
             )
 
 
-def main() -> int:
+def main(argv=None) -> int:
     """
     Main entry point for CLI
 
@@ -244,7 +244,7 @@ def main() -> int:
     """
     try:
         # Parse arguments
-        args = parse_arguments()
+        args = parse_arguments(argv)
 
         # Setup logging
         setup_logging(args.verbose)
