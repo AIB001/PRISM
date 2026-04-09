@@ -10,11 +10,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import math
 import shutil
 
+from prism.forcefield.common.units import nm_to_angstrom
+
 # Conversion constants
 KJ_TO_KCAL = 0.239005736
-NM_TO_ANG = 10.0
 DEG_TO_RAD = math.pi / 180.0
-SQ_NM_TO_SQ_ANG = NM_TO_ANG**2
+SQ_NM_TO_SQ_ANG = nm_to_angstrom(1.0) ** 2
 
 
 @dataclass
@@ -329,7 +330,7 @@ class AmberToCharmmConverter:
             name_i = self._make_unique_type(parser.atoms[bond.i - 1].type_name)
             name_j = self._make_unique_type(parser.atoms[bond.j - 1].type_name)
             k = self._convert_bond_k(bond.k_kj_per_nm2)
-            req = bond.length_nm * NM_TO_ANG
+            req = nm_to_angstrom(bond.length_nm)
             lines.append(f"{name_i:<10}{name_j:<10}{k:10.3f}{req:10.4f}")
 
         lines.append("")
@@ -397,7 +398,7 @@ class AmberToCharmmConverter:
             if record.sigma_nm == 0.0 and record.epsilon_kj == 0.0:
                 rmin_over2 = 0.0
             else:
-                rmin = (2 ** (1 / 6)) * record.sigma_nm * NM_TO_ANG
+                rmin = (2 ** (1 / 6)) * nm_to_angstrom(record.sigma_nm)
                 rmin_over2 = rmin / 2.0
             eps = -abs(record.epsilon_kj * KJ_TO_KCAL)
             lines.append(
@@ -439,9 +440,9 @@ class AmberToCharmmConverter:
                 line = handle.readline()
                 if not line:
                     break
-                x = float(line[20:28]) * NM_TO_ANG
-                y = float(line[28:36]) * NM_TO_ANG
-                z = float(line[36:44]) * NM_TO_ANG
+                x = nm_to_angstrom(float(line[20:28]))
+                y = nm_to_angstrom(float(line[28:36]))
+                z = nm_to_angstrom(float(line[36:44]))
                 coords.append((x, y, z))
         if len(coords) < expected_atoms:
             raise ValueError("Not enough coordinate entries in GRO file")

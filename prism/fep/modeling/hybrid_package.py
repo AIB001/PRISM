@@ -16,16 +16,7 @@ from prism.fep.common.coordinates import angstrom_xyz_to_nm, nm_xyz_to_angstrom
 from prism.fep.gromacs.itp_builder import ITPBuilder
 from prism.forcefield.registry import iter_known_ligand_output_subdirs, resolve_ligand_artifact
 from prism.gaussian.utils import normalize_element_symbol
-
-try:
-    from prism.forcefield.adapters import CGenFFAdapter
-except ImportError:
-    # Fallback for backward compatibility
-    class CGenFFAdapter:
-        @classmethod
-        def find_charmm_ff_dir(cls, lig_ff_path):
-            charmm_ff = lig_ff_path / "charmm36.ff"
-            return charmm_ff if charmm_ff.exists() else None
+from prism.forcefield.adapters import CGenFFAdapter
 
 
 class HybridPackageBuilder:

@@ -629,7 +629,48 @@ class FEPScaffoldBuilder:
         }
         if extra_sources:
             manifest["sources"] = extra_sources
+        mapping_summary = self._extract_mapping_summary(hybrid_dir)
+        if mapping_summary:
+            manifest["mapping"] = mapping_summary
         (layout.root / "fep_scaffold.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    def _extract_mapping_summary(self, hybrid_dir: Path) -> Optional[Dict[str, object]]:
+        """Extract machine-readable mapping counts from the generated HTML report."""
+        mapping_html = hybrid_dir / "mapping.html"
+        if not mapping_html.exists():
+            return None
+
+        text = mapping_html.read_text(errors="ignore")
+        atoms_a_match = re.search(r"const ATOMS_A = (\[.*?\]);\s*const ATOMS_B =", text, re.S)
+        atoms_b_match = re.search(r"const ATOMS_B = (\[.*?\]);\s*const BONDS_A =", text, re.S)
+        if not atoms_a_match or not atoms_b_match:
+            return None
+
+        try:
+            atoms_a = json.loads(atoms_a_match.group(1))
+            atoms_b = json.loads(atoms_b_match.group(1))
+        except json.JSONDecodeError:
+            return None
+
+        def _counts(atoms):
+            counts = {"common": 0, "surrounding": 0, "transformed": 0}
+            for atom in atoms:
+                label = atom.get("classification")
+                if label in counts:
+                    counts[label] += 1
+            return counts
+
+        counts_a = _counts(atoms_a)
+        counts_b = _counts(atoms_b)
+        return {
+            "source": "mapping.html",
+            "common_pairs": min(counts_a["common"], counts_b["common"]),
+            "surrounding_pairs": min(counts_a["surrounding"], counts_b["surrounding"]),
+            "transformed_a": counts_a["transformed"],
+            "transformed_b": counts_b["transformed"],
+            "state_a": counts_a,
+            "state_b": counts_b,
+        }
 
     def _write_unbound_topology(self, topol_path: Path) -> None:
         """Write unbound leg topology template."""

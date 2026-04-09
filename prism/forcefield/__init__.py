@@ -2,89 +2,88 @@
 # -*- coding: utf-8 -*-
 
 """
-Force field generators for PRISM
+Force field generators for PRISM.
 
-Available force field generators:
-- GAFFForceFieldGenerator: GAFF force field using AmberTools
-- GAFF2ForceFieldGenerator: GAFF2 force field using AmberTools (improved version)
-- OpenFFForceFieldGenerator: OpenFF force field
-- CGenFFForceFieldGenerator: CGenFF (CHARMM General Force Field) from web server
-- CHARMMGUIForceFieldGenerator: CHARMM-GUI output converter
-- RTFForceFieldGenerator: RTF+PRM force field converter (CGenFF files)
-- OPLSAAForceFieldGenerator: OPLS-AA force field using LigParGen
-- MMFFForceFieldGenerator: MMFF-based force field using SwissParam
-- MATCHForceFieldGenerator: MATCH force field using SwissParam
-- HybridMMFFMATCHForceFieldGenerator: Hybrid MMFF-based-MATCH force field
+Import failures are tracked in ``get_import_errors()`` so callers can diagnose
+why a generator is unavailable instead of seeing it silently disappear from the
+registry.
 """
 
 from .registry import iter_forcefield_specs
 
 # Try to import all available generators
 __all__ = []
+_IMPORT_ERRORS = {}
+
+
+def _record_import_error(label, exc):
+    """Track optional import failures for user-facing diagnostics."""
+    _IMPORT_ERRORS[label] = f"{type(exc).__name__}: {exc}"
+
 
 # Base class (always available)
 try:
     from .base import ForceFieldGeneratorBase
 
     __all__.append("ForceFieldGeneratorBase")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("ForceFieldGeneratorBase", exc)
 
 # GAFF force field
 try:
     from .gaff import GAFFForceFieldGenerator
 
     __all__.append("GAFFForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("GAFFForceFieldGenerator", exc)
 
 # GAFF2 force field
 try:
     from .gaff2 import GAFF2ForceFieldGenerator
 
     __all__.append("GAFF2ForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("GAFF2ForceFieldGenerator", exc)
 
 # OpenFF force field
 try:
     from .openff import OpenFFForceFieldGenerator
 
     __all__.append("OpenFFForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("OpenFFForceFieldGenerator", exc)
 
 # CGenFF force field
 try:
     from .cgenff import CGenFFForceFieldGenerator
 
     __all__.append("CGenFFForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("CGenFFForceFieldGenerator", exc)
 
 # CHARMM-GUI force field
 try:
     from .charmm_gui import CHARMMGUIForceFieldGenerator
 
     __all__.append("CHARMMGUIForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("CHARMMGUIForceFieldGenerator", exc)
 
 # RTF force field
 try:
     from .rtf import RTFForceFieldGenerator
 
     __all__.append("RTFForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("RTFForceFieldGenerator", exc)
 
 # OPLS-AA force field
 try:
     from .opls_aa import OPLSAAForceFieldGenerator
 
     __all__.append("OPLSAAForceFieldGenerator")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("OPLSAAForceFieldGenerator", exc)
 
 # SwissParam-based force fields
 try:
@@ -105,24 +104,24 @@ try:
             "HybridForceFieldGenerator",
         ]
     )
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("SwissParamForceFieldGenerator", exc)
 
 # Converters
 try:
     from .converters import AmberToCharmmConverter
 
     __all__.append("AmberToCharmmConverter")
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("AmberToCharmmConverter", exc)
 
 # Gaussian RESP module (for charge replacement)
 try:
     from ..gaussian import GaussianRESPWorkflow, RESPChargeReplacer, replace_itp_charges
 
     __all__.extend(["GaussianRESPWorkflow", "RESPChargeReplacer", "replace_itp_charges"])
-except ImportError:
-    pass
+except ImportError as exc:
+    _record_import_error("GaussianRESPWorkflow", exc)
 
 
 def list_available_generators():
@@ -134,6 +133,11 @@ def list_available_generators():
     list : Names of available generators
     """
     return __all__
+
+
+def get_import_errors():
+    """Return optional generator import failures for diagnostics."""
+    return dict(_IMPORT_ERRORS)
 
 
 def get_generator_info():
@@ -174,4 +178,6 @@ def get_generator_info():
             "output_dir": hybrid_spec.generator_output_subdir,
             "dependencies": list(hybrid_spec.dependencies),
         }
+    if _IMPORT_ERRORS:
+        info["_unavailable"] = dict(sorted(_IMPORT_ERRORS.items()))
     return info

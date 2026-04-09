@@ -29,6 +29,12 @@ def _default_fep_output_dir(forcefield: str, ligand_forcefield: str) -> str:
 
 def main():
     """Main function"""
+    if "--fep-analyze" in sys.argv[1:]:
+        from ..fep.analysis.cli import main as fep_analyze_main
+
+        forwarded_argv = [arg for arg in sys.argv[1:] if arg != "--fep-analyze"]
+        return fep_analyze_main(forwarded_argv)
+
     parser = argparse.ArgumentParser(
         description="PRISM Builder - Build protein-ligand systems for GROMACS with multiple force field support",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -371,7 +377,7 @@ Example usage:
         "--distance-cutoff",
         type=float,
         default=0.6,
-        help="Distance cutoff for atom mapping in Angstroms (default: 0.6)",
+        help="Distance cutoff for atom mapping in nm (default: 0.6)",
     )
     fep_group.add_argument(
         "--charge-strategy",
