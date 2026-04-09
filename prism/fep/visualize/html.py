@@ -325,7 +325,7 @@ def _generate_canvas_html(
             "dist_cutoff": "Maximum distance (nm) between atoms to be considered as common",
             "charge_cutoff": "Maximum charge difference for common atoms",
             "charge_common": "Charge assignment for common atoms (ref/mut/mean/none)",
-            "charge_reception": "Charge reception mode (unique/surround/surround_ext/none)",
+            "charge_reception": "Charge reception mode for standard workflows (unique/surround/none)",
             "working_dir": "Working directory for this FEP calculation",
         }
 

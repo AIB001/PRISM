@@ -293,7 +293,7 @@ def read_fep_config(config_file: str) -> Dict[str, Any]:
 
     [Model]
     charge_common = ref|mut|mean|none
-    charge_reception = unique|surround|surround_ext|none
+    charge_reception = unique|surround|none
     distance = 12
     recharge_hydrogen = False
 
