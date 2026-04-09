@@ -25,7 +25,8 @@ DEFAULT_MAPPING_PARAMS = {
 DEFAULT_SIMULATION_PARAMS = {
     "equilibration_nvt_time_ps": 500,
     "equilibration_npt_time_ps": 500,
-    "production_time_ns": 5.0,
+    "per_window_npt_time_ps": 100,
+    "production_time_ns": 2.0,
     "dt": 0.002,
     "temperature": 310,
     "pressure": 1.0,
@@ -47,6 +48,7 @@ DEFAULT_OUTPUT_PARAMS = {
     "trajectory_interval_ps": 500,
     "energy_interval_ps": 10,
     "log_interval_ps": 10,
+    "nstdhdl": 100,
 }
 DEFAULT_EXECUTION_PARAMS = {
     "mode": "standard",
@@ -151,8 +153,9 @@ class FEPConfig:
 
         Returns dict with keys:
         - equilibration_nvt_time_ps: NVT equilibration time in ps
-        - equilibration_npt_time_ps: NPT equilibration time in ps
-        - production_time_ns: Production time per window in ns
+        - equilibration_npt_time_ps: Leg-level NPT equilibration time in ps
+        - per_window_npt_time_ps: Per-window short NPT equilibration time in ps
+        - production_time_ns: Production time per lambda window in ns
         - dt: Time step in ps
         - temperature: Temperature in K
         - pressure: Pressure in bar
@@ -219,6 +222,7 @@ class FEPConfig:
         - trajectory_interval_ps: Trajectory output interval in ps
         - energy_interval_ps: Energy output interval in ps
         - log_interval_ps: Log output interval in ps
+        - nstdhdl: Interval in MD steps for writing free-energy derivatives to ``dhdl.xvg``
         """
         return self._merged_fep_section("output", DEFAULT_OUTPUT_PARAMS)
 

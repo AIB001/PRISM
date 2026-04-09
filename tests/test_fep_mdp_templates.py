@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from pathlib import Path
 
 import pytest
@@ -87,3 +89,41 @@ def test_write_mdps_honors_lambda_quadratic_exponent(tmp_path):
     )
     schedule = (mdps_dir / "lambda_schedule.json").read_text()
     assert '"quadratic_exponent": 4.0' in schedule
+
+
+def test_write_fep_mdps_propagates_output_nstdhdl(tmp_path: Path):
+    """Custom output.nstdhdl should propagate into all FEP-specific MDPs."""
+    mdp_dir = tmp_path / "bound" / "repeat1" / "mdps"
+    write_fep_mdps(
+        output_dir=str(mdp_dir),
+        config={
+            "output": {
+                "trajectory_interval_ps": 500,
+                "energy_interval_ps": 10,
+                "log_interval_ps": 10,
+                "nstdhdl": 25,
+            }
+        },
+        leg_name="bound",
+    )
+
+    prod_text = (mdp_dir / "prod_00.mdp").read_text()
+    em_short_text = (mdp_dir / "em_short_00.mdp").read_text()
+    npt_short_text = (mdp_dir / "npt_short_00.mdp").read_text()
+
+    assert "nstdhdl                  = 25" in prod_text
+    assert "nstdhdl                  = 25" in em_short_text
+    assert "nstdhdl                  = 25" in npt_short_text
+    assert "separate-dhdl-file       = yes" in prod_text
+
+
+def test_write_fep_mdps_rejects_negative_nstdhdl(tmp_path: Path):
+    """Negative dhdl output cadence should be rejected early."""
+    mdp_dir = tmp_path / "unbound" / "repeat1" / "mdps"
+
+    with pytest.raises(ValueError, match="output.nstdhdl"):
+        write_fep_mdps(
+            output_dir=str(mdp_dir),
+            config={"output": {"nstdhdl": -1}},
+            leg_name="unbound",
+        )

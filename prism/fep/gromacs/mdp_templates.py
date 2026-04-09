@@ -34,7 +34,7 @@ free-energy              = yes
 init-lambda-state        = {init_lambda_state}
 delta-lambda             = 0
 calc-lambda-neighbors    = 1
-nstdhdl                  = 100
+nstdhdl                  = {nstdhdl}
 separate-dhdl-file       = yes
 
 ; Lambda schedules (strategy: {strategy})
@@ -263,8 +263,8 @@ def write_fep_mdps(
     npt_ps = sim_cfg.get("equilibration_npt_time_ps", 500)
     npt_short_ps = sim_cfg.get("per_window_npt_time_ps", fep_cfg.get("per_window_npt_time_ps", 100))
 
-    # Production time - check both fep and simulation sections
-    prod_ns = fep_cfg.get("production_time_ns", sim_cfg.get("production_time_ns", 5))
+    # Production time - prefer explicit simulation config, then legacy fep key
+    prod_ns = sim_cfg.get("production_time_ns", fep_cfg.get("production_time_ns", 2.0))
 
     forcefield_info = config.get("forcefield", prism_config.get("forcefield", {}))
     if isinstance(forcefield_info, dict):
@@ -300,6 +300,9 @@ def write_fep_mdps(
     traj_interval = int(output_cfg.get("trajectory_interval_ps", 500) / dt)
     energy_interval = int(output_cfg.get("energy_interval_ps", 10) / dt)
     log_interval = int(output_cfg.get("log_interval_ps", 10) / dt)
+    nstdhdl = int(output_cfg.get("nstdhdl", 100))
+    if nstdhdl < 0:
+        raise ValueError("output.nstdhdl must be >= 0")
 
     # Get constraints from PRISM config
     constraints_cfg = prism_config.get("constraints", {})
@@ -561,7 +564,7 @@ free-energy              = yes
 init-lambda-state        = {index}
 delta-lambda             = 0
 calc-lambda-neighbors    = -1
-nstdhdl                  = 100
+nstdhdl                  = {nstdhdl}
 separate-dhdl-file       = yes
 
 ; Lambda schedules (strategy: {schedule['strategy']})
@@ -627,7 +630,7 @@ free-energy              = yes
 init-lambda-state        = {index}
 delta-lambda             = 0
 calc-lambda-neighbors    = -1
-nstdhdl                  = 100
+nstdhdl                  = {nstdhdl}
 separate-dhdl-file       = yes
 
 ; Lambda schedules (strategy: {schedule['strategy']})
@@ -710,6 +713,7 @@ lincs-warnangle         = 30
             nstenergy=energy_interval,
             nstlog=log_interval,
             nstxout_compressed=traj_interval,
+            nstdhdl=nstdhdl,
             init_lambda_state=index,
             strategy=schedule["strategy"],
             coul_lambdas=schedule["coul_lambdas"],
