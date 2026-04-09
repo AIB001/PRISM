@@ -164,6 +164,7 @@ def write_fep_mdps(
     output_dir: str,
     lambda_strategy: str = "decoupled",
     lambda_distribution: str = "nonlinear",
+    quadratic_exponent: float = 2.0,
     lambda_windows: int = 32,
     coul_windows: int = 12,
     vdw_windows: int = 20,
@@ -185,6 +186,8 @@ def write_fep_mdps(
         Lambda strategy: 'coupled', 'decoupled', or 'custom' (default: 'decoupled')
     lambda_distribution : str, optional
         Distribution type: 'linear', 'nonlinear', or 'quadratic' (default: 'nonlinear')
+    quadratic_exponent : float, optional
+        Endpoint-bias exponent used when ``lambda_distribution='quadratic'`` (default: 2.0)
     lambda_windows : int, optional
         Total number of lambda windows for coupled mode (default: 32)
     coul_windows : int, optional
@@ -217,8 +220,12 @@ def write_fep_mdps(
     # Get simulation parameters (use FEP config if provided, otherwise PRISM defaults)
     sim_cfg = config.get("simulation", {})
     fep_cfg = config.get("fep", {})
+    lambda_cfg = config.get("lambda", {})
 
     # Override lambda parameters from config if provided (only if still at defaults)
+    if quadratic_exponent == 2.0 and "quadratic_exponent" in lambda_cfg:
+        quadratic_exponent = lambda_cfg["quadratic_exponent"]
+
     if fep_cfg:
         # Only override if parameters are still at default values
         if lambda_windows == 32 and "lambda_windows" in fep_cfg:
@@ -311,6 +318,7 @@ def write_fep_mdps(
     schedule = _generate_lambda_schedule(
         strategy=lambda_strategy,
         distribution=lambda_distribution,
+        quadratic_exponent=quadratic_exponent,
         total_windows=lambda_windows,
         coul_windows=coul_windows,
         vdw_windows=vdw_windows,
@@ -730,7 +738,7 @@ lincs-warnangle         = 30
         (output_path / f"prod_{index:02d}.mdp").write_text(prod_mdp)
 
 
-def _generate_distribution(n_points: int, dist_type: str) -> List[float]:
+def _generate_distribution(n_points: int, dist_type: str, quadratic_exponent: float = 2.0) -> List[float]:
     """
     Generate lambda distribution
 
@@ -740,6 +748,9 @@ def _generate_distribution(n_points: int, dist_type: str) -> List[float]:
         Number of lambda points
     dist_type : str
         Distribution type: 'linear', 'nonlinear', or 'quadratic'
+    quadratic_exponent : float
+        Endpoint-bias exponent for the quadratic family. Only used when
+        ``dist_type='quadratic'``. ``2.0`` reproduces the historical behavior.
 
     Returns
     -------
@@ -802,15 +813,19 @@ def _generate_distribution(n_points: int, dist_type: str) -> List[float]:
             return list(np.interp(x_new, x_ref, ref_32))
 
     elif dist_type == "quadratic":
-        # Quadratic distribution: denser at endpoints
+        if quadratic_exponent < 1.0:
+            raise ValueError("quadratic_exponent must be >= 1.0")
+
+        # Power-law endpoint-biased distribution. exponent=2.0 reproduces the
+        # previous piecewise quadratic schedule and larger values concentrate
+        # more points near the endpoints while making the midpoint sparser.
         x = np.linspace(0, 1, n_points)
-        # Use x^2 for first half, 1-(1-x)^2 for second half
         lambdas = []
-        for i, val in enumerate(x):
+        for val in x:
             if val <= 0.5:
-                lambdas.append(2 * val**2)
+                lambdas.append(0.5 * (2 * val) ** quadratic_exponent)
             else:
-                lambdas.append(1 - 2 * (1 - val) ** 2)
+                lambdas.append(1 - 0.5 * (2 * (1 - val)) ** quadratic_exponent)
         return lambdas
 
     else:
@@ -820,6 +835,7 @@ def _generate_distribution(n_points: int, dist_type: str) -> List[float]:
 def _generate_lambda_schedule(
     strategy: str = "decoupled",
     distribution: str = "nonlinear",
+    quadratic_exponent: float = 2.0,
     total_windows: int = 32,
     coul_windows: int = 12,
     vdw_windows: int = 20,
@@ -835,6 +851,8 @@ def _generate_lambda_schedule(
         Lambda strategy: 'coupled', 'decoupled', or 'custom' (default: 'decoupled')
     distribution : str, optional
         Distribution type: 'linear', 'nonlinear', or 'quadratic' (default: 'nonlinear')
+    quadratic_exponent : float, optional
+        Endpoint-bias exponent for the quadratic family (default: 2.0)
     total_windows : int, optional
         Total number of lambda windows for coupled mode (default: 32)
     coul_windows : int, optional
@@ -875,7 +893,7 @@ def _generate_lambda_schedule(
 
     elif strategy == "coupled":
         # All lambdas change together from 0 to 1
-        lambdas = _generate_distribution(total_windows, distribution)
+        lambdas = _generate_distribution(total_windows, distribution, quadratic_exponent=quadratic_exponent)
         coul_lambdas = lambdas
         vdw_lambdas = lambdas
         n_windows = total_windows
@@ -883,8 +901,8 @@ def _generate_lambda_schedule(
     elif strategy == "decoupled":
         # Stage 1: Turn off electrostatics (coul 0→1, vdw=0)
         # Stage 2: Turn off VDW (coul=1, vdw 0→1)
-        coul_stage = _generate_distribution(coul_windows, distribution)
-        vdw_stage = _generate_distribution(vdw_windows, distribution)
+        coul_stage = _generate_distribution(coul_windows, distribution, quadratic_exponent=quadratic_exponent)
+        vdw_stage = _generate_distribution(vdw_windows, distribution, quadratic_exponent=quadratic_exponent)
 
         # Stage 1: coul changes, vdw stays at 0
         coul_lambdas = coul_stage + [1.0] * vdw_windows
@@ -913,5 +931,7 @@ def _generate_lambda_schedule(
         "bonded_lambdas": bonded_lambdas_str,
         "mass_lambdas": mass_lambdas_str,
         "strategy": strategy,
+        "distribution": distribution,
+        "quadratic_exponent": quadratic_exponent,
         "n_windows": n_windows,
     }

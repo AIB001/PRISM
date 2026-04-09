@@ -218,10 +218,13 @@ class FEPWorkflowMixin:
 
             print_header("FEP Workflow Complete!")
             print(f"\n  FEP scaffold:       {path(fep_output)}")
+            print(f"  Mapping report:     {path(os.path.join(fep_output, 'common', 'hybrid', 'mapping.html'))}")
             print(f"\n  To run FEP simulations:")
             print(f"  1. cd {fep_output} && ./run_fep.sh bound")
             print(f"  2. cd {fep_output} && ./run_fep.sh unbound")
-            print(f"  3. Analyze with gmx bar or alchemical-analysis")
+            print(
+                f"  3. Analyze with prism --fep-analyze --bound-dir {fep_output}/bound --unbound-dir {fep_output}/unbound"
+            )
 
             return self.output_dir
 

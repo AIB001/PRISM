@@ -22,6 +22,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import List
 
 from prism.fep.analysis import FEPAnalyzer, FEPMultiEstimatorAnalyzer, MultiEstimatorReportGenerator
 
@@ -98,14 +99,20 @@ For more information, see: https://github.com/your-repo/prism
         type=str,
         required=True,
         metavar="PATH",
-        help="Path to bound leg directory containing lambda window subdirectories (window_00, window_01, ...)",
+        help=(
+            "Path to the bound leg. Accepts either a repeat directory containing window_* "
+            "(for example bound/repeat1) or a bound directory containing repeat* subdirectories."
+        ),
     )
     required.add_argument(
         "--unbound-dir",
         type=str,
         required=True,
         metavar="PATH",
-        help="Path to unbound leg directory containing lambda window subdirectories (window_00, window_01, ...)",
+        help=(
+            "Path to the unbound leg. Accepts either a repeat directory containing window_* "
+            "(for example unbound/repeat1) or an unbound directory containing repeat* subdirectories."
+        ),
     )
 
     # Output options
@@ -180,7 +187,39 @@ For more information, see: https://github.com/your-repo/prism
     return parser.parse_args(argv)
 
 
-def validate_arguments(args: argparse.Namespace) -> None:
+def _resolve_repeat_dirs(path_str: str, leg_name: str) -> List[Path]:
+    """
+    Resolve an analysis input path to one or more repeat directories.
+
+    Accepted forms:
+    - a repeat directory containing window_*
+    - a leg directory containing repeat* subdirectories
+    """
+    path = Path(path_str)
+    if not path.exists():
+        raise FileNotFoundError(f"{leg_name.capitalize()} directory not found: {path_str}")
+
+    # Direct repeat-style input: contains window_* subdirectories itself.
+    window_dirs = sorted(p for p in path.glob("window_*") if p.is_dir())
+    if window_dirs:
+        return [path]
+
+    # Leg directory: contains repeat* subdirectories, each with window_*.
+    repeat_dirs = []
+    for repeat_dir in sorted(p for p in path.glob("repeat*") if p.is_dir()):
+        if any(child.is_dir() and child.name.startswith("window_") for child in repeat_dir.iterdir()):
+            repeat_dirs.append(repeat_dir)
+
+    if repeat_dirs:
+        return repeat_dirs
+
+    raise ValueError(
+        f"No lambda window directories found in {path_str}. "
+        f"Expected either window_* directly under the path or repeat*/window_* beneath it."
+    )
+
+
+def validate_arguments(args: argparse.Namespace) -> tuple[List[Path], List[Path]]:
     """
     Validate command-line arguments
 
@@ -189,35 +228,18 @@ def validate_arguments(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed arguments
 
-    Raises
-    ------
-    FileNotFoundError
-        If input directories don't exist
-    ValueError
-        If arguments are invalid
+    Returns
+    -------
+    tuple[list[Path], list[Path]]
+        Resolved bound and unbound repeat directories
     """
-    # Check bound directory
-    bound_dir = Path(args.bound_dir)
-    if not bound_dir.exists():
-        raise FileNotFoundError(f"Bound directory not found: {args.bound_dir}")
+    bound_dirs = _resolve_repeat_dirs(args.bound_dir, "bound")
+    unbound_dirs = _resolve_repeat_dirs(args.unbound_dir, "unbound")
 
-    # Check for lambda windows
-    window_dirs = list(bound_dir.glob("window_*"))
-    if not window_dirs:
+    if len(bound_dirs) != len(unbound_dirs):
         raise ValueError(
-            f"No lambda window directories found in {args.bound_dir}. Expected format: window_00, window_01, ..."
-        )
-
-    # Check unbound directory
-    unbound_dir = Path(args.unbound_dir)
-    if not unbound_dir.exists():
-        raise FileNotFoundError(f"Unbound directory not found: {args.unbound_dir}")
-
-    # Check for lambda windows
-    window_dirs = list(unbound_dir.glob("window_*"))
-    if not window_dirs:
-        raise ValueError(
-            f"No lambda window directories found in {args.unbound_dir}. Expected format: window_00, window_01, ..."
+            "Bound and unbound inputs resolve to different numbers of repeats: "
+            f"{len(bound_dirs)} vs {len(unbound_dirs)}"
         )
 
     # Validate temperature
@@ -231,6 +253,8 @@ def validate_arguments(args: argparse.Namespace) -> None:
                 f"Multi-estimator mode only supports 'alchemlyb' backend. "
                 f"Got: {args.backend}. Please use --backend alchemlyb or omit this flag."
             )
+
+    return bound_dirs, unbound_dirs
 
 
 def main(argv=None) -> int:
@@ -251,7 +275,8 @@ def main(argv=None) -> int:
         logger = logging.getLogger(__name__)
 
         # Validate arguments
-        validate_arguments(args)
+        bound_dirs, unbound_dirs = validate_arguments(args)
+        aggregate_repeats = len(bound_dirs) > 1
 
         # Detect multi-estimator mode
         if args.all_estimators or len(args.estimator) > 1:
@@ -267,8 +292,12 @@ def main(argv=None) -> int:
         logger.info("=" * 70)
         logger.info("PRISM-FEP Analysis")
         logger.info("=" * 70)
-        logger.info(f"Bound directory: {args.bound_dir}")
-        logger.info(f"Unbound directory: {args.unbound_dir}")
+        logger.info(f"Bound input: {args.bound_dir}")
+        logger.info(f"Unbound input: {args.unbound_dir}")
+        if aggregate_repeats:
+            logger.info(f"Resolved repeats: {len(bound_dirs)}")
+            for i, (bound_dir, unbound_dir) in enumerate(zip(bound_dirs, unbound_dirs), 1):
+                logger.info(f"  repeat{i}: {bound_dir} | {unbound_dir}")
         if multi_mode:
             logger.info(f"Estimators: {', '.join(estimators)}")
         else:
@@ -276,19 +305,19 @@ def main(argv=None) -> int:
         logger.info(f"Temperature: {args.temperature} K")
         logger.info("=" * 70)
 
-        if multi_mode:
+        if multi_mode or aggregate_repeats:
             # Multi-estimator mode
-            # Validate backend (only alchemlyb supported for multi-estimator)
+            # Validate backend (only alchemlyb supported for multi-estimator and repeat aggregation)
             if args.backend != "alchemlyb":
                 raise ValueError(
-                    f"Multi-estimator mode only supports 'alchemlyb' backend. "
+                    f"Repeat aggregation and multi-estimator mode only support 'alchemlyb' backend. "
                     f"Got: {args.backend}. Please use --backend alchemlyb or omit this flag."
                 )
 
             # Create multi-estimator analyzer
             analyzer = FEPMultiEstimatorAnalyzer(
-                bound_dirs=args.bound_dir,
-                unbound_dirs=args.unbound_dir,
+                bound_dirs=bound_dirs,
+                unbound_dirs=unbound_dirs,
                 estimators=estimators,
                 temperature=args.temperature,
                 backend=args.backend,
@@ -297,13 +326,20 @@ def main(argv=None) -> int:
             )
 
             # Run analysis
-            logger.info("Starting FEP analysis with multiple estimators...")
+            if aggregate_repeats and not multi_mode:
+                logger.info("Starting FEP analysis with repeat aggregation...")
+            else:
+                logger.info("Starting FEP analysis with multiple estimators...")
             multi_results = analyzer.analyze()
 
             # Print summary for all estimators
             logger.info("")
             logger.info("=" * 70)
-            logger.info("RESULTS SUMMARY - Multi-Estimator Comparison")
+            logger.info(
+                "RESULTS SUMMARY - "
+                + ("Repeat-Aggregated " if aggregate_repeats else "")
+                + ("Multi-Estimator Comparison" if len(multi_results.methods) > 1 else "Single Estimator")
+            )
             logger.info("=" * 70)
             for name, results in multi_results.methods.items():
                 logger.info(
@@ -337,8 +373,8 @@ def main(argv=None) -> int:
             # Single estimator mode (existing behavior)
             # Create analyzer
             analyzer = FEPAnalyzer(
-                bound_dir=args.bound_dir,
-                unbound_dir=args.unbound_dir,
+                bound_dir=bound_dirs[0],
+                unbound_dir=unbound_dirs[0],
                 temperature=args.temperature,
                 estimator=estimators[0],
                 backend=args.backend,
