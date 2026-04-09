@@ -364,11 +364,16 @@ analyzer.generate_html_report("fep_results.html")
 | p38-19-24 | p38α MAPK | charmm36-jul2022 | RTF | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08; bound runtime guard enables unconstrained 0.5 fs startup for zeroized H-bonds) |
 | oMeEtPh-EtPh | T4 lysozyme L99A | charmm36m | CHARMM-GUI | ✅ | EM+NVT | EM+NVT | Bound and unbound smoke checks completed |
 | oMeEtPh-EtPh | T4 lysozyme L99A | amber19sb | — | ✅ | EM+NVT | EM+NVT | Bound+unbound EM+NVT completed (2026-04-08, CPU mode due to CUDA error) |
+| udca-t1-1-lca | FXR | amber14sb_OL15 | GAFF2 | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
+| udca-t1-1-lca | FXR | amber14sb_OL15 | OpenFF | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
+| udca-t1-1-lca | FXR | amber14sb_OL15 | OPLS-AA | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
+| udca-t1-1-lca | FXR | amber14sb_OL15 | MMFF94 | ✅ | EM+NVT | EM+NVT | Smoke test passed (2026-04-09) |
 
 **Test platforms**:
 - **HIF-2α**: Hypoxia-Inducible Factor 2α (42-38, 25-36 systems)
 - **T4 lysozyme L99A**: Model binding pocket (oMeEtPh-EtPh system)
 - **p38α MAP kinase**: Inhibitor series (p38-19-24 system)
+- **FXR**: Farnesoid X receptor (udca-t1-1-lca system)
 
 ### Critical bug fixes validated
 
@@ -383,12 +388,12 @@ analyzer.generate_html_report("fep_results.html")
 - Surrounding atoms: mass_b from B-state atom type
 - 42-38 force-field variants now complete bound EM+NVT across GAFF2, OpenFF, OPLS-AA, MMFF, CGenFF, and CHARMM-GUI paths
 
-**Current validation snapshot** (2026-04-08 updated):
-- **27 system variants** with completed bound+unbound EM+NVT ✅ (+5 p38 systems + amber19sb + 2 charmm-gui)
+**Current validation snapshot** (2026-04-09 updated):
+- **31 system variants** with completed bound+unbound EM+NVT ✅ (+4 udca-t1-1-lca systems)
 - **0 variants** with pending unbound testing ⚠️ (all tested!)
 - **1 variant** with system build failure ❌ (p38-19-24 OPLS: LigParGen error)
-- **Total: 28 tracked system variants** in the unit-test workspace (27 in table + 39-8 platform)
-- Recent additions: p38-19-24 (GAFF2, RTF) and oMeEtPh-EtPh (amber19sb) unbound legs completed; 42-38/oMeEtPh charmm-gui unbound verified
+- **Total: 32 tracked system variants** in the unit-test workspace (31 in table + 39-8 platform)
+- Recent additions: udca-t1-1-lca (GAFF2, OpenFF, OPLS-AA, MMFF94) smoke tests completed
 
 **Successful force field combinations**:
 - AMBER (amber14sb_OL15, amber99sb) + GAFF2, OpenFF, MMFF, OPLS-AA ✅
