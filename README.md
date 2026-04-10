@@ -176,6 +176,19 @@ Or use directly without installation:
 python /path/to/PRISM/prism/builder.py
 ```
 
+## Documentation
+
+For detailed tutorials, guides, and API references, visit the **PRISM documentation**:
+
+📚 **[https://prism-tutorial.com/](https://prism-tutorial.com/)**
+
+The documentation includes:
+- **Basic Tutorial**: Get started with PRISM from scratch
+- **FEP Tutorial**: Learn free energy perturbation calculations
+- **Configuration Guide**: Detailed parameter reference
+- **Analysis Tools**: Trajectory and energy analysis
+- **FEP User Guide**: Complete FEP workflow documentation
+
 ## Quick Start
 
 ### Basic Usage
