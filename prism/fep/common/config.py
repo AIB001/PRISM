@@ -251,7 +251,7 @@ class FEPConfig:
         """Get the total number of repeats to scaffold."""
         replicas = self.fep_config.get("replicas")
         if replicas is None:
-            replicas = self.fep_config.get("fep", {}).get("replicas", 1)
+            replicas = self.fep_config.get("fep", {}).get("replicas", 3)
         return max(1, int(replicas))
 
     def get_all_mdp_params(self) -> Dict[str, Any]:
