@@ -590,8 +590,8 @@ def _generate_canvas_html(
                 <div class="stat-label">Surrounding Atoms</div>
             </div>
             <div class="stat-item">
-                <div class="stat-value">{len(mapping.common) * 2 + len(mapping.transformed_a) + len(mapping.transformed_b) + len(mapping.surrounding_a) + len(mapping.surrounding_b)}</div>
-                <div class="stat-label">Total Atoms</div>
+                <div class="stat-value">{len(mapping.common) + len(mapping.transformed_a) + len(mapping.transformed_b) + len(mapping.surrounding_a) + len(mapping.surrounding_b)}</div>
+                <div class="stat-label">Total Atoms (in hybrid.itp)</div>
             </div>
         </div>
 
