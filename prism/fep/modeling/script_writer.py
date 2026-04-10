@@ -141,7 +141,7 @@ def _get_execution_settings(config: Optional[dict]) -> dict:
         "parallel_windows": parallel_windows,
         "omp_threads": omp_threads,
         "total_cpus": total_cpus,  # For logging/validation
-        "replicas": int(config.get("replicas", fep_config.get("replicas", 1))),
+        "replicas": int(config.get("replicas", fep_config.get("replicas", 3))),
         "is_charmm": is_charmm,  # Pass for logging
         "min_gromacs_version": min_gromacs_version,
         "min_gromacs_reason": min_gromacs_reason,
