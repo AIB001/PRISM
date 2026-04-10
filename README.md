@@ -797,7 +797,7 @@ If you use PRISM in your research, please cite:
   author = {Shi, Zhaoqi and Gao, Xufan and Xu, Mingyu and Zhu, Xuanyi and Wang, Peng and Yang, Yuxuan and Yang, Zaixing and Zhou, Ruhong},
   year = {2026},
   doi = {https://doi.org/10.64898/2026.04.02.716083},
-  publisher = {Authorea Preprints},
+  publisher = {BioRxiv Preprints},
   url = {https://doi.org/10.64898/2026.04.02.716083}
 }
 ```
