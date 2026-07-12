@@ -140,6 +140,50 @@ class SystemPreparationMixin:
         with open(pdb_file, "w") as f:
             f.writelines(fixed_lines)
 
+    def apply_ptm(self, cleaned_protein: str) -> str:
+        """Apply PTM / disulfide staging to the cleaned protein before pdb2gmx.
+
+        Renames modified residues to their force-field residue codes, detects
+        disulfide bonds, and (for CHARMM36) stages a local ``residuetypes.dat``
+        into the model directory where ``pdb2gmx`` runs. Returns the path to the
+        PTM-staged PDB (or the unchanged input when PTM is disabled).
+        """
+        ptm_config = getattr(self, "ptm_config", None)
+        if ptm_config is None or not ptm_config.enabled:
+            return cleaned_protein
+
+        from ..ptm import PTMStager
+
+        print_subheader("Applying post-translational modifications")
+
+        staged_pdb = os.path.join(self.output_dir, f"{self.protein_name}_ptm.pdb")
+        ff_name = self.forcefield["name"] if self.forcefield else None
+        ff_dir = (self.forcefield or {}).get("dir") or (self.forcefield or {}).get("path")
+        # pdb2gmx runs with cwd = model_dir, so residuetypes.dat is staged there.
+        model_dir = str(self.system_builder.model_dir)
+
+        stager = PTMStager(
+            ptm_config,
+            forcefield_name=ff_name,
+            forcefield_dir=ff_dir,
+            gmx_command=self.gromacs_env.gmx_command,
+            verbose=True,
+        )
+        result = stager.apply(cleaned_protein, staged_pdb, work_dir=model_dir)
+
+        # Stash for downstream reference (e.g. logging / provenance).
+        self._ptm_result = result
+
+        if result.amber_route_required:
+            print_subheader("Note: AMBER PTM route")
+            print(
+                "  Phosphorylation on an AMBER force field needs the tleap+phosaa "
+                "-> ParmEd/ACPYPE route. The structure has been staged, but for a "
+                "fully automated pdb2gmx build use --forcefield charmm36-jul2022."
+            )
+
+        return staged_pdb
+
     def build_model(self, cleaned_protein: str):
         """Build the GROMACS model with support for multiple ligands"""
         return self.system_builder.build(
@@ -231,17 +275,29 @@ class SystemPreparationMixin:
 # SIMULATION PART
 ######################################################
 
+# --- Hardware detection (portable; nothing about this host is hardcoded) ---
+# Threads: respect OMP_NUM_THREADS if set, else use all logical cores.
+NTOMP="${OMP_NUM_THREADS:-$(nproc 2>/dev/null || echo 1)}"
+# GPU: offload only if an NVIDIA GPU is actually present, else run CPU-only.
+# On a multi-GPU host, export CUDA_VISIBLE_DEVICES=<id> to pick a device.
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    GPU_ARGS="-nb gpu -bonded gpu -pme gpu -gpu_id 0"
+else
+    GPU_ARGS=""
+fi
+echo "GROMACS run: NTOMP=$NTOMP, ${GPU_ARGS:+GPU offload}${GPU_ARGS:-CPU-only}"
+
 # Energy Minimization (EM)
 mkdir -p em
 if [ -f ./em/em.gro ]; then
     echo "EM already completed, skipping..."
 elif [ -f ./em/em.tpr ]; then
     echo "EM tpr file found, continuing from checkpoint..."
-    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v -cpi ./em/em.cpt
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -v -cpi ./em/em.cpt
 else
     echo "Starting EM from scratch..."
     gmx grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o ./em/em.tpr -maxwarn 999
-    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v
+    gmx mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -v
 fi
 
 # NVT Equilibration
@@ -250,11 +306,11 @@ if [ -f ./nvt/nvt.gro ]; then
     echo "NVT already completed, skipping..."
 elif [ -f ./nvt/nvt.tpr ]; then
     echo "NVT tpr file found, continuing from checkpoint..."
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
 else
     echo "Starting NVT from scratch..."
     gmx grompp -f ../mdps/nvt.mdp -c ./em/em.gro -r ./em/em.gro -p topol.top -o ./nvt/nvt.tpr -maxwarn 999
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
 fi
 
 # NPT Equilibration
@@ -263,11 +319,11 @@ if [ -f ./npt/npt.gro ]; then
     echo "NPT already completed, skipping..."
 elif [ -f ./npt/npt.tpr ]; then
     echo "NPT tpr file found, continuing from checkpoint..."
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
 else
     echo "Starting NPT from scratch..."
     gmx grompp -f ../mdps/npt.mdp -c ./nvt/nvt.gro -r ./nvt/nvt.gro -t ./nvt/nvt.cpt -p topol.top -o ./npt/npt.tpr -maxwarn 999
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./npt/npt.tpr -deffnm ./npt/npt -v
 fi
 
 # Production MD
@@ -276,11 +332,11 @@ if [ -f ./prod/md.gro ]; then
     echo "Production MD already completed, skipping..."
 elif [ -f ./prod/md.tpr ]; then
     echo "Production MD tpr file found, continuing from checkpoint..."
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
 else
     echo "Starting Production MD from scratch..."
     gmx grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 999
-    gmx mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
+    gmx mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./prod/md.tpr -deffnm ./prod/md -v
 fi
 """
 

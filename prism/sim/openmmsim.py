@@ -2,7 +2,30 @@
 # -*- coding: utf-8 -*-
 
 """
-OpenMM simulator for PRISM MD simulations with enhanced CUDA support and progress bars
+OpenMM simulator for PRISM.
+
+Runs simulations from a GROMACS-prepared system (topol.top + solv_ions.gro) with
+a broad set of run types — not just plain MD:
+
+  * minimize                energy minimization
+  * nvt / npt               equilibration (optionally position-restrained)
+  * npt-membrane            NPT with a MonteCarloMembraneBarostat (bilayers)
+  * production              NVT or NPT (isotropic / membrane) production
+  * anneal                  simulated-annealing temperature ramp
+
+Settings (nonbonded cutoff, constraints, dt, temperature, pressure, ensemble)
+are read from the PRISM-generated MDP files rather than hardcoded. Extras:
+position restraints, modern LangevinMiddle integrator, optional hydrogen-mass
+repartitioning (HMR) for larger time steps, checkpoint/restart resume, and
+DCD + state-data + checkpoint reporters.
+
+Optional plugins (installed separately — see setup.py extras `openmm-plugins`):
+  * openmm-plumed  -> metadynamics / steered MD via a PLUMED script
+  * openmm-ml      -> hybrid ML/MM potentials (NNP) for the ligand region
+Both are gated: absent plugins simply disable the corresponding feature.
+
+Nothing here is machine-specific: platform, device, and thread counts are
+auto-detected or passed in, never hardcoded.
 """
 
 import os
@@ -20,9 +43,23 @@ try:
     OPENMM_AVAILABLE = True
 except ImportError:
     OPENMM_AVAILABLE = False
-    print("Warning: OpenMM not available. RECOMMENDED INSTALLATION:")
-    print("  mamba install -c conda-forge openmm")
-    print("  # OR: conda install -c conda-forge openmm")
+    print("Warning: OpenMM not available. Optional install:  conda install -c conda-forge openmm")
+
+# --- optional plugins (gated; absence only disables the feature) ---
+try:
+    import openmmplumed  # noqa: F401  (provides openmm.app PlumedForce via the plugin)
+    from openmmplumed import PlumedForce
+
+    PLUMED_AVAILABLE = True
+except Exception:
+    PLUMED_AVAILABLE = False
+
+try:
+    from openmmml import MLPotential  # noqa: F401
+
+    OPENMMML_AVAILABLE = True
+except Exception:
+    OPENMMML_AVAILABLE = False
 
 try:
     from tqdm import tqdm
@@ -30,11 +67,10 @@ try:
     TQDM_AVAILABLE = True
 except ImportError:
     TQDM_AVAILABLE = False
-    print("Info: tqdm not available for progress bars. Install with: pip install tqdm")
 
 
 class ProgressReporter:
-    """Custom reporter for displaying simulation progress with tqdm"""
+    """Custom reporter for displaying simulation progress with tqdm (or text)."""
 
     def __init__(self, total_steps, update_interval=1000, desc="Simulation"):
         self.total_steps = total_steps
@@ -58,20 +94,15 @@ class ProgressReporter:
             increment = current_step - self.pbar.n
             if increment > 0:
                 self.pbar.update(increment)
-        else:
-            # Fallback to simple text progress
-            if current_step % (self.total_steps // 20) == 0 or current_step == self.total_steps:
-                elapsed = time.time() - self.start_time
-                progress = current_step / self.total_steps * 100
-                eta = elapsed / (current_step / self.total_steps) - elapsed if current_step > 0 else 0
-                print(
-                    f"{self.desc}: {progress:.1f}% ({current_step}/{self.total_steps} steps) "
-                    f"ETA: {timedelta(seconds=int(eta))}"
-                )
+        elif self.total_steps and current_step % max(1, self.total_steps // 20) == 0:
+            elapsed = time.time() - self.start_time
+            progress = current_step / self.total_steps * 100
+            eta = elapsed / (current_step / self.total_steps) - elapsed if current_step > 0 else 0
+            print(f"{self.desc}: {progress:.1f}% ({current_step}/{self.total_steps}) ETA {timedelta(seconds=int(eta))}")
 
 
 class TqdmReporter:
-    """OpenMM reporter that updates tqdm progress bar"""
+    """OpenMM reporter that drives a ProgressReporter."""
 
     def __init__(self, progress_reporter, reportInterval):
         self.progress_reporter = progress_reporter
@@ -82,919 +113,491 @@ class TqdmReporter:
         return (steps, False, False, False, False, None)
 
     def report(self, simulation, state):
-        if state is None:
-            return
         self.progress_reporter.update(simulation.currentStep)
 
 
-class OpenMMSimulator:
-    """
-    OpenMM simulator class for running MD simulations.
+# Default per-stage step counts when an MDP value is missing.
+_DEFAULT_NSTEPS = {"nvt": 250000, "npt": 250000, "prod": 5000000, "anneal": 500000}
 
-    This class reads GROMACS topology files and runs equivalent simulations
-    using OpenMM with the same parameters as in the MDP files.
-    """
+
+class OpenMMSimulator:
+    """Run flexible OpenMM simulations from a GROMACS-prepared PRISM system."""
 
     def __init__(self, gmx_dir, system_files, ff_dir):
-        """
-        Initialize OpenMM simulator.
-
-        Parameters:
-        -----------
-        gmx_dir : str
-            Path to GMX_PROLIG_MD directory
-        system_files : dict
-            Dictionary of system file paths
-        ff_dir : str
-            Path to force field directory
-        """
         if not OPENMM_AVAILABLE:
-            raise ImportError("OpenMM is not installed. Please install it to use this simulator.")
-
+            raise ImportError(
+                "OpenMM is not installed. Optional install: conda install -c conda-forge openmm"
+            )
         self.gmx_dir = gmx_dir
         self.system_files = system_files
         self.ff_dir = ff_dir
-
-        # Find GROMACS installation
         self.gmx_data_dir = self._find_gromacs_data_dir()
-
-        # Parse MDP files to get simulation parameters
         self.mdp_params = self._parse_mdp_files()
-
-        # Check CUDA availability at initialization
         self.cuda_info = self._check_cuda_availability()
 
         print("OpenMM simulator initialized")
-        print(f"  Platforms available: {self._get_platform_info()}")
+        print(f"  Platforms: {self._get_platform_info()}")
         if self.cuda_info["available"]:
-            print(
-                f"  CUDA: Available (Driver: {self.cuda_info['driver_version']}, "
-                f"Devices: {self.cuda_info['device_count']})"
-            )
+            print(f"  CUDA: available (driver {self.cuda_info['driver_version']}, "
+                  f"{self.cuda_info['device_count']} device(s))")
         else:
-            print(f"  CUDA: Not available ({self.cuda_info['reason']})")
-        if self.gmx_data_dir:
-            print(f"  GROMACS data directory: {self.gmx_data_dir}")
+            print(f"  CUDA: not available ({self.cuda_info['reason']})")
+        plugins = [n for n, ok in (("openmm-plumed", PLUMED_AVAILABLE), ("openmm-ml", OPENMMML_AVAILABLE)) if ok]
+        print(f"  Optional plugins: {', '.join(plugins) if plugins else 'none (metadynamics/ML disabled)'}")
 
+    # ================================================================== #
+    #  Topology / environment helpers (load a GROMACS system into OpenMM) #
+    # ================================================================== #
     def _check_cuda_availability(self):
-        """Check CUDA availability and version"""
-        cuda_info = {
-            "available": False,
-            "driver_version": None,
-            "device_count": 0,
-            "devices": [],
-            "reason": "Not checked",
-        }
-
+        info = {"available": False, "driver_version": None, "device_count": 0, "devices": [], "reason": "not checked"}
         try:
-            # Check if CUDA platform is available in OpenMM
             for i in range(mm.Platform.getNumPlatforms()):
-                platform = mm.Platform.getPlatform(i)
-                if platform.getName() == "CUDA":
-                    cuda_info["available"] = True
-                    cuda_info["reason"] = "CUDA platform found"
-
-                    # Try to get CUDA device information
+                if mm.Platform.getPlatform(i).getName() == "CUDA":
+                    info["available"] = True
+                    info["reason"] = "CUDA platform found"
                     try:
-                        # Get device count
-                        cuda_info["device_count"] = int(platform.getPropertyDefaultValue("DeviceIndex")) + 1
-                    except:
-                        cuda_info["device_count"] = 1
-
-                    # Try to get driver version using nvidia-smi
-                    try:
-                        result = subprocess.run(
-                            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                            capture_output=True,
-                            text=True,
-                        )
-                        if result.returncode == 0:
-                            cuda_info["driver_version"] = result.stdout.strip().split("\n")[0]
-
-                        # Get device names
-                        result = subprocess.run(
-                            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True
-                        )
-                        if result.returncode == 0:
-                            cuda_info["devices"] = result.stdout.strip().split("\n")
-                    except:
+                        r = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                           capture_output=True, text=True, timeout=10)
+                        if r.returncode == 0:
+                            info["devices"] = [d for d in r.stdout.strip().split("\n") if d]
+                            info["device_count"] = len(info["devices"])
+                        r = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                                           capture_output=True, text=True, timeout=10)
+                        if r.returncode == 0:
+                            info["driver_version"] = r.stdout.strip().split("\n")[0]
+                    except Exception:
                         pass
-
                     break
-
-            if not cuda_info["available"]:
-                cuda_info["reason"] = "CUDA platform not found in OpenMM"
-
+            if not info["available"]:
+                info["reason"] = "CUDA platform not present in this OpenMM build"
         except Exception as e:
-            cuda_info["reason"] = str(e)
-
-        return cuda_info
-
-    def _diagnose_topology_includes(self, top_file):
-        """Diagnose include statements in topology file"""
-        print("\nDiagnosing topology file includes:")
-        with open(top_file, "r") as f:
-            lines = f.readlines()
-
-        includes = []
-        for i, line in enumerate(lines, 1):
-            if line.strip().startswith("#include"):
-                includes.append((i, line.strip()))
-
-        if includes:
-            print(f"Found {len(includes)} include statements:")
-            for line_num, include in includes:
-                print(f"  Line {line_num}: {include}")
-
-                # Check for syntax errors
-                if include.count('"') != 2:
-                    print(f"    -> WARNING: Syntax error - unmatched quotes!")
-
-                # Extract filename
-                match = re.search(r'#include\s+"([^"]+)"', include)
-                if match:
-                    filename = match.group(1)
-                    # Check if it's a force field file
-                    if ".ff/" in filename:
-                        print(f"    -> Force field include: {filename}")
-                        if self.gmx_data_dir:
-                            full_path = os.path.join(self.gmx_data_dir, filename)
-                            exists = "EXISTS" if os.path.exists(full_path) else "NOT FOUND"
-                            print(f"    -> Full path: {full_path} [{exists}]")
-                else:
-                    # Try to extract filename even with syntax errors
-                    match2 = re.search(r'#include\s+"([^"]+)', include)
-                    if match2:
-                        filename = match2.group(1)
-                        print(f"    -> Possibly malformed include: {filename}")
-        else:
-            print("No include statements found in topology file")
+            info["reason"] = str(e)
+        return info
 
     def _find_gromacs_data_dir(self):
-        """Find GROMACS data directory containing force field files"""
         try:
-            # Find GROMACS binary
-            result = subprocess.run(["which", "gmx"], capture_output=True, text=True)
-            if result.returncode == 0:
-                gmx_bin = result.stdout.strip()
-                print(f"Found GROMACS binary: {gmx_bin}")
-
-                # GROMACS data is typically in ../share/gromacs/top relative to bin
-                gmx_bin_dir = os.path.dirname(gmx_bin)
-
-                # Check if it's a conda installation
-                if "conda" in gmx_bin or "miniconda" in gmx_bin or "anaconda" in gmx_bin:
-                    print("Detected conda GROMACS installation")
-
-                potential_dirs = [
-                    os.path.join(os.path.dirname(gmx_bin_dir), "share", "gromacs", "top"),
-                    os.path.join(os.path.dirname(gmx_bin_dir), "share", "top"),
-                    # Conda environments might have it here
-                    os.path.join(os.path.dirname(os.path.dirname(gmx_bin)), "share", "gromacs", "top"),
-                    # System-wide installations
-                    "/usr/share/gromacs/top",
-                    "/usr/local/share/gromacs/top",
-                    # Alternative conda location
-                    os.path.join(os.path.dirname(gmx_bin_dir), "share", "gromacs"),
-                ]
-
-                for dir_path in potential_dirs:
-                    if os.path.exists(dir_path):
-                        # Verify it contains force field files
-                        ff_files = [f for f in os.listdir(dir_path) if f.endswith(".ff")]
-                        if ff_files:
-                            print(f"Found GROMACS data directory: {dir_path}")
-                            print(f"Available force fields: {', '.join(ff_files[:5])}...")
-                            return dir_path
-        except Exception as e:
-            print(f"Warning: Could not find GROMACS installation: {e}")
-
-        print("Warning: GROMACS data directory not found")
+            r = subprocess.run(["which", "gmx"], capture_output=True, text=True)
+            if r.returncode == 0:
+                gmx_bin = r.stdout.strip()
+                bin_dir = os.path.dirname(gmx_bin)
+                for d in (
+                    os.path.join(os.path.dirname(bin_dir), "share", "gromacs", "top"),
+                    os.path.join(os.path.dirname(bin_dir), "share", "top"),
+                    "/usr/share/gromacs/top", "/usr/local/share/gromacs/top",
+                ):
+                    if os.path.isdir(d) and any(f.endswith(".ff") for f in os.listdir(d)):
+                        return d
+        except Exception:
+            pass
         return None
 
     def _create_modified_topology(self, original_top):
-        """Create a modified topology file with absolute paths for ALL includes"""
-        # Read original topology
-        with open(original_top, "r") as f:
+        with open(original_top) as f:
             lines = f.readlines()
-
-        # Get the directory of the topology file
         top_dir = os.path.dirname(original_top)
-
-        print("\nConverting include paths to absolute paths:")
-
-        modified_lines = []
+        modified = []
         for line in lines:
-            # Check if this is an include line
             if line.strip().startswith("#include"):
-                # First, fix any syntax errors (missing quotes)
                 if line.count('"') == 1:
-                    print(f"  Fixing syntax error in: {line.strip()}")
                     line = line.rstrip() + '"\n'
-
-                # Now process the include
-                match = re.search(r'#include\s+"([^"]+)"', line)
-                if match:
-                    include_file = match.group(1)
-                    new_path = self._resolve_include_path(include_file, top_dir)
-                    if new_path != include_file:
-                        line = f'#include "{new_path}"\n'
-
-            modified_lines.append(line)
-
-        # Join lines back together
-        modified_content = "".join(modified_lines)
-
-        # Only create a new file if we actually modified something
-        if modified_lines != lines:
-            # Create temporary file with modified topology
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".top", delete=False) as tmp:
-                tmp.write(modified_content)
-                print(f"\nCreated modified topology: {tmp.name}")
-                return tmp.name
-        else:
-            print("\nNo modifications needed to topology file")
-            return original_top
+                m = re.search(r'#include\s+"([^"]+)"', line)
+                if m:
+                    new = self._resolve_include_path(m.group(1), top_dir)
+                    if new != m.group(1):
+                        line = f'#include "{new}"\n'
+            modified.append(line)
+        if modified != lines:
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".top", delete=False)
+            tmp.write("".join(modified))
+            tmp.close()
+            return tmp.name
+        return original_top
 
     def _resolve_include_path(self, include_file, top_dir):
-        """Resolve include file path to absolute path"""
-        # Check if it's already an absolute path
         if os.path.isabs(include_file):
             return include_file
-
-        # Handle force field includes (contain .ff/)
-        if ".ff/" in include_file:
-            if self.gmx_data_dir:
-                absolute_path = os.path.join(self.gmx_data_dir, include_file)
-                if os.path.exists(absolute_path):
-                    print(f"  Force field: {include_file} -> {absolute_path}")
-                    return absolute_path
-                else:
-                    # Try alternative locations
-                    for base_dir in ["/usr/share/gromacs/top", "/usr/local/share/gromacs/top"]:
-                        alt_path = os.path.join(base_dir, include_file)
-                        if os.path.exists(alt_path):
-                            print(f"  Force field: {include_file} -> {alt_path}")
-                            return alt_path
-
-        # Handle relative paths (../)
-        if include_file.startswith("../"):
-            # Resolve relative to topology file directory
-            absolute_path = os.path.abspath(os.path.join(top_dir, include_file))
-            if os.path.exists(absolute_path):
-                print(f"  Relative: {include_file} -> {absolute_path}")
-                return absolute_path
-            else:
-                print(f"  ERROR: Could not resolve relative path: {include_file}")
-                print(f"    Tried: {absolute_path}")
-
-        # Handle files in the same directory as topology
-        else:
-            # First check in topology directory
-            absolute_path = os.path.join(top_dir, include_file)
-            if os.path.exists(absolute_path):
-                print(f"  Local: {include_file} -> {absolute_path}")
-                return absolute_path
-
-            # Check in force field directory
-            if self.ff_dir:
-                ff_path = os.path.join(self.ff_dir, include_file)
-                if os.path.exists(ff_path):
-                    print(f"  Force field dir: {include_file} -> {ff_path}")
-                    return ff_path
-
-            # Also check parent directory (for cases like posre.itp)
-            parent_dir = os.path.dirname(top_dir)
-            parent_path = os.path.join(parent_dir, include_file)
-            if os.path.exists(parent_path):
-                print(f"  Parent dir: {include_file} -> {parent_path}")
-                return parent_path
-
-        # If we couldn't resolve it, print a warning but keep original
-        print(f"  WARNING: Could not resolve: {include_file}")
+        if ".ff/" in include_file and self.gmx_data_dir:
+            p = os.path.join(self.gmx_data_dir, include_file)
+            if os.path.exists(p):
+                return p
+        candidates = [
+            os.path.join(top_dir, include_file),
+            os.path.join(self.ff_dir, include_file) if self.ff_dir else None,
+            os.path.join(os.path.dirname(top_dir), include_file),
+            os.path.abspath(os.path.join(top_dir, include_file)),
+        ]
+        for c in candidates:
+            if c and os.path.exists(c):
+                return os.path.abspath(c)
         return include_file
 
     def _get_platform_info(self):
-        """Get information about available OpenMM platforms"""
-        platforms = []
-        for i in range(mm.Platform.getNumPlatforms()):
-            platform = mm.Platform.getPlatform(i)
-            platforms.append(platform.getName())
-        return ", ".join(platforms)
-
-    def _verify_modified_topology(self, top_file):
-        """Verify that all includes in modified topology are absolute paths"""
-        with open(top_file, "r") as f:
-            lines = f.readlines()
-
-        print("  Checking includes in modified topology:")
-        for i, line in enumerate(lines):
-            if line.strip().startswith("#include"):
-                match = re.search(r'#include\s+"([^"]+)"', line)
-                if match:
-                    path = match.group(1)
-                    if os.path.isabs(path):
-                        exists = "EXISTS" if os.path.exists(path) else "NOT FOUND"
-                        print(f"    ✓ {path} [{exists}]")
-                    else:
-                        print(f"    ✗ Still relative: {path}")
+        return ", ".join(mm.Platform.getPlatform(i).getName() for i in range(mm.Platform.getNumPlatforms()))
 
     def _parse_mdp_files(self):
-        """Parse MDP files to extract simulation parameters"""
         params = {}
-
-        # Parse each MDP file
         for stage in ["em", "nvt", "npt", "md"]:
-            mdp_file = self.system_files.get(f"{stage}_mdp")
-            if mdp_file and os.path.exists(mdp_file):
-                params[stage] = self._parse_mdp(mdp_file)
-
+            f = self.system_files.get(f"{stage}_mdp")
+            if f and os.path.exists(f):
+                params[stage] = self._parse_mdp(f)
         return params
 
-    def _parse_mdp(self, mdp_file):
-        """Parse a single MDP file"""
+    @staticmethod
+    def _parse_mdp(mdp_file):
         params = {}
-
-        with open(mdp_file, "r") as f:
+        with open(mdp_file) as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith(";"):
-                    if "=" in line:
-                        key, value = line.split("=", 1)
-                        key = key.strip()
-                        value = value.strip()
-                        # Remove inline comments
-                        if ";" in value:
-                            value = value.split(";")[0].strip()
-                        params[key] = value
-
+                if line and not line.startswith(";") and "=" in line:
+                    k, v = line.split("=", 1)
+                    params[k.strip()] = v.split(";")[0].strip()
         return params
 
-    def run(self, stages=None, platform="auto", device_index=0, num_threads=10, gmx_data_dir=None, **kwargs):
-        """
-        Run OpenMM MD simulation.
+    def _mdp(self, stage, key, default=None):
+        return self.mdp_params.get(stage, {}).get(key, default)
 
-        Parameters:
-        -----------
-        stages : list, optional
-            List of stages to run ['em', 'nvt', 'npt', 'prod']
-            If None, runs all stages
-        platform : str
-            OpenMM platform to use ('auto', 'CUDA', 'OpenCL', 'CPU')
-            'auto' will try CUDA first, then fall back to CPU with multiple threads
-        device_index : int
-            GPU device index (default: 0)
-        num_threads : int
-            Number of CPU threads to use (default: 10)
-        gmx_data_dir : str, optional
-            Manual path to GROMACS data directory (e.g., '/usr/share/gromacs/top')
-        **kwargs : dict
-            Additional parameters
+    # ================================================================== #
+    #  System / integrator / restraint / barostat builders               #
+    # ================================================================== #
+    def _nonbonded_from_mdp(self):
+        """Derive nonbonded cutoff (nm) and constraints from the MDP files."""
+        # cutoff: prefer rvdw/rcoulomb from any stage (md > npt > nvt > em)
+        cutoff = 1.0
+        for stage in ("md", "npt", "nvt", "em"):
+            for key in ("rvdw", "rcoulomb", "rlist"):
+                v = self._mdp(stage, key)
+                if v:
+                    try:
+                        cutoff = float(v)
+                        break
+                    except ValueError:
+                        pass
+            else:
+                continue
+            break
+        cons_str = (self._mdp("md", "constraints") or self._mdp("npt", "constraints")
+                    or self._mdp("nvt", "constraints") or "h-bonds").lower()
+        cons = {"h-bonds": app.HBonds, "hbonds": app.HBonds, "all-bonds": app.AllBonds,
+                "h-angles": app.HAngles, "none": None}.get(cons_str, app.HBonds)
+        return cutoff * unit.nanometer, cons
 
-        Returns:
-        --------
-        dict
-            Dictionary with paths to output files
+    def _build_system(self, top, box_vectors, hmr=False, hydrogen_mass_amu=1.5, ml_region=None):
+        cutoff, constraints = self._nonbonded_from_mdp()
+        kwargs = dict(nonbondedMethod=app.PME, nonbondedCutoff=cutoff, constraints=constraints, rigidWater=True)
+        if hmr:
+            kwargs["hydrogenMass"] = hydrogen_mass_amu * unit.amu
+        system = top.createSystem(**kwargs)
+        if ml_region is not None:
+            system = self._apply_ml_potential(system, top.topology, ml_region)
+        return system
+
+    @staticmethod
+    def _make_integrator(temperature, dt, kind="langevin-middle", friction=1.0):
+        fr = friction / unit.picosecond
+        if kind == "langevin":
+            return mm.LangevinIntegrator(temperature, fr, dt)
+        if kind == "nose-hoover":
+            return mm.NoseHooverIntegrator(temperature, fr, dt)
+        # default: LangevinMiddle (more accurate sampling than legacy Langevin)
+        return mm.LangevinMiddleIntegrator(temperature, fr, dt)
+
+    def _add_position_restraints(self, system, topology, ref_positions, selection="backbone", fc=1000.0):
+        """Harmonic position restraints (kJ/mol/nm^2) on a selection of atoms."""
+        if not selection or selection == "none":
+            return None
+        force = mm.CustomExternalForce("0.5*k*periodicdistance(x,y,z,x0,y0,z0)^2")
+        force.addGlobalParameter("k", fc * unit.kilojoule_per_mole / unit.nanometer**2)
+        for p in ("x0", "y0", "z0"):
+            force.addPerParticleParameter(p)
+        bb = {"CA", "C", "N", "O"}
+        std_aa = {"ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU",
+                  "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+                  "HID", "HIE", "HIP", "CYX", "SEP", "TPO", "PTR"}
+        n = 0
+        for atom in topology.atoms():
+            keep = False
+            rn = atom.residue.name
+            if selection == "heavy":
+                keep = atom.element is not None and atom.element.symbol != "H"
+            elif selection == "protein":
+                keep = rn in std_aa
+            else:  # backbone (default)
+                keep = rn in std_aa and atom.name in bb
+            if keep:
+                pos = ref_positions[atom.index].value_in_unit(unit.nanometer)
+                force.addParticle(atom.index, [pos[0], pos[1], pos[2]])
+                n += 1
+        if n == 0:
+            return None
+        system.addForce(force)
+        print(f"  Position restraints: {n} atoms ({selection}, k={fc} kJ/mol/nm^2)")
+        return force
+
+    @staticmethod
+    def _add_barostat(system, ensemble, temperature, pressure, surface_tension=0.0, freq=25):
+        if ensemble == "npt":
+            system.addForce(mm.MonteCarloBarostat(pressure, temperature, freq))
+        elif ensemble in ("npt-membrane", "membrane"):
+            system.addForce(mm.MonteCarloMembraneBarostat(
+                pressure, surface_tension * unit.bar * unit.nanometer, temperature,
+                mm.MonteCarloMembraneBarostat.XYIsotropic, mm.MonteCarloMembraneBarostat.ZFree, freq))
+
+    def _apply_plumed(self, system, plumed_input):
+        if not PLUMED_AVAILABLE:
+            print("  PLUMED requested but openmm-plumed is not installed — skipping (see setup.py extras).")
+            return
+        script = open(plumed_input).read() if os.path.exists(plumed_input) else plumed_input
+        system.addForce(PlumedForce(script))
+        print("  PLUMED bias added (metadynamics / steered MD).")
+
+    def _apply_ml_potential(self, system, topology, ml_region):
+        if not OPENMMML_AVAILABLE:
+            print("  ML potential requested but openmm-ml is not installed — using pure MM (see setup.py extras).")
+            return system
+        # ml_region: name of the ML model, e.g. 'ani2x' or 'mace-off'; applied to the ligand residue
+        lig_atoms = [a.index for a in topology.atoms() if a.residue.name in ("LIG", "MOL", "UNK")]
+        if not lig_atoms:
+            print("  ML potential: no ligand atoms found; using pure MM.")
+            return system
+        potential = MLPotential(ml_region if isinstance(ml_region, str) else "ani2x")
+        return potential.createMixedSystem(topology, system, lig_atoms)
+
+    def _setup_platform(self, platform_name, device_index, precision="mixed"):
+        try:
+            if platform_name == "auto":
+                platform_name = "CUDA" if self.cuda_info["available"] else (
+                    "OpenCL" if "OpenCL" in self._get_platform_info() else "CPU")
+            platform = mm.Platform.getPlatformByName(platform_name)
+            props = {}
+            if platform_name in ("CUDA", "OpenCL"):
+                props["DeviceIndex"] = str(device_index)
+                if platform_name == "CUDA":
+                    props["Precision"] = precision
+            print(f"  Platform: {platform_name}" + (f" (device {device_index}, {precision})" if props else ""))
+            return platform, props
+        except Exception as e:
+            print(f"  Platform '{platform_name}' unavailable ({e}); falling back to CPU.")
+            return mm.Platform.getPlatformByName("CPU"), {}
+
+    # ================================================================== #
+    #  Public run API                                                     #
+    # ================================================================== #
+    def run(self, stages=None, platform="auto", device_index=0, precision="mixed",
+            ensemble="npt", restraints="backbone", restraint_fc=1000.0, equil_restraints=True,
+            integrator="langevin-middle", hmr=False, hydrogen_mass_amu=1.5,
+            plumed=None, ml_potential=None, resume=True, num_threads=None,
+            gmx_data_dir=None, **kwargs):
+        """Run an OpenMM workflow.
+
+        Parameters
+        ----------
+        stages : list[str]   subset of ['em','nvt','npt','prod','anneal'] (default em,nvt,npt,prod)
+        ensemble : str       production ensemble: 'nvt' | 'npt' | 'npt-membrane'
+        restraints : str     'backbone' | 'heavy' | 'protein' | 'none' (applied during nvt/npt if equil_restraints)
+        hmr : bool           hydrogen-mass repartitioning (allows a larger time step)
+        integrator : str     'langevin-middle' (default) | 'langevin' | 'nose-hoover'
+        plumed : str         path to a PLUMED input (metadynamics / steered MD; needs openmm-plumed)
+        ml_potential : str   ML model name for a hybrid ML/MM ligand region (needs openmm-ml)
+        resume : bool        resume production from a checkpoint if present
         """
-        # Override auto-detected GROMACS directory if provided
         if gmx_data_dir:
-            print(f"Using manually specified GROMACS data directory: {gmx_data_dir}")
             self.gmx_data_dir = gmx_data_dir
-
-        # Default stages
         if stages is None:
             stages = ["em", "nvt", "npt", "prod"]
-
         if num_threads:
-            print(f"CPU threads requested: {num_threads}")
+            os.environ.setdefault("OPENMM_CPU_THREADS", str(num_threads))
         if kwargs:
             print(f"Ignoring extra parameters: {list(kwargs)}")
 
-        # Setup platform with automatic fallback
-        print(f"\nAttempting to use {platform} platform...")
-        platform_obj = self._setup_platform(platform, device_index)
+        platform_obj = self._setup_platform(platform, device_index, precision)
 
-        # If CUDA failed and we fell back, inform the user
-        if platform == "CUDA" and platform_obj[0].getName() != "CUDA":
-            print(f"\n{'='*60}")
-            print(f"Note: Using {platform_obj[0].getName()} platform instead of CUDA")
-            print("To fix CUDA compatibility issues:")
-            print("1. Check CUDA driver version: nvidia-smi")
-            print("2. Reinstall OpenMM with matching CUDA version:")
-            print("   mamba install -c conda-forge openmm cudatoolkit=11.7")
-            print("   # OR: conda install -c conda-forge openmm cudatoolkit=11.7")
-            print("3. Or explicitly use CPU: sim.run(engine='openmm', platform='CPU')")
-            print(f"{'='*60}\n")
-
-        # Load system from GROMACS files
-        print("Loading GROMACS system...")
-        gro_file = self.system_files["gro"]
-        top_file = self.system_files["top"]
-
-        # Diagnose topology includes
-        self._diagnose_topology_includes(top_file)
-
-        # Create modified topology with absolute paths
-        modified_top = self._create_modified_topology(top_file)
-        if modified_top != top_file:
-            print("\nTopology file has been modified with absolute paths")
-            # Verify the modified topology
-            print("\nVerifying modified topology:")
-            self._verify_modified_topology(modified_top)
+        # Load GROMACS system
+        gro = app.GromacsGroFile(self.system_files["gro"])
+        modified_top = self._create_modified_topology(self.system_files["top"])
+        try:
+            top = app.GromacsTopFile(modified_top, periodicBoxVectors=gro.getPeriodicBoxVectors())
+        except Exception as e:
+            if modified_top != self.system_files["top"] and os.path.exists(modified_top):
+                os.unlink(modified_top)
+            raise RuntimeError(f"Could not load GROMACS topology in OpenMM ({e}). "
+                               f"Consider the GROMACS engine: sim.run(engine='gmx').")
 
         try:
-            # Use GromacsGroFile and GromacsTopFile
-            gro = app.GromacsGroFile(gro_file)
-
-            # Since we've converted all paths to absolute, we don't need includeDir
-            # But OpenMM requires it, so we'll use the topology directory
-            print(f"\nLoading topology with all absolute paths...")
-
-            try:
-                top = app.GromacsTopFile(modified_top, periodicBoxVectors=gro.getPeriodicBoxVectors())
-                print("Successfully loaded topology file!")
-            except Exception as e:
-                print("\n" + "=" * 60)
-                print("ERROR: Could not load GROMACS topology file in OpenMM")
-                print("=" * 60)
-                print(f"\nError: {str(e)}")
-
-                # Try to identify which file is missing
-                if "Could not locate #include file:" in str(e):
-                    missing_file = str(e).split("Could not locate #include file:")[-1].strip()
-                    print(f"\nMissing file: {missing_file}")
-                    print("\nThis usually means the path conversion didn't work properly.")
-
-                print("\nPossible solutions:")
-                print("1. Use GROMACS engine instead (recommended):")
-                print("   sim.run(engine='gmx')")
-                print("\n2. Check that all required files exist:")
-                print(f"   - Topology: {top_file}")
-                print(f"   - Ligand files: {self.ff_dir}")
-                print(f"   - GROMACS data: {self.gmx_data_dir}")
-                print("\n3. Manually copy all required files to one directory")
-                print("=" * 60)
-                raise RuntimeError(
-                    f"Could not load topology file in OpenMM. "
-                    f"Consider using GROMACS engine instead: sim.run(engine='gmx')"
-                )
-
-            # Create system
-            system = top.createSystem(
-                nonbondedMethod=app.PME, nonbondedCutoff=1.0 * unit.nanometer, constraints=app.HBonds
-            )
-
-            # Run stages
             outputs = {}
             positions = gro.positions
             velocities = None
-            box_vectors = gro.getPeriodicBoxVectors()
+            box = gro.getPeriodicBoxVectors()
 
             for stage in stages:
-                print(f"\n{'='*60}")
-                print(f" Running {stage.upper()} stage")
-                print(f"{'='*60}")
-
+                print(f"\n{'='*60}\n {stage.upper()} stage\n{'='*60}")
                 if stage == "em":
-                    positions, box_vectors = self._run_minimization(
-                        system, top.topology, positions, box_vectors, platform_obj
-                    )
+                    system = self._build_system(top, box, hmr, hydrogen_mass_amu, ml_potential)
+                    if plumed:
+                        self._apply_plumed(system, plumed)
+                    positions, box = self._run_minimization(system, top.topology, positions, box, platform_obj)
                     outputs["em"] = {"gro": os.path.join(self.gmx_dir, "em_openmm.gro")}
-
-                elif stage == "nvt":
-                    positions, velocities, box_vectors = self._run_nvt(
-                        system, top.topology, positions, box_vectors, platform_obj
-                    )
-                    outputs["nvt"] = {"gro": os.path.join(self.gmx_dir, "nvt_openmm.gro")}
-
-                elif stage == "npt":
-                    positions, velocities, box_vectors = self._run_npt(
-                        system, top.topology, positions, velocities, box_vectors, platform_obj
-                    )
-                    outputs["npt"] = {"gro": os.path.join(self.gmx_dir, "npt_openmm.gro")}
-
-                elif stage == "prod":
-                    self._run_production(system, top.topology, positions, velocities, box_vectors, platform_obj)
-                    outputs["prod"] = {
-                        "dcd": os.path.join(self.gmx_dir, "prod_openmm.dcd"),
-                        "log": os.path.join(self.gmx_dir, "prod_openmm.log"),
-                        "gro": os.path.join(self.gmx_dir, "prod_openmm.gro"),
-                    }
-
+                elif stage in ("nvt", "npt"):
+                    system = self._build_system(top, box, hmr, hydrogen_mass_amu, ml_potential)
+                    if plumed:
+                        self._apply_plumed(system, plumed)
+                    sel = restraints if equil_restraints else "none"
+                    positions, velocities, box = self._run_md(
+                        system, top.topology, positions, velocities, box, platform_obj,
+                        stage=stage, ensemble=("npt" if stage == "npt" else "nvt"),
+                        integrator=integrator, restraints=sel, restraint_fc=restraint_fc)
+                    outputs[stage] = {"gro": os.path.join(self.gmx_dir, f"{stage}_openmm.gro")}
+                elif stage in ("prod", "production"):
+                    system = self._build_system(top, box, hmr, hydrogen_mass_amu, ml_potential)
+                    if plumed:
+                        self._apply_plumed(system, plumed)
+                    positions, velocities, box = self._run_md(
+                        system, top.topology, positions, velocities, box, platform_obj,
+                        stage="prod", ensemble=ensemble, integrator=integrator,
+                        restraints="none", production=True, resume=resume)
+                    outputs["prod"] = {"dcd": os.path.join(self.gmx_dir, "prod_openmm.dcd"),
+                                       "log": os.path.join(self.gmx_dir, "prod_openmm.log"),
+                                       "gro": os.path.join(self.gmx_dir, "prod_openmm.gro")}
+                elif stage == "anneal":
+                    system = self._build_system(top, box, hmr, hydrogen_mass_amu, ml_potential)
+                    positions, velocities, box = self._run_anneal(
+                        system, top.topology, positions, velocities, box, platform_obj, integrator=integrator)
+                    outputs["anneal"] = {"gro": os.path.join(self.gmx_dir, "anneal_openmm.gro")}
+                else:
+                    print(f"  Unknown stage '{stage}', skipping.")
             return outputs
-
         finally:
-            # Clean up temporary topology file
-            if modified_top != top_file and os.path.exists(modified_top):
+            if modified_top != self.system_files["top"] and os.path.exists(modified_top):
                 os.unlink(modified_top)
 
-    def _setup_platform(self, platform_name, device_index):
-        """Setup OpenMM platform with automatic fallback and better diagnostics"""
-        try:
-            platform = mm.Platform.getPlatformByName(platform_name)
+    # ================================================================== #
+    #  Stage implementations                                              #
+    # ================================================================== #
+    def _run_minimization(self, system, topology, positions, box, platform_info):
+        platform, props = platform_info
+        em = self.mdp_params.get("em", {})
+        max_it = int(float(em.get("nsteps", 10000)))
+        tol = float(em.get("emtol", 200.0)) * unit.kilojoule_per_mole / unit.nanometer
+        integrator = mm.VerletIntegrator(1.0 * unit.femtoseconds)
+        sim = app.Simulation(topology, system, integrator, platform, props)
+        sim.context.setPositions(positions)
+        sim.context.setPeriodicBoxVectors(*box)
+        e0 = sim.context.getState(getEnergy=True).getPotentialEnergy()
+        print(f"  Initial PE: {e0}")
+        sim.minimizeEnergy(tolerance=tol, maxIterations=max_it)
+        state = sim.context.getState(getPositions=True, getEnergy=True, enforcePeriodicBox=True)
+        print(f"  Final PE:   {state.getPotentialEnergy()}")
+        out = os.path.join(self.gmx_dir, "em_openmm.gro")
+        self._write_gro_file(out, topology, state.getPositions(), state.getPeriodicBoxVectors(), "EM (OpenMM)")
+        return state.getPositions(), state.getPeriodicBoxVectors()
 
-            if platform_name in ["CUDA", "OpenCL"]:
-                properties = {"DeviceIndex": str(device_index)}
-                if platform_name == "CUDA":
-                    properties["Precision"] = "mixed"
-                    # Add more CUDA-specific optimizations
-                    properties["UseCpuPme"] = "false"
+    def _run_md(self, system, topology, positions, velocities, box, platform_info,
+                stage="nvt", ensemble="nvt", integrator="langevin-middle",
+                restraints="none", restraint_fc=1000.0, production=False, resume=False):
+        platform, props = platform_info
+        mdp_stage = "md" if production else stage
+        p = self.mdp_params.get(mdp_stage, {})
+        dt = float(p.get("dt", 0.002)) * unit.picoseconds
+        nsteps = int(float(p.get("nsteps", _DEFAULT_NSTEPS.get("prod" if production else stage, 250000))))
+        temperature = float(str(p.get("ref_t", "310")).split()[0]) * unit.kelvin
+        pressure = float(str(p.get("ref_p", "1.0")).split()[0]) * unit.bar
 
-                # Test if the platform actually works
-                try:
-                    # Create a minimal test system
-                    test_system = mm.System()
-                    test_system.addParticle(1.0)
-                    test_integrator = mm.VerletIntegrator(1.0)
-                    test_context = mm.Context(test_system, test_integrator, platform, properties)
+        # restraints must be added before the context is created
+        if restraints and restraints != "none":
+            self._add_position_restraints(system, topology, positions, restraints, restraint_fc)
+        # detect membrane from MDP (semiisotropic) unless explicitly set
+        if ensemble == "npt" and "semiisotropic" in str(p.get("pcoupltype", "")).lower():
+            ensemble = "npt-membrane"
+        if ensemble in ("npt", "npt-membrane", "membrane"):
+            self._add_barostat(system, ensemble, temperature, pressure)
 
-                    # If CUDA, get device info
-                    if platform_name == "CUDA" and self.cuda_info["devices"]:
-                        device_name = (
-                            self.cuda_info["devices"][device_index]
-                            if device_index < len(self.cuda_info["devices"])
-                            else "Unknown"
-                        )
-                        print(
-                            f"Successfully initialized {platform_name} platform on device {device_index}: {device_name}"
-                        )
-                    else:
-                        print(f"Successfully initialized {platform_name} platform")
+        integ = self._make_integrator(temperature, dt, integrator)
+        sim = app.Simulation(topology, system, integ, platform, props)
 
-                    del test_context
-                    del test_integrator
-                    del test_system
-                    return platform, properties
-
-                except Exception as e:
-                    error_msg = str(e)
-                    if "CUDA_ERROR_UNSUPPORTED_PTX_VERSION" in error_msg:
-                        print(f"\n⚠️  CUDA version incompatibility detected!")
-                        print("Your CUDA driver is too old for this version of OpenMM.")
-                        print(f"Current driver version: {self.cuda_info.get('driver_version', 'Unknown')}")
-                        print("Falling back to OpenCL platform...")
-
-                        # Try OpenCL
-                        if platform_name == "CUDA":
-                            return self._setup_platform("OpenCL", device_index)
-                    elif "CUDA_ERROR" in error_msg:
-                        print(f"\n⚠️  CUDA error: {error_msg}")
-                        print("Falling back to OpenCL platform...")
-                        if platform_name == "CUDA":
-                            return self._setup_platform("OpenCL", device_index)
-                    else:
-                        raise
+        deffnm = os.path.join(self.gmx_dir, f"{'prod' if production else stage}_openmm")
+        chk = deffnm + ".chk"
+        start = 0
+        if production and resume and os.path.exists(chk):
+            try:
+                sim.loadCheckpoint(chk)
+                start = sim.currentStep
+                print(f"  Resuming from checkpoint at step {start}")
+            except Exception as e:
+                print(f"  Checkpoint load failed ({e}); starting fresh.")
+        if start == 0:
+            sim.context.setPositions(positions)
+            sim.context.setPeriodicBoxVectors(*box)
+            if velocities is not None:
+                sim.context.setVelocities(velocities)
             else:
-                print(f"Using {platform_name} platform (no GPU acceleration)")
-                return platform, {}
+                sim.context.setVelocitiesToTemperature(temperature)
 
-        except Exception as e:
-            print(f"⚠️  {platform_name} platform not available: {e}")
-            if platform_name != "CPU":
-                print("Falling back to CPU platform...")
-                return mm.Platform.getPlatformByName("CPU"), {}
-            else:
-                raise
+        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
+        print(f"  {stage.upper()} {ensemble}: {nsteps:,} steps ({total_time}), T={temperature}"
+              + (f", P={pressure}" if ensemble != "nvt" else ""))
 
-    def _write_gro_file(self, filename, topology, positions, box_vectors, title="Generated by OpenMM"):
-        """Write a GROMACS .gro file"""
+        report_every = int(float(p.get("nstxout-compressed", p.get("nstxout", 5000)) or 5000))
+        if report_every <= 0:   # a literal "0" in the mdp would give a zero-interval reporter
+            report_every = 5000
+        sim.reporters.append(app.StateDataReporter(
+            deffnm + ".log", max(1000, report_every), step=True, time=True, temperature=True,
+            potentialEnergy=True, density=(ensemble != "nvt"), speed=True, totalSteps=nsteps, separator="\t"))
+        if production:
+            sim.reporters.append(app.DCDReporter(deffnm + ".dcd", report_every, append=(start > 0)))
+            sim.reporters.append(app.CheckpointReporter(chk, max(report_every, 50000)))
+
+        with ProgressReporter(nsteps, desc=f"{stage.upper()} {ensemble}") as prog:
+            sim.reporters.append(TqdmReporter(prog, 1000))
+            remaining = nsteps - start
+            if remaining > 0:
+                sim.step(remaining)
+
+        state = sim.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
+        self._write_gro_file(deffnm + ".gro", topology, state.getPositions(),
+                             state.getPeriodicBoxVectors(), f"{stage} (OpenMM)")
+        return state.getPositions(), state.getVelocities(), state.getPeriodicBoxVectors()
+
+    def _run_anneal(self, system, topology, positions, velocities, box, platform_info,
+                    integrator="langevin-middle", t_low=100.0, t_high=None, n_cycles=1):
+        """Simulated annealing: ramp temperature low->high->low over the MD nsteps."""
+        platform, props = platform_info
+        p = self.mdp_params.get("md", self.mdp_params.get("npt", {}))
+        dt = float(p.get("dt", 0.002)) * unit.picoseconds
+        nsteps = int(float(p.get("nsteps", _DEFAULT_NSTEPS["anneal"])))
+        t_high = t_high or float(str(p.get("ref_t", "310")).split()[0])
+        integ = self._make_integrator(t_low * unit.kelvin, dt, integrator)
+        sim = app.Simulation(topology, system, integ, platform, props)
+        sim.context.setPositions(positions)
+        sim.context.setPeriodicBoxVectors(*box)
+        sim.context.setVelocitiesToTemperature(t_low * unit.kelvin)
+        n_windows = 20
+        steps_per = max(1, nsteps // (n_windows * 2 * n_cycles))
+        print(f"  Simulated annealing {t_low}->{t_high}->{t_low} K, {nsteps:,} steps")
+        with ProgressReporter(nsteps, desc="Anneal") as prog:
+            sim.reporters.append(TqdmReporter(prog, 1000))
+            for _ in range(n_cycles):
+                for ramp in (list(range(n_windows)), list(range(n_windows, 0, -1))):
+                    for w in ramp:
+                        T = t_low + (t_high - t_low) * (w / n_windows)
+                        integ.setTemperature(T * unit.kelvin)
+                        sim.step(steps_per)
+        state = sim.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
+        out = os.path.join(self.gmx_dir, "anneal_openmm.gro")
+        self._write_gro_file(out, topology, state.getPositions(), state.getPeriodicBoxVectors(), "Anneal (OpenMM)")
+        return state.getPositions(), state.getVelocities(), state.getPeriodicBoxVectors()
+
+    # ================================================================== #
+    def _write_gro_file(self, filename, topology, positions, box_vectors, title="OpenMM"):
         try:
             with open(filename, "w") as f:
-                # Write title
-                f.write(f"{title}\n")
-
-                # Write number of atoms
-                f.write(f"{topology.getNumAtoms():5d}\n")
-
-                # Write atom data
+                f.write(f"{title}\n{topology.getNumAtoms():5d}\n")
                 for i, atom in enumerate(topology.atoms()):
                     pos = positions[i].value_in_unit(unit.nanometer)
-
-                    # Format: residue number (5), residue name (5), atom name (5),
-                    # atom number (5), x (8.3f), y (8.3f), z (8.3f)
-                    f.write(
-                        f"{atom.residue.index + 1:5d}"
-                        f"{atom.residue.name[:5]:>5s}"
-                        f"{atom.name[:5]:>5s}"
-                        f"{i + 1:5d}"
-                        f"{pos[0]:8.3f}{pos[1]:8.3f}{pos[2]:8.3f}\n"
-                    )
-
-                # Write box vectors
+                    f.write(f"{atom.residue.index + 1:5d}{atom.residue.name[:5]:<5s}{atom.name[:5]:>5s}"
+                            f"{i + 1:5d}{pos[0]:8.3f}{pos[1]:8.3f}{pos[2]:8.3f}\n")
                 if box_vectors is not None:
                     box = box_vectors.value_in_unit(unit.nanometer)
-                    if len(box) == 3:
-                        # Rectangular box
-                        f.write(f"{box[0][0]:10.5f}{box[1][1]:10.5f}{box[2][2]:10.5f}\n")
-                    else:
-                        # Triclinic box - write full matrix
-                        f.write(
-                            f"{box[0][0]:10.5f}{box[1][1]:10.5f}{box[2][2]:10.5f}"
-                            f"{box[0][1]:10.5f}{box[0][2]:10.5f}{box[1][0]:10.5f}"
-                            f"{box[1][2]:10.5f}{box[2][0]:10.5f}{box[2][1]:10.5f}\n"
-                        )
+                    f.write(f"{box[0][0]:10.5f}{box[1][1]:10.5f}{box[2][2]:10.5f}\n")
         except Exception as e:
-            print(f"Warning: Failed to write GRO file: {e}")
-            # Fall back to PDB format
-            pdb_filename = filename.replace(".gro", ".pdb")
-            print(f"Writing PDB file instead: {pdb_filename}")
-            with open(pdb_filename, "w") as f:
+            print(f"Warning: failed to write GRO ({e}); writing PDB instead.")
+            with open(filename.replace(".gro", ".pdb"), "w") as f:
                 app.PDBFile.writeFile(topology, positions, f)
-
-    def _run_minimization(self, system, topology, positions, box_vectors, platform_info):
-        """Run energy minimization with progress bar"""
-        platform, properties = platform_info
-
-        # Get parameters from MDP
-        em_params = self.mdp_params.get("em", {})
-        max_iterations = int(em_params.get("nsteps", 10000))
-        tolerance = float(em_params.get("emtol", 200.0)) * unit.kilojoules_per_mole / unit.nanometer
-
-        print(f"Running energy minimization (max {max_iterations} steps)...")
-        print(f"Tolerance: {tolerance}")
-
-        # Create integrator
-        integrator = mm.VerletIntegrator(1.0 * unit.femtoseconds)
-
-        # Create simulation
-        simulation = app.Simulation(topology, system, integrator, platform, properties)
-        simulation.context.setPositions(positions)
-        simulation.context.setPeriodicBoxVectors(*box_vectors)
-
-        # Get initial energy
-        state = simulation.context.getState(getEnergy=True)
-        initial_energy = state.getPotentialEnergy()
-        print(f"Initial potential energy: {initial_energy}")
-
-        # Minimize with progress tracking
-        with ProgressReporter(max_iterations, desc="Energy Minimization") as progress:
-            # We'll do minimization in chunks to show progress
-            chunk_size = max(100, max_iterations // 100)
-            remaining_iterations = max_iterations
-
-            while remaining_iterations > 0:
-                current_chunk = min(chunk_size, remaining_iterations)
-                simulation.minimizeEnergy(tolerance=tolerance, maxIterations=current_chunk)
-
-                # Update progress
-                progress.update(max_iterations - remaining_iterations + current_chunk)
-
-                # Check if converged
-                state = simulation.context.getState(getEnergy=True)
-                current_energy = state.getPotentialEnergy()
-
-                # Simple convergence check
-                if abs((current_energy - initial_energy) / initial_energy) < 1e-6:
-                    print(f"\nConverged at step {max_iterations - remaining_iterations + current_chunk}")
-                    break
-
-                remaining_iterations -= current_chunk
-
-        # Get minimized positions
-        state = simulation.context.getState(getPositions=True, getEnergy=True, enforcePeriodicBox=True)
-        positions = state.getPositions()
-        box_vectors = state.getPeriodicBoxVectors()
-        final_energy = state.getPotentialEnergy()
-
-        print(f"Final potential energy: {final_energy}")
-        print(f"Energy change: {final_energy - initial_energy}")
-
-        # Save minimized structure
-        output_file = os.path.join(self.gmx_dir, "em_openmm.gro")
-        self._write_gro_file(output_file, topology, positions, box_vectors, title="Energy minimized structure")
-        print(f"Minimized structure saved to: {output_file}")
-
-        return positions, box_vectors
-
-    def _run_nvt(self, system, topology, positions, box_vectors, platform_info):
-        """Run NVT equilibration with progress bar"""
-        platform, properties = platform_info
-
-        # Get parameters from MDP
-        nvt_params = self.mdp_params.get("nvt", {})
-        dt = float(nvt_params.get("dt", 0.002)) * unit.picoseconds
-        nsteps = int(nvt_params.get("nsteps", 250000))
-        temperature = float(nvt_params.get("ref_t", "310").split()[0]) * unit.kelvin
-
-        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
-        print(f"Running NVT equilibration")
-        print(f"  Steps: {nsteps:,}")
-        print(f"  Time: {total_time}")
-        print(f"  Temperature: {temperature}")
-
-        # Create integrator with thermostat
-        integrator = mm.LangevinIntegrator(temperature, 1.0 / unit.picosecond, dt)
-
-        # Create simulation
-        simulation = app.Simulation(topology, system, integrator, platform, properties)
-        simulation.context.setPositions(positions)
-        simulation.context.setPeriodicBoxVectors(*box_vectors)
-        simulation.context.setVelocitiesToTemperature(temperature)
-
-        # Add reporters
-        log_file = os.path.join(self.gmx_dir, "nvt_openmm.log")
-        simulation.reporters.append(
-            app.StateDataReporter(
-                log_file,
-                5000,
-                step=True,
-                time=True,
-                temperature=True,
-                progress=False,  # Disable built-in progress
-                remainingTime=False,
-                speed=True,
-                totalSteps=nsteps,
-                separator="\t",
-            )
-        )
-
-        # Add progress bar reporter
-        with ProgressReporter(nsteps, desc="NVT Equilibration") as progress:
-            simulation.reporters.append(TqdmReporter(progress, 1000))
-
-            # Run simulation
-            simulation.step(nsteps)
-
-        # Get final state
-        state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
-        positions = state.getPositions()
-        velocities = state.getVelocities()
-        box_vectors = state.getPeriodicBoxVectors()
-
-        # Save final structure
-        output_file = os.path.join(self.gmx_dir, "nvt_openmm.gro")
-        self._write_gro_file(output_file, topology, positions, box_vectors, title="NVT equilibrated structure")
-        print(f"NVT equilibrated structure saved to: {output_file}")
-
-        return positions, velocities, box_vectors
-
-    def _run_npt(self, system, topology, positions, velocities, box_vectors, platform_info):
-        """Run NPT equilibration with progress bar"""
-        platform, properties = platform_info
-
-        # Get parameters from MDP
-        npt_params = self.mdp_params.get("npt", {})
-        dt = float(npt_params.get("dt", 0.002)) * unit.picoseconds
-        nsteps = int(npt_params.get("nsteps", 250000))
-        temperature = float(npt_params.get("ref_t", "310").split()[0]) * unit.kelvin
-        pressure = float(npt_params.get("ref_p", 1.0)) * unit.bar
-
-        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
-        print(f"Running NPT equilibration")
-        print(f"  Steps: {nsteps:,}")
-        print(f"  Time: {total_time}")
-        print(f"  Temperature: {temperature}")
-        print(f"  Pressure: {pressure}")
-
-        # Add barostat
-        barostat = mm.MonteCarloBarostat(pressure, temperature, 25)
-        system.addForce(barostat)
-
-        # Create integrator
-        integrator = mm.LangevinIntegrator(temperature, 1.0 / unit.picosecond, dt)
-
-        # Create simulation
-        simulation = app.Simulation(topology, system, integrator, platform, properties)
-        simulation.context.setPositions(positions)
-        if velocities is not None:
-            simulation.context.setVelocities(velocities)
-        else:
-            simulation.context.setVelocitiesToTemperature(temperature)
-        simulation.context.setPeriodicBoxVectors(*box_vectors)
-
-        # Add reporters
-        log_file = os.path.join(self.gmx_dir, "npt_openmm.log")
-        simulation.reporters.append(
-            app.StateDataReporter(
-                log_file,
-                5000,
-                step=True,
-                time=True,
-                temperature=True,
-                volume=True,
-                density=True,
-                progress=False,
-                remainingTime=False,
-                speed=True,
-                totalSteps=nsteps,
-                separator="\t",
-            )
-        )
-
-        # Add progress bar reporter
-        with ProgressReporter(nsteps, desc="NPT Equilibration") as progress:
-            simulation.reporters.append(TqdmReporter(progress, 1000))
-
-            # Run simulation
-            simulation.step(nsteps)
-
-        # Get final state
-        state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
-        positions = state.getPositions()
-        velocities = state.getVelocities()
-        box_vectors = state.getPeriodicBoxVectors()
-
-        # Save final structure
-        output_file = os.path.join(self.gmx_dir, "npt_openmm.gro")
-        self._write_gro_file(output_file, topology, positions, box_vectors, title="NPT equilibrated structure")
-        print(f"NPT equilibrated structure saved to: {output_file}")
-
-        return positions, velocities, box_vectors
-
-    def _run_production(self, system, topology, positions, velocities, box_vectors, platform_info):
-        """Run production MD with progress bar"""
-        platform, properties = platform_info
-
-        # Get parameters from MDP
-        md_params = self.mdp_params.get("md", {})
-        dt = float(md_params.get("dt", 0.002)) * unit.picoseconds
-        nsteps = int(md_params.get("nsteps", 250000000))
-        temperature = float(md_params.get("ref_t", "310").split()[0]) * unit.kelvin
-        pressure = float(md_params.get("ref_p", 1.0)) * unit.bar
-
-        # Output frequency
-        nstxtcout = int(md_params.get("nstxtcout", 250000))
-
-        total_time = (nsteps * dt).in_units_of(unit.nanoseconds)
-        print(f"Running production MD")
-        print(f"  Steps: {nsteps:,}")
-        print(f"  Time: {total_time}")
-        print(f"  Temperature: {temperature}")
-        print(f"  Pressure: {pressure}")
-        print(f"  Frame output interval: {nstxtcout} steps")
-
-        # Add barostat
-        barostat = mm.MonteCarloBarostat(pressure, temperature, 25)
-        system.addForce(barostat)
-
-        # Create integrator
-        integrator = mm.LangevinIntegrator(temperature, 1.0 / unit.picosecond, dt)
-
-        # Create simulation
-        simulation = app.Simulation(topology, system, integrator, platform, properties)
-        simulation.context.setPositions(positions)
-        if velocities is not None:
-            simulation.context.setVelocities(velocities)
-        else:
-            simulation.context.setVelocitiesToTemperature(temperature)
-        simulation.context.setPeriodicBoxVectors(*box_vectors)
-
-        # Add reporters
-        log_file = os.path.join(self.gmx_dir, "prod_openmm.log")
-        dcd_file = os.path.join(self.gmx_dir, "prod_openmm.dcd")
-
-        simulation.reporters.append(app.DCDReporter(dcd_file, nstxtcout))
-        simulation.reporters.append(
-            app.StateDataReporter(
-                log_file,
-                5000,
-                step=True,
-                time=True,
-                temperature=True,
-                volume=True,
-                density=True,
-                potentialEnergy=True,
-                kineticEnergy=True,
-                progress=False,
-                remainingTime=False,
-                speed=True,
-                totalSteps=nsteps,
-                separator="\t",
-            )
-        )
-
-        # Add progress bar reporter with checkpoint saving
-        checkpoint_interval = 1000000  # Save checkpoint every 1M steps
-        checkpoint_file = os.path.join(self.gmx_dir, "prod_openmm.chk")
-
-        with ProgressReporter(nsteps, desc="Production MD") as progress:
-            simulation.reporters.append(TqdmReporter(progress, 1000))
-
-            # Run simulation with periodic checkpointing
-            steps_completed = 0
-            while steps_completed < nsteps:
-                steps_to_run = min(checkpoint_interval, nsteps - steps_completed)
-                simulation.step(steps_to_run)
-                steps_completed += steps_to_run
-
-                # Save checkpoint
-                if steps_completed % checkpoint_interval == 0:
-                    simulation.saveCheckpoint(checkpoint_file)
-                    if not TQDM_AVAILABLE:
-                        print(f"Checkpoint saved at step {steps_completed}")
-
-        # Save final structure
-        state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
-        final_positions = state.getPositions()
-        final_box_vectors = state.getPeriodicBoxVectors()
-
-        output_gro = os.path.join(self.gmx_dir, "prod_openmm.gro")
-        self._write_gro_file(
-            output_gro, topology, final_positions, final_box_vectors, title="Production MD final structure"
-        )
-
-        print(f"\n✅ Production MD completed!")
-        print(f"  Trajectory: {dcd_file}")
-        print(f"  Log file: {log_file}")
-        print(f"  Final structure: {output_gro}")
-        print(f"  Checkpoint: {checkpoint_file}")

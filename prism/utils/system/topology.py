@@ -424,14 +424,14 @@ class TopologyProcessorMixin:
             if nter:
                 # Map terminal name to menu selection number
                 # This is a simplified approach - actual indices vary by force field
-                nter_input = self._get_terminal_menu_index(nter, "nter", ff_info)
+                nter_input = self._get_terminal_menu_index("nter", nter, ff_info)
                 if nter_input:
                     input_lines.append(nter_input)
             else:
                 input_lines.append("0")  # Default selection
 
             if cter:
-                cter_input = self._get_terminal_menu_index(cter, "cter", ff_info)
+                cter_input = self._get_terminal_menu_index("cter", cter, ff_info)
                 if cter_input:
                     input_lines.append(cter_input)
             else:

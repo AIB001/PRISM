@@ -16,13 +16,13 @@ from prism.forcefield.registry import normalize_forcefield_name
 
 
 class FEPSystemNamer:
-    """FEP 系统目录命名标准化工具
+    """Standardization helper for FEP system directory names.
 
-    标准格式: <protein_ff>-mut_<ligand_ff>
-    示例: amber14sb_ol15-mut_gaff2
+    Standard format: <protein_ff>-mut_<ligand_ff>
+    Example: amber14sb_ol15-mut_gaff2
     """
 
-    # 力场名称标准化映射
+    # Force-field name normalization map
     FORCEFIELD_NORMALIZATION = {
         # AMBER force fields
         "amber14sb_OL15": "amber14sb_ol15",
@@ -47,15 +47,15 @@ class FEPSystemNamer:
 
     @classmethod
     def generate_name(cls, protein_ff: str, ligand_ff: str) -> str:
-        """生成标准 FEP 系统目录名
+        """Generate the standard FEP system directory name.
 
         Args:
-            protein_ff: 蛋白质力场名称 (如 amber14sb_OL15)
-            ligand_ff: 配体力场名称 (如 gaff2, opls)
+            protein_ff: Protein force-field name (e.g. amber14sb_OL15)
+            ligand_ff: Ligand force-field name (e.g. gaff2, opls)
 
         Returns:
-            标准化目录名，格式: <protein_ff>-mut_<ligand_ff>
-            例如: amber14sb_ol15-mut_gaff2
+            Normalized directory name, format: <protein_ff>-mut_<ligand_ff>
+            e.g. amber14sb_ol15-mut_gaff2
 
         Examples:
             >>> FEPSystemNamer.generate_name("amber14sb_OL15", "gaff2")
@@ -63,28 +63,28 @@ class FEPSystemNamer:
             >>> FEPSystemNamer.generate_name("charmm36_jul2022", "cgenff")
             'charmm36_jul2022-mut_cgenff'
         """
-        # 标准化力场名称
+        # Normalize the force-field names
         protein = cls._normalize_forcefield_name(protein_ff)
         ligand = cls._normalize_forcefield_name(ligand_ff)
 
-        # 生成标准目录名
+        # Build the standard directory name
         standard_name = f"{protein}-mut_{ligand}"
 
         return standard_name
 
     @classmethod
     def validate_name(cls, name: str) -> bool:
-        """验证目录名是否符合 FEP 系统命名规范
+        """Validate that a directory name follows the FEP system naming convention.
 
-        规范: <protein_ff>-mut_<ligand_ff>
-        - 只能包含小写字母、数字、下划线、连字符
-        - 必须包含 "-mut_" 分隔符
+        Convention: <protein_ff>-mut_<ligand_ff>
+        - May contain only lowercase letters, digits, underscores and hyphens
+        - Must contain the "-mut_" separator
 
         Args:
-            name: 目录名称
+            name: Directory name
 
         Returns:
-            是否符合规范
+            Whether the name conforms to the convention
 
         Examples:
             >>> FEPSystemNamer.validate_name("amber14sb_ol15-mut_gaff2")
@@ -94,33 +94,33 @@ class FEPSystemNamer:
             >>> FEPSystemNamer.validate_name("amber14sb_ol15_gaff2")
             False
         """
-        # 检查格式: <protein_ff>-mut_<ligand_ff>
+        # Check the format: <protein_ff>-mut_<ligand_ff>
         pattern = r"^[a-z0-9_]+-mut_[a-z0-9_]+$"
         return bool(re.match(pattern, name))
 
     @classmethod
     def suggest_name(cls, protein_ff: str, ligand_ff: str) -> str:
-        """建议目录名（带提示信息）
+        """Suggest a directory name (with hint information).
 
         Args:
-            protein_ff: 蛋白质力场名称
-            ligand_ff: 配体力场名称
+            protein_ff: Protein force-field name
+            ligand_ff: Ligand force-field name
 
         Returns:
-            建议的标准目录名
+            The suggested standard directory name
         """
         standard = cls.generate_name(protein_ff, ligand_ff)
         return standard
 
     @classmethod
     def parse_name(cls, name: str) -> Optional[Dict[str, str]]:
-        """解析标准目录名，提取力场信息
+        """Parse a standard directory name and extract force-field information.
 
         Args:
-            name: 标准目录名
+            name: Standard directory name
 
         Returns:
-            包含 protein_ff 和 ligand_ff 的字典，如果解析失败返回 None
+            A dict with protein_ff and ligand_ff, or None if parsing fails
 
         Examples:
             >>> FEPSystemNamer.parse_name("amber14sb_ol15-mut_gaff2")
@@ -136,18 +136,18 @@ class FEPSystemNamer:
 
     @classmethod
     def _normalize_forcefield_name(cls, ff_name: str) -> str:
-        """标准化力场名称
+        """Normalize a force-field name.
 
-        转换规则：
-        1. 转小写
-        2. 移除多余分隔符（- 和 _）
-        3. 使用映射表进行标准化
+        Conversion rules:
+        1. Lowercase
+        2. Remove redundant separators ('-' and '_')
+        3. Apply the normalization map
 
         Args:
-            ff_name: 原始力场名称
+            ff_name: Original force-field name
 
         Returns:
-            标准化后的力场名称
+            The normalized force-field name
         """
         # Check local mapping case-insensitively for protein force fields
         normalized_lower = ff_name.lower()
@@ -161,38 +161,38 @@ class FEPSystemNamer:
         except KeyError:
             pass
 
-        # 标准化处理：转小写，移除特殊字符
+        # Normalize: lowercase and strip special characters
         normalized = ff_name.lower()
-        # 移除所有连字符和下划线
+        # Remove all hyphens and underscores
         normalized = re.sub(r"[-_]+", "", normalized)
 
         return normalized
 
     @classmethod
     def get_default_output_dir(cls, protein_ff: str, ligand_ff: str, base_dir: str = ".") -> Path:
-        """获取默认输出目录路径
+        """Get the default output directory path.
 
         Args:
-            protein_ff: 蛋白质力场名称
-            ligand_ff: 配体力场名称
-            base_dir: 基础目录（默认为当前目录）
+            protein_ff: Protein force-field name
+            ligand_ff: Ligand force-field name
+            base_dir: Base directory (defaults to the current directory)
 
         Returns:
-            完整的输出目录路径
+            The full output directory path
         """
         standard_name = cls.generate_name(protein_ff, ligand_ff)
         return Path(base_dir) / standard_name
 
 
 def generate_fep_system_name(protein_ff: str, ligand_ff: str) -> str:
-    """生成 FEP 系统目录名的便捷函数
+    """Convenience function to generate a FEP system directory name.
 
     Args:
-        protein_ff: 蛋白质力场名称
-        ligand_ff: 配体力场名称
+        protein_ff: Protein force-field name
+        ligand_ff: Ligand force-field name
 
     Returns:
-        标准化目录名
+        The normalized directory name
 
     Examples:
         >>> generate_fep_system_name("amber14sb_OL15", "gaff2")
@@ -202,24 +202,24 @@ def generate_fep_system_name(protein_ff: str, ligand_ff: str) -> str:
 
 
 def validate_fep_system_name(name: str) -> bool:
-    """验证 FEP 系统目录名的便捷函数
+    """Convenience function to validate a FEP system directory name.
 
     Args:
-        name: 目录名称
+        name: Directory name
 
     Returns:
-        是否符合规范
+        Whether the name conforms to the convention
     """
     return FEPSystemNamer.validate_name(name)
 
 
 def parse_fep_system_name(name: str) -> Optional[Dict[str, str]]:
-    """解析 FEP 系统目录名的便捷函数
+    """Convenience function to parse a FEP system directory name.
 
     Args:
-        name: 标准目录名
+        name: Standard directory name
 
     Returns:
-        包含力场信息的字典，解析失败返回 None
+        A dict with force-field information, or None if parsing fails
     """
     return FEPSystemNamer.parse_name(name)

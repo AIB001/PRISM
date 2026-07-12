@@ -17,7 +17,7 @@ When the user asks about drug design, inhibitor screening, molecule search, targ
 
 - **Confirm before every action** — present parameters to the user and wait for approval before calling any tool.
 - **Directory structure** — create `docking/` before docking, create `MD/` before building. All outputs go under these directories.
-- **MD building defaults** — use `prism protein.pdb ligand.mol2 -lff gaff2 -ff amber14sb -o <ID> --gaussian hf --isopt false --protonation propka`. Do NOT override box, salt, or temperature parameters — always use PRISM's built-in defaults for those.
+- **MD building defaults** — use `prism protein.pdb ligand.mol2 -lff gaff2 -ff amber14sb -o <ID> --protonation propka`. This gives the canonical defaults: AM1-BCC ligand charges (do NOT add `--gaussian`), amber14sb protein FF, gaff2 ligand FF, PROPKA protonation, tip3p water. Do NOT override box, salt, or temperature parameters — always use PRISM's built-in defaults for those.
 - **All file paths must be absolute.**
 - **Case directory naming** — use `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`).
 - **No nested duplicate system directories** — prohibit `.../GMX_PROLIG_FEP/GMX_PROLIG_FEP/`.

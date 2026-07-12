@@ -83,6 +83,8 @@ class PRISMBuilder(
         lambda_windows=11,
         lambda_strategy="decoupled",
         lambda_distribution="nonlinear",
+        ptm_config=None,
+        membrane_config=None,
     ):
         """
         Initialize PRISM Builder with configuration support
@@ -377,6 +379,33 @@ class PRISMBuilder(
                 self.lambda_windows = fep_cfg["lambda_windows"]
         self.forcefield_idx = self.config["forcefield"]["index"]
         self.water_model_idx = self.config["water_model"]["index"]
+
+        # PTM configuration (post-translational modifications + disulfides).
+        # Opt-in: enabled only when the user passes --ptm/--ssbond or a YAML
+        # `ptm:` section is present; otherwise it is a no-op (disulfides="none").
+        from ..ptm import PTMConfig, parse_ptm_yaml
+
+        if ptm_config is not None:
+            self.ptm_config = ptm_config
+        elif self.config.get("ptm"):
+            self.ptm_config = parse_ptm_yaml(self.config.get("ptm"))
+        else:
+            self.ptm_config = PTMConfig(requests=[], disulfides="none")
+
+        # Membrane configuration (opt-in). When enabled, the workflow dispatches
+        # to the membrane build path instead of the standard solvation step.
+        from ..membrane import parse_membrane_yaml
+
+        if membrane_config is not None:
+            self.membrane_config = membrane_config
+        elif self.config.get("membrane"):
+            self.membrane_config = parse_membrane_yaml(
+                self.config.get("membrane"),
+                temperature=self.config.get("simulation", {}).get("temperature", 303.15),
+            )
+        else:
+            self.membrane_config = None
+        self.membrane_mode = bool(self.membrane_config and self.membrane_config.enabled)
 
         # Get force field and water model info
         self.forcefield = self._get_forcefield_info()

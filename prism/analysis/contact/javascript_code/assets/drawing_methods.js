@@ -233,13 +233,53 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                 }
             }
             
+            contactStrength(contact) {
+                // Strongest occupancy among typed interactions, else contact frequency.
+                if (contact.interactionTypes && contact.interactionTypes.length) {
+                    return contact.interactionTypes[0].occupancy;
+                }
+                return contact.frequency || 0;
+            }
+
+            isContactVisible(contact) {
+                // Occupancy threshold (use the stronger of frequency / typed occupancy).
+                const strength = Math.max(contact.frequency || 0, this.contactStrength(contact));
+                if (this.minOccupancy && strength < this.minOccupancy) return false;
+                // Interaction-type filter (only applies to typed contacts).
+                if (this.activeTypes && contact.dominantType && !this.activeTypes.has(contact.dominantType)) {
+                    return false;
+                }
+                return true;
+            }
+
+            getInteractionEdgeStyle(contact) {
+                // Returns {color, dash} keyed on the dominant interaction type,
+                // falling back to the legacy frequency gradient when untyped.
+                if (contact.dominantType && typeof INTERACTION_STYLE !== 'undefined'
+                        && INTERACTION_STYLE[contact.dominantType]) {
+                    const s = INTERACTION_STYLE[contact.dominantType];
+                    return { color: s.color, dash: s.dash || [] };
+                }
+                return { color: this.getFrequencyColor(contact.frequency), dash: [] };
+            }
+
+            getResidueClassColor(cls) {
+                if (cls && typeof RESIDUE_CLASS_COLORS !== 'undefined' && RESIDUE_CLASS_COLORS[cls]) {
+                    return RESIDUE_CLASS_COLORS[cls];
+                }
+                return null;
+            }
+
             drawConnections() {
                 this.contacts.forEach((contact, index) => {
+                    if (!this.isContactVisible(contact)) return;
                     const ligandAtom = this.ligandAtoms.find(a => a.id === contact.ligandAtom);
                     if (!ligandAtom) return;
-                    
-                    const color = this.getFrequencyColor(contact.frequency);
-                    
+
+                    const edgeStyle = this.getInteractionEdgeStyle(contact);
+                    const color = edgeStyle.color;
+                    const strength = this.contactStrength(contact);
+
                     let targetX = contact.x;
                     let targetY = contact.y;
                     
@@ -271,14 +311,18 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                         this.ctx.restore();
                     }
                     
-                    // Draw main connection
+                    // Draw main connection: width encodes occupancy, dash encodes
+                    // interaction type (solid = H-bond/salt bridge; dashed = pi/halogen/hydrophobic).
+                    this.ctx.save();
+                    this.ctx.setLineDash(edgeStyle.dash);
                     this.ctx.strokeStyle = color;
-                    this.ctx.lineWidth = contact.isTop3 ? (3 + contact.frequency * 3) : (1.5 + contact.frequency * 2);
-                    this.ctx.globalAlpha = contact.isTop3 ? 0.8 : (0.5 + contact.frequency * 0.3);
+                    this.ctx.lineWidth = contact.isTop3 ? (3 + strength * 3) : (1.5 + strength * 2.5);
+                    this.ctx.globalAlpha = contact.isTop3 ? 0.85 : (0.5 + strength * 0.35);
                     this.ctx.beginPath();
                     this.ctx.moveTo(ligandAtom.x, ligandAtom.y);
                     this.ctx.lineTo(targetX, targetY);
                     this.ctx.stroke();
+                    this.ctx.restore();
                     this.ctx.globalAlpha = 1.0;
                 });
             }
@@ -287,12 +331,12 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                 this.ctx.strokeStyle = '#34495e';
                 this.ctx.lineWidth = 3;
                 
-                // 绘制键
+                // Draw bonds
                 this.ligandBonds.forEach(([id1, id2]) => {
                     const atom1 = this.ligandAtoms.find(a => a.id === id1);
                     const atom2 = this.ligandAtoms.find(a => a.id === id2);
                     if (atom1 && atom2) {
-                        // 如果隐藏氢原子模式开启，跳过涉及氢的键
+                        // If hide-hydrogen mode is on, skip bonds involving hydrogen
                         if (!this.showHydrogens && (atom1.element === 'H' || atom2.element === 'H')) {
                             return;
                         }
@@ -309,9 +353,9 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                     }
                 });
                 
-                // 绘制原子
+                // Draw atoms
                 this.ligandAtoms.forEach(atom => {
-                    // 如果隐藏氢原子模式开启，跳过氢原子
+                    // If hide-hydrogen mode is on, skip hydrogen atoms
                     if (!this.showHydrogens && atom.element === 'H') {
                         return;
                     }
@@ -348,7 +392,10 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
             
             drawContacts() {
                 this.contacts.forEach((contact, i) => {
-                    const color = this.getFrequencyColor(contact.frequency);
+                    if (!this.isContactVisible(contact)) return;
+                    // Residue node colour encodes chemistry class (Maestro/MOE style);
+                    // falls back to the frequency gradient when typing is unavailable.
+                    const color = this.getResidueClassColor(contact.residueClass) || this.getFrequencyColor(contact.frequency);
                     this.drawOrientedStructure(contact, color, i + 1);
                 });
             }
@@ -369,20 +416,24 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                 
                 // Use contact.isTop3 instead of index
                 if (contact.isTop3) {
-                    this.drawOrientedAAStructure(x, y, residueType, contact.residue, color, index, angle, contact.frequency);
+                    this.drawOrientedAAStructure(x, y, residueType, contact.residue, color, index, angle, contact.frequency, contact.id);
                 } else {
                     this.drawSimpleLabel(x, y, residueType, contact.residue, color, index);
                 }
             }
-            
-            drawOrientedAAStructure(x, y, residueType, residueName, color, index, angle, frequency) {
+
+            drawOrientedAAStructure(x, y, residueType, residueName, color, index, angle, frequency, contactId) {
                 // Calculate contact atom position (closer to structure)
                 const contactAtomPos = {
                     x: x + Math.cos(angle) * 25,  // Reduced from 30
                     y: y + Math.sin(angle) * 25
                 };
                 
-                const contactIdx = this.contacts.findIndex(c => c.residue === residueName);
+                // Match on the unique contact id (not residue name) so duplicate
+                // residues in allow_duplicate_residues mode stash onto the right object.
+                const contactIdx = contactId !== undefined
+                    ? this.contacts.findIndex(c => c.id === contactId)
+                    : this.contacts.findIndex(c => c.residue === residueName);
                 if (contactIdx >= 0) {
                     this.contacts[contactIdx].contactAtomX = contactAtomPos.x;
                     this.contacts[contactIdx].contactAtomY = contactAtomPos.y;
@@ -478,9 +529,11 @@ rotate3D(x, y, z, rotX, rotY, rotZ) {
                 this.ctx.font = 'bold 14px Arial';  // Reduced from 18px
                 this.ctx.textAlign = 'center';
                 this.ctx.textBaseline = 'middle';
-                // 计算TOP3排名 - 使用residueName参数
+                // Compute TOP3 ranking - uses the residueName parameter
                 const top3Contacts = this.contacts.filter(c => c.isTop3).sort((a, b) => b.frequency - a.frequency);
-                const rankIndex = top3Contacts.findIndex(c => c.residue === residueName) + 1;
+                const rankIndex = (contactId !== undefined
+                    ? top3Contacts.findIndex(c => c.id === contactId)
+                    : top3Contacts.findIndex(c => c.residue === residueName)) + 1;
                 this.ctx.fillText('#' + rankIndex, x + 40, y - 25);
             }
             

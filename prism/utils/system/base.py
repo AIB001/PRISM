@@ -82,7 +82,8 @@ class SystemBuilderBase:
         self.model_dir.mkdir(exist_ok=True)
 
     def _run_command(
-        self, command: list, work_dir: str, input_str: Optional[str] = None, env: Optional[dict] = None
+        self, command: list, work_dir: str, input_str: Optional[str] = None, env: Optional[dict] = None,
+        timeout: Optional[int] = 3600,
     ) -> Tuple[str, str]:
         """
         Executes a shell command and handles errors.
@@ -92,12 +93,15 @@ class SystemBuilderBase:
             work_dir: The directory in which to run the command.
             input_str: A string to be passed to the command's stdin.
             env: Optional dictionary of environment variables to set.
+            timeout: Hard wall-clock limit in seconds (default 1h); None disables it.
+                External tools (pdb2gmx/grompp/genion/pdbfixer) can hang, so a bound
+                keeps a single stuck step from stalling the whole build.
 
         Returns:
             A tuple containing the stdout and stderr of the command.
 
         Raises:
-            RuntimeError: If the command returns a non-zero exit code.
+            RuntimeError: If the command returns a non-zero exit code or times out.
         """
         cmd_str = " ".join(map(str, command))
         print(f"Executing in {work_dir}: {cmd_str}")
@@ -116,7 +120,12 @@ class SystemBuilderBase:
             text=True,
             env=cmd_env,
         )
-        stdout, stderr = process.communicate(input=input_str)
+        try:
+            stdout, stderr = process.communicate(input=input_str, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise RuntimeError(f"Command timed out after {timeout}s: {cmd_str}")
 
         if process.returncode != 0:
             print("--- STDOUT ---")
@@ -154,7 +163,7 @@ class SystemBuilderBase:
             },
             "cter": {
                 "amber": {"COO-": "0", "COOH": "1", "None": "2"},
-                "charmm": {"COO-": "0", "COOH": "1", "None": "2"},
+                "charmm": {"COO-": "1", "COOH": "2", "CT2": "3", "None": "7"},
                 "default": {"COO-": "0", "COOH": "1", "None": "2"},
             },
         }

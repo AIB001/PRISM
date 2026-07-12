@@ -19,6 +19,10 @@ class ContactMap {
                     this.zoom = 1.0;
                     this.centerX = 600;
                     this.centerY = 400;
+
+                    // Interaction filtering state (set by the report UI controls)
+                    this.minOccupancy = 0.0;   // hide contacts below this strength
+                    this.activeTypes = null;   // null => show all interaction types
                     
                     // 3D rotation angles
                     this.rotationX = 0;

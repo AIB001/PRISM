@@ -53,4 +53,4 @@ class AnalysisConfig:
 
     def __post_init__(self):
         if self.parallel_workers is None:
-            self.parallel_workers = min(os.cpu_count(), 8)
+            self.parallel_workers = min(os.cpu_count() or 1, 8)

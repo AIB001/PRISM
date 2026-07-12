@@ -96,7 +96,7 @@ class RTFForceFieldGenerator(ForceFieldGeneratorBase):
 
         try:
             # Check if output already exists
-            lig_dir = os.path.join(self.output_dir, "LIG.rtf2gmx")
+            lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
                     print(f"\nUsing cached RTF force field parameters from: {lig_dir}")

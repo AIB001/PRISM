@@ -67,7 +67,7 @@ grep "Atom[0-9]+" mapping.html | wc -l  # Should be 0
 - Legend width: Consistent with other panels, not content-stretched
 - Legend: Centered or aligned with controls
 - Avoid extra whitespace in Legend area
-- No奇怪换行 in English text
+- No awkward line breaks in English text
 
 ### Bond Order Rendering Requirements
 

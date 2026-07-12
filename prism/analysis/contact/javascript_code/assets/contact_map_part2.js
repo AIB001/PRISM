@@ -162,9 +162,19 @@ initEvents() {
             showTooltip(element, x, y) {
                 let content = '';
                 if (element.frequency !== undefined) {
-                    const distanceText = element.avgDistance ? ` | Distance: ${element.avgDistance.toFixed(2)}nm` : '';
+                    const distanceText = element.avgDistance ? ` | Distance: ${element.avgDistance.toFixed(2)} nm` : '';
                     const top3Text = element.isTop3 ? ' <span style="color: gold;">★ TOP 3</span>' : '';
-                    content = `${element.residue}${top3Text}<br>Frequency: ${(element.frequency * 100).toFixed(1)}%${distanceText}`;
+                    content = `<b>${element.residue}</b>${top3Text}<br>Frequency: ${(element.frequency * 100).toFixed(1)}%${distanceText}`;
+                    // Append typed interactions with their occupancy, colour-coded.
+                    if (element.interactionTypes && element.interactionTypes.length) {
+                        content += '<br><span style="opacity:0.75;font-size:11px;">Interactions:</span>';
+                        element.interactionTypes.forEach(it => {
+                            const meta = (typeof INTERACTION_STYLE !== 'undefined') ? INTERACTION_STYLE[it.type] : null;
+                            const label = meta ? meta.label : it.type;
+                            const col = meta ? meta.color : '#ccc';
+                            content += `<br><span style="color:${col};">●</span> ${label}: ${(it.occupancy * 100).toFixed(0)}%`;
+                        });
+                    }
                 } else {
                     content = `Ligand Atom: ${element.element}${element.id.substring(1)}<br>Contacts: ${element.contacts || 0}`;
                 }

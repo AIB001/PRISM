@@ -48,6 +48,8 @@ class HTMLGenerator:
         self.ligand_data = None
         self.contacts = None
         self.stats = None
+        self.residue_interactions = {}
+        self.interaction_summary = {}
 
     def analyze(self):
         """
@@ -74,6 +76,31 @@ class HTMLGenerator:
         analyzer = FastContactAnalyzer(self.traj)
         self.contact_results = analyzer.calculate_contact_proportions()
 
+        # Classify interaction types (H-bond, salt bridge, pi-stacking, etc.)
+        # with per-type trajectory occupancy. Non-fatal: an empty result simply
+        # falls back to distance-only colouring in the report.
+        print("\nClassifying interaction types...")
+        try:
+            from .interactions import InteractionTyper
+
+            typer = InteractionTyper(verbose=True)
+            typing = typer.compute(
+                self.traj,
+                self.contact_results.get("ligand_residue"),
+                ligand_mol,
+                self.contact_results.get("ligand_atoms"),
+            )
+            self.residue_interactions = typing.get("residue_interactions", {})
+            self.interaction_summary = typing.get("summary", {})
+            print(
+                f"Typed interactions for {len(self.residue_interactions)} residues "
+                f"({', '.join(f'{k}:{v}' for k, v in self.interaction_summary.items()) or 'none'})"
+            )
+        except Exception as exc:
+            print(f"Warning: interaction typing skipped ({exc})")
+            self.residue_interactions = {}
+            self.interaction_summary = {}
+
         # Generate visualization data
         vis_generator = VisualizationGenerator()
         self.ligand_data = vis_generator.generate_ligand_data(self.contact_results, ligand_mol)
@@ -82,6 +109,7 @@ class HTMLGenerator:
             self.ligand_data,
             max_contacts=self.max_contacts,
             allow_duplicate_residues=self.allow_duplicate_residues,
+            residue_interactions=self.residue_interactions,
         )
 
         # Calculate statistics
@@ -95,6 +123,8 @@ class HTMLGenerator:
             "contacts": self.contacts,
             "stats": self.stats,
             "traj": self.traj,
+            "residue_interactions": self.residue_interactions,
+            "interaction_summary": self.interaction_summary,
         }
 
     def generate(self, output_file="contact_analysis.html"):
@@ -127,6 +157,7 @@ class HTMLGenerator:
             ligand_data=self.ligand_data,
             contacts=self.contacts,
             stats=self.stats,
+            interaction_summary=self.interaction_summary,
         )
 
         # Write output

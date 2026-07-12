@@ -400,24 +400,25 @@ grep '"classification": "unknown"' output/mapping.html  # Should return 0
 4. **Generate HTML** and check visualization quality
 5. **Commit** with descriptive message: `[fep] brief description`
 
-### FEP测试资源管理
+### FEP test resource management (adapt to the host — never hardcode)
 
-**CPU/GPU资源要求**:
-- **所有FEP测试必须使用14个CPU核心** (`-ntomp 14`)
-- 56核心系统最多支持4个并行FEP任务 (4 × 14 = 56核心)
-- **除非有SQM计算**，否则必须保证每个gmx任务使用14核心
-- 使用 `find . -name "run_single_em_nvt.sh" -exec sed -i 's/-ntomp [0-9]*/-ntomp 14/g' {} \;` 更新脚本
+FEP run scripts must adapt to whatever machine they run on. Do **not** hardcode a
+core count, GPU count, or GPU id — detect them at runtime.
 
-**GPU分配策略**:
-- 每个FEP测试分配独立GPU (GPU 0-5)
-- 使用 `CUDA_VISIBLE_DEVICES=N` 指定GPU编号
-- 避免GPU过载，确保每个测试有足够显存
+**CPU threads**:
+- Derive `-ntomp` from the available cores (e.g. `nproc` / `os.cpu_count()`).
+- When running several jobs concurrently, leave headroom: `threads_per_job ≈ total_cores / n_parallel_jobs`.
 
-**并行任务监控**:
-- 最多同时运行4个FEP测试
-- 监控命令: `ps aux | grep "gmx mdrun" | grep -v grep | wc -l`
-- 如果超过4个并行任务，必须停止最不重要的一个
-- 检查GPU状态: `nvidia-smi | grep "gmx"`
+**GPU allocation**:
+- Detect GPUs with `nvidia-smi -L`; assign one per job and select it with `CUDA_VISIBLE_DEVICES=<id>`.
+- Do not assume a fixed number of GPUs; fall back to CPU-only when none are present.
+
+**Parallelism**:
+- Cap concurrency at `min(n_gpus, total_cores // threads_per_job)`.
+
+**Monitoring**:
+- `ps aux | grep "gmx mdrun" | grep -v grep`
+- `nvidia-smi`
 
 ## Git Workflow
 

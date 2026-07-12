@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Python tool for building protein-ligand systems for molecular dynamics simulations in GROMACS. It supports multiple force fields including GAFF (via AmberTools) and OpenFF (Open Force Field).
 
-**Documentation Repository**: `/home/gxf1212/data/work/PRISM-Tutorial` - Official documentation and tutorials for PRISM
+**Documentation**: Official tutorials and guides at https://prism-tutorial.com/ (the PRISM-Tutorial project).
 
 ## Code Search and Navigation
 
@@ -189,24 +189,23 @@ Git commit message format: `[module] description;xxx`. Don't be too long!
 - **Commit messages**: Should reflect all recent changes in the commit
 - **File creation**: Avoid creating files in root directory
 
-### CPU/GPU资源管理
+### Compute Resource Guidance (adapt to the host — never hardcode)
 
-**CPU核心数要求**:
-- **所有GROMACS任务必须使用14个CPU核心** (`-ntomp 14`)
-- 56核心系统 ÷ 14核心/任务 = 最多4个并行任务
-- **除非有SQM计算**，否则必须保证每个gmx任务使用14核心
-- 更新脚本时使用: `find . -name "run_single_em_nvt.sh" -exec sed -i 's/-ntomp [0-9]*/-ntomp 14/g' {} \;`
+PRISM and its generated run scripts must adapt to whatever machine they run on.
+Do **not** hardcode a specific core count, GPU count, or GPU id anywhere in the
+software or in generated scripts — detect them at runtime.
 
-**GPU分配**:
-- 系统有8个GPU (GPU 0-7)，通常使用GPU 0-5
-- 每个测试分配独立GPU，避免GPU过载
-- 使用 `CUDA_VISIBLE_DEVICES=N` 指定GPU
+- **CPU threads**: derive `-ntomp` from the available cores (e.g. `nproc` /
+  `os.cpu_count()`). When running several jobs concurrently, leave headroom:
+  `threads_per_job ≈ total_cores / n_parallel_jobs`.
+- **GPUs**: detect with `nvidia-smi -L`; assign one job per GPU and select it
+  with `CUDA_VISIBLE_DEVICES=<id>`. Do not assume a fixed number of GPUs.
+- **Parallelism**: cap concurrency at `min(n_gpus, total_cores // threads_per_job)`.
+- **Monitoring**: `ps aux | grep "gmx mdrun" | grep -v grep`.
 
-**并行任务管理**:
-- 最多同时运行4个FEP测试 (4 × 14 = 56核心)
-- 如果超过4个并行任务，必须停止最不重要的一个
-- 监控命令: `ps aux | grep "gmx mdrun" | grep -v grep | wc -l`
+### Working notes
 
-不用每次push；TODO完成了就清掉
-
-尽量复用已有的测试脚本。
+- Reuse existing test scripts where possible rather than writing new ones.
+- Avoid creating files in the repository root; keep the package tree clean.
+- Benchmark, model-deployment, and planning artifacts live OUTSIDE the package
+  (in the surrounding project folder), never inside `PRISM-main/`.

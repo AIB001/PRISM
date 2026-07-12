@@ -37,7 +37,7 @@ class DataProcessor:
                 try:
                     Chem.SanitizeMol(ligand_mol)
                     print(f"Ligand loaded: {ligand_mol.GetNumAtoms()} atoms")
-                except:
+                except Exception:
                     print("Warning: Could not sanitize ligand molecule")
         except Exception as e:
             print(f"Error loading ligand: {e}")

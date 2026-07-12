@@ -100,7 +100,7 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
 
         try:
             # Check if output already exists
-            lig_dir = os.path.join(self.output_dir, "LIG.charmm2gmx")
+            lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
                     print(f"\nUsing cached CHARMM-GUI force field parameters from: {lig_dir}")
@@ -601,7 +601,7 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
         content = "; Include CHARMM36 force field\n"
 
         # Check if charmm36.ff exists
-        charmm36_dir = Path(self.output_dir) / "LIG.charmm2gmx" / "charmm36.ff"
+        charmm36_dir = Path(self.output_dir) / self.get_output_dir_name() / "charmm36.ff"
         if charmm36_dir.exists():
             content += '#include "charmm36.ff/charmm36.itp"\n'
         else:
@@ -611,7 +611,7 @@ class CHARMMGUIForceFieldGenerator(ForceFieldGeneratorBase):
                 # Copy charmm36.itp to output
                 import shutil as shutil_mod
 
-                charmm36_dst = Path(self.output_dir) / "LIG.charmm2gmx" / "charmm36.itp"
+                charmm36_dst = Path(self.output_dir) / self.get_output_dir_name() / "charmm36.itp"
                 shutil_mod.copy2(charmm36_src, charmm36_dst)
                 content += '#include "charmm36.itp"\n'
 

@@ -18,6 +18,7 @@ from .loader import (
     get_contact_map_class_part2,
     get_drawing_methods,
     get_utility_functions,
+    get_interaction_ui,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "get_contact_map_class_part2",
     "get_drawing_methods",
     "get_utility_functions",
+    "get_interaction_ui",
 ]

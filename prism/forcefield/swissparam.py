@@ -293,7 +293,17 @@ class SwissParamForceFieldGenerator(ForceFieldGeneratorBase):
         os.makedirs(extract_dir, exist_ok=True)
 
         with tarfile.open(tar_file, "r:gz") as tar:
-            tar.extractall(extract_dir)
+            # tar_data comes from a remote server: reject members that would
+            # escape extract_dir (path traversal / tarbomb / symlink escape).
+            try:
+                tar.extractall(extract_dir, filter="data")  # Python 3.12+
+            except TypeError:
+                dest = os.path.realpath(extract_dir)
+                for m in tar.getmembers():
+                    target = os.path.realpath(os.path.join(extract_dir, m.name))
+                    if target != dest and not target.startswith(dest + os.sep):
+                        raise RuntimeError(f"Unsafe tar member path: {m.name}")
+                tar.extractall(extract_dir)
 
         print(f"    ✓ Extracted to: {extract_dir}")
 

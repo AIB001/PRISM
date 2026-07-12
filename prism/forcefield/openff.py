@@ -263,7 +263,9 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 ]
 
                 print(f"Running antechamber with command: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir)
+                # antechamber runs sqm (AM1-BCC), which can hang on charged/large
+                # ligands — bound it so the build fails over to obabel instead.
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir, timeout=600)
 
                 if result.returncode == 0 and os.path.exists(temp_sdf):
                     mol = Molecule.from_file(temp_sdf)
@@ -297,7 +299,7 @@ class OpenFFForceFieldGenerator(ForceFieldGeneratorBase):
                 ]
 
                 print(f"Running Open Babel with command: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir)
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir, timeout=300)
 
                 if result.returncode == 0 and os.path.exists(temp_sdf):
                     mol = Molecule.from_file(temp_sdf)

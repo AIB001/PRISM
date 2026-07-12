@@ -54,7 +54,7 @@ class VisualizationGenerator:
                         coords_3d.append([pos.x, pos.y, pos.z])
                     coords_3d = np.array(coords_3d)
                     has_3d = True
-            except:
+            except Exception:
                 coords_3d = np.column_stack([coords_2d, np.zeros(len(coords_2d))])
 
             # Normalize 3D coordinates
@@ -142,7 +142,14 @@ class VisualizationGenerator:
 
         return ligand_data
 
-    def generate_contact_data(self, contact_results, ligand_data, max_contacts=20, allow_duplicate_residues=False):
+    def generate_contact_data(
+        self,
+        contact_results,
+        ligand_data,
+        max_contacts=20,
+        allow_duplicate_residues=False,
+        residue_interactions=None,
+    ):
         """
         Generate contact data for HTML with proper alignment and TOP3 marking
 
@@ -156,6 +163,10 @@ class VisualizationGenerator:
             Maximum number of contacts to display (default: 20, or 25 if allow_duplicate_residues=True)
         allow_duplicate_residues : bool
             If True, allows same residue to appear multiple times with different ligand atoms (default: False)
+        residue_interactions : dict, optional
+            Mapping of ``res_id -> {interaction_type: occupancy}`` produced by
+            :class:`prism.analysis.contact.interactions.InteractionTyper`. When
+            provided, each contact is annotated with interaction-type metadata.
 
         Returns
         -------
@@ -164,10 +175,33 @@ class VisualizationGenerator:
         """
         if allow_duplicate_residues:
             # Mode 1: Allow duplicate residues - show atom-pair level contacts
-            return self._generate_contact_data_with_duplicates(contact_results, ligand_data, max_contacts)
+            contacts = self._generate_contact_data_with_duplicates(contact_results, ligand_data, max_contacts)
         else:
             # Mode 2: Unique residues only - show best contact per residue
-            return self._generate_contact_data_unique_residues(contact_results, ligand_data, max_contacts)
+            contacts = self._generate_contact_data_unique_residues(contact_results, ligand_data, max_contacts)
+
+        self._annotate_interactions(contacts, residue_interactions or {})
+        return contacts
+
+    @staticmethod
+    def _annotate_interactions(contacts, residue_interactions):
+        """Attach interaction-type metadata and residue chemistry class to contacts.
+
+        ``interactionTypes`` is a list of ``{"type", "occupancy"}`` sorted by
+        occupancy; ``dominantType`` is the strongest interaction (or ``None``).
+        ``residueClass`` colours the residue node by chemistry. This is additive:
+        when no typing data is available the fields default to empty so the
+        front-end falls back to legacy frequency colouring.
+        """
+        from .interactions import residue_class
+
+        for contact in contacts:
+            res_id = contact.get("residue", "")
+            types = residue_interactions.get(res_id, {})
+            sorted_types = sorted(types.items(), key=lambda kv: kv[1], reverse=True)
+            contact["interactionTypes"] = [{"type": t, "occupancy": float(o)} for t, o in sorted_types]
+            contact["dominantType"] = sorted_types[0][0] if sorted_types else None
+            contact["residueClass"] = residue_class(contact.get("residueType", res_id))
 
     def _generate_contact_data_unique_residues(self, contact_results, ligand_data, max_contacts):
         """Generate contact data with unique residues (one contact per residue)"""

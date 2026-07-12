@@ -227,6 +227,35 @@ Example usage:
         help="Handle N-terminal MET residues: keep (default), drop, auto (drop for CHARMM36*)",
     )
 
+    # Post-translational modification (PTM) options
+    ptm_group = parser.add_argument_group("Post-translational modifications (PTM)")
+    ptm_group.add_argument(
+        "--ptm",
+        action="append",
+        default=None,
+        metavar="CHAIN:RESID:CODE[:CHARGE]",
+        help="Mark a residue as a PTM by wwPDB CCD code (repeatable). "
+        "Examples: --ptm A:145:SEP (phosphoserine), --ptm A:32:TPO:-1 (monoanionic). "
+        "CHARMM36 builds these directly; AMBER phospho uses the tleap+phosaa route. "
+        "Run --list-ptms to see supported codes. The modified atoms must be present in the input PDB.",
+    )
+    ptm_group.add_argument(
+        "--ssbond",
+        choices=["auto", "none"],
+        default=None,
+        help="Disulfide handling: auto (detect SG-SG pairs and form bonds) or none. "
+        "Enabling any PTM/ssbond option activates the PTM staging step.",
+    )
+    ptm_group.add_argument(
+        "--phospho-ff",
+        choices=["phosaa19SB", "phosaa14SB", "phosaa10"],
+        default="phosaa19SB",
+        help="AMBER phosphorylation parameter set for the tleap route (default: phosaa19SB)",
+    )
+    ptm_group.add_argument(
+        "--list-ptms", action="store_true", help="List supported PTM codes and exit"
+    )
+
     # Energy minimization
     em_group = parser.add_argument_group("Energy minimization")
     em_group.add_argument(
@@ -358,6 +387,45 @@ Example usage:
         "--rest2-cutoff", type=float, default=0.5, help="Pocket detection cutoff in nm for REST2 (default: 0.5)"
     )
 
+    # Membrane protein options
+    memb_group = parser.add_argument_group("Membrane protein options")
+    memb_group.add_argument(
+        "--membrane",
+        action="store_true",
+        help="Build an all-atom protein-in-bilayer system (PACKMOL-Memgen -> ParmEd -> GROMACS) "
+        "with a semiisotropic membrane equilibration protocol. Output in GMX_PROLIG_MEMB/.",
+    )
+    memb_group.add_argument(
+        "--lipid",
+        action="append",
+        default=None,
+        metavar="LIPID",
+        help="Lipid type for the bilayer (repeatable for mixtures), e.g. --lipid POPC --lipid CHL1. Default: POPC",
+    )
+    memb_group.add_argument(
+        "--lipid-ratio",
+        type=int,
+        action="append",
+        default=None,
+        metavar="N",
+        help="Molar ratio per lipid (parallel to --lipid), e.g. --lipid POPC --lipid CHL1 --lipid-ratio 10 --lipid-ratio 1",
+    )
+    memb_group.add_argument(
+        "--lipid-ff",
+        choices=["lipid21", "slipids", "charmm36"],
+        default="lipid21",
+        help="Lipid force field (default: lipid21; pairs with AMBER. charmm36 pairs with CHARMM36).",
+    )
+    memb_group.add_argument(
+        "--membrane-orient",
+        choices=["opm", "ppm", "preoriented", "memembed"],
+        default="preoriented",
+        help="Membrane-normal orientation source (default: preoriented). 'opm' fetches an oriented structure by PDB id.",
+    )
+    memb_group.add_argument(
+        "--membrane-pdbid", default=None, help="PDB id to fetch a pre-oriented structure from OPM (with --membrane-orient opm)"
+    )
+
     # FEP (Free Energy Perturbation) options
     fep_group = parser.add_argument_group("FEP (Free Energy Perturbation) options")
     fep_group.add_argument(
@@ -398,7 +466,7 @@ Example usage:
         try:
             # Try to get from package resources
             default_config = pkg_resources.resource_string("prism", "configs/default_config.yaml").decode("utf-8")
-        except:
+        except Exception:
             # Fallback to embedded string
             default_config = """# PRISM Default Configuration File
 # This file serves as a template for creating custom configurations
@@ -504,6 +572,22 @@ pressure_coupling:
             setup_cadd_agent()
         else:
             print("Unknown module: '{}'. Available modules: cadd-agent".format(args.add))
+        sys.exit(0)
+
+    # Handle --list-ptms option
+    if getattr(args, "list_ptms", False):
+        from ..ptm import iter_ptm_defs
+
+        print("\nSupported post-translational modifications (CCD code -> details):\n")
+        print(f"  {'CODE':<6}{'NAME':<28}{'PARENT':<8}{'CHARMM36':<10}{'AMBER':<14}{'STATUS'}")
+        print("  " + "-" * 78)
+        for d in iter_ptm_defs():
+            charmm = d.charmm_resname or "-"
+            amber = d.amber_resname or "-"
+            status = "ok" if d.validated else "custom params needed"
+            print(f"  {d.code:<6}{d.name:<28}{d.parent:<8}{charmm:<10}{amber:<14}{status}")
+        print("\nDisulfides: use --ssbond auto (native pdb2gmx, no parameters needed).")
+        print("Usage: --ptm CHAIN:RESID:CODE[:CHARGE]   e.g. --ptm A:145:SEP --ptm A:32:TPO:-1")
         sys.exit(0)
 
     # Handle --list-forcefields option
@@ -676,6 +760,32 @@ pressure_coupling:
     if args.fep and args.output == "prism_output":
         args.output = _default_fep_output_dir(args.forcefield, args.ligand_forcefield)
 
+    # Build PTM configuration (opt-in: only when --ptm or --ssbond is given)
+    ptm_config = None
+    if getattr(args, "ptm", None) or getattr(args, "ssbond", None):
+        from ..ptm import parse_ptm_cli
+
+        try:
+            ptm_config = parse_ptm_cli(args.ptm, args.ssbond, args.phospho_ff)
+        except ValueError as exc:
+            parser.error(str(exc))
+
+    # Build membrane configuration (opt-in: only when --membrane is given)
+    membrane_config = None
+    if getattr(args, "membrane", False):
+        from ..membrane import parse_membrane_cli
+
+        membrane_config = parse_membrane_cli(
+            membrane=True,
+            lipid=args.lipid,
+            lipid_ratio=args.lipid_ratio,
+            orient=args.membrane_orient,
+            pdb_id=args.membrane_pdbid,
+            lipid_ff=args.lipid_ff,
+            salt_concentration=args.salt_concentration,
+            temperature=args.temperature,
+        )
+
     # Create and run PRISM Builder
     builder = PRISMBuilder(
         args.protein,
@@ -711,6 +821,8 @@ pressure_coupling:
         distance_cutoff=args.distance_cutoff if hasattr(args, "distance_cutoff") else 0.6,  # Atom mapping cutoff
         charge_strategy=args.charge_strategy if hasattr(args, "charge_strategy") else "mean",  # Charge strategy
         lambda_windows=args.lambda_windows if hasattr(args, "lambda_windows") else 11,  # Lambda windows
+        ptm_config=ptm_config,  # Post-translational modifications / disulfides
+        membrane_config=membrane_config,  # Membrane protein build
         **kwargs,
     )
 

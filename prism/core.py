@@ -314,11 +314,14 @@ class PRISMSystem:
             files["npt_mdp"] = os.path.join(mdp_dir, "npt.mdp")
             files["md_mdp"] = os.path.join(mdp_dir, "md.mdp")
 
-        # Force field files
-        if self.ligand_forcefield == "gaff":
-            ff_dir = os.path.join(self.output_dir, "LIG.amb2gmx")
-        else:
-            ff_dir = os.path.join(self.output_dir, "LIG.openff2gmx")
+        # Force field files (resolve the canonical subdir via the registry,
+        # so all ligand force fields are handled — not just gaff/openff).
+        try:
+            from prism.forcefield.registry import get_primary_forcefield_output_subdir
+            ff_subdir = get_primary_forcefield_output_subdir(self.ligand_forcefield)
+        except Exception:
+            ff_subdir = "LIG.openff2gmx"
+        ff_dir = os.path.join(self.output_dir, ff_subdir)
 
         if os.path.exists(ff_dir):
             files["ligand_ff_directory"] = ff_dir

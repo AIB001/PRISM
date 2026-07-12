@@ -10,6 +10,13 @@ from .contact_analyzer import FastContactAnalyzer
 from .data_processor import DataProcessor
 from .visualization_generator import VisualizationGenerator
 from .html_builder import HTMLBuilder
+from .interactions import (
+    InteractionTyper,
+    INTERACTION_TYPES,
+    INTERACTION_STYLE,
+    RESIDUE_CLASS_COLORS,
+    residue_class,
+)
 
 __all__ = [
     "generate_html",
@@ -18,4 +25,9 @@ __all__ = [
     "DataProcessor",
     "VisualizationGenerator",
     "HTMLBuilder",
+    "InteractionTyper",
+    "INTERACTION_TYPES",
+    "INTERACTION_STYLE",
+    "RESIDUE_CLASS_COLORS",
+    "residue_class",
 ]

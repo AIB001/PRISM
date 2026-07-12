@@ -121,11 +121,11 @@ def check_gpu_available():
     try:
         import subprocess
 
-        result = subprocess.run(["nvidia-smi", "--list-gpus"], capture_output=True, text=True, check=False)
+        result = subprocess.run(["nvidia-smi", "--list-gpus"], capture_output=True, text=True, check=False, timeout=10)
         if result.returncode == 0:
             gpu_info["cuda_available"] = True
             gpu_info["devices"] = result.stdout.strip().split("\n")
-    except:
+    except Exception:
         pass
 
     # Check for OpenCL
@@ -138,7 +138,7 @@ def check_gpu_available():
             for platform in platforms:
                 devices = platform.get_devices()
                 gpu_info["devices"].extend([str(d) for d in devices])
-    except:
+    except Exception:
         pass
 
     return gpu_info
@@ -198,9 +198,12 @@ def estimate_simulation_time(mdp_params, system_size):
     return estimates
 
 
-def create_checkpoint_script(gmx_dir, stage="prod"):
+def create_checkpoint_script(gmx_dir, stage="prod", ntomp=None, gpu_id="auto"):
     """
     Create a checkpoint restart script for GROMACS.
+
+    Thread count and GPU usage are auto-detected at script-generation time and
+    are NOT hardcoded, so the script is portable across machines.
 
     Parameters:
     -----------
@@ -208,25 +211,39 @@ def create_checkpoint_script(gmx_dir, stage="prod"):
         Path to GMX_PROLIG_MD directory
     stage : str
         Simulation stage to restart
+    ntomp : int, optional
+        OpenMP threads; if None, uses all detected logical cores.
+    gpu_id : int | str | None
+        'auto' detects a GPU; an int forces a device id; None forces CPU-only.
 
     Returns:
     --------
     str
         Path to created script
     """
+    if ntomp is None:
+        ntomp = max(1, os.cpu_count() or 1)
+    if gpu_id == "auto":
+        try:
+            import subprocess
+
+            r = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, check=False)
+            gpu_id = 0 if (r.returncode == 0 and "GPU 0" in r.stdout) else None
+        except FileNotFoundError:
+            gpu_id = None
+    gpu_flags = f" -nb gpu -bonded gpu -pme gpu -gpu_id {gpu_id}" if gpu_id is not None else ""
+
     script_content = f"""#!/bin/bash
 # Restart {stage} simulation from checkpoint
 
-cd {gmx_dir}
+cd "{gmx_dir}"
 
 if [ -f ./{stage}/{stage}.cpt ]; then
     echo "Restarting {stage} from checkpoint..."
     gmx mdrun -s ./{stage}/{stage}.tpr \\
               -cpi ./{stage}/{stage}.cpt \\
               -deffnm ./{stage}/{stage} \\
-              -ntmpi 1 -ntomp 15 \\
-              -nb gpu -bonded gpu -pme gpu \\
-              -gpu_id 0 -v
+              -ntmpi 1 -ntomp {ntomp}{gpu_flags} -v
 else
     echo "No checkpoint file found at ./{stage}/{stage}.cpt"
     exit 1

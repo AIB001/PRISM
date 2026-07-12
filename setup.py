@@ -52,6 +52,20 @@ extras_require = {
         "plotly>=5.0.0",  # For interactive HTML reports
         "tqdm>=4.60.0",  # For progress bars
     ],
+    "simulation": [
+        # Run simulations with the OpenMM engine (minimize/nvt/npt/membrane/
+        # production/anneal, restraints, HMR, checkpoint-resume). The GROMACS
+        # engine needs no Python deps (just the `gmx` binary on PATH).
+        "openmm>=8.0",  # best installed via conda: conda install -c conda-forge openmm
+        "tqdm>=4.60.0",
+    ],
+    "openmm-plugins": [
+        # OPTIONAL OpenMM plugins for advanced run types (install only if needed):
+        #   - hybrid ML/MM potentials (ANI/MACE) for a ligand region
+        "openmm-ml>=1.1",
+        # NOTE: metadynamics / steered MD via PLUMED requires openmm-plumed, which
+        # is conda-only:   conda install -c conda-forge openmm-plumed
+    ],
     "all": [
         "acpype>=2021.0",
         "openff-toolkit>=0.10.0",
@@ -65,6 +79,7 @@ extras_require = {
         "alchemlyb>=0.6.0",
         "plotly>=5.0.0",
         "tqdm>=4.60.0",
+        "openmm>=8.0",  # OpenMM simulation engine
     ],
 }
 
@@ -122,6 +137,8 @@ print("  pip install -e .[openff]        # With OpenFF support")
 print("  pip install -e .[opls]          # With OPLS-AA support (LigParGen)")
 print("  pip install -e .[swissparam]    # With SwissParam support (MMFF/MATCH/Hybrid)")
 print("  pip install -e .[analysis]      # With enhanced analysis (MDTraj, SciPy)")
+print("  pip install -e .[simulation]    # With the OpenMM simulation engine")
+print("  pip install -e .[openmm-plugins]# OPTIONAL OpenMM plugins (ML/MM; PLUMED via conda)")
 print("  pip install -e .[all]           # With all force fields and features")
 
 print("\nALTERNATIVE (PIP ONLY - may have dependency issues):")

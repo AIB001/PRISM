@@ -34,8 +34,60 @@ class WorkflowMixin:
             return self.run_mmpbsa()
         elif self.fep_mode:
             return self.run_fep()
+        elif getattr(self, "membrane_mode", False):
+            return self.run_membrane()
         else:
             return self.run_normal()
+
+    def run_membrane(self):
+        """Build an all-atom protein-in-bilayer system (membrane protein mode)."""
+        from ..membrane import MembraneBuilder
+
+        print_header("PRISM Membrane Builder Workflow")
+        try:
+            self.save_config()
+
+            print_step(1, 3, "Cleaning protein structure")
+            cleaned_protein = self.clean_protein()
+            print_success("Protein structure cleaned")
+
+            # Optional PTM / disulfide staging before membrane embedding.
+            cleaned_protein = self.apply_ptm(cleaned_protein)
+
+            print_step(2, 3, "Reporting membrane-build prerequisites")
+            builder = MembraneBuilder(self.membrane_config, verbose=True)
+            missing = builder.capability_report()
+            if missing:
+                print_warning("Some membrane-build tools are missing:")
+                for m in missing:
+                    print_warning(f"  - {m}")
+                print_warning(
+                    "PRISM will still emit the orientation + membrane MDP scaffold. "
+                    "Install AmberTools (packmol-memgen + ParmEd) or run from that env to complete the bilayer."
+                )
+
+            print_step(3, 3, "Building membrane system (orient -> bilayer -> convert -> mdps)")
+            result = builder.build(cleaned_protein, self.output_dir)
+
+            print_header("Membrane Setup " + ("Complete!" if result.success else "(partial)"))
+            print(f"\n  System dir: {path(result.system_dir)}")
+            if result.gro:
+                print(f"  Structure:  {path(result.gro)}")
+                print(f"  Topology:   {path(result.top)}")
+            if result.mdps:
+                print(f"  Membrane MDPs: {', '.join(sorted(result.mdps))}")
+            if not result.success:
+                print_warning(result.note)
+                print("\n  Ligand-in-membrane embedding and full equilibration wiring are planned for the next increment.")
+
+            return self.output_dir
+
+        except Exception as e:
+            print_error(f"Membrane workflow failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+            raise
 
     def run_normal(self):
         """Run the normal (non-PMF) workflow"""
@@ -54,6 +106,9 @@ class WorkflowMixin:
             print_step(2, 6, "Cleaning protein structure")
             cleaned_protein = self.clean_protein()
             print_success("Protein structure cleaned")
+
+            # Step 2b: Apply PTM / disulfide staging (opt-in; no-op otherwise)
+            cleaned_protein = self.apply_ptm(cleaned_protein)
 
             # Step 3: Build model
             print_step(3, 6, "Building GROMACS system")

@@ -47,6 +47,11 @@ def get_utility_functions() -> str:
     return _load_js_file("utility_functions.js")
 
 
+def get_interaction_ui() -> str:
+    """Interaction-report UI logic (legends, filters, theme toggle, table)"""
+    return _load_js_file("interaction_ui.js")
+
+
 def get_javascript_code() -> str:
     """Return the complete JavaScript code as a string.
 
@@ -60,6 +65,7 @@ def get_javascript_code() -> str:
         + get_contact_map_class_part2()
         + get_drawing_methods()
         + get_utility_functions()
+        + get_interaction_ui()
         + r"""
     </script>
 </body>

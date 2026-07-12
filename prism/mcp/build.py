@@ -17,7 +17,7 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
-        protonation: str = "gromacs",
+        protonation: str = "propka",
         temperature: float = 310.0,
         ph: float = 7.0,
         production_ns: float = 500.0,
@@ -35,6 +35,12 @@ def register(mcp):
         nterm_met: str = "keep",
         em_tolerance: float = 200.0,
         em_steps: int = 10000,
+        ptm: Optional[str] = None,
+        ssbond: Optional[str] = None,
+        membrane: bool = False,
+        lipid: str = "POPC",
+        membrane_orient: str = "preoriented",
+        membrane_pdbid: Optional[str] = None,
     ) -> str:
         """Build a complete protein-ligand system for GROMACS molecular dynamics simulation.
 
@@ -46,10 +52,13 @@ def register(mcp):
           4. Generate MDP parameter files (em, nvt, npt, md)
           5. Generate localrun.sh script for GPU-accelerated simulation
 
-        Recommended defaults: amber14sb protein force field + gaff2 ligand force field.
+        PRISM canonical defaults (use these unless the user asks otherwise):
+        amber14sb protein force field + gaff2 ligand force field + tip3p water +
+        PROPKA protonation + AM1-BCC ligand charges (gaussian_method=None).
 
         If the user has Gaussian (g16) installed, they can set gaussian_method to 'hf'
         or 'dft' to use high-precision RESP charges instead of the default AM1-BCC.
+        AM1-BCC (the default) is fast and needs no external QM software.
         If g16 is not available, PRISM will generate Gaussian input files and a script
         for the user to run manually on a machine with Gaussian.
 
@@ -69,7 +78,7 @@ def register(mcp):
                 For amber19sb, use water_model="opc".
             water_model: Water model. Default: "tip3p".
                 Options: "tip3p", "tip4p", "spc", "spce", "opc" (for amber19sb).
-            protonation: Protonation method. Default: "gromacs".
+            protonation: Protonation method. Default: "propka" (canonical PRISM default).
                 "gromacs": Let pdb2gmx handle protonation states (default HIE).
                 "propka": Use PROPKA pKa prediction for intelligent per-residue
                 ionizable residue states (HID/HIE/HIP, ASH/GLH, LYN/CYM/TYH). Requires propka package.
@@ -97,6 +106,21 @@ def register(mcp):
                 "auto": Drop for CHARMM36 force fields, keep otherwise.
             em_tolerance: Energy minimization convergence tolerance in kJ/mol/nm. Default: 200.0.
             em_steps: Maximum number of energy minimization steps. Default: 10000.
+            ptm: Post-translational modifications (optional). Comma-separated specs
+                "CHAIN:RESID:CODE[:CHARGE]", e.g. "A:145:SEP,A:32:TPO:-1".
+                Codes: SEP/TPO/PTR (phospho), MLZ/MLY/M3L (methyl-Lys), ALY (acetyl-Lys),
+                2MR (methyl-Arg). The modified atoms must already be present in the input PDB.
+                CHARMM36 builds these directly; AMBER phospho uses the tleap+phosaa route.
+            ssbond: Disulfide handling (optional): "auto" (detect SG-SG and bond) or "none".
+                Enabling ptm or ssbond activates the PTM staging step.
+            membrane: If true, build a protein-in-bilayer system (PACKMOL-Memgen ->
+                ParmEd -> GROMACS, semiisotropic membrane MDP). Requires AmberTools.
+                Output goes to GMX_PROLIG_MEMB/. Default: false.
+            lipid: Lipid type for the bilayer when membrane=true. Default: "POPC".
+            membrane_orient: Orientation source for membrane builds:
+                "preoriented" (default), "opm" (fetch oriented structure by PDB id), "ppm".
+            membrane_pdbid: PDB id to fetch a pre-oriented structure from OPM
+                (used with membrane_orient="opm").
         """
         logger.info(f"build_system: {protein_path} + {ligand_paths} -> {output_dir}")
 
@@ -138,6 +162,25 @@ def register(mcp):
                 # Single ligand: pass string; multiple: pass list
                 lig_input = lig_list[0] if len(lig_list) == 1 else lig_list
 
+                # Optional PTM / disulfide staging
+                ptm_config = None
+                if ptm or ssbond:
+                    from prism.ptm import parse_ptm_cli
+
+                    ptm_specs = [s.strip() for s in ptm.split(",")] if ptm else None
+                    ptm_config = parse_ptm_cli(ptm_specs, ssbond=ssbond, phospho_ff="phosaa19SB")
+
+                # Optional membrane build
+                membrane_config = None
+                if membrane:
+                    from prism.membrane import parse_membrane_cli
+
+                    membrane_config = parse_membrane_cli(
+                        membrane=True, lipid=[lipid], lipid_ratio=None,
+                        orient=membrane_orient, pdb_id=membrane_pdbid, lipid_ff="lipid21",
+                        salt_concentration=salt_concentration, temperature=temperature,
+                    )
+
                 builder = PRISMBuilder(
                     protein_path=protein_path,
                     ligand_paths=lig_input,
@@ -148,6 +191,8 @@ def register(mcp):
                     overwrite=overwrite,
                     gaussian_method=gaussian_method,
                     do_optimization=do_optimization,
+                    ptm_config=ptm_config,
+                    membrane_config=membrane_config,
                 )
 
                 # Apply simulation parameters
@@ -242,7 +287,7 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
-        protonation: str = "gromacs",
+        protonation: str = "propka",
         temperature: float = 310.0,
         ph: float = 7.0,
         salt_concentration: float = 0.15,
@@ -282,7 +327,7 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
-            protonation: Protonation method. Default: "gromacs".
+            protonation: Protonation method. Default: "propka" (canonical PRISM default).
                 "gromacs": Let pdb2gmx handle protonation states (default HIE).
                 "propka": Use PROPKA pKa prediction for intelligent per-residue
                 ionizable residue states. Requires propka package.
@@ -393,7 +438,7 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
-        protonation: str = "gromacs",
+        protonation: str = "propka",
         ph: float = 7.0,
         salt_concentration: float = 0.15,
         ligand_charge: int = 0,
@@ -429,7 +474,7 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
-            protonation: Protonation method. Default: "gromacs".
+            protonation: Protonation method. Default: "propka" (canonical PRISM default).
                 "gromacs": Let pdb2gmx handle protonation states (default HIE).
                 "propka": Use PROPKA pKa prediction for intelligent per-residue
                 ionizable residue states. Requires propka package.
@@ -539,7 +584,7 @@ def register(mcp):
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
         water_model: str = "tip3p",
-        protonation: str = "gromacs",
+        protonation: str = "propka",
         temperature: float = 310.0,
         ph: float = 7.0,
         salt_concentration: float = 0.15,
@@ -573,7 +618,7 @@ def register(mcp):
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
             forcefield: Protein force field. Default: "amber14sb" (recommended).
             water_model: Water model. Default: "tip3p".
-            protonation: Protonation method. Default: "gromacs".
+            protonation: Protonation method. Default: "propka" (canonical PRISM default).
                 "gromacs": Let pdb2gmx handle protonation states (default HIE).
                 "propka": Use PROPKA pKa prediction for intelligent per-residue
                 ionizable residue states. Requires propka package.

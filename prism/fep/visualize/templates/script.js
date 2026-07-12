@@ -67,34 +67,34 @@
         // Draw bonds
         function drawBonds(atoms, bonds, offsetX, offsetY) {
             bonds.forEach(bond => {
-                // 兼容旧格式：数组 [id1, id2]
+                // Backward-compat for the old format: array [id1, id2]
                 const atom1Id = bond.atom1 || bond[0];
                 const atom2Id = bond.atom2 || bond[1];
-                const bondType = bond.type || 1;  // 默认单键
+                const bondType = bond.type || 1;  // default: single bond
 
                 const atom1 = atoms.find(a => a.id === atom1Id);
                 const atom2 = atoms.find(a => a.id === atom2Id);
 
                 if (atom1 && atom2) {
-                    // 根据键序类型绘制
+                    // Draw according to bond-order type
                     if (bondType === 2) {
-                        // DOUBLE: 双线
+                        // DOUBLE: two lines
                         drawDoubleBond(atom1, atom2);
                     } else if (bondType === 3) {
-                        // TRIPLE: 三线
+                        // TRIPLE: three lines
                         drawTripleBond(atom1, atom2);
                     } else if (bondType === 12) {
-                        // AROMATIC: Kekulé结构（实线+虚线）
+                        // AROMATIC: Kekule structure (solid + dashed line)
                         drawAromaticBond(atom1, atom2);
                     } else {
-                        // SINGLE: 单线
+                        // SINGLE: single line
                         drawSingleBond(atom1, atom2);
                     }
                 }
             });
         }
 
-        // 绘制单键
+        // Draw a single bond
         function drawSingleBond(atom1, atom2) {
             ctx.beginPath();
             ctx.moveTo(atom1.x, atom1.y);
@@ -104,7 +104,7 @@
             ctx.stroke();
         }
 
-        // 绘制双键（两条平行线）
+        // Draw a double bond (two parallel lines)
         function drawDoubleBond(atom1, atom2) {
             const dx = atom2.x - atom1.x;
             const dy = atom2.y - atom1.y;
@@ -112,28 +112,28 @@
 
             if (len === 0) return;
 
-            // 计算法向量（垂直于键方向）
+            // Compute the normal vector (perpendicular to the bond direction)
             const nx = dy / len;
             const ny = -dx / len;
-            const offset = 2.5;  // 平行线间距
+            const offset = 2.5;  // spacing between parallel lines
 
             ctx.strokeStyle = '#666';
             ctx.lineWidth = 2;
 
-            // 第一条线
+            // first line
             ctx.beginPath();
             ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
             ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
             ctx.stroke();
 
-            // 第二条线
+            // second line
             ctx.beginPath();
             ctx.moveTo(atom1.x - nx * offset, atom1.y - ny * offset);
             ctx.lineTo(atom2.x - nx * offset, atom2.y - ny * offset);
             ctx.stroke();
         }
 
-        // 绘制三键（三条平行线）
+        // Draw a triple bond (three parallel lines)
         function drawTripleBond(atom1, atom2) {
             const dx = atom2.x - atom1.x;
             const dy = atom2.y - atom1.y;
@@ -141,21 +141,21 @@
 
             if (len === 0) return;
 
-            // 计算法向量
+            // Compute the normal vector
             const nx = dy / len;
             const ny = -dx / len;
-            const offset = 3.5;  // 平行线间距
+            const offset = 3.5;  // spacing between parallel lines
 
             ctx.strokeStyle = '#666';
             ctx.lineWidth = 1.5;
 
-            // 中心线
+            // center line
             ctx.beginPath();
             ctx.moveTo(atom1.x, atom1.y);
             ctx.lineTo(atom2.x, atom2.y);
             ctx.stroke();
 
-            // 外侧两条线
+            // the two outer lines
             ctx.beginPath();
             ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
             ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
@@ -167,7 +167,7 @@
             ctx.stroke();
         }
 
-        // 绘制芳香键（Kekulé结构：实线+虚线）
+        // Draw an aromatic bond (Kekule structure: solid + dashed line)
         function drawAromaticBond(atom1, atom2) {
             const dx = atom2.x - atom1.x;
             const dy = atom2.y - atom1.y;
@@ -175,12 +175,12 @@
 
             if (len === 0) return;
 
-            // 计算法向量
+            // Compute the normal vector
             const nx = dy / len;
             const ny = -dx / len;
             const offset = 2.5;
 
-            // 主实线
+            // main solid line
             ctx.strokeStyle = '#666';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -188,15 +188,15 @@
             ctx.lineTo(atom2.x, atom2.y);
             ctx.stroke();
 
-            // 副虚线（偏移）
+            // secondary dashed line (offset)
             ctx.strokeStyle = '#666';
             ctx.lineWidth = 1.5;
-            ctx.setLineDash([3, 3]);  // 虚线模式
+            ctx.setLineDash([3, 3]);  // dashed pattern
             ctx.beginPath();
             ctx.moveTo(atom1.x + nx * offset, atom1.y + ny * offset);
             ctx.lineTo(atom2.x + nx * offset, atom2.y + ny * offset);
             ctx.stroke();
-            ctx.setLineDash([]);  // 重置
+            ctx.setLineDash([]);  // reset
         }
 
         // Draw atoms

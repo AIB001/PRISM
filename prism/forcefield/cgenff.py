@@ -97,7 +97,7 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
 
         try:
             # Check if output already exists
-            lig_dir = os.path.join(self.output_dir, "LIG.cgenff2gmx")
+            lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
                     print(f"\nUsing cached CGenFF force field parameters from: {lig_dir}")
@@ -865,7 +865,10 @@ class CGenFFForceFieldGenerator(ForceFieldGeneratorBase):
         """
         # Step 1: Identify LP atoms and build mapping
         lp_atoms = {}  # {lp_atom_id: {'charge': float, 'halogen_id': str}}
-        halogen_elements = {"F", "Cl", "Br", "I", "CL"}
+        # Tokens are matched against an UPPERCASED atom name, so they must all be
+        # uppercase — otherwise "Br"/"Cl" never match "BR1"/"CL1" and the LP charge
+        # on bromine/chlorine is silently dropped (breaking charge conservation).
+        halogen_elements = {"F", "CL", "BR", "I"}
 
         for atom in self.atoms:
             atom_name = atom["name"].upper()

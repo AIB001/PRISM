@@ -352,6 +352,13 @@ class OPLSAAForceFieldGenerator(ForceFieldGeneratorBase):
                 # Extract the ZIP file
                 extract_dir = os.path.join(temp_dir, os.path.basename(zip_path).replace(".zip", ""))
                 with zipfile.ZipFile(zip_file, "r") as zip_ref:
+                    # ZIP comes from a remote server: reject members whose resolved
+                    # path escapes extract_dir (path traversal).
+                    dest = os.path.realpath(extract_dir)
+                    for member in zip_ref.namelist():
+                        target = os.path.realpath(os.path.join(extract_dir, member))
+                        if target != dest and not target.startswith(dest + os.sep):
+                            raise ValueError(f"Unsafe path in archive: {member}")
                     zip_ref.extractall(extract_dir)
 
                 print(f"✓ Extracted to: {extract_dir}")

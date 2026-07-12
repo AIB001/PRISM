@@ -231,6 +231,14 @@ class MMPBSAGenerator:
 
 GMX=${{GMX:-gmx}}
 
+# --- Hardware detection (portable; nothing about this host is hardcoded) ---
+NTOMP="${{OMP_NUM_THREADS:-$(nproc 2>/dev/null || echo 1)}}"
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    GPU_ARGS="-nb gpu -bonded gpu -pme gpu -gpu_id 0"
+else
+    GPU_ARGS=""
+fi
+
 ######################################################
 # SIMULATION
 ######################################################
@@ -241,11 +249,11 @@ if [ -f ./em/em.gro ]; then
     echo "EM already completed, skipping..."
 elif [ -f ./em/em.tpr ]; then
     echo "EM tpr file found, continuing from checkpoint..."
-    $GMX mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v -cpi ./em/em.cpt
+    $GMX mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -v -cpi ./em/em.cpt
 else
     echo "Starting EM from scratch..."
     $GMX grompp -f ../mdps/em.mdp -c solv_ions.gro -r solv_ions.gro -p topol.top -o ./em/em.tpr -maxwarn 999
-    $GMX mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp 10 -gpu_id 0 -v
+    $GMX mdrun -s ./em/em.tpr -deffnm ./em/em -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -v
 fi
 
 # NVT Equilibration
@@ -254,11 +262,11 @@ if [ -f ./nvt/nvt.gro ]; then
     echo "NVT already completed, skipping..."
 elif [ -f ./nvt/nvt.tpr ]; then
     echo "NVT tpr file found, continuing from checkpoint..."
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v -cpi ./nvt/nvt.cpt
 else
     echo "Starting NVT from scratch..."
     $GMX grompp -f ../mdps/nvt.mdp -c ./em/em.gro -r ./em/em.gro -p topol.top -o ./nvt/nvt.tpr -maxwarn 999
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./nvt/nvt.tpr -deffnm ./nvt/nvt -v
 fi
 
 # NPT Equilibration
@@ -267,11 +275,11 @@ if [ -f ./npt/npt.gro ]; then
     echo "NPT already completed, skipping..."
 elif [ -f ./npt/npt.tpr ]; then
     echo "NPT tpr file found, continuing from checkpoint..."
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./npt/npt.tpr -deffnm ./npt/npt -v -cpi ./npt/npt.cpt
 else
     echo "Starting NPT from scratch..."
     $GMX grompp -f ../mdps/npt.mdp -c ./nvt/nvt.gro -r ./nvt/nvt.gro -t ./nvt/nvt.cpt -p topol.top -o ./npt/npt.tpr -maxwarn 999
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./npt/npt.tpr -deffnm ./npt/npt -v
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./npt/npt.tpr -deffnm ./npt/npt -v
 fi
 """
 
@@ -285,11 +293,11 @@ if [ -f ./prod/md.gro ]; then
     echo "Production MD already completed, skipping..."
 elif [ -f ./prod/md.tpr ]; then
     echo "Production MD tpr file found, continuing from checkpoint..."
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./prod/md.tpr -deffnm ./prod/md -v -cpi ./prod/md.cpt
 else
     echo "Starting Production MD from scratch..."
     $GMX grompp -f ../mdps/md.mdp -c ./npt/npt.gro -r ./npt/npt.gro -p topol.top -o ./prod/md.tpr -maxwarn 999
-    $GMX mdrun -ntmpi 1 -ntomp 10 -nb gpu -bonded gpu -pme gpu -gpu_id 0 -s ./prod/md.tpr -deffnm ./prod/md -v
+    $GMX mdrun -ntmpi 1 -ntomp $NTOMP $GPU_ARGS -s ./prod/md.tpr -deffnm ./prod/md -v
 fi
 """
 

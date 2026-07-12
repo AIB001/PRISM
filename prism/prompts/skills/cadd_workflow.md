@@ -287,8 +287,7 @@ MD/          (or MMPBSA/ or PMF/)
 > - Ligand force field: gaff2
 > - Water model: tip3p
 > - Protonation: propka (pKa-based intelligent assignment)
-> - Charge method: Gaussian HF/6-31G* RESP charges
-> - Geometry optimization before ESP: no
+> - Charge method: AM1-BCC (default — fast, no external QM software needed)
 > - Production MD: 500 ns
 > - Box/salt/temperature: PRISM defaults (do not override)
 >
@@ -298,10 +297,10 @@ MD/          (or MMPBSA/ or PMF/)
 
 CLI equivalent:
 ```
-prism protein.pdb ligand.mol2 -lff gaff2 -ff amber14sb -o <ChEMBL_ID> --gaussian hf --isopt false --protonation propka
+prism protein.pdb ligand.mol2 -lff gaff2 -ff amber14sb -o <ChEMBL_ID> --protonation propka
 ```
 
-MCP tool form:
+MCP tool form (all of these are the defaults, so a minimal call works too):
 ```
 build_system(
     protein_path="/path/to/docking/CHEMBL25/protein.pdb",
@@ -311,11 +310,11 @@ build_system(
     ligand_forcefield="gaff2",
     water_model="tip3p",
     protonation="propka",
-    gaussian_method="hf",
-    do_optimization=false,
     production_ns=500.0,
 )
-# Note: Do NOT set box_distance, box_shape, salt_concentration, or temperature
+# Charges default to AM1-BCC (gaussian_method omitted) — do NOT set gaussian_method
+# unless the user explicitly wants RESP and has Gaussian g16.
+# Do NOT set box_distance, box_shape, salt_concentration, or temperature
 # — use PRISM defaults for these parameters.
 ```
 
@@ -327,8 +326,7 @@ build_system(
 | `ligand_forcefield` | `"gaff2"` | Improved GAFF with better torsion parameters |
 | `water_model` | `"tip3p"` | Standard 3-point water model |
 | `protonation` | `"propka"` | pKa-based per-residue protonation (HID/HIE/HIP, ASH/GLH, etc.) |
-| `gaussian_method` | `"hf"` | HF/6-31G* RESP charges (requires Gaussian g16) |
-| `do_optimization` | `false` | Skip geometry optimization before ESP calculation |
+| `gaussian_method` | `None` | AM1-BCC charges (default — fast, no QM software). Set `"hf"`/`"dft"` ONLY if the user wants RESP and has Gaussian g16. |
 | `production_ns` | `500.0` | 500 ns production MD |
 | `box_distance` | PRISM default | Do NOT override — let PRISM decide |
 | `box_shape` | PRISM default | Do NOT override — let PRISM decide |
@@ -530,8 +528,7 @@ Use the Bash tool to write this file in the working directory. **Adapt the `stag
     "forcefield": "amber14sb",
     "ligand_forcefield": "gaff2",
     "protonation": "propka",
-    "gaussian_method": "hf",
-    "do_optimization": false,
+    "charge_method": "am1bcc",
     "production_ns": 500.0,
     "systems": [
       {

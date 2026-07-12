@@ -87,7 +87,7 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
 
         try:
             # Check if output already exists BEFORE trying to generate parameters
-            lig_dir = os.path.join(self.output_dir, "LIG.amb2gmx")
+            lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
             if os.path.exists(lig_dir) and not self.overwrite:
                 if self.check_required_files(lig_dir):
                     print_info(f"Using cached GAFF2 parameters from: {path(lig_dir)}")
@@ -256,22 +256,41 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating GAFF2 force field parameters...")
-        self.run_command(
-            [
-                "parmchk2",
-                "-i",
-                os.path.basename(prep_file),
-                "-f",
-                "prepi",
-                "-o",
-                os.path.basename(frcmod_file),
-                "-a",
-                "Y",  # Print all force field parameters
-                "-s",
-                "2",  # GAFF2 parameter set
-            ],
-            cwd=ff_dir,
-        )
+        try:
+            self.run_command(
+                [
+                    "parmchk2",
+                    "-i",
+                    os.path.basename(prep_file),
+                    "-f",
+                    "prepi",
+                    "-o",
+                    os.path.basename(frcmod_file),
+                    "-a",
+                    "Y",  # Print all force field parameters
+                    "-s",
+                    "2",  # GAFF2 parameter set
+                ],
+                cwd=ff_dir,
+            )
+        except Exception as e:
+            print(f"\nparmchk2 with prepi format failed ({e}). Retrying with mol2 format...")
+            self.run_command(
+                [
+                    "parmchk2",
+                    "-i",
+                    os.path.basename(amber_mol2),
+                    "-f",
+                    "mol2",
+                    "-o",
+                    os.path.basename(frcmod_file),
+                    "-a",
+                    "Y",  # Print all force field parameters
+                    "-s",
+                    "2",  # GAFF2 parameter set
+                ],
+                cwd=ff_dir,
+            )
 
         print("Creating AMBER topology with GAFF2...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)
@@ -425,20 +444,37 @@ quit
             self.run_command(cmd_alt, cwd=ff_dir)
 
         print("Generating GAFF2 force field parameters...")
-        self.run_command(
-            [
-                "parmchk2",
-                "-i",
-                os.path.basename(prep_file),
-                "-f",
-                "prepi",
-                "-o",
-                os.path.basename(frcmod_file),
-                "-s",
-                "2",  # GAFF2 parameter set
-            ],
-            cwd=ff_dir,
-        )
+        try:
+            self.run_command(
+                [
+                    "parmchk2",
+                    "-i",
+                    os.path.basename(prep_file),
+                    "-f",
+                    "prepi",
+                    "-o",
+                    os.path.basename(frcmod_file),
+                    "-s",
+                    "2",  # GAFF2 parameter set
+                ],
+                cwd=ff_dir,
+            )
+        except Exception as e:
+            print(f"\nparmchk2 with prepi format failed ({e}). Retrying with mol2 format...")
+            self.run_command(
+                [
+                    "parmchk2",
+                    "-i",
+                    os.path.basename(amber_mol2),
+                    "-f",
+                    "mol2",
+                    "-o",
+                    os.path.basename(frcmod_file),
+                    "-s",
+                    "2",  # GAFF2 parameter set
+                ],
+                cwd=ff_dir,
+            )
 
         print("Creating AMBER topology with GAFF2...")
         self._create_topology_with_tleap(amber_mol2, frcmod_file, prmtop_file, rst7_file)
