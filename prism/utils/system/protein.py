@@ -21,6 +21,11 @@ class ProteinProcessorMixin:
             print(f"Fixed protein PDB already exists at {fixed_pdb}, skipping pdbfixer.")
             return str(fixed_pdb)
 
+        # pdbfixer (OpenMM PDBFile) writes only 3-character residue names, so
+        # 4-letter CHARMM residues such as THP2 (phosphothreonine dianion) would
+        # be truncated to THP. Record them now and restore them after pdbfixer.
+        long_residue_names = self._scan_long_residue_names(cleaned_protein)
+
         # Check if pdbfixer is available
         if not shutil.which("pdbfixer"):
             print("Warning: pdbfixer command not found. Skipping protein fixing step.")
@@ -56,7 +61,60 @@ class ProteinProcessorMixin:
         ff_name = getattr(self, "ff_info", {}).get("name") if hasattr(self, "ff_info") and self.ff_info else None
         fix_terminal_atoms(str(fixed_pdb), str(fixed_pdb), force_field=ff_name, verbose=True)
 
+        # Restore any 4-character residue names truncated by pdbfixer so they
+        # match their .rtp entry (GROMACS pdb2gmx reads the 4-char name field).
+        if long_residue_names:
+            self._restore_long_residue_names(str(fixed_pdb), long_residue_names)
+
         return str(fixed_pdb)
+
+    @staticmethod
+    def _scan_long_residue_names(pdb_file: str) -> dict:
+        """Map (chain, resid, icode) -> (4-char residue name, record type).
+
+        Only residues whose name occupies the 4-character field (columns 18-21)
+        are captured; 3-letter names are unaffected.
+        """
+        long_names: dict = {}
+        try:
+            with open(pdb_file, "r") as fh:
+                for line in fh:
+                    if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                        continue
+                    if len(line) < 22:
+                        continue
+                    resname = line[17:21].strip()
+                    if len(resname) != 4:
+                        continue
+                    try:
+                        resid = int(line[22:26])
+                    except (ValueError, IndexError):
+                        continue
+                    icode = line[26] if len(line) > 26 else " "
+                    long_names[(line[21], resid, icode)] = (resname, line[:6].strip())
+        except OSError:
+            return {}
+        return long_names
+
+    @staticmethod
+    def _restore_long_residue_names(pdb_file: str, long_names: dict) -> None:
+        """Rewrite 4-character residue names (and record type) after pdbfixer."""
+        out = []
+        with open(pdb_file, "r") as fh:
+            for line in fh:
+                if line.startswith("ATOM") or line.startswith("HETATM"):
+                    try:
+                        resid = int(line[22:26])
+                        icode = line[26] if len(line) > 26 else " "
+                        key = (line[21], resid, icode)
+                    except (ValueError, IndexError):
+                        key = None
+                    if key in long_names:
+                        resname, record = long_names[key]
+                        line = f"{record:<6}" + line[6:17] + f"{resname:<4s}" + line[21:]
+                out.append(line)
+        with open(pdb_file, "w") as fh:
+            fh.writelines(out)
 
     def _convert_amber_histidine(self, pdb_file: str) -> None:
         """Convert AMBER histidine residue names to GROMACS-compatible names.

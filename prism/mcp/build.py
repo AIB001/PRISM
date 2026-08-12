@@ -12,7 +12,7 @@ def register(mcp):
     @mcp.tool()
     def build_system(
         protein_path: str,
-        ligand_paths: str,
+        ligand_paths: str = "",
         output_dir: str = "prism_output",
         ligand_forcefield: str = "gaff2",
         forcefield: str = "amber14sb",
@@ -37,8 +37,10 @@ def register(mcp):
         em_steps: int = 10000,
         ptm: Optional[str] = None,
         ssbond: Optional[str] = None,
+        phospho_ff: str = "phosaa19SB",
         membrane: bool = False,
         lipid: str = "POPC",
+        lipid_ff: str = "lipid21",
         membrane_orient: str = "preoriented",
         membrane_pdbid: Optional[str] = None,
     ) -> str:
@@ -68,7 +70,8 @@ def register(mcp):
         Args:
             protein_path: Absolute path to the protein PDB file.
             ligand_paths: Absolute path to ligand file(s). For multiple ligands,
-                separate with commas: "/path/lig1.mol2,/path/lig2.mol2"
+                separate with commas: "/path/lig1.mol2,/path/lig2.mol2". May be
+                empty for a protein-only membrane build.
             output_dir: Directory for all output files. Default: "prism_output".
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
                 Options: "gaff", "gaff2", "openff", "opls", "mmff", "match", "hybrid".
@@ -113,10 +116,15 @@ def register(mcp):
                 CHARMM36 builds these directly; AMBER phospho uses the tleap+phosaa route.
             ssbond: Disulfide handling (optional): "auto" (detect SG-SG and bond) or "none".
                 Enabling ptm or ssbond activates the PTM staging step.
+            phospho_ff: AMBER phosphorylation parameter family requested by the
+                PTM configuration. Options: "phosaa19SB", "phosaa14SB", or
+                "phosaa10". The automated AMBER tleap route is currently gated.
             membrane: If true, build a protein-in-bilayer system (PACKMOL-Memgen ->
                 ParmEd -> GROMACS, semiisotropic membrane MDP). Requires AmberTools.
                 Output goes to GMX_PROLIG_MEMB/. Default: false.
             lipid: Lipid type for the bilayer when membrane=true. Default: "POPC".
+            lipid_ff: Lipid parameter family for membrane builds. Default:
+                "lipid21"; "lipid17" is also supported by the current backend.
             membrane_orient: Orientation source for membrane builds:
                 "preoriented" (default), "opm" (fetch oriented structure by PDB id), "ppm".
             membrane_pdbid: PDB id to fetch a pre-oriented structure from OPM
@@ -134,6 +142,14 @@ def register(mcp):
         elif not os.path.exists(protein_path):
             errors.append(f"Protein file not found: {protein_path}")
 
+        if not lig_list and not membrane:
+            errors.append("At least one ligand path is required unless membrane=true.")
+        if membrane and lig_list:
+            errors.append(
+                "Membrane mode currently builds protein-bilayer systems only; "
+                "ligand inputs are not yet incorporated."
+            )
+
         for lp in lig_list:
             if not os.path.isabs(lp):
                 errors.append(f"ligand_path must be an absolute path, got: {lp}")
@@ -149,6 +165,36 @@ def register(mcp):
 
         if nterm_met not in ("keep", "drop", "auto"):
             errors.append(f"nterm_met must be 'keep', 'drop', or 'auto', got: {nterm_met}")
+
+        if membrane_orient not in ("preoriented", "opm", "ppm", "memembed"):
+            errors.append(
+                "membrane_orient must be 'preoriented', 'opm', 'ppm', or 'memembed', "
+                f"got: {membrane_orient}"
+            )
+        if membrane and membrane_orient == "opm" and not membrane_pdbid:
+            errors.append("membrane_pdbid is required when membrane_orient='opm'.")
+        if membrane:
+            unsupported_membrane_values = [
+                name
+                for name, value, default in (
+                    ("box_distance", box_distance, 1.5),
+                    ("box_shape", box_shape, "cubic"),
+                    ("pressure", pressure, 1.0),
+                    ("dt", dt, 0.002),
+                    ("nvt_ps", nvt_ps, 500.0),
+                    ("npt_ps", npt_ps, 500.0),
+                    ("em_tolerance", em_tolerance, 200.0),
+                    ("em_steps", em_steps, 10000),
+                )
+                if value != default
+            ]
+            if unsupported_membrane_values:
+                errors.append(
+                    "Membrane mode uses a validated fixed protocol for these generic "
+                    "soluble-system parameters: "
+                    + ", ".join(unsupported_membrane_values)
+                    + "."
+                )
 
         if errors:
             return json.dumps({"success": False, "errors": errors}, indent=2)
@@ -168,7 +214,7 @@ def register(mcp):
                     from prism.ptm import parse_ptm_cli
 
                     ptm_specs = [s.strip() for s in ptm.split(",")] if ptm else None
-                    ptm_config = parse_ptm_cli(ptm_specs, ssbond=ssbond, phospho_ff="phosaa19SB")
+                    ptm_config = parse_ptm_cli(ptm_specs, ssbond=ssbond, phospho_ff=phospho_ff)
 
                 # Optional membrane build
                 membrane_config = None
@@ -177,8 +223,10 @@ def register(mcp):
 
                     membrane_config = parse_membrane_cli(
                         membrane=True, lipid=[lipid], lipid_ratio=None,
-                        orient=membrane_orient, pdb_id=membrane_pdbid, lipid_ff="lipid21",
+                        orient=membrane_orient, pdb_id=membrane_pdbid, lipid_ff=lipid_ff,
                         salt_concentration=salt_concentration, temperature=temperature,
+                        production_ns=production_ns,
+                        protein_forcefield=forcefield, water_model=water_model,
                     )
 
                 builder = PRISMBuilder(
@@ -199,42 +247,126 @@ def register(mcp):
                 builder.config["simulation"]["temperature"] = temperature
                 builder.config["simulation"]["pH"] = ph
                 builder.config["simulation"]["production_time_ns"] = production_ns
-                builder.config["simulation"]["ligand_charge"] = ligand_charge
-                builder.config["ligand_forcefield"]["charge"] = ligand_charge
-                builder.config["box"]["distance"] = box_distance
-                builder.config["box"]["shape"] = box_shape
                 builder.config["ions"]["concentration"] = salt_concentration
+                if not membrane:
+                    builder.config["simulation"]["ligand_charge"] = ligand_charge
+                    builder.config["ligand_forcefield"]["charge"] = ligand_charge
+                    builder.config["box"]["distance"] = box_distance
+                    builder.config["box"]["shape"] = box_shape
 
                 # Apply protonation method
                 builder.config.setdefault("protonation", {})["method"] = protonation
 
                 # Apply new parameters
-                builder.config["simulation"]["pressure"] = pressure
-                builder.config["simulation"]["dt"] = dt
-                builder.config["simulation"]["equilibration_nvt_time_ps"] = nvt_ps
-                builder.config["simulation"]["equilibration_npt_time_ps"] = npt_ps
                 builder.config.setdefault("protein_preparation", {})["nterm_met"] = nterm_met
-                builder.config.setdefault("energy_minimization", {})["emtol"] = em_tolerance
-                builder.config["energy_minimization"]["nsteps"] = em_steps
+                if not membrane:
+                    builder.config["simulation"]["pressure"] = pressure
+                    builder.config["simulation"]["dt"] = dt
+                    builder.config["simulation"]["equilibration_nvt_time_ps"] = nvt_ps
+                    builder.config["simulation"]["equilibration_npt_time_ps"] = npt_ps
+                    builder.config.setdefault("energy_minimization", {})["emtol"] = em_tolerance
+                    builder.config["energy_minimization"]["nsteps"] = em_steps
 
                 result_dir = builder.run()
 
             # --- Collect output info ---
-            gmx_dir = os.path.join(result_dir, "GMX_PROLIG_MD")
+            gmx_dir = os.path.join(result_dir, "GMX_PROLIG_MEMB" if membrane else "GMX_PROLIG_MD")
             mdp_dir = os.path.join(result_dir, "mdps")
             files = {}
-            if os.path.isdir(gmx_dir):
-                files["system_coordinates"] = os.path.join(gmx_dir, "solv_ions.gro")
-                files["topology"] = os.path.join(gmx_dir, "topol.top")
-                files["run_script"] = os.path.join(gmx_dir, "localrun.sh")
-            if os.path.isdir(mdp_dir):
-                for name in ("em.mdp", "nvt.mdp", "npt.mdp", "md.mdp"):
-                    p = os.path.join(mdp_dir, name)
-                    if os.path.exists(p):
-                        files[name] = p
+            membrane_result = getattr(builder, "membrane_result", None) if membrane else None
+            if membrane:
+                # Trust only paths returned by this invocation. Scanning an
+                # existing output directory can resurrect complete files from
+                # an older build and attach them to a new partial response.
+                if membrane_result is not None:
+                    for key, attribute in (
+                        ("system_coordinates", "gro"),
+                        ("topology", "top"),
+                        ("index", "ndx"),
+                        ("oriented_protein", "oriented_pdb"),
+                    ):
+                        candidate = getattr(membrane_result, attribute, None)
+                        if candidate and os.path.isfile(candidate):
+                            files[key] = candidate
+                    for path_value in (getattr(membrane_result, "mdps", {}) or {}).values():
+                        if path_value and os.path.isfile(path_value):
+                            files[os.path.basename(path_value)] = path_value
+            else:
+                if os.path.isdir(gmx_dir):
+                    files["system_coordinates"] = os.path.join(gmx_dir, "solv_ions.gro")
+                    files["topology"] = os.path.join(gmx_dir, "topol.top")
+                    files["run_script"] = os.path.join(gmx_dir, "localrun.sh")
+                if os.path.isdir(mdp_dir):
+                    for name in ("em.mdp", "nvt.mdp", "npt.mdp", "md.mdp"):
+                        p = os.path.join(mdp_dir, name)
+                        if os.path.exists(p):
+                            files[name] = p
 
-            return json.dumps(
-                {
+            parameters = {
+                "protein_forcefield": forcefield,
+                "ligand_forcefield": ligand_forcefield,
+                "water_model": water_model,
+                "protonation": protonation,
+                "temperature_K": temperature,
+                "pH": ph,
+                "production_ns": production_ns,
+                "box_distance_nm": box_distance,
+                "salt_concentration_M": salt_concentration,
+                "gaussian_method": gaussian_method,
+                "pressure_bar": pressure,
+                "dt_ps": dt,
+                "nvt_ps": nvt_ps,
+                "npt_ps": npt_ps,
+                "nterm_met": nterm_met,
+                "em_tolerance": em_tolerance,
+                "em_steps": em_steps,
+                "phospho_ff": phospho_ff,
+            }
+
+            if membrane:
+                for ignored_key in (
+                    "ligand_forcefield",
+                    "box_distance_nm",
+                    "gaussian_method",
+                    "pressure_bar",
+                    "dt_ps",
+                    "nvt_ps",
+                    "npt_ps",
+                    "em_tolerance",
+                    "em_steps",
+                ):
+                    parameters.pop(ignored_key, None)
+                build_success = bool(membrane_result and membrane_result.success)
+                warnings = list(getattr(membrane_result, "warnings", []))
+                note = getattr(membrane_result, "note", "") or "Membrane build did not return a complete result."
+                parameters.update(
+                    {
+                        "membrane": True,
+                        "lipid": lipid,
+                        "lipid_ff": lipid_ff,
+                        "membrane_orient": membrane_orient,
+                        "membrane_pdbid": membrane_pdbid,
+                    }
+                )
+                message = (
+                    "Membrane system built successfully. Use the generated MDP files with "
+                    f"gmx grompp -n {os.path.join(gmx_dir, 'index.ndx')}."
+                    if build_success
+                    else f"Membrane build is incomplete: {note}"
+                )
+                payload = {
+                    "success": build_success,
+                    "partial": not build_success,
+                    "output_dir": result_dir,
+                    "gmx_dir": gmx_dir,
+                    "message": message,
+                    "note": note,
+                    "warnings": warnings,
+                    "files": files,
+                    "parameters": parameters,
+                }
+            else:
+                payload = {
                     "success": True,
                     "output_dir": result_dir,
                     "gmx_dir": gmx_dir,
@@ -245,28 +377,10 @@ def register(mcp):
                         f"  bash localrun.sh"
                     ),
                     "files": files,
-                    "parameters": {
-                        "protein_forcefield": forcefield,
-                        "ligand_forcefield": ligand_forcefield,
-                        "water_model": water_model,
-                        "protonation": protonation,
-                        "temperature_K": temperature,
-                        "pH": ph,
-                        "production_ns": production_ns,
-                        "box_distance_nm": box_distance,
-                        "salt_concentration_M": salt_concentration,
-                        "gaussian_method": gaussian_method,
-                        "pressure_bar": pressure,
-                        "dt_ps": dt,
-                        "nvt_ps": nvt_ps,
-                        "npt_ps": npt_ps,
-                        "nterm_met": nterm_met,
-                        "em_tolerance": em_tolerance,
-                        "em_steps": em_steps,
-                    },
-                },
-                indent=2,
-            )
+                    "parameters": parameters,
+                }
+
+            return json.dumps(payload, indent=2)
 
         except Exception as e:
             logger.error(f"build_system failed: {e}\n{traceback.format_exc()}")

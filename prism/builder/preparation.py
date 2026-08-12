@@ -57,8 +57,13 @@ class SystemPreparationMixin:
 
         cleaned_pdb = os.path.join(self.output_dir, f"{self.protein_name}_clean.pdb")
 
+        ptm_config = getattr(self, "ptm_config", None)
+        ptm_requests = list(getattr(ptm_config, "requests", []) or [])
+
         # Check for existing cleaned file
-        if os.path.exists(cleaned_pdb) and not self.overwrite:
+        # A cached clean file may have been produced without the current PTM
+        # request, so rebuild it whenever modified residues are requested.
+        if os.path.exists(cleaned_pdb) and not self.overwrite and not ptm_requests:
             print(f"Using existing cleaned protein: {cleaned_pdb}")
             return cleaned_pdb
 
@@ -90,8 +95,29 @@ class SystemPreparationMixin:
             forcefield_name=self.forcefield["name"] if self.forcefield else None,
         )
 
-        # Clean the protein
-        cleaner.clean_pdb(self.protein_path, cleaned_pdb)
+        # Deposited modified amino acids are normally HETATM records. The
+        # cleaner otherwise moves all non-metal HETATM records after the chain's
+        # TER record, permanently breaking PTM backbone continuity. Promote only
+        # explicitly requested PTM positions in a temporary input copy so their
+        # original chain order is retained during cleaning.
+        protein_input = self.protein_path
+        ptm_preclean = None
+        if ptm_requests:
+            from ..ptm import promote_requested_ptm_records
+
+            ptm_preclean = os.path.join(self.output_dir, f".{self.protein_name}_ptm_preclean.pdb")
+            promoted = promote_requested_ptm_records(self.protein_path, ptm_preclean, ptm_config)
+            if promoted:
+                protein_input = ptm_preclean
+            else:
+                os.remove(ptm_preclean)
+                ptm_preclean = None
+
+        try:
+            cleaner.clean_pdb(protein_input, cleaned_pdb)
+        finally:
+            if ptm_preclean and os.path.exists(ptm_preclean):
+                os.remove(ptm_preclean)
 
         # Some prepared receptors keep non-canonical terminal cap atoms
         # (e.g. CAY/CY/OY or CAT/NT) on standard amino-acid residue names.

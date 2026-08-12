@@ -106,7 +106,11 @@ Example usage:
     # Force field options
     ff_group = parser.add_argument_group("Force field options")
     ff_group.add_argument(
-        "--forcefield", "-ff", type=str, default="amber99sb", help="Protein force field name (default: amber99sb)"
+        "--forcefield",
+        "-ff",
+        type=str,
+        default=None,
+        help="Protein force field name (default: amber99sb; membrane mode: amber14sb)",
     )
     ff_group.add_argument(
         "--water", "-w", type=str, default=None, help="Water model name (default: auto-detect from force field)"
@@ -412,9 +416,9 @@ Example usage:
     )
     memb_group.add_argument(
         "--lipid-ff",
-        choices=["lipid21", "slipids", "charmm36"],
+        choices=["lipid17", "lipid21"],
         default="lipid21",
-        help="Lipid force field (default: lipid21; pairs with AMBER. charmm36 pairs with CHARMM36).",
+        help="Lipid force field for automated membrane parameterization (default: lipid21).",
     )
     memb_group.add_argument(
         "--membrane-orient",
@@ -457,7 +461,162 @@ Example usage:
         "--lambda-windows", type=int, default=11, help="Number of lambda windows for FEP calculations (default: 11)"
     )
 
-    args = parser.parse_args()
+    raw_cli_args = sys.argv[1:]
+    args = parser.parse_args(raw_cli_args)
+
+    # Reparse with action defaults suppressed to learn which destinations were
+    # explicitly supplied. Delegating this to argparse keeps detection aligned
+    # with all syntax argparse accepts, including short-option clusters,
+    # attached values, ``-alias=value``, and the ``--`` positional terminator.
+    action_defaults = [(action, action.default) for action in parser._actions]
+    try:
+        for action, _default in action_defaults:
+            action.default = argparse.SUPPRESS
+        explicit_args = parser.parse_args(raw_cli_args)
+    finally:
+        for action, default in action_defaults:
+            action.default = default
+    explicit_destinations = frozenset(vars(explicit_args))
+
+    def _cli_option_provided(*option_names):
+        """Whether argparse saw any alias for an option explicitly supplied."""
+        return any(
+            parser._option_string_actions[option_name].dest in explicit_destinations
+            for option_name in option_names
+        )
+
+    config_file_data = {}
+    if args.config:
+        import yaml
+
+        try:
+            with open(args.config, "r", encoding="utf-8") as config_handle:
+                loaded_config = yaml.safe_load(config_handle)
+                config_file_data = {} if loaded_config is None else loaded_config
+        except (OSError, yaml.YAMLError) as exc:
+            parser.error(f"Unable to read configuration file '{args.config}': {exc}")
+        if not isinstance(config_file_data, dict):
+            parser.error("The configuration file must contain a top-level YAML mapping.")
+
+    def _yaml_mapping(section_name):
+        value = config_file_data.get(section_name, {})
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            parser.error(f"The YAML '{section_name}' section must be a mapping.")
+        return value
+
+    yaml_membrane = config_file_data.get("membrane")
+    if yaml_membrane is not None and not isinstance(yaml_membrane, dict):
+        parser.error("The YAML 'membrane' section must be a mapping.")
+    yaml_membrane = yaml_membrane or {}
+    yaml_membrane_enabled = False
+    if "membrane" in config_file_data and config_file_data.get("membrane") is not None:
+        yaml_enabled_value = yaml_membrane.get("enabled", True)
+        if type(yaml_enabled_value) is not bool:
+            parser.error("Membrane enabled must be a boolean (true or false).")
+        yaml_membrane_enabled = yaml_enabled_value
+    effective_membrane = bool(args.membrane or yaml_membrane_enabled)
+
+    if effective_membrane:
+        yaml_forcefield = _yaml_mapping("forcefield").get("name")
+        yaml_water_model = _yaml_mapping("water_model").get("name")
+        yaml_simulation = _yaml_mapping("simulation")
+        yaml_ions = _yaml_mapping("ions")
+        unsupported_yaml_controls = [
+            f"{section}.{key}"
+            for section, keys in (
+                (
+                    "simulation",
+                    (
+                        "pressure",
+                        "dt",
+                        "equilibration_nvt_time_ps",
+                        "equilibration_npt_time_ps",
+                        "nvt_ps",
+                        "npt_ps",
+                    ),
+                ),
+                ("box", ("distance", "shape", "center")),
+                (
+                    "energy_minimization",
+                    ("emtol", "nsteps", "em_tolerance", "em_steps"),
+                ),
+            )
+            for key in keys
+            if key in _yaml_mapping(section)
+        ]
+        if unsupported_yaml_controls:
+            parser.error(
+                "Membrane mode does not consume these generic soluble-system YAML controls: "
+                + ", ".join(unsupported_yaml_controls)
+                + ". Configure only supported fields under the membrane section."
+            )
+    else:
+        yaml_forcefield = None
+        yaml_water_model = None
+        yaml_simulation = {}
+        yaml_ions = {}
+
+    nested_membrane_forcefield = (
+        yaml_membrane.get("protein_forcefield", yaml_membrane.get("forcefield"))
+        if effective_membrane
+        else None
+    )
+    nested_membrane_water = (
+        yaml_membrane.get("water_model", yaml_membrane.get("water"))
+        if effective_membrane
+        else None
+    )
+
+    if args.forcefield is None:
+        configured_forcefield = (
+            yaml_forcefield if yaml_forcefield is not None else nested_membrane_forcefield
+        )
+        if configured_forcefield is not None and (
+            not isinstance(configured_forcefield, str) or not configured_forcefield.strip()
+        ):
+            parser.error("Configured protein force field must be a non-empty string.")
+        args.forcefield = (
+            configured_forcefield
+            if configured_forcefield is not None
+            else ("amber14sb" if effective_membrane else "amber99sb")
+        )
+    if effective_membrane and args.water is None:
+        configured_water = yaml_water_model if yaml_water_model is not None else nested_membrane_water
+        if configured_water is not None and (
+            not isinstance(configured_water, str) or not configured_water.strip()
+        ):
+            parser.error("Configured water model must be a non-empty string.")
+        args.water = configured_water if configured_water is not None else "tip3p"
+
+    membrane_temperature = (
+        args.temperature
+        if _cli_option_provided("--temperature", "-t")
+        else yaml_simulation.get("temperature", args.temperature)
+    )
+    membrane_production_ns = (
+        args.production_ns
+        if _cli_option_provided("--production-ns")
+        else yaml_simulation.get(
+            "production_time_ns", yaml_simulation.get("production_ns", args.production_ns)
+        )
+    )
+    membrane_salt_concentration = (
+        args.salt_concentration
+        if _cli_option_provided("--salt-concentration", "-sc")
+        else yaml_ions.get("concentration", args.salt_concentration)
+    )
+    membrane_positive_ion = (
+        args.positive_ion
+        if _cli_option_provided("--positive-ion", "-pion")
+        else yaml_ions.get("positive_ion", args.positive_ion)
+    )
+    membrane_negative_ion = (
+        args.negative_ion
+        if _cli_option_provided("--negative-ion", "-nion")
+        else yaml_ions.get("negative_ion", args.negative_ion)
+    )
 
     # Handle --export-config option
     if args.export_config:
@@ -625,10 +784,48 @@ pressure_coupling:
     if not protein_path:
         parser.error("Protein file is required. Use positional argument or --protein-file flag")
 
-    if not ligand_paths:
+    # Protein-only builds are valid when a membrane or a PTM/disulfide
+    # modification is requested (both build a protein-only system that does
+    # not need a ligand).
+    effective_ptm = bool(
+        args.ptm or args.ssbond or (config_file_data.get("ptm") is not None)
+    )
+    if not ligand_paths and not effective_membrane and not effective_ptm:
         parser.error(
-            "At least one ligand file is required. Provide ligand path(s) as positional arguments or use --ligand-file flag"
+            "At least one ligand file is required. Provide ligand path(s) as positional "
+            "arguments or use --ligand-file flag (protein-only builds require --membrane "
+            "or a --ptm/--ssbond modification)."
         )
+
+    if effective_membrane and ligand_paths:
+        parser.error(
+            "Membrane mode currently builds protein-bilayer systems only; ligand inputs are not yet incorporated."
+        )
+
+    if effective_membrane and any((args.pmf, args.rest2, args.mmpbsa, args.fep)):
+        parser.error("--membrane cannot be combined with --pmf, --rest2, --mmpbsa, or --fep.")
+
+    if effective_membrane:
+        unsupported_membrane_options = [
+            option
+            for option, aliases in (
+                ("box distance", ("--box-distance", "-d")),
+                ("box shape", ("--box-shape", "-bs")),
+                ("pressure", ("--pressure", "-p")),
+                ("time step", ("--dt",)),
+                ("NVT duration", ("--nvt-ps",)),
+                ("NPT duration", ("--npt-ps",)),
+                ("energy-minimization tolerance", ("--em-tolerance",)),
+                ("energy-minimization steps", ("--em-steps",)),
+            )
+            if _cli_option_provided(*aliases)
+        ]
+        if unsupported_membrane_options:
+            parser.error(
+                "Membrane mode uses a validated fixed protocol for "
+                + ", ".join(unsupported_membrane_options)
+                + "; these generic soluble-system options are not yet configurable."
+            )
 
     # Validate ligand number
     actual_ligand_count = len(ligand_paths)
@@ -729,6 +926,25 @@ pressure_coupling:
         if pmf_overrides:
             config_overrides.setdefault("pmf", {}).update(pmf_overrides)
 
+    # In membrane mode, explicit CLI values must also replace YAML when they
+    # equal argparse's defaults.  Limit this precedence fix to values that the
+    # membrane pipeline actually consumes.
+    if effective_membrane:
+        if _cli_option_provided("--forcefield", "-ff"):
+            config_overrides.setdefault("forcefield", {})["name"] = args.forcefield
+        if _cli_option_provided("--water", "-w"):
+            config_overrides.setdefault("water_model", {})["name"] = args.water
+        if _cli_option_provided("--temperature", "-t"):
+            config_overrides.setdefault("simulation", {})["temperature"] = args.temperature
+        if _cli_option_provided("--production-ns"):
+            config_overrides.setdefault("simulation", {})["production_time_ns"] = args.production_ns
+        if _cli_option_provided("--salt-concentration", "-sc"):
+            config_overrides.setdefault("ions", {})["concentration"] = args.salt_concentration
+        if _cli_option_provided("--positive-ion", "-pion"):
+            config_overrides.setdefault("ions", {})["positive_ion"] = args.positive_ion
+        if _cli_option_provided("--negative-ion", "-nion"):
+            config_overrides.setdefault("ions", {})["negative_ion"] = args.negative_ion
+
     # Save config overrides if any
     if config_overrides:
         # Create temporary config file with overrides
@@ -740,6 +956,8 @@ pressure_coupling:
             with open(args.config, "r") as f:
                 base_config = yaml.safe_load(f)
         else:
+            base_config = {}
+        if effective_membrane and base_config is None:
             base_config = {}
 
         # Merge overrides
@@ -760,31 +978,82 @@ pressure_coupling:
     if args.fep and args.output == "prism_output":
         args.output = _default_fep_output_dir(args.forcefield, args.ligand_forcefield)
 
-    # Build PTM configuration (opt-in: only when --ptm or --ssbond is given)
+    # Build PTM configuration. Explicit --ptm/--ssbond retains the original
+    # all-CLI behavior; --phospho-ff may independently override YAML PTM data.
     ptm_config = None
-    if getattr(args, "ptm", None) or getattr(args, "ssbond", None):
-        from ..ptm import parse_ptm_cli
+    yaml_ptm = config_file_data.get("ptm")
+    if yaml_ptm is not None and not isinstance(yaml_ptm, dict):
+        parser.error("The YAML 'ptm' section must be a mapping.")
+    cli_ptm_fields = bool(getattr(args, "ptm", None) or getattr(args, "ssbond", None))
+    phospho_override = _cli_option_provided("--phospho-ff")
+    if cli_ptm_fields or (yaml_ptm is not None and phospho_override):
+        from ..ptm import PTMConfig, parse_ptm_cli, parse_ptm_yaml
 
         try:
-            ptm_config = parse_ptm_cli(args.ptm, args.ssbond, args.phospho_ff)
+            yaml_ptm_config = parse_ptm_yaml(yaml_ptm)
+            cli_ptm_config = parse_ptm_cli(args.ptm, args.ssbond, args.phospho_ff)
+            ptm_config = PTMConfig(
+                requests=cli_ptm_config.requests if cli_ptm_fields else yaml_ptm_config.requests,
+                disulfides=cli_ptm_config.disulfides if cli_ptm_fields else yaml_ptm_config.disulfides,
+                amber_phospho_ff=(
+                    args.phospho_ff if phospho_override else yaml_ptm_config.amber_phospho_ff
+                ),
+            )
         except ValueError as exc:
             parser.error(str(exc))
 
-    # Build membrane configuration (opt-in: only when --membrane is given)
+    # Build one effective membrane configuration from YAML plus explicit CLI
+    # overrides. argparse defaults are deliberately not copied over YAML: only
+    # options present in raw_cli_args replace configured values.
     membrane_config = None
-    if getattr(args, "membrane", False):
-        from ..membrane import parse_membrane_cli
+    if effective_membrane:
+        from ..membrane import parse_membrane_yaml
 
-        membrane_config = parse_membrane_cli(
-            membrane=True,
-            lipid=args.lipid,
-            lipid_ratio=args.lipid_ratio,
-            orient=args.membrane_orient,
-            pdb_id=args.membrane_pdbid,
-            lipid_ff=args.lipid_ff,
-            salt_concentration=args.salt_concentration,
-            temperature=args.temperature,
-        )
+        membrane_values = dict(yaml_membrane)
+        membrane_values["enabled"] = True
+
+        if args.lipid is not None:
+            membrane_values["lipids"] = args.lipid
+        if args.lipid_ratio is not None:
+            membrane_values["ratio"] = args.lipid_ratio
+        if _cli_option_provided("--membrane-orient"):
+            membrane_values["orient"] = args.membrane_orient
+        if _cli_option_provided("--membrane-pdbid"):
+            membrane_values["pdb_id"] = args.membrane_pdbid
+        if _cli_option_provided("--lipid-ff"):
+            membrane_values["lipid_ff"] = args.lipid_ff
+
+        if _cli_option_provided("--temperature", "-t"):
+            membrane_values["temperature"] = args.temperature
+        if _cli_option_provided("--production-ns"):
+            membrane_values["production_ns"] = args.production_ns
+        if "salt_concentration" not in membrane_values or _cli_option_provided(
+            "--salt-concentration", "-sc"
+        ):
+            membrane_values["salt_concentration"] = membrane_salt_concentration
+        if "positive_ion" not in membrane_values or _cli_option_provided(
+            "--positive-ion", "-pion"
+        ):
+            membrane_values["positive_ion"] = membrane_positive_ion
+        if "negative_ion" not in membrane_values or _cli_option_provided(
+            "--negative-ion", "-nion"
+        ):
+            membrane_values["negative_ion"] = membrane_negative_ion
+
+        # PACKMOL-Memgen must use the same resolved global protein/water pair
+        # that PRISMBuilder reports. These values already honor explicit CLI,
+        # top-level YAML, membrane YAML, then mode defaults in that order.
+        membrane_values["protein_forcefield"] = args.forcefield
+        membrane_values["water_model"] = args.water
+
+        try:
+            membrane_config = parse_membrane_yaml(
+                membrane_values,
+                temperature=membrane_temperature,
+                production_ns=membrane_production_ns,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
 
     # Create and run PRISM Builder
     builder = PRISMBuilder(

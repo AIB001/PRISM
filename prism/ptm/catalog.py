@@ -10,8 +10,8 @@ structure). For every modification we record how to realise it in an all-atom
 GROMACS ``pdb2gmx`` pipeline for both supported force-field families:
 
 * **CHARMM36** — the bundled ``charmm36-jul2022.ff`` already contains the PTM
-  residues in ``aminoacids.rtp`` (verified: SEP, TPO, PTR, SP1/SP2, TP1/TP2,
-  MLZ, MLY, M3L, ALY, 2MR). The only requirements are that the residue is
+  residues in ``aminoacids.rtp`` (verified: SEP, TPO, PTR, SP1/SP2,
+  THP1/THP2, TP1/TP2, MLZ, MLY, M3L, ALY, 2MR). The only requirements are that the residue is
   registered as ``Protein`` in a ``residuetypes.dat`` visible to ``pdb2gmx`` and
   that the heavy-atom names match the ``.rtp`` entry.
 * **AMBER** — phosphorylation uses the ``phosaa14SB`` / ``phosaa19SB`` parameter
@@ -56,6 +56,13 @@ class PTMDef:
     #: residues by atom name, so deposited names that differ from the .rtp entry
     #: must be renamed first.
     atom_aliases: Dict[str, str] = field(default_factory=dict)
+    #: CHARMM-specific aliases keyed by the selected .rtp residue name.
+    #: Charge variants can use atom names that differ from the CCD entry.
+    charmm_atom_aliases: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    #: Modification-specific heavy atoms required by each automated target
+    #: residue. These signatures prevent a plain parent residue from being
+    #: relabelled as a PTM without the atoms that make up the modification.
+    required_heavy_atoms: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
     #: Whether validated parameters exist. If False, the modification is only a
     #: structural placeholder and requires user-supplied parameters.
@@ -63,14 +70,33 @@ class PTMDef:
     note: str = ""
 
     def charmm_name_for_charge(self, charge: Optional[int]) -> Optional[str]:
-        if charge is not None and charge in self.charmm_charge_variants:
+        if charge is None:
+            return self.charmm_resname
+        if charge in self.charmm_charge_variants:
             return self.charmm_charge_variants[charge]
-        return self.charmm_resname
+        if charge == self.default_charge:
+            return self.charmm_resname
+        return None
 
     def amber_name_for_charge(self, charge: Optional[int]) -> Optional[str]:
-        if charge is not None and charge in self.amber_charge_variants:
+        if charge is None:
+            return self.amber_resname
+        if charge in self.amber_charge_variants:
             return self.amber_charge_variants[charge]
-        return self.amber_resname
+        if charge == self.default_charge:
+            return self.amber_resname
+        return None
+
+    def atom_aliases_for(self, family: str, resname: str) -> Dict[str, str]:
+        """Return atom aliases for the selected force-field residue."""
+        aliases = dict(self.atom_aliases)
+        if family == "charmm":
+            aliases.update(self.charmm_atom_aliases.get(resname, {}))
+        return aliases
+
+    def required_heavy_atoms_for(self, resname: str) -> Tuple[str, ...]:
+        """Return the modification-specific heavy atoms for ``resname``."""
+        return self.required_heavy_atoms.get(resname, ())
 
 
 # --------------------------------------------------------------------------- #
@@ -82,21 +108,49 @@ _CATALOG: Tuple[PTMDef, ...] = (
     PTMDef(
         code="SEP", name="Phosphoserine", category="phosphorylation", parent="SER",
         default_charge=-2,
-        charmm_resname="SEP", charmm_charge_variants={-2: "SEP", -1: "SP1"},
+        # SEP is monoanionic in the bundled .rtp; SP2 is the dianion.
+        charmm_resname="SP2", charmm_charge_variants={-2: "SP2", -1: "SEP"},
+        charmm_atom_aliases={
+            "SP2": {"O3P": "OT"},
+            "SEP": {"OT": "O3P", "HT": "H3T"},
+        },
+        required_heavy_atoms={
+            "SP2": ("P", "O1P", "O2P", "OT"),
+            "SEP": ("P", "O1P", "O2P", "O3P"),
+        },
         amber_resname="SEP", amber_leaprc="leaprc.phosaa19SB",
         amber_charge_variants={-2: "SEP", -1: "S1P"},
     ),
     PTMDef(
         code="TPO", name="Phosphothreonine", category="phosphorylation", parent="THR",
         default_charge=-2,
-        charmm_resname="TPO", charmm_charge_variants={-2: "TPO", -1: "TP1"},
+        # TPO is monoanionic. THP1/THP2 are phosphothreonine variants;
+        # TP1/TP2 in this force field are phosphotyrosine variants.
+        charmm_resname="THP2", charmm_charge_variants={-2: "THP2", -1: "TPO"},
+        charmm_atom_aliases={
+            "THP2": {"O3P": "OT"},
+            "TPO": {"OT": "O3P", "HT": "H3T"},
+        },
+        required_heavy_atoms={
+            "THP2": ("P", "O1P", "O2P", "OT"),
+            "TPO": ("P", "O1P", "O2P", "O3P"),
+        },
         amber_resname="TPO", amber_leaprc="leaprc.phosaa19SB",
         amber_charge_variants={-2: "TPO", -1: "T1P"},
     ),
     PTMDef(
         code="PTR", name="Phosphotyrosine", category="phosphorylation", parent="TYR",
         default_charge=-2,
-        charmm_resname="PTR", charmm_charge_variants={-2: "PTR"},
+        # PTR is monoanionic in the bundled .rtp; TP2 is the dianion.
+        charmm_resname="TP2", charmm_charge_variants={-2: "TP2", -1: "PTR"},
+        charmm_atom_aliases={
+            "TP2": {"P": "P1", "O3P": "O2", "O1P": "O3", "O2P": "O4"},
+            "PTR": {"P1": "P", "O2": "O3P", "H2": "H3T", "O3": "O1P", "O4": "O2P"},
+        },
+        required_heavy_atoms={
+            "TP2": ("P1", "O2", "O3", "O4"),
+            "PTR": ("P", "O1P", "O2P", "O3P"),
+        },
         amber_resname="PTR", amber_leaprc="leaprc.phosaa19SB",
         amber_charge_variants={-2: "PTR", -1: "Y1P"},
     ),
@@ -112,25 +166,30 @@ _CATALOG: Tuple[PTMDef, ...] = (
     PTMDef(
         code="MLZ", name="N6-methyl-lysine", category="methylation", parent="LYS",
         default_charge=1, charmm_resname="MLZ",
+        required_heavy_atoms={"MLZ": ("CM",)},
         note="Monomethyl-lysine (CHARMM36 / Croitoru 2021).",
     ),
     PTMDef(
         code="MLY", name="N6,N6-dimethyl-lysine", category="methylation", parent="LYS",
         default_charge=1, charmm_resname="MLY",
+        required_heavy_atoms={"MLY": ("CH1", "CH2")},
     ),
     PTMDef(
         code="M3L", name="N6,N6,N6-trimethyl-lysine", category="methylation", parent="LYS",
         default_charge=1, charmm_resname="M3L",
+        required_heavy_atoms={"M3L": ("CM1", "CM2", "CM3")},
     ),
     # ---- Lysine acetylation ----------------------------------------------
     PTMDef(
         code="ALY", name="N6-acetyl-lysine", category="acetylation", parent="LYS",
         default_charge=0, charmm_resname="ALY",
+        required_heavy_atoms={"ALY": ("CH", "OH", "CH3")},
     ),
     # ---- Arginine methylation --------------------------------------------
     PTMDef(
-        code="2MR", name="Asymmetric dimethyl-arginine", category="methylation", parent="ARG",
+        code="2MR", name="Symmetric dimethyl-arginine", category="methylation", parent="ARG",
         default_charge=1, charmm_resname="2MR",
+        required_heavy_atoms={"2MR": ("CQ1", "CQ2")},
     ),
     # ---- Modifications without canonical validated parameters ------------
     PTMDef(

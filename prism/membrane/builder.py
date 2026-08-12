@@ -18,12 +18,11 @@ capability report, so importing/constructing the builder never fails.
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 from . import packmol_memgen
-from .config import MembraneConfig
+from .config import MembraneConfig, PACKMOL_PARAMETRIZED_LIPID_FFS
 from .membrane_mdp import write_membrane_mdps
 from .orient import orient_protein
 
@@ -52,6 +51,15 @@ class MembraneBuilder:
     def capability_report(self) -> List[str]:
         """Return a list of missing-capability messages (empty if all present)."""
         missing = []
+        if (self.config.lipid_ff or "").lower() not in PACKMOL_PARAMETRIZED_LIPID_FFS:
+            missing.append(
+                f"The automated AMBER backend cannot parametrize lipid_ff={self.config.lipid_ff!r}; "
+                "use lipid17/lipid21 or provide an externally parametrized topology."
+            )
+        try:
+            self.config.packmol_forcefield_pair()
+        except ValueError as exc:
+            missing.append(str(exc))
         if not packmol_memgen.is_available():
             missing.append(
                 "packmol-memgen not found (provided by AmberTools). "
@@ -76,10 +84,16 @@ class MembraneBuilder:
     # ------------------------------------------------------------------ #
     def build(self, protein_pdb: str, output_dir: str) -> MembraneBuildResult:
         """Run the full membrane build. Returns a :class:`MembraneBuildResult`."""
+        # Invalid scientific parameters must fail before creating an output
+        # directory or launching PACKMOL-Memgen.  They are not missing-runtime
+        # capabilities and must not be downgraded to a seemingly usable
+        # "partial" scaffold.
+        self.config.raise_for_errors()
+
         system_dir = os.path.join(output_dir, "GMX_PROLIG_MEMB")
         os.makedirs(system_dir, exist_ok=True)
         result = MembraneBuildResult(system_dir=system_dir)
-        result.warnings.extend(self.config.validate())
+        result.warnings.extend(self.config.validation_warnings())
 
         # 0) Capability gate.
         missing = self.capability_report()
@@ -135,7 +149,14 @@ class MembraneBuilder:
         # 4) Membrane MDP protocol.
         self._emit_mdps(output_dir, result)
 
-        result.success = bool(result.gro and result.top)
+        required_mdps = {"em", "nvt", "npt", "md"}
+        result.success = bool(
+            result.gro
+            and result.top
+            and result.ndx
+            and required_mdps.issubset(result.mdps)
+            and all(os.path.isfile(path) for path in result.mdps.values())
+        )
         result.note = "Membrane system built." if result.success else "Conversion incomplete; see warnings."
         if self.verbose:
             self._print(result)
@@ -158,7 +179,7 @@ class MembraneBuilder:
                 output_dir,
                 temperature=self.config.temperature,
                 ff_family=self.config.family(),
-                production_ns=100.0,
+                production_ns=self.config.production_ns,
             )
         except Exception as exc:
             result.warnings.append(f"Membrane MDP generation failed: {exc}")
@@ -172,12 +193,22 @@ class MembraneBuilder:
         try:
             import parmed as pmd
 
+            before_top = self._file_signature(out_top)
+            before_gro = self._file_signature(out_gro)
             parm = pmd.load_file(prmtop, xyz=inpcrd)
             parm.save(out_top, format="gromacs", overwrite=True)
             parm.save(out_gro, overwrite=True)
+            after_top = self._file_signature(out_top)
+            after_gro = self._file_signature(out_gro)
+            if after_top is None or after_gro is None:
+                raise RuntimeError("ParmEd returned without writing both GROMACS output files.")
+            if after_top == before_top or after_gro == before_gro:
+                raise RuntimeError(
+                    "ParmEd did not create or update both GROMACS outputs; refusing to reuse stale files."
+                )
             if ndx_path:
                 try:
-                    self._write_membrane_index(parm, ndx_path, result)
+                    self._write_membrane_index(parm, ndx_path)
                     result.ndx = ndx_path
                 except Exception as exc:  # index is non-fatal
                     result.warnings.append(f"Index (SOLU/MEMB/SOLV) generation failed: {exc}")
@@ -189,6 +220,17 @@ class MembraneBuilder:
             )
             return False
 
+    @staticmethod
+    def _file_signature(file_path):
+        """Lightweight signature used to distinguish this run from stale output."""
+        try:
+            stat = os.stat(file_path)
+        except OSError:
+            return None
+        if not os.path.isfile(file_path):
+            return None
+        return stat.st_mtime_ns, stat.st_size
+
     # residue-name classification for the SOLU/MEMB/SOLV thermostat groups
     _SOLV_RESNAMES = {
         "WAT", "HOH", "SOL", "TIP3", "T3P", "TIP", "SPC",
@@ -198,24 +240,71 @@ class MembraneBuilder:
         "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU",
         "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
         "HID", "HIE", "HIP", "HSD", "HSE", "HSP", "CYX", "CYM", "ASH", "GLH", "LYN",
-        "SEP", "TPO", "PTR", "MLZ", "MLY", "M3L", "ALY", "2MR",
+        "SEP", "TPO", "PTR", "SP1", "SP2", "THP1", "THP2", "TP1", "TP2",
+        "S1P", "T1P", "Y1P", "MLZ", "MLY", "M3L", "ALY", "2MR",
     }
 
-    def _write_membrane_index(self, parm, ndx_path: str, result: "MembraneBuildResult"):
+    # Amber Lipid17/21 represents many phospholipids as several bonded
+    # residues rather than retaining the input PACKMOL residue name.  For
+    # example, one POPC molecule is written as PA (palmitoyl), PC (headgroup),
+    # and OL (oleoyl).  These names come from AmberTools'
+    # charmm-lipid-to-Amber mapping.  Restrict the aliases to lipids explicitly
+    # requested by the user so an unrelated unknown residue is never silently
+    # assigned to the membrane thermostat group.
+    _AMBER_LIPID_RESIDUES = {
+        "POPC": {"PA", "PC", "OL"},
+        "POPE": {"PA", "PE", "OL"},
+        "POPS": {"PA", "PS", "OL"},
+        "POPG": {"PA", "PGR", "OL"},
+        "POPA": {"PA", "PH-", "OL"},
+        "DOPC": {"PC", "OL"},
+        "DOPE": {"PE", "OL"},
+        "DOPS": {"PS", "OL"},
+        "DPPC": {"PA", "PC"},
+        "DMPC": {"MY", "PC"},
+        "DLPC": {"LAL", "PC"},
+        "CHL1": {"CHL"},
+        "CHOL": {"CHL"},
+        "PSM": {"PA", "SA", "SPM"},
+    }
+
+    def _write_membrane_index(self, parm, ndx_path: str):
         """Write a GROMACS index file with SOLU / MEMB / SOLV groups.
 
         SOLU = protein (incl. PTM residues); SOLV = water + ions; MEMB =
-        everything else (lipids). Atom indices are 1-based, in topology order.
+        explicitly configured lipids. Unknown residues fail closed instead of
+        being silently coupled to the membrane thermostat.
         """
         solu, memb, solv = [], [], []
+        membrane_resnames = {
+            str(lipid).strip().upper()
+            for lipid in self.config.lipids
+            if isinstance(lipid, str) and lipid.strip()
+        }
+        for lipid in tuple(membrane_resnames):
+            membrane_resnames.update(self._AMBER_LIPID_RESIDUES.get(lipid, ()))
+        if "CHOL" in membrane_resnames:
+            membrane_resnames.add("CHL1")
+        if "CHL1" in membrane_resnames:
+            membrane_resnames.add("CHOL")
+        unknown_resnames = set()
         for i, atom in enumerate(parm.atoms, start=1):
             rn = atom.residue.name.upper()
             if rn in self._PROTEIN_RESNAMES:
                 solu.append(i)
             elif rn in self._SOLV_RESNAMES:
                 solv.append(i)
-            else:
+            elif rn in membrane_resnames:
                 memb.append(i)
+            else:
+                unknown_resnames.add(rn or "<blank>")
+
+        if unknown_resnames:
+            raise ValueError(
+                "Cannot classify residue name(s) for membrane thermostat groups: "
+                + ", ".join(sorted(unknown_resnames))
+                + ". Add supported protein/PTM names or list the lipid explicitly."
+            )
 
         def _block(name, idxs):
             lines = [f"[ {name} ]"]
@@ -223,15 +312,18 @@ class MembraneBuilder:
                 lines.append(" ".join(str(x) for x in idxs[k:k + 15]))
             return "\n".join(lines) + "\n"
 
+        groups = {"SOLU": solu, "MEMB": memb, "SOLV": solv}
+        empty_groups = [name for name, idxs in groups.items() if not idxs]
+        if empty_groups:
+            raise ValueError(
+                "Cannot generate membrane thermostat index: empty group(s) "
+                f"{', '.join(empty_groups)}. Verify protein/lipid/solvent residue names."
+            )
+
         with open(ndx_path, "w") as fh:
-            for name, idxs in (("SOLU", solu), ("MEMB", memb), ("SOLV", solv)):
+            for name, idxs in groups.items():
                 fh.write(_block(name, idxs))
 
-        if not memb:
-            result.warnings.append(
-                "Index: no lipid (MEMB) atoms detected — verify lipid residue names; "
-                "the membrane MDP tc-grps (SOLU MEMB SOLV) needs a non-empty MEMB group."
-            )
         if self.verbose:
             print(f"  index.ndx: SOLU={len(solu)} MEMB={len(memb)} SOLV={len(solv)} atoms")
 

@@ -19,7 +19,15 @@ Typical use::
     result = builder.build("protein.pdb", "out") # build (gated)
 """
 
-from .config import MembraneConfig, parse_membrane_cli, parse_membrane_yaml, COMMON_LIPIDS, LIPID_FF_FAMILY
+from .config import (
+    COMMON_LIPIDS,
+    DEFAULT_PRODUCTION_NS,
+    LIPID_FF_FAMILY,
+    MEMBRANE_TIMESTEP_PS,
+    MembraneConfig,
+    parse_membrane_cli,
+    parse_membrane_yaml,
+)
 from .membrane_mdp import write_membrane_mdps
 from .orient import orient_protein, fetch_opm, strip_opm_dummy_atoms
 from .packmol_memgen import build_command, is_available as packmol_memgen_available
@@ -30,6 +38,8 @@ __all__ = [
     "parse_membrane_cli",
     "parse_membrane_yaml",
     "COMMON_LIPIDS",
+    "DEFAULT_PRODUCTION_NS",
+    "MEMBRANE_TIMESTEP_PS",
     "LIPID_FF_FAMILY",
     "write_membrane_mdps",
     "orient_protein",

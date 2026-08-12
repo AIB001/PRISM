@@ -34,6 +34,129 @@ from .ligand_ff import LigandForceFieldMixin
 from .preparation import SystemPreparationMixin
 
 
+def _yaml_membrane_preflight(config_path):
+    """Inspect raw membrane YAML before choosing builder defaults.
+
+    ``ConfigurationManager`` needs the default protein force field while it is
+    being constructed.  Without this small preflight, a Python API caller that
+    enables membrane mode only in YAML is initialized as a soluble amber99sb
+    build and rejected later when PACKMOL-Memgen synchronizes its force field.
+    """
+    if not config_path or not os.path.exists(config_path):
+        return False, None, None, {}
+
+    import yaml
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as config_handle:
+            raw_config = yaml.safe_load(config_handle)
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"Unable to read configuration file {config_path!r}: {exc}") from exc
+
+    if raw_config is None:
+        return False, None, None, {}
+    if not isinstance(raw_config, dict):
+        raise ValueError("The configuration file must contain a top-level YAML mapping.")
+    if "membrane" not in raw_config or raw_config["membrane"] is None:
+        return False, None, None, {}
+
+    membrane_section = raw_config["membrane"]
+    if not isinstance(membrane_section, dict):
+        raise ValueError("The YAML 'membrane' section must be a mapping.")
+    enabled = membrane_section.get("enabled", True)
+    if type(enabled) is not bool:
+        raise ValueError("Membrane enabled must be a boolean (true or false).")
+
+    for section in (
+        "forcefield",
+        "water_model",
+        "simulation",
+        "ions",
+        "box",
+        "energy_minimization",
+    ):
+        if section in raw_config and not isinstance(raw_config[section], dict):
+            raise ValueError(f"The YAML '{section}' section must be a mapping.")
+
+    for section, label in (
+        ("forcefield", "protein force field"),
+        ("water_model", "water model"),
+    ):
+        value = raw_config.get(section, {}).get("name")
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"Configured {label} must be a non-empty string.")
+
+    if enabled:
+        unsupported_controls = [
+            f"{section}.{key}"
+            for section, keys in (
+                (
+                    "simulation",
+                    (
+                        "pressure",
+                        "dt",
+                        "equilibration_nvt_time_ps",
+                        "equilibration_npt_time_ps",
+                        "nvt_ps",
+                        "npt_ps",
+                    ),
+                ),
+                ("box", ("distance", "shape", "center")),
+                (
+                    "energy_minimization",
+                    ("emtol", "nsteps", "em_tolerance", "em_steps"),
+                ),
+            )
+            if isinstance(raw_config.get(section), dict)
+            for key in keys
+            if key in raw_config[section]
+        ]
+        if unsupported_controls:
+            raise ValueError(
+                "Membrane mode does not consume these generic soluble-system YAML controls: "
+                + ", ".join(unsupported_controls)
+                + ". Configure only supported fields under the membrane section."
+            )
+
+    protein_forcefield = membrane_section.get(
+        "protein_forcefield", membrane_section.get("forcefield")
+    )
+    water_model = membrane_section.get("water_model", membrane_section.get("water"))
+    for value, label in (
+        (protein_forcefield, "protein force field"),
+        (water_model, "water model"),
+    ):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ValueError(f"Configured membrane {label} must be a non-empty string.")
+
+    simulation = raw_config.get("simulation")
+    simulation = simulation if isinstance(simulation, dict) else {}
+    ions = raw_config.get("ions")
+    ions = ions if isinstance(ions, dict) else {}
+    runtime_values = {}
+    if "temperature" in simulation:
+        runtime_values["temperature"] = simulation["temperature"]
+    if "production_time_ns" in simulation:
+        runtime_values["production_ns"] = simulation["production_time_ns"]
+    elif "production_ns" in simulation:
+        runtime_values["production_ns"] = simulation["production_ns"]
+    for source_key, target_key in (
+        ("concentration", "salt_concentration"),
+        ("positive_ion", "positive_ion"),
+        ("negative_ion", "negative_ion"),
+    ):
+        if source_key in ions:
+            runtime_values[target_key] = ions[source_key]
+    return enabled, protein_forcefield, water_model, runtime_values
+
+
+def _normalise_membrane_forcefield_name(value):
+    """Translate PACKMOL aliases to PRISM's GROMACS force-field names."""
+    aliases = {"ff14sb": "amber14sb", "ff19sb": "amber19sb"}
+    normalized = str(value).strip()
+    return aliases.get(normalized.lower(), normalized)
+
+
 class PRISMBuilder(
     WorkflowMixin,
     FEPWorkflowMixin,
@@ -273,6 +396,32 @@ class PRISMBuilder(
         self.lambda_strategy = lambda_strategy
         self.lambda_distribution = lambda_distribution
 
+        yaml_membrane_forcefield = None
+        yaml_membrane_water = None
+        yaml_membrane_runtime = {}
+        if membrane_config is not None:
+            enabled_value = getattr(membrane_config, "enabled", False)
+            if type(enabled_value) is not bool:
+                raise ValueError("Membrane enabled must be a boolean (true or false).")
+            membrane_requested = enabled_value
+            if membrane_requested:
+                # Validate the caller's original object before selecting global
+                # defaults or synchronizing fields onto it; otherwise an empty
+                # or incompatible pair could be silently replaced by defaults.
+                membrane_config.raise_for_errors()
+                yaml_membrane_forcefield = getattr(
+                    membrane_config, "protein_forcefield", None
+                )
+                yaml_membrane_water = getattr(membrane_config, "water_model", None)
+        else:
+            (
+                membrane_requested,
+                yaml_membrane_forcefield,
+                yaml_membrane_water,
+                yaml_membrane_runtime,
+            ) = _yaml_membrane_preflight(config_path)
+        self._validate_workflow_modes(membrane_mode=membrane_requested)
+
         # Handle resp_files - normalize to list or None
         if resp_files is None:
             self.resp_files = None
@@ -292,12 +441,29 @@ class PRISMBuilder(
         self.gromacs_env = GromacsEnvironment()
 
         # Process force field names before initializing config
-        default_ff = forcefield if forcefield else "amber99sb"
-        default_water = water_model if water_model else "tip3p"
+        if forcefield:
+            default_ff = forcefield
+        elif membrane_requested:
+            default_ff = _normalise_membrane_forcefield_name(
+                yaml_membrane_forcefield or "amber14sb"
+            )
+        else:
+            default_ff = "amber99sb"
+        default_water = water_model or (
+            str(yaml_membrane_water).strip()
+            if membrane_requested and yaml_membrane_water
+            else "tip3p"
+        )
 
-        # Initialize configuration manager
+        # Initialize configuration manager. Membrane builds parameterize the
+        # protein with PACKMOL-Memgen/AMBER (e.g. ff19SB/OPC) and convert via
+        # ParmEd, so their force field need not exist as a GROMACS ``.ff``.
+        # Feed the config manager a GROMACS-valid placeholder and skip GROMACS
+        # force-field discovery entirely; the real membrane force field is
+        # resolved from the membrane config below.
+        config_gromacs_env = None if membrane_requested else self.gromacs_env
         self.config_manager = ConfigurationManager(
-            config_path, self.gromacs_env, forcefield_name=default_ff, water_model_name=default_water
+            config_path, config_gromacs_env, forcefield_name=default_ff, water_model_name=default_water
         )
         self.config = self.config_manager.config
 
@@ -394,22 +560,60 @@ class PRISMBuilder(
 
         # Membrane configuration (opt-in). When enabled, the workflow dispatches
         # to the membrane build path instead of the standard solvation step.
-        from ..membrane import parse_membrane_yaml
+        from ..membrane import DEFAULT_PRODUCTION_NS, parse_membrane_yaml
 
         if membrane_config is not None:
             self.membrane_config = membrane_config
-        elif self.config.get("membrane"):
+        elif "membrane" in self.config and self.config.get("membrane") is not None:
+            membrane_values = dict(self.config.get("membrane"))
+            if "temperature" not in membrane_values and "temperature" in yaml_membrane_runtime:
+                membrane_values["temperature"] = yaml_membrane_runtime["temperature"]
+            if (
+                "production_ns" not in membrane_values
+                and "production_time_ns" not in membrane_values
+                and "production_ns" in yaml_membrane_runtime
+            ):
+                membrane_values["production_ns"] = yaml_membrane_runtime["production_ns"]
+            for field_name in ("salt_concentration", "positive_ion", "negative_ion"):
+                if field_name not in membrane_values and field_name in yaml_membrane_runtime:
+                    membrane_values[field_name] = yaml_membrane_runtime[field_name]
             self.membrane_config = parse_membrane_yaml(
-                self.config.get("membrane"),
+                membrane_values,
                 temperature=self.config.get("simulation", {}).get("temperature", 303.15),
+                # Match the canonical production default (default_config.yaml).
+                # The merged config normally supplies this; the fallback only
+                # matters when a partial simulation block omits it, and must not
+                # silently diverge from the soluble 500 ns default.
+                production_ns=self.config.get("simulation", {}).get(
+                    "production_time_ns", DEFAULT_PRODUCTION_NS
+                ),
             )
         else:
             self.membrane_config = None
         self.membrane_mode = bool(self.membrane_config and self.membrane_config.enabled)
+        self._validate_workflow_modes(membrane_mode=self.membrane_mode)
+        if self.membrane_mode and self.ligand_paths:
+            raise ValueError(
+                "Membrane mode currently builds protein-bilayer systems only; "
+                "ligand inputs are not yet incorporated."
+            )
 
         # Get force field and water model info
-        self.forcefield = self._get_forcefield_info()
-        self.water_model = self._get_water_model_info()
+        if self.membrane_mode:
+            # Membrane protein/water force fields are AMBER names consumed by
+            # PACKMOL-Memgen (not GROMACS pdb2gmx), so resolve them directly from
+            # the already-computed global defaults (which honour an explicit
+            # --forcefield / YAML override) instead of the GROMACS force-field
+            # table, then synchronize the membrane config so the reported and
+            # generated force fields cannot diverge.
+            self.forcefield = {"name": default_ff, "dir": None, "source": "PACKMOL-Memgen"}
+            self.water_model = {"name": default_water, "source": "PACKMOL-Memgen"}
+            self.membrane_config.protein_forcefield = default_ff
+            self.membrane_config.water_model = default_water
+            self.membrane_config.raise_for_errors()
+        else:
+            self.forcefield = self._get_forcefield_info()
+            self.water_model = self._get_water_model_info()
 
         # Extract names
         self.protein_name = Path(protein_path).stem
@@ -432,6 +636,26 @@ class PRISMBuilder(
         )
 
         self._print_initialization_info()
+
+    def _validate_workflow_modes(self, membrane_mode=False):
+        """Reject another workflow only when membrane mode is enabled."""
+        if not membrane_mode:
+            return
+        conflicting_modes = [
+            name
+            for name, enabled in (
+                ("pmf", self.pmf_mode),
+                ("rest2", self.rest2_mode),
+                ("mmpbsa", self.mmpbsa_mode),
+                ("fep", self.fep_mode),
+            )
+            if enabled
+        ]
+        if conflicting_modes:
+            raise ValueError(
+                "Membrane mode cannot be combined with another build workflow "
+                f"(received: {', '.join(conflicting_modes)})."
+            )
 
     def _print_initialization_info(self):
         """Print initialization information"""

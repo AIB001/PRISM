@@ -87,13 +87,29 @@ class MetalProcessorMixin:
             "ACE",
             "NME",
             "NH2",
+            # PTM residues: pdb2gmx builds these into the protein chain via a
+            # staged residuetypes.dat, so they are NOT metals. Their standard
+            # backbone/side-chain atom names Calpha="CA" and Cdelta="CD" collide
+            # with the calcium/cadmium element symbols in ``metal_names``; without
+            # this skip every PTM residue is misread as a metal ion and injected
+            # into ``[ molecules ]`` as a nonexistent moleculetype, breaking grompp.
+            "SEP", "SP1", "SP2",              # phosphoserine (+ charge variants)
+            "TPO", "THP1", "THP2",            # phosphothreonine
+            "PTR", "TP1", "TP2",              # phosphotyrosine
+            "M3L", "MLY", "MLZ",              # methyl-lysine
+            "ALY",                             # acetyl-lysine
+            "2MR",                             # symmetric dimethyl-arginine
+            "S1P", "T1P", "Y1P",              # AMBER monoanionic phospho variants
         }
 
         with open(pdb_file, "r") as f:
             for line in f:
                 # Check both ATOM and HETATM (metals may be converted to ATOM by cleaner)
                 if line.startswith("ATOM") or line.startswith("HETATM"):
-                    residue_name = line[17:20].strip().upper()
+                    # Read the 4-character residue-name field (columns 18-21) so
+                    # 4-letter names such as THP2 are not truncated to THP and
+                    # then misread as a metal via their Calpha/Cdelta atoms.
+                    residue_name = line[17:21].strip().upper()
                     atom_name = line[12:16].strip().upper()
 
                     # CRITICAL: Skip if this is a protein residue

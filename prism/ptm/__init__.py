@@ -28,7 +28,7 @@ Typical use::
 from .catalog import PTMDef, get_ptm, is_known_ptm, iter_ptm_defs, supported_codes
 from .disulfides import Disulfide, detect_disulfides, bonded_cys_resname
 from .spec import PTMConfig, PTMRequest, parse_ptm_cli, parse_ptm_yaml
-from .stager import PTMStager, PTMResult
+from .stager import PTMStager, PTMResult, promote_requested_ptm_records
 
 __all__ = [
     "PTMDef",
@@ -45,4 +45,5 @@ __all__ = [
     "parse_ptm_yaml",
     "PTMStager",
     "PTMResult",
+    "promote_requested_ptm_records",
 ]

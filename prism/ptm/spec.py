@@ -23,9 +23,31 @@ YAML form::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from numbers import Integral
+import re
 from typing import List, Optional, Tuple, Union
 
 from .catalog import get_ptm, is_known_ptm
+
+
+def _normalise_integer(value, *, context: str) -> int:
+    """Accept genuine integers and integer strings without truncation."""
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {context} {value!r}; expected an integer.")
+    if isinstance(value, Integral):
+        return int(value)
+    if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+        return int(value.strip())
+    raise ValueError(f"Invalid {context} {value!r}; expected an integer.")
+
+
+def _normalise_charge(value, *, context: str) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return _normalise_integer(value, context=f"charge for {context}")
+    except ValueError as exc:
+        raise ValueError(f"Invalid charge {value!r} for {context}; expected an integer.") from exc
 
 
 @dataclass(frozen=True)
@@ -36,6 +58,20 @@ class PTMRequest:
     resid: int
     code: str
     charge: Optional[int] = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "chain", str(self.chain or "").strip() or "A")
+        object.__setattr__(
+            self,
+            "resid",
+            _normalise_integer(self.resid, context="PTM residue id"),
+        )
+        object.__setattr__(self, "code", str(self.code).strip().upper())
+        object.__setattr__(
+            self,
+            "charge",
+            _normalise_charge(self.charge, context=f"PTM {self.code or '<unknown>'}"),
+        )
 
     def describe(self) -> str:
         c = f" (charge {self.charge:+d})" if self.charge is not None else ""
@@ -56,7 +92,7 @@ class PTMConfig:
         return bool(self.requests) or self.disulfides not in ("none", None, False)
 
     def validate(self) -> List[str]:
-        """Return a list of human-readable warnings/errors (empty if clean)."""
+        """Return user-request errors that must be resolved before staging."""
         problems: List[str] = []
         for r in self.requests:
             d = get_ptm(r.code)
@@ -66,6 +102,17 @@ class PTMConfig:
                 problems.append(
                     f"PTM '{r.code}' ({d.name}) has no canonical validated parameters: {d.note}"
                 )
+            elif r.charge is not None:
+                supported_charges = {
+                    d.default_charge,
+                    *d.charmm_charge_variants.keys(),
+                    *d.amber_charge_variants.keys(),
+                }
+                if r.charge not in supported_charges:
+                    problems.append(
+                        f"PTM '{r.code}' does not define charge {r.charge:+d}; "
+                        f"available charges: {sorted(supported_charges)}"
+                    )
         if self.amber_phospho_ff not in ("phosaa19SB", "phosaa14SB", "phosaa10"):
             problems.append(f"Unknown amber_phospho_ff '{self.amber_phospho_ff}'")
         return problems
@@ -76,21 +123,21 @@ def parse_ptm_cli(ptm_args: Optional[List[str]], ssbond: Optional[str], phospho_
     requests: List[PTMRequest] = []
     for spec in ptm_args or []:
         parts = [p.strip() for p in str(spec).split(":")]
-        if len(parts) < 3:
+        if len(parts) not in (3, 4):
             raise ValueError(
                 f"Invalid --ptm '{spec}'. Expected CHAIN:RESID:CODE[:CHARGE], e.g. A:145:SEP or A:32:TPO:-1"
             )
         chain, resid_s, code = parts[0], parts[1], parts[2].upper()
         try:
-            resid = int(resid_s)
-        except ValueError:
-            raise ValueError(f"Invalid residue id '{resid_s}' in --ptm '{spec}'")
+            resid = _normalise_integer(resid_s, context="residue id")
+        except ValueError as exc:
+            raise ValueError(f"Invalid residue id '{resid_s}' in --ptm '{spec}'") from exc
         charge = None
         if len(parts) >= 4 and parts[3] != "":
             try:
-                charge = int(parts[3])
-            except ValueError:
-                raise ValueError(f"Invalid charge '{parts[3]}' in --ptm '{spec}'")
+                charge = _normalise_charge(parts[3], context=f"--ptm '{spec}'")
+            except ValueError as exc:
+                raise ValueError(f"Invalid charge '{parts[3]}' in --ptm '{spec}'") from exc
         if not is_known_ptm(code):
             raise ValueError(
                 f"Unknown PTM code '{code}'. Known codes: see `prism --list-ptms`."
@@ -107,18 +154,34 @@ def parse_ptm_cli(ptm_args: Optional[List[str]], ssbond: Optional[str], phospho_
 
 def parse_ptm_yaml(cfg: Optional[dict]) -> PTMConfig:
     """Build a :class:`PTMConfig` from a parsed YAML ``ptm:`` mapping."""
-    if not cfg:
+    if cfg is None:
         return PTMConfig(requests=[], disulfides="auto")
+    if not isinstance(cfg, dict):
+        raise ValueError("The YAML 'ptm' section must be a mapping.")
+
+    residue_entries = cfg.get("residues", [])
+    if residue_entries is None:
+        residue_entries = []
+    elif not isinstance(residue_entries, (list, tuple)):
+        raise ValueError("The YAML 'ptm.residues' value must be a sequence of mappings.")
 
     requests: List[PTMRequest] = []
-    for r in cfg.get("residues", []) or []:
-        code = str(r.get("code", "")).upper()
+    for index, r in enumerate(residue_entries):
+        if not isinstance(r, dict):
+            raise ValueError(f"Invalid PTM residue entry at index {index}; expected a mapping.")
+        code = str(r.get("code", "")).strip().upper()
+        if "resid" not in r:
+            raise ValueError(f"PTM residue entry at index {index} is missing 'resid'.")
+        try:
+            resid = _normalise_integer(r["resid"], context="residue id")
+        except ValueError as exc:
+            raise ValueError(f"Invalid residue id {r['resid']!r} in PTM YAML entry {index}.") from exc
         requests.append(
             PTMRequest(
-                chain=str(r.get("chain", "A")),
-                resid=int(r["resid"]),
+                chain=str(r.get("chain", "A")).strip() or "A",
+                resid=resid,
                 code=code,
-                charge=r.get("charge"),
+                charge=_normalise_charge(r.get("charge"), context=f"PTM YAML entry {index}"),
             )
         )
 

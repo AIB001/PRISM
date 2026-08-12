@@ -47,6 +47,13 @@ class LigandForceFieldMixin:
         print_subheader(f"Generating Ligand Force Fields ({self.ligand_forcefield.upper()})")
         print(f"Processing {number(self.ligand_count)} ligand(s)...")
 
+        # Protein-only builds (membrane / PTM) carry no ligands to parameterize.
+        # Returning early avoids ThreadPoolExecutor(max_workers=0) further down.
+        if self.ligand_count == 0 or not self.ligand_paths:
+            self.lig_ff_dirs = []
+            print_info("No ligands to parameterize (protein-only build).")
+            return
+
         primary_output_dir = get_primary_forcefield_output_subdir(self.ligand_forcefield)
 
         # Create base directory for ligand force fields

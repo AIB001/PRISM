@@ -25,10 +25,9 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from .catalog import get_ptm
 from .disulfides import Disulfide, apply_disulfide_renaming, bonded_cys_resname, detect_disulfides
@@ -45,6 +44,75 @@ def _ff_family(ff_name: Optional[str]) -> str:
     if "opls" in n:
         return "opls"
     return "amber"
+
+
+def _pdb_residue_key(line: str) -> Optional[Tuple[str, int]]:
+    """Return a normalized ``(chain, resid)`` key for a PDB atom record."""
+    if not (line.startswith("ATOM") or line.startswith("HETATM")):
+        return None
+    try:
+        resid = int(line[22:26])
+    except (ValueError, IndexError):
+        return None
+    chain = line[21].strip() or "A"
+    return chain, resid
+
+
+def _known_source_names(definition) -> Set[str]:
+    """Residue names that can legitimately represent one catalogued PTM."""
+    names = {definition.code, definition.parent}
+    for name in (
+        definition.charmm_resname,
+        definition.amber_resname,
+        *definition.charmm_charge_variants.values(),
+        *definition.amber_charge_variants.values(),
+    ):
+        if name:
+            names.add(name)
+    return {name.upper() for name in names}
+
+
+def _normalized_target_atom_name(atom_name: str, aliases: Dict[str, str]) -> str:
+    """Normalize one input atom name exactly as it will be written."""
+    normalized = atom_name.strip().upper()
+    return aliases.get(normalized, normalized)
+
+
+def promote_requested_ptm_records(input_pdb: str, output_pdb: str, config: PTMConfig) -> int:
+    """Promote requested PTM ``HETATM`` records before protein cleaning.
+
+    ``ProteinCleaner`` groups ordinary HETATM records after the protein's TER
+    record. Deposited modified amino acids normally use HETATM, so requested
+    PTM records must be marked as protein before cleaning to keep their original
+    place in the chain. The residue name and all coordinates remain unchanged.
+
+    Returns the number of coordinate records promoted.
+    """
+    targets: Dict[Tuple[str, int], Set[str]] = {}
+    for request in config.requests:
+        definition = get_ptm(request.code)
+        if definition is None:
+            continue
+        key = (str(request.chain).strip() or "A", int(request.resid))
+        targets.setdefault(key, set()).update(_known_source_names(definition))
+
+    with open(input_pdb, "r") as fh:
+        lines = fh.readlines()
+
+    promoted = 0
+    output_lines = []
+    for line in lines:
+        key = _pdb_residue_key(line)
+        if line.startswith("HETATM") and key in targets:
+            resname = line[17:20].strip().upper()
+            if resname in targets[key]:
+                line = "ATOM  " + line[6:]
+                promoted += 1
+        output_lines.append(line)
+
+    with open(output_pdb, "w") as fh:
+        fh.writelines(output_lines)
+    return promoted
 
 
 @dataclass
@@ -96,8 +164,10 @@ class PTMStager:
         work_dir = work_dir or os.path.dirname(os.path.abspath(output_pdb)) or "."
         result = PTMResult(output_pdb=output_pdb, family=self.family)
 
-        # Surface configuration problems early (non-fatal).
-        result.warnings.extend(self.config.validate())
+        # Reject every invalid or unavailable request before an output file is
+        # written.  A requested structural modification must never degrade into
+        # a warning followed by an unchanged build.
+        self._validate_requests()
 
         # 1) Apply requested PTM residue renames + atom-name normalisation.
         codes_used: List[str] = []
@@ -109,74 +179,169 @@ class PTMStager:
         # 3) FF-specific staging.
         if self.family == "charmm" and codes_used:
             result.residuetypes_path = self._stage_residuetypes(work_dir, codes_used)
-        elif self.family in ("amber", "opls") and codes_used:
-            # phospho/methyl/acetyl on AMBER need the tleap->ACPYPE route, which
-            # replaces the pdb2gmx protein-topology build for the modified chain.
-            phospho = [c for c in codes_used if get_ptm(c) and get_ptm(c).category == "phosphorylation"]
-            if phospho:
-                result.amber_route_required = True
-                # The residues were just renamed to AMBER names (e.g. SEP/TPO/PTR) that
-                # amber*sb .rtp cannot build, and the tleap->ParmEd/ACPYPE route is not
-                # wired into the default pdb2gmx path. Fail here with an actionable message
-                # rather than letting pdb2gmx fail later with an "unknown residue" error.
-                raise RuntimeError(
-                    "AMBER phosphorylation PTM(s) "
-                    f"{', '.join(sorted(set(phospho)))} require the tleap+"
-                    f"{self.config.amber_phospho_ff} -> ParmEd/ACPYPE route, which is not "
-                    "available in the default pdb2gmx build. Use --forcefield "
-                    "charmm36-jul2022 for the fully automated phosphorylation path."
-                )
 
         if self.verbose:
             print(result.summary())
         return result
 
+    def _validate_requests(self) -> None:
+        """Fail before staging when a requested PTM cannot be honored."""
+        problems = self.config.validate()
+        if problems:
+            details = "; ".join(problems)
+            raise ValueError(f"Invalid PTM configuration: {details}")
+
+        seen = set()
+        resolved = []
+        for request in self.config.requests:
+            definition = get_ptm(request.code)
+            # ``validate`` catches these; retain defensive checks for callers
+            # supplying custom config-like objects.
+            if definition is None:
+                raise ValueError(
+                    f"Unknown PTM code '{request.code}' at {request.chain}{request.resid}."
+                )
+            if not definition.validated:
+                raise ValueError(
+                    f"PTM '{request.code}' has no validated parameters: {definition.note}"
+                )
+
+            key = (str(request.chain).strip() or "A", int(request.resid))
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate PTM requests for {key[0]}{key[1]}; each residue can have only one PTM."
+                )
+            seen.add(key)
+
+            if self.family == "charmm":
+                target = definition.charmm_name_for_charge(request.charge)
+            else:
+                target = definition.amber_name_for_charge(request.charge)
+            if not target:
+                charge = (
+                    f" charge {request.charge:+d}" if request.charge is not None else ""
+                )
+                raise ValueError(
+                    f"PTM {request.code}{charge} is not available in the {self.family} "
+                    f"force-field family at {request.chain}{request.resid}."
+                )
+            if len(target) > 4:
+                raise ValueError(
+                    f"PTM residue name '{target}' exceeds the 4-character residue-name "
+                    "field supported by GROMACS/pdb2gmx."
+                )
+            resolved.append((request, definition, target))
+
+        # The renamed AMBER variants (S1P/T1P/Y1P) are not catalog keys, so
+        # route detection must use the original definitions rather than target
+        # residue names.  Run this before writing a partially staged PDB.
+        if self.family in ("amber", "opls"):
+            phospho = sorted(
+                {definition.code for _request, definition, _target in resolved
+                 if definition.category == "phosphorylation"}
+            )
+            if phospho:
+                family_label = self.family.upper()
+                raise RuntimeError(
+                    f"{family_label} phosphorylation PTM(s) {', '.join(phospho)} require the "
+                    f"tleap+{self.config.amber_phospho_ff} -> ParmEd/ACPYPE route, which is not "
+                    "available in the default pdb2gmx build. Use --forcefield "
+                    "charmm36-jul2022 for the fully automated phosphorylation path."
+                )
+
     # ------------------------------------------------------------------ #
     def _rename_ptm_residues(self, input_pdb, output_pdb, result: PTMResult, codes_used: List[str]):
         """Rename requested residues to their PTM code; normalise atom names."""
-        # Build a lookup of (chain, resid) -> (target_resname, atom_aliases)
+        # Build a lookup of (chain, resid) -> target metadata.
         targets = {}
         for req in self.config.requests:
             d = get_ptm(req.code)
             if d is None:
-                continue
+                raise ValueError(f"Unknown PTM code '{req.code}' at {req.chain}{req.resid}.")
+            key = (str(req.chain).strip() or "A", int(req.resid))
+            if key in targets:
+                raise ValueError(
+                    f"Duplicate PTM requests for {key[0]}{key[1]}; each residue can have only one PTM."
+                )
             if self.family == "charmm":
                 target = d.charmm_name_for_charge(req.charge)
             else:
                 target = d.amber_name_for_charge(req.charge)
             if not target:
-                result.warnings.append(
-                    f"{req.code} not available in the {self.family} family at {req.chain}{req.resid}; skipped."
+                charge = f" charge {req.charge:+d}" if req.charge is not None else ""
+                raise ValueError(
+                    f"PTM {req.code}{charge} is not available in the {self.family} "
+                    f"force-field family at {req.chain}{req.resid}."
                 )
-                continue
-            targets[(req.chain, req.resid)] = (target, d.atom_aliases)
-            codes_used.append(target)
-            result.renamed_residues.append(f"{req.chain}{req.resid}:{d.parent}->{target}")
+            if len(target) > 4:
+                raise ValueError(
+                    f"PTM residue name '{target}' exceeds the 4-character residue-name "
+                    "field supported by GROMACS/pdb2gmx."
+                )
+            targets[key] = (req, d, target, d.atom_aliases_for(self.family, target))
 
         with open(input_pdb, "r") as fh:
             lines = fh.readlines()
 
+        # Validate every requested location before writing anything. Previously
+        # a typo in chain/residue silently produced an unchanged PDB while the
+        # result claimed success; a wrong parent residue was blindly relabelled.
+        source_names: Dict[Tuple[str, int], Set[str]] = {}
+        insertion_codes: Dict[Tuple[str, int], Set[str]] = {}
+        normalized_atom_names: Dict[Tuple[str, int], Set[str]] = {}
+        for line in lines:
+            key = _pdb_residue_key(line)
+            if key not in targets:
+                continue
+            source_names.setdefault(key, set()).add(line[17:20].strip().upper())
+            insertion_codes.setdefault(key, set()).add(line[26].strip() if len(line) > 26 else "")
+            aliases = targets[key][3]
+            atom_name = _normalized_target_atom_name(line[12:16], aliases)
+            normalized_atom_names.setdefault(key, set()).add(atom_name)
+
+        for key, (req, definition, target, _aliases) in targets.items():
+            location = f"{key[0]}{key[1]}"
+            if key not in source_names:
+                raise ValueError(f"PTM target {location} not found in input PDB.")
+            if len(insertion_codes[key]) > 1:
+                raise ValueError(
+                    f"PTM target {location} is ambiguous because multiple insertion codes share that residue id."
+                )
+            unexpected = source_names[key] - _known_source_names(definition)
+            if unexpected:
+                names = ", ".join(sorted(unexpected))
+                expected = ", ".join(sorted(_known_source_names(definition)))
+                raise ValueError(
+                    f"PTM target {location} has incompatible residue name(s) {names}; expected one of {expected}."
+                )
+            required_atoms = (
+                set(definition.required_heavy_atoms_for(target))
+                if self.family == "charmm"
+                else set()
+            )
+            missing_atoms = required_atoms - normalized_atom_names.get(key, set())
+            if missing_atoms:
+                missing = ", ".join(sorted(missing_atoms))
+                raise ValueError(
+                    f"PTM target {location} is missing required {target} heavy atom(s): {missing}."
+                )
+            codes_used.append(target)
+            result.renamed_residues.append(f"{req.chain}{req.resid}:{definition.parent}->{target}")
+
         out = []
         for line in lines:
-            if line.startswith("ATOM") or line.startswith("HETATM"):
-                chain = line[21].strip() or "A"
-                try:
-                    resid = int(line[22:26])
-                except ValueError:
-                    out.append(line)
-                    continue
-                key = (chain, resid)
-                if key in targets:
-                    target, aliases = targets[key]
-                    # PTM atoms are often HETATM; pdb2gmx wants ATOM for protein.
-                    line = "ATOM  " + line[6:]
-                    # normalise atom name if an alias is defined
-                    atom_name = line[12:16].strip()
-                    if atom_name in aliases:
-                        new_name = aliases[atom_name]
-                        line = line[:12] + f"{new_name:>4s}"[:4] + line[16:]
-                    # rename the residue
-                    line = line[:17] + f"{target:>3s}" + line[20:]
+            key = _pdb_residue_key(line)
+            if key in targets:
+                _req, _definition, target, aliases = targets[key]
+                # PTM atoms are often HETATM; pdb2gmx wants ATOM for protein.
+                line = "ATOM  " + line[6:]
+                # Normalize case and aliases using the same rule as preflight.
+                atom_name = line[12:16].strip()
+                new_name = _normalized_target_atom_name(atom_name, aliases)
+                if new_name != atom_name:
+                    line = line[:12] + f"{new_name:>4s}"[:4] + line[16:]
+                # rename the residue
+                line = line[:17] + f"{target:<4s}" + line[21:]
             out.append(line)
 
         with open(output_pdb, "w") as fh:

@@ -68,6 +68,10 @@ class WorkflowMixin:
 
             print_step(3, 3, "Building membrane system (orient -> bilayer -> convert -> mdps)")
             result = builder.build(cleaned_protein, self.output_dir)
+            # Preserve the structured result for API/MCP callers.  The public
+            # workflow still returns output_dir for compatibility with the
+            # other builder modes.
+            self.membrane_result = result
 
             print_header("Membrane Setup " + ("Complete!" if result.success else "(partial)"))
             print(f"\n  System dir: {path(result.system_dir)}")
