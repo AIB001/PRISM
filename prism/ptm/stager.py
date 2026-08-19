@@ -14,17 +14,26 @@ generation. It:
 3. For the CHARMM36 family — whose bundled FF already contains the PTM residues
    — stages a local ``residuetypes.dat`` registering the PTM codes as
    ``Protein`` so the backbone is not split at the modified residue.
-4. For the AMBER family, reports the route (``tleap`` + ``phosaa`` →
-   ParmEd/ACPYPE) and gates on AmberTools availability.
+4. For the AMBER family, refuses phosphorylation requests outright: that route
+   needs ``tleap`` + ``phosaa`` → ParmEd/ACPYPE, which this staging step does
+   not drive (see :meth:`PTMStager._validate_requests`).
 
 The result object tells the system builder what changed and which ``pdb2gmx``
 inputs/flags to use.
+
+This package deliberately imports nothing from ``prism.utils`` (no colour
+helpers, no GROMACS environment object): staging runs very early in protein
+preparation and the regression tests load ``prism/ptm`` standalone, without
+PRISM's optional heavy dependencies. External-tool interaction is therefore
+limited to ``shutil.which`` plus one short, timeout-guarded ``gmx -version``
+probe.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -32,6 +41,13 @@ from typing import Dict, List, Optional, Set, Tuple
 from .catalog import get_ptm
 from .disulfides import Disulfide, apply_disulfide_renaming, bonded_cys_resname, detect_disulfides
 from .spec import PTMConfig
+
+#: Seconds allowed for ``gmx -version``.  Same budget PRISM uses elsewhere for
+#: this probe (``GromacsEnvironment._get_gromacs_data_dir``,
+#: ``prism.utils.system.topology._find_installed_forcefield_dir``); it is a
+#: metadata query, so a slower answer means a broken/hung install rather than a
+#: busy one.
+_GMX_VERSION_TIMEOUT = 5
 
 
 def _ff_family(ff_name: Optional[str]) -> str:
@@ -178,7 +194,7 @@ class PTMStager:
 
         # 3) FF-specific staging.
         if self.family == "charmm" and codes_used:
-            result.residuetypes_path = self._stage_residuetypes(work_dir, codes_used)
+            result.residuetypes_path = self._stage_residuetypes(work_dir, codes_used, result)
 
         if self.verbose:
             print(result.summary())
@@ -355,17 +371,43 @@ class PTMStager:
         bonds = detect_disulfides(pdb_path)
         if isinstance(mode, list):
             # restrict to user-specified residue positions
-            wanted = {(str(c), int(i)) for c, i in mode}
+            wanted = {(str(c).strip() or "A", int(i)) for c, i in mode}
             bonds = [
                 b for b in bonds
                 if (b.a.chain, b.a.resid) in wanted or (b.b.chain, b.b.resid) in wanted
             ]
+            # An explicitly listed position whose SG has no in-range partner is
+            # dropped here.  Say so: an unformed disulfide changes the modelled
+            # protein just as much as a wrong one, and it is invisible in the
+            # output PDB (the cysteine simply keeps its CYS name).
+            matched = {
+                position
+                for bond in bonds
+                for position in ((bond.a.chain, bond.a.resid), (bond.b.chain, bond.b.resid))
+            }
+            unmatched = sorted(wanted - matched)
+            if unmatched:
+                positions = ", ".join(f"{chain}{resid}" for chain, resid in unmatched)
+                result.warnings.append(
+                    f"Requested disulfide position(s) {positions} have no cysteine SG within "
+                    "bonding distance of another SG and were not bonded; check the chain/residue "
+                    "ids and the input geometry."
+                )
         if not bonds:
             return
         n = apply_disulfide_renaming(pdb_path, pdb_path, bonds, self.forcefield_name)
         result.disulfides = bonds
+        target = bonded_cys_resname(self.forcefield_name)
+        if target and not n:
+            # Renaming is how the AMBER/OPLS path tells pdb2gmx about an SS
+            # bond; detecting bonds but renaming nothing means it silently did
+            # not happen.
+            result.warnings.append(
+                f"Detected {len(bonds)} disulfide bond(s) but renamed no cysteine to "
+                f"'{target}'; pdb2gmx will build them as free cysteines unless specbond.dat "
+                "matches the SG-SG geometry."
+            )
         if self.verbose and bonds:
-            target = bonded_cys_resname(self.forcefield_name)
             if n and target:
                 print(f"  Detected {len(bonds)} disulfide bond(s); renamed {n} cysteines to '{target}'")
             else:
@@ -373,7 +415,7 @@ class PTMStager:
                       f"them from SG-SG geometry (cysteines kept as CYS for {self.family}).")
 
     # ------------------------------------------------------------------ #
-    def _stage_residuetypes(self, work_dir: str, codes: List[str]) -> Optional[str]:
+    def _stage_residuetypes(self, work_dir: str, codes: List[str], result: PTMResult) -> Optional[str]:
         """Write a local residuetypes.dat that registers PTM codes as Protein.
 
         ``pdb2gmx`` reads ``residuetypes.dat`` from the working directory first,
@@ -398,6 +440,18 @@ class PTMStager:
                 p = ln.split()
                 if p:
                     existing.add(p[0].upper())
+            # This file *replaces* the installed one for pdb2gmx (working
+            # directory wins), so the fallback is not merely incomplete -- it
+            # unclassifies every residue GROMACS knows and this list does not
+            # (nucleic acids, most ions, alternative water names). Never let
+            # that happen silently.
+            result.warnings.append(
+                f"Could not locate the GROMACS residuetypes.dat (set GMXLIB, or make "
+                f"'{self.gmx_command}' reachable on PATH). {dest} was written from PRISM's "
+                "minimal built-in list instead; because pdb2gmx reads the working-directory "
+                "copy in preference to the installed one, nucleic acids and less common "
+                "ions/waters will not be classified. Check the pdb2gmx output."
+            )
 
         added = []
         for code in sorted(set(codes)):
@@ -405,15 +459,44 @@ class PTMStager:
                 lines.append(f"{code}    Protein")
                 added.append(code)
 
-        with open(dest, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
+        # Stage through a temporary file in the same directory: pdb2gmx reads
+        # this copy *instead of* the installed one, so a half-written file left
+        # behind by a failed write would silently misclassify residues for
+        # every later run in this directory.
+        staging = dest + ".prism.tmp"
+        try:
+            with open(staging, "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+            os.replace(staging, dest)
+        finally:
+            if os.path.exists(staging):
+                try:
+                    os.remove(staging)
+                except OSError:
+                    pass
 
         if self.verbose and added:
             print(f"  Registered PTM residues as Protein in {dest}: {', '.join(added)}")
         return dest
 
+    #: GROMACS ``top`` directory layouts relative to the ``gmx`` binary's
+    #: prefix, in the order ``GromacsEnvironment._detect_gromacs`` tries them.
+    _GMX_TOP_SUBPATHS = (
+        ("share", "gromacs", "top"),
+        ("share", "top"),
+        ("top",),
+    )
+
     def _find_global_residuetypes(self) -> Optional[str]:
-        """Locate the GROMACS global residuetypes.dat."""
+        """Locate the GROMACS global residuetypes.dat.
+
+        The resolution order mirrors ``GromacsEnvironment._detect_gromacs`` and
+        ``prism.utils.system.topology._find_installed_forcefield_dir``: env
+        hints, then the layouts around the ``gmx`` binary, then ``gmx -version``
+        "Data prefix". Matching that order matters because a miss here does not
+        fail loudly -- it makes :meth:`_stage_residuetypes` write its minimal
+        fallback into the directory ``pdb2gmx`` runs in.
+        """
         # 1) GMXLIB / GMXDATA env hints
         for env in ("GMXLIB", "GMXDATA"):
             base = os.environ.get(env)
@@ -424,13 +507,54 @@ class PTMStager:
                 ):
                     if os.path.exists(cand):
                         return cand
-        # 2) derive from the gmx binary location: <prefix>/share/gromacs/top
+        # 2) derive from the gmx binary location. Not every install uses
+        #    <prefix>/share/gromacs/top, so try the same layouts PRISM's
+        #    GROMACS environment detection does rather than only that one.
         gmx = shutil.which(self.gmx_command) or shutil.which("gmx")
         if gmx:
             prefix = Path(gmx).resolve().parent.parent
-            cand = prefix / "share" / "gromacs" / "top" / "residuetypes.dat"
+            for parts in self._GMX_TOP_SUBPATHS:
+                cand = prefix.joinpath(*parts, "residuetypes.dat")
+                if cand.exists():
+                    return str(cand)
+        # 3) ask the binary itself, which is what PRISM falls back to elsewhere
+        #    when the layout guesses miss (wrapper scripts, relocated installs).
+        data_prefix = self._gmx_data_prefix()
+        if data_prefix:
+            cand = Path(data_prefix) / "share" / "gromacs" / "top" / "residuetypes.dat"
             if cand.exists():
                 return str(cand)
+        return None
+
+    def _gmx_data_prefix(self) -> Optional[str]:
+        """Return the ``Data prefix`` reported by ``gmx -version``, or None.
+
+        Best-effort by design: this is a last-resort hint, so a missing, hung or
+        broken GROMACS must degrade to ``None`` rather than abort staging. The
+        call is bounded by :data:`_GMX_VERSION_TIMEOUT` for the same reason the
+        membrane backend bounds its ``--help`` probe -- an unbounded metadata
+        query can hang a build indefinitely.
+        """
+        tried: Set[str] = set()
+        for command in (self.gmx_command, "gmx"):
+            if not command or command in tried:
+                continue
+            tried.add(command)
+            if not shutil.which(command):
+                continue
+            try:
+                proc = subprocess.run(
+                    [command, "-version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=_GMX_VERSION_TIMEOUT,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in (proc.stdout or "").splitlines():
+                if "Data prefix" in line:
+                    return line.split(":", 1)[1].strip()
         return None
 
     @staticmethod
@@ -449,5 +573,16 @@ class PTMStager:
 
     # ------------------------------------------------------------------ #
     def amber_tleap_available(self) -> bool:
-        """Return True if an AmberTools tleap is reachable."""
+        """Return True if an AmberTools tleap is reachable.
+
+        Advisory only: :meth:`apply` never consults this. The AMBER
+        phosphorylation route is refused up front in
+        :meth:`_validate_requests` regardless of whether tleap is installed,
+        because this module does not drive the tleap -> ParmEd/ACPYPE
+        conversion. Kept for callers that want to report the environment.
+        Availability checks that *do* gate a build live in
+        ``prism.membrane.packmol_memgen.missing_requirements`` and
+        ``GAFFForceFieldGenerator.generate_amber_parameters``, both of which
+        pair the check with an install hint.
+        """
         return shutil.which("tleap") is not None

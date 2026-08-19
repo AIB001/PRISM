@@ -10,14 +10,24 @@ structure). For every modification we record how to realise it in an all-atom
 GROMACS ``pdb2gmx`` pipeline for both supported force-field families:
 
 * **CHARMM36** — the bundled ``charmm36-jul2022.ff`` already contains the PTM
-  residues in ``aminoacids.rtp`` (verified: SEP, TPO, PTR, SP1/SP2,
-  THP1/THP2, TP1/TP2, MLZ, MLY, M3L, ALY, 2MR). The only requirements are that the residue is
+  residues in ``aminoacids.rtp`` (verified: SEP/SP1/SP2, TPO/THP1/THP2,
+  PTR/TP1/TP2, MLZ, MLY, M3L, ALY, 2MR). SEP/TPO/PTR and SP1/THP1/TP1 are
+  duplicate monoanionic entries that differ only in phosphate atom naming, so
+  the catalog emits SEP/TPO/PTR for charge -1 and records SP1/THP1/TP1 as
+  recognised equivalents. The only requirements are that the residue is
   registered as ``Protein`` in a ``residuetypes.dat`` visible to ``pdb2gmx`` and
   that the heavy-atom names match the ``.rtp`` entry.
 * **AMBER** — phosphorylation uses the ``phosaa14SB`` / ``phosaa19SB`` parameter
   sets shipped with AmberTools (``leaprc.phosaa19SB``); the modified residue is
   built with ``tleap`` and converted to GROMACS with ParmEd/ACPYPE through
   PRISM's existing ``amb2gmx`` path.
+
+This module is the single source of truth for PTM residue names. Any other
+module that needs to recognise a modified amino acid (thermostat-group
+classification, metal-vs-protein discrimination, position-restraint selections)
+must derive its table from :func:`ptm_resnames` rather than re-listing the
+codes, exactly as ligand-backend metadata is derived from
+``prism.forcefield.registry`` rather than re-listed per caller.
 
 References (see PRISM_Capability_Expansion_Roadmap.md for full citations):
     - Raguette et al. JCTC 2024 (phosaa14SB/phosaa19SB)
@@ -27,7 +37,7 @@ References (see PRISM_Capability_Expansion_Roadmap.md for full citations):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -44,6 +54,11 @@ class PTMDef:
     charmm_resname: Optional[str] = None
     #: Alternative CHARMM rtp names for other protonation states, by charge.
     charmm_charge_variants: Dict[int, str] = field(default_factory=dict)
+    #: CHARMM .rtp entries that describe the same chemical state as one of the
+    #: names above under a different atom-naming scheme. They are never emitted
+    #: by PRISM, but a structure prepared elsewhere may already carry them, so
+    #: they belong in the residue-name table exported by :func:`ptm_resnames`.
+    charmm_equivalent_resnames: Tuple[str, ...] = ()
 
     #: AMBER tleap residue name (None => not available in the AMBER phosaa path).
     amber_resname: Optional[str] = None
@@ -98,6 +113,42 @@ class PTMDef:
         """Return the modification-specific heavy atoms for ``resname``."""
         return self.required_heavy_atoms.get(resname, ())
 
+    def resnames(self, ff_family: Optional[str] = None) -> FrozenSet[str]:
+        """Residue names this modification can carry in a built system.
+
+        Includes the CCD code, every force-field residue name and every
+        protonation-state variant, plus the CHARMM ``.rtp`` entries that are
+        equivalent to one of them. ``ff_family`` is matched loosely against
+        ``"amber"`` / ``"charmm"``; ``None`` returns the union. The CCD code is
+        always included: a deposited structure carries it whichever force field
+        is selected afterwards. Use :func:`supported_codes` instead when the
+        question is which PTMs a family can actually build.
+        """
+        fam = (ff_family or "").lower()
+        want_charmm = not fam or "charmm" in fam
+        # Non-CHARMM families (amber, opls) all resolve through the AMBER
+        # names, matching how PTMStager classifies a force field.
+        want_amber = "charmm" not in fam
+
+        names = {self.code}
+        if want_charmm:
+            names.add(self.charmm_resname)
+            names.update(self.charmm_charge_variants.values())
+            names.update(self.charmm_equivalent_resnames)
+        if want_amber:
+            names.add(self.amber_resname)
+            names.update(self.amber_charge_variants.values())
+        return frozenset(name.strip().upper() for name in names if name)
+
+    def known_source_resnames(self) -> FrozenSet[str]:
+        """Residue names that may legitimately denote this PTM in an input PDB.
+
+        This is :meth:`resnames` plus the unmodified parent residue, which is
+        what a deposited structure carries when the modification is described
+        only by the requested PTM code.
+        """
+        return self.resnames() | {self.parent.strip().upper()}
+
 
 # --------------------------------------------------------------------------- #
 # The catalog                                                                  #
@@ -109,7 +160,9 @@ _CATALOG: Tuple[PTMDef, ...] = (
         code="SEP", name="Phosphoserine", category="phosphorylation", parent="SER",
         default_charge=-2,
         # SEP is monoanionic in the bundled .rtp; SP2 is the dianion.
+        # SP1 is the same monoanion written with OT/HT instead of O3P/H3T.
         charmm_resname="SP2", charmm_charge_variants={-2: "SP2", -1: "SEP"},
+        charmm_equivalent_resnames=("SP1",),
         charmm_atom_aliases={
             "SP2": {"O3P": "OT"},
             "SEP": {"OT": "O3P", "HT": "H3T"},
@@ -126,7 +179,9 @@ _CATALOG: Tuple[PTMDef, ...] = (
         default_charge=-2,
         # TPO is monoanionic. THP1/THP2 are phosphothreonine variants;
         # TP1/TP2 in this force field are phosphotyrosine variants.
+        # THP1 is the same monoanion as TPO written with OT/HT.
         charmm_resname="THP2", charmm_charge_variants={-2: "THP2", -1: "TPO"},
+        charmm_equivalent_resnames=("THP1",),
         charmm_atom_aliases={
             "THP2": {"O3P": "OT"},
             "TPO": {"OT": "O3P", "HT": "H3T"},
@@ -142,7 +197,9 @@ _CATALOG: Tuple[PTMDef, ...] = (
         code="PTR", name="Phosphotyrosine", category="phosphorylation", parent="TYR",
         default_charge=-2,
         # PTR is monoanionic in the bundled .rtp; TP2 is the dianion.
+        # TP1 is the same monoanion written with P1/O2/H2 instead of P/O3P/H3T.
         charmm_resname="TP2", charmm_charge_variants={-2: "TP2", -1: "PTR"},
+        charmm_equivalent_resnames=("TP1",),
         charmm_atom_aliases={
             "TP2": {"P": "P1", "O3P": "O2", "O1P": "O3", "O2P": "O4"},
             "PTR": {"P1": "P", "O2": "O3P", "H2": "H3T", "O3": "O1P", "O4": "O2P"},
@@ -221,6 +278,34 @@ def get_ptm(code: str) -> Optional[PTMDef]:
 
 def is_known_ptm(code: str) -> bool:
     return str(code).strip().upper() in _BY_CODE
+
+
+def ptm_resnames(
+    ff_family: Optional[str] = None,
+    validated_only: bool = True,
+    include_parents: bool = False,
+) -> FrozenSet[str]:
+    """Every residue name a catalogued PTM can appear under.
+
+    This is the table other PRISM modules must use instead of hand-maintaining
+    their own list of modified-residue names (thermostat-group classification,
+    metal-vs-protein discrimination, position-restraint selections). Keeping it
+    here means adding a PTM to :data:`_CATALOG` updates every consumer.
+
+    ``ff_family`` is matched loosely against ``"amber"`` / ``"charmm"``;
+    ``None`` returns the union over both families. Unvalidated placeholders are
+    excluded by default because staging refuses to build them.
+    ``include_parents`` additionally returns the unmodified parent residues,
+    which is what a deposited structure carries before staging.
+    """
+    names: Set[str] = set()
+    for definition in _CATALOG:
+        if validated_only and not definition.validated:
+            continue
+        names |= definition.resnames(ff_family)
+        if include_parents:
+            names.add(definition.parent.strip().upper())
+    return frozenset(names)
 
 
 def supported_codes(ff_family: Optional[str] = None) -> List[str]:

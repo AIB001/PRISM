@@ -13,17 +13,33 @@ list) and works out the residue renaming / ``pdb2gmx`` flags required.
 
 The PDB parser here is intentionally dependency-free (no mdtraj/Bio.PDB) so the
 detection can run early in protein preparation.
+
+This module deliberately prints nothing. It is a library layer, and only the
+caller knows whether a finding is worth a line of console output and at what
+weight; the staging layer renders the results (see :mod:`prism.ptm.stager`).
+What the module does own is its *error* text, which follows the rest of PRISM in
+naming the stage that needed a file rather than leaving the user with a bare
+errno and a path.
 """
 
 from __future__ import annotations
 
 import math
+import os
+import shutil
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-# specbond.dat reference SG-SG length is 0.20 nm; allow a generous tolerance to
-# catch slightly distorted crystal geometries while excluding non-bonded pairs.
+#: Lower bound on an SG-SG separation that can be a real disulfide. Anything
+#: shorter is a clash or a duplicated altloc, not a bond.
 _SG_SG_MIN = 1.5  # Angstrom
+#: Upper bound. ``specbond.dat`` gives the reference SG-SG length as 0.20 nm and
+#: ``pdb2gmx`` accepts it within 10% (1.8-2.2 A); this window is intentionally
+#: wider so slightly distorted crystal geometries are still *reported* to the
+#: user, while non-bonded pairs stay excluded. The consequence is that a pair
+#: found between 2.2 and 2.5 A is a candidate PRISM lists but ``pdb2gmx`` may
+#: still decline to bond on the force fields that rely on ``specbond.dat``
+#: (CHARMM); on AMBER/OPLS the CYX rename forces the bond regardless.
 _SG_SG_MAX = 2.5  # Angstrom (0.20 nm + ~25% — pragmatic upper bound)
 
 
@@ -51,8 +67,37 @@ class Disulfide:
         )
 
 
+def _require_input_pdb(pdb_path: str, purpose: str) -> None:
+    """Fail with a message that names the stage, not just an errno and a path.
+
+    ``open()`` on a missing file reports only the path, which inside a
+    multi-stage build tells the user nothing about which step went wrong. The
+    rest of PRISM always names the role of the file (``prism/core.py``:
+    "Protein file not found: ..."), so disulfide handling does too.
+    """
+    if not os.path.isfile(pdb_path):
+        raise FileNotFoundError(
+            f"PDB file for {purpose} not found: {pdb_path}. "
+            "Disulfide handling reads the cleaned protein produced by the "
+            "protein-preparation step; check that step completed, or pass an "
+            "existing PDB."
+        )
+
+
+def _require_output_dir(out_path: str, purpose: str) -> None:
+    """Check the destination directory before any work is done."""
+    parent = os.path.dirname(os.path.abspath(out_path))
+    if not os.path.isdir(parent):
+        raise FileNotFoundError(
+            f"Output directory for {purpose} does not exist: {parent}. "
+            "Create it (or point the build at an existing output directory) "
+            "before staging disulfides."
+        )
+
+
 def _parse_cys_sg(pdb_path: str) -> List[CysSG]:
     """Extract all cysteine SG atoms from a PDB file."""
+    _require_input_pdb(pdb_path, "disulfide detection")
     out: List[CysSG] = []
     cys_names = {"CYS", "CYX", "CYM", "CYS2"}
     with open(pdb_path, "r") as fh:
@@ -86,6 +131,13 @@ def detect_disulfides(pdb_path: str) -> List[Disulfide]:
 
     Each SG is matched to at most one partner (its nearest in-range SG), which
     guards against the chained ``SG-SG-SG`` angle bug that crashes ``grompp``.
+
+    A returned pair is a *candidate*: the accepted distance window is slightly
+    wider than the one ``pdb2gmx`` applies to ``specbond.dat`` (see
+    :data:`_SG_SG_MAX`). On force fields where the bond is formed from geometry
+    rather than from the residue name (CHARMM), a pair near the upper bound can
+    still be declined by ``pdb2gmx``, so callers should not report these as
+    bonds that are guaranteed to exist in the final topology.
     """
     sgs = _parse_cys_sg(pdb_path)
     n = len(sgs)
@@ -144,13 +196,14 @@ def apply_disulfide_renaming(
     ``CYS2``), no renaming is performed and ``pdb2gmx`` + ``specbond.dat`` forms
     the bond from the SG-SG geometry instead.
     """
+    _require_input_pdb(input_pdb, "disulfide renaming")
+    _require_output_dir(output_pdb, "disulfide renaming")
+
     target = bonded_cys_resname(ff_family)
 
     # No rename needed/possible (CHARMM, or an over-length name): copy through.
     if not bonds or target is None or len(target) > 3:
         if input_pdb != output_pdb:
-            import shutil
-
             shutil.copy2(input_pdb, output_pdb)
         return 0
 
