@@ -16,6 +16,106 @@ import argparse
 from .core import PRISMBuilder
 from ..fep.naming import generate_fep_system_name
 
+# The membrane option sets are imported, never restated.  ``prism/__init__.py``
+# already imports ``prism.membrane`` eagerly, so this costs nothing at startup,
+# and it means a route this CLI has never heard of becomes selectable the moment
+# ``prism.membrane.config`` learns it -- a hand-copied ``choices=[...]`` is
+# exactly the kind of duplicate that drifts out of sync with its source.
+from ..membrane.config import (
+    BILAYER_SOURCES,
+    ORIENTATION_METHODS,
+    SOLVATE_MODES,
+    membrane_defaults,
+)
+
+
+# Per-choice help for the two independent membrane route selectors and for the
+# orientation source.  Only the prose lives here, keyed by the name it describes:
+# whether a name is *offered* is decided by the imported sets above, so a set
+# that grows a member still renders complete help, and one that loses a member
+# drops the stale sentence along with the choice.
+#
+# The two route axes are easy to confuse, so each string says which of the two it
+# belongs to: ``bilayer_source`` is about the LIPIDS, ``solvate`` about the WATER.
+_BILAYER_SOURCE_HELP = {
+    "packmol": (
+        "'packmol' packs lipids around the solute from single lipid conformers -- validated, "
+        "slower, and the only option for a lipid with no bundled patch."
+    ),
+    "patch": (
+        "'patch' tiles a bundled pre-equilibrated Lipid21 bilayer in the membrane plane and "
+        "deletes the lipids the solute overlaps: 75 s against >600 s measured on a class-C "
+        "GPCR homodimer, where the packmol wet pack never finished at all. It produces a "
+        "water-free system, so it requires --membrane-solvate gromacs (or auto)."
+    ),
+    "auto": (
+        "'auto' tiles a patch when this composition has one bundled and nothing rules it out, "
+        "and otherwise packs with packmol -- it never turns a request packmol could have built "
+        "into one that fails."
+    ),
+}
+
+_SOLVATE_MODE_HELP = {
+    "packmol": (
+        "'packmol' lets PACKMOL-Memgen place water and ions in the same run that packs the "
+        "lipids -- the validated route, and the step that stops finishing on a large system, "
+        "because it is placing ~10^5 molecules instead of ~10^2."
+    ),
+    "gromacs": (
+        "'gromacs' packs dry and then runs gmx solvate plus gmx genion, with an inflated "
+        "carbon radius and a geometric purge of the water that still lands in the hydrophobic "
+        "core."
+    ),
+    "auto": (
+        "'auto' takes gromacs only when the projected water count makes the wet pack "
+        "impractical, and packmol otherwise."
+    ),
+}
+
+_ORIENT_METHOD_HELP = {
+    "auto": (
+        "'auto' measures the input against the bilayer frame and runs MEMEMBED only when the "
+        "structure is not already membrane-framed, so an unoriented PDB needs no extra flag "
+        "and a frame you prepared deliberately is left untouched. It fails closed: if MEMEMBED "
+        "is needed and not installed, the build stops instead of packing an unoriented solute."
+    ),
+    "preoriented": (
+        "'preoriented' trusts the input frame as given."
+    ),
+    "memembed": (
+        "'memembed' orients the structure with MEMEMBED. PRISM runs the binary itself -- "
+        "PACKMOL-Memgen orients nothing -- which is what lets the fast route start from an "
+        "unoriented structure."
+    ),
+    "opm": (
+        "'opm' fetches an already-oriented structure from OPM by PDB id (--membrane-pdbid)."
+    ),
+    "ppm": (
+        "'ppm' is recognised but not automated: run the PPM server or the standalone 'immers' "
+        "binary yourself and pass its output as preoriented."
+    ),
+}
+
+
+def _ordered_choices(allowed, preferred):
+    """Render an unordered config set as a stable argparse ``choices`` list.
+
+    The option sets in :mod:`prism.membrane.config` are ``set`` literals and
+    ``str`` hashing is randomised per process, so iterating one straight into
+    ``choices`` would reshuffle ``--help`` between runs.  ``preferred`` fixes the
+    order of the names this module has prose for; anything the config grows later
+    is appended sorted rather than dropped, so an unknown-to-here backend is
+    still selectable (and still visible) without editing this file.
+    """
+    ordered = [name for name in preferred if name in allowed]
+    ordered.extend(sorted(str(name) for name in allowed if name not in preferred))
+    return ordered
+
+
+def _describe_choices(allowed, descriptions):
+    """Join the per-choice prose for the choices this config actually offers."""
+    return " ".join(text for name, text in descriptions.items() if name in allowed)
+
 
 def _slug_case_token(value: str) -> str:
     token = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower())
@@ -392,12 +492,24 @@ Example usage:
     )
 
     # Membrane protein options
+    #
+    # Defaults are read from MembraneConfig rather than repeated here: argparse's
+    # own defaults for these flags are inert (every one is applied only when
+    # _cli_option_provided says it was typed), so a hardcoded "(default: ...)" in
+    # help text is a claim this file cannot keep true when the config changes its
+    # mind about the default route.
+    membrane_field_defaults = membrane_defaults()
     memb_group = parser.add_argument_group("Membrane protein options")
     memb_group.add_argument(
         "--membrane",
         action="store_true",
-        help="Build an all-atom protein-in-bilayer system (PACKMOL-Memgen -> ParmEd -> GROMACS) "
-        "with a semiisotropic membrane equilibration protocol. Output in GMX_PROLIG_MEMB/.",
+        help="Build an all-atom protein-in-bilayer system with a semiisotropic membrane "
+        "equilibration protocol. Output in GMX_PROLIG_MEMB/. The bilayer is packed by "
+        "PACKMOL-Memgen or tiled from a bundled pre-equilibrated patch (--membrane-bilayer), "
+        "then converted to GROMACS. A ligand is embedded alongside the protein by passing it "
+        "with -lf/--ligand-file, which PRISM parameterizes with GAFF/GAFF2 itself; pre-built "
+        "AMBER parameters can still be supplied through the YAML membrane keys ligand_frcmod "
+        "+ ligand_lib.",
     )
     memb_group.add_argument(
         "--lipid",
@@ -421,13 +533,101 @@ Example usage:
         help="Lipid force field for automated membrane parameterization (default: lipid21).",
     )
     memb_group.add_argument(
+        "--membrane-bilayer",
+        choices=_ordered_choices(BILAYER_SOURCES, tuple(_BILAYER_SOURCE_HELP)),
+        default=None,
+        help="Which backend builds the BILAYER -- this flag is about the LIPIDS; "
+        "--membrane-solvate is the separate question of who places the WATER. "
+        + _describe_choices(BILAYER_SOURCES, _BILAYER_SOURCE_HELP)
+        + f" Default: {membrane_field_defaults['bilayer_source']}. Overrides membrane.bilayer_source "
+        "in the --config YAML; omit it to keep the configured value.",
+    )
+    memb_group.add_argument(
+        "--membrane-solvate",
+        choices=_ordered_choices(SOLVATE_MODES, tuple(_SOLVATE_MODE_HELP)),
+        default=None,
+        help="Which backend places the WATER and ions -- this flag is about the WATER; "
+        "--membrane-bilayer is the separate question of who builds the LIPIDS. "
+        + _describe_choices(SOLVATE_MODES, _SOLVATE_MODE_HELP)
+        + f" Default: {membrane_field_defaults['solvate']}. Overrides membrane.solvate in the "
+        "--config YAML; omit it to keep the configured value.",
+    )
+    memb_group.add_argument(
         "--membrane-orient",
-        choices=["opm", "ppm", "preoriented", "memembed"],
-        default="preoriented",
-        help="Membrane-normal orientation source (default: preoriented). 'opm' fetches an oriented structure by PDB id.",
+        choices=_ordered_choices(ORIENTATION_METHODS, tuple(_ORIENT_METHOD_HELP)),
+        default=None,
+        help="Membrane-normal orientation source. The bilayer is always built centred on "
+        "z = 0 and the solute is never moved to meet it, so this decides whether the "
+        "structure arrives membrane-framed. "
+        + _describe_choices(ORIENTATION_METHODS, _ORIENT_METHOD_HELP)
+        + f" Default: {membrane_field_defaults['orient']}.",
     )
     memb_group.add_argument(
         "--membrane-pdbid", default=None, help="PDB id to fetch a pre-oriented structure from OPM (with --membrane-orient opm)"
+    )
+    memb_group.add_argument(
+        "--membrane-no-validate-orientation",
+        action="store_true",
+        help="Skip the pre-pack check that a 'preoriented' input really is membrane-framed. "
+        "BOTH bilayer routes ALWAYS build the bilayer centred on z=0 and leave the solute at "
+        "its input coordinates -- neither moves the protein to meet the membrane. So a structure "
+        "that is not membrane-framed (a raw crystallographic PDB, an OPM/PPM model that was "
+        "later re-centred, anything whose z origin is not the bilayer midplane) gets packed "
+        "OUTSIDE the membrane, and the build still succeeds: you end up with a solvated protein "
+        "sitting next to a bilayer rather than inside it. The check measures the median z of the "
+        "membrane-spanning region against z=0. Disable this only if you have already validated "
+        "your own frame of reference.",
+    )
+    memb_group.add_argument(
+        "--membrane-center-tolerance",
+        type=float,
+        default=15.0,
+        metavar="ANGSTROM",
+        help="How far (Angstrom) the membrane-spanning region of a 'preoriented' input may sit "
+        "from the z=0 bilayer midplane before the orientation check rejects it (default: 15.0). "
+        "Raise it for an unusually thick or strongly asymmetric bilayer. Has no effect together "
+        "with --membrane-no-validate-orientation.",
+    )
+    memb_group.add_argument(
+        "--membrane-posres-bb",
+        type=float,
+        default=1000.0,
+        metavar="FC",
+        help="Position-restraint force constant on protein backbone atoms in kJ/mol/nm^2 for the "
+        "staged membrane equilibration (default: 1000). This is the full-strength value applied "
+        "in the first restrained stage; later stages scale it down and production runs "
+        "unrestrained. Lower it to let the fold relax sooner, raise it to hold a fragile or "
+        "low-resolution model in place while the lipids anneal around it.",
+    )
+    memb_group.add_argument(
+        "--membrane-posres-sc",
+        type=float,
+        default=500.0,
+        metavar="FC",
+        help="Position-restraint force constant on protein side-chain atoms in kJ/mol/nm^2 for "
+        "the staged membrane equilibration (default: 500). Deliberately weaker than the backbone "
+        "so side chains can settle into the lipid packing while the fold itself stays put.",
+    )
+    memb_group.add_argument(
+        "--membrane-posres-lipid",
+        type=float,
+        default=1000.0,
+        metavar="FC",
+        help="Position-restraint force constant on lipid headgroups in kJ/mol/nm^2 during the "
+        "restrained equilibration stages (default: 1000). Keeps the freshly packed bilayer flat "
+        "while water and ions equilibrate around it; the lipids are released one stage before the "
+        "protein backbone. Pass 0 to leave the lipids free from the start.",
+    )
+    memb_group.add_argument(
+        "--membrane-ligand-resname",
+        default="LIG",
+        metavar="RESNAME",
+        help="Residue name of a ligand embedded in the bilayer alongside the protein "
+        "(default: LIG). It names the unit PRISM writes when it parameterizes a "
+        "-lf/--ligand-file ligand for this build, so on that path the flag renames the ligand "
+        "residue in the finished system. With pre-built AMBER parameters supplied through the "
+        "YAML membrane keys ligand_frcmod/ligand_lib it is a lookup key instead, and must match "
+        "the unit name inside that .lib.",
     )
 
     # FEP (Free Energy Perturbation) options
@@ -797,10 +997,29 @@ pressure_coupling:
             "or a --ptm/--ssbond modification)."
         )
 
+    # Membrane mode embeds a -lf/--ligand-file ligand by parameterizing it with
+    # GAFF/GAFF2 and feeding the resulting AMBER frcmod/lib to PACKMOL-Memgen's
+    # --ligand_param.  Two combinations genuinely cannot work; catching them here
+    # turns a mid-build failure (minutes in, after packing has started) into an
+    # immediate usage error.
     if effective_membrane and ligand_paths:
-        parser.error(
-            "Membrane mode currently builds protein-bilayer systems only; ligand inputs are not yet incorporated."
-        )
+        from .workflow import WorkflowMixin
+
+        if len(ligand_paths) > 1:
+            parser.error(
+                f"Membrane mode embeds a single ligand, but {len(ligand_paths)} were given. "
+                "PACKMOL-Memgen's --ligand_param takes one FRCMOD:LIB pair, so the extra "
+                "ligands could only be dropped silently."
+            )
+        if args.ligand_forcefield not in WorkflowMixin.MEMBRANE_LIGAND_FORCEFIELDS:
+            supported = " or ".join(
+                f"--ligand-forcefield {ff}" for ff in WorkflowMixin.MEMBRANE_LIGAND_FORCEFIELDS
+            )
+            parser.error(
+                f"Membrane mode cannot embed a ligand parameterized with "
+                f"'{args.ligand_forcefield}': the bilayer is built in AMBER, so the ligand needs "
+                f"AMBER-side parameters. Use {supported}."
+            )
 
     if effective_membrane and any((args.pmf, args.rest2, args.mmpbsa, args.fep)):
         parser.error("--membrane cannot be combined with --pmf, --rest2, --mmpbsa, or --fep.")
@@ -1022,6 +1241,58 @@ pressure_coupling:
             membrane_values["pdb_id"] = args.membrane_pdbid
         if _cli_option_provided("--lipid-ff"):
             membrane_values["lipid_ff"] = args.lipid_ff
+        # The two independent route axes: who builds the lipids, who places the
+        # water.  Both were reachable only as YAML keys, which made the fast
+        # route cost a hand-written config file.  Contradictory combinations
+        # (patch + packmol solvation) are not re-checked here -- MembraneConfig
+        # owns that rule, and parse_membrane_yaml below turns it into a
+        # parser.error, so there is exactly one statement of it.
+        if _cli_option_provided("--membrane-bilayer"):
+            membrane_values["bilayer_source"] = args.membrane_bilayer
+        if _cli_option_provided("--membrane-solvate"):
+            membrane_values["solvate"] = args.membrane_solvate
+        if _cli_option_provided("--membrane-no-validate-orientation"):
+            # The flag is worded negatively; the config field is positive.
+            membrane_values["validate_orientation"] = not args.membrane_no_validate_orientation
+        if _cli_option_provided("--membrane-center-tolerance"):
+            membrane_values["center_tolerance"] = args.membrane_center_tolerance
+        if _cli_option_provided("--membrane-posres-bb"):
+            membrane_values["posres_fc_backbone"] = args.membrane_posres_bb
+        if _cli_option_provided("--membrane-posres-sc"):
+            membrane_values["posres_fc_sidechain"] = args.membrane_posres_sc
+        if _cli_option_provided("--membrane-posres-lipid"):
+            membrane_values["posres_fc_lipid"] = args.membrane_posres_lipid
+        if _cli_option_provided("--membrane-ligand-resname"):
+            membrane_values["ligand_resname"] = args.membrane_ligand_resname
+
+        # gaff2 is DERIVED from --ligand-forcefield, never configured on its own:
+        # it selects the leaprc that PACKMOL-Memgen sources for the ligand, so it
+        # must name the same GAFF generation that actually produced the ligand
+        # parameters.  A mismatch is silent rather than fatal -- all 83 GAFF atom
+        # types are a strict subset of GAFF2's 100 with identical masses, so tleap
+        # reads the wrong leaprc without a single warning and only the force
+        # constants change (aromatic ca-ca k = 461.1 in gaff.dat vs 354.25 in
+        # gaff2.dat: a 23% error).  Deriving here also corrects MembraneConfig's
+        # standalone ``gaff2 = True`` default, which contradicts PRISM's own -lff
+        # default of plain ``gaff``.  Non-GAFF ligand force fields select neither
+        # and leave PACKMOL-Memgen on its documented leaprc.gaff default.
+        derived_gaff2 = args.ligand_forcefield == "gaff2"
+        # A YAML ``gaff2:`` key cannot be honored as an independent setting -- it
+        # would silently contradict the selection above.  Reject the contradiction
+        # instead of picking a winner, and keep the boolean type check that
+        # overwriting the key would otherwise bypass.
+        if "gaff2" in membrane_values:
+            yaml_gaff2 = membrane_values["gaff2"]
+            if type(yaml_gaff2) is not bool:
+                parser.error("Membrane gaff2 must be a boolean (true or false).")
+            if yaml_gaff2 != derived_gaff2:
+                parser.error(
+                    f"Membrane gaff2={yaml_gaff2} contradicts --ligand-forcefield "
+                    f"'{args.ligand_forcefield}'; the ligand force field decides which GAFF "
+                    "generation is used. Select '-lff gaff2' or '-lff gaff' instead of setting "
+                    "membrane.gaff2."
+                )
+        membrane_values["gaff2"] = derived_gaff2
 
         if _cli_option_provided("--temperature", "-t"):
             membrane_values["temperature"] = args.temperature

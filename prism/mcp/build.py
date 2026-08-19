@@ -72,6 +72,8 @@ def register(mcp):
             ligand_paths: Absolute path to ligand file(s). For multiple ligands,
                 separate with commas: "/path/lig1.mol2,/path/lig2.mol2". May be
                 empty for a protein-only membrane build.
+                Membrane builds also accept a ligand embedded in the bilayer
+                alongside the protein; see the `membrane` argument.
             output_dir: Directory for all output files. Default: "prism_output".
             ligand_forcefield: Ligand force field. Default: "gaff2" (recommended).
                 Options: "gaff", "gaff2", "openff", "opls", "mmff", "match", "hybrid".
@@ -121,7 +123,15 @@ def register(mcp):
                 "phosaa10". The automated AMBER tleap route is currently gated.
             membrane: If true, build a protein-in-bilayer system (PACKMOL-Memgen ->
                 ParmEd -> GROMACS, semiisotropic membrane MDP). Requires AmberTools.
-                Output goes to GMX_PROLIG_MEMB/. Default: false.
+                Output goes to GMX_PROLIG_MEMB/ and mirrors the soluble
+                GMX_PROLIG_MD layout: topol.top, system.gro, index.ndx,
+                position-restraint files and a localrun.sh driver. The protocol
+                is a five-stage staged restraint release (em -> nvt -> npt ->
+                npt2 -> md) that equilibrates at 1 fs and produces at 2 fs.
+                A ligand can be embedded in the bilayer alongside the protein,
+                but only from pre-built AMBER parameters supplied through the
+                YAML membrane section (ligand_frcmod + ligand_lib), which drive
+                PACKMOL-Memgen's --keepligs/--ligand_param. Default: false.
             lipid: Lipid type for the bilayer when membrane=true. Default: "POPC".
             lipid_ff: Lipid parameter family for membrane builds. Default:
                 "lipid21"; "lipid17" is also supported by the current backend.
@@ -144,11 +154,6 @@ def register(mcp):
 
         if not lig_list and not membrane:
             errors.append("At least one ligand path is required unless membrane=true.")
-        if membrane and lig_list:
-            errors.append(
-                "Membrane mode currently builds protein-bilayer systems only; "
-                "ligand inputs are not yet incorporated."
-            )
 
         for lp in lig_list:
             if not os.path.isabs(lp):
@@ -166,11 +171,14 @@ def register(mcp):
         if nterm_met not in ("keep", "drop", "auto"):
             errors.append(f"nterm_met must be 'keep', 'drop', or 'auto', got: {nterm_met}")
 
-        if membrane_orient not in ("preoriented", "opm", "ppm", "memembed"):
-            errors.append(
-                "membrane_orient must be 'preoriented', 'opm', 'ppm', or 'memembed', "
-                f"got: {membrane_orient}"
-            )
+        # Imported rather than restated: a hand-copied set here silently rejected
+        # every orientation method prism.membrane.config learned afterwards, and
+        # 'auto' -- now the default -- was the case that exposed it.
+        from prism.membrane.config import ORIENTATION_METHODS
+
+        if membrane_orient not in ORIENTATION_METHODS:
+            allowed = ", ".join(f"'{name}'" for name in sorted(ORIENTATION_METHODS))
+            errors.append(f"membrane_orient must be one of {allowed}, got: {membrane_orient}")
         if membrane and membrane_orient == "opm" and not membrane_pdbid:
             errors.append("membrane_pdbid is required when membrane_orient='opm'.")
         if membrane:
@@ -218,9 +226,16 @@ def register(mcp):
 
                 # Optional membrane build
                 membrane_config = None
+                membrane_system_dirname = None
                 if membrane:
                     from prism.membrane import parse_membrane_cli
 
+                    # The membrane system directory name is owned by the membrane
+                    # builder; importing it keeps this tool from drifting out of
+                    # sync with a rename.
+                    from prism.membrane.builder import MEMBRANE_SYSTEM_DIRNAME
+
+                    membrane_system_dirname = MEMBRANE_SYSTEM_DIRNAME
                     membrane_config = parse_membrane_cli(
                         membrane=True, lipid=[lipid], lipid_ratio=None,
                         orient=membrane_orient, pdb_id=membrane_pdbid, lipid_ff=lipid_ff,
@@ -270,7 +285,9 @@ def register(mcp):
                 result_dir = builder.run()
 
             # --- Collect output info ---
-            gmx_dir = os.path.join(result_dir, "GMX_PROLIG_MEMB" if membrane else "GMX_PROLIG_MD")
+            gmx_dir = os.path.join(
+                result_dir, membrane_system_dirname if membrane else "GMX_PROLIG_MD"
+            )
             mdp_dir = os.path.join(result_dir, "mdps")
             files = {}
             membrane_result = getattr(builder, "membrane_result", None) if membrane else None
@@ -284,13 +301,20 @@ def register(mcp):
                         ("topology", "top"),
                         ("index", "ndx"),
                         ("oriented_protein", "oriented_pdb"),
+                        # Mirrors the soluble path's "run_script" key so a caller
+                        # can drive either system the same way.
+                        ("run_script", "runscript"),
                     ):
                         candidate = getattr(membrane_result, attribute, None)
                         if candidate and os.path.isfile(candidate):
                             files[key] = candidate
-                    for path_value in (getattr(membrane_result, "mdps", {}) or {}).values():
-                        if path_value and os.path.isfile(path_value):
-                            files[os.path.basename(path_value)] = path_value
+                    # Position restraints are inputs to the staged protocol, not
+                    # optional extras: grompp rejects the equilibration MDPs
+                    # without them, so report them by filename like the MDPs.
+                    for mapping_attribute in ("posres", "mdps"):
+                        for path_value in (getattr(membrane_result, mapping_attribute, {}) or {}).values():
+                            if path_value and os.path.isfile(path_value):
+                                files[os.path.basename(path_value)] = path_value
             else:
                 if os.path.isdir(gmx_dir):
                     files["system_coordinates"] = os.path.join(gmx_dir, "solv_ions.gro")
@@ -348,12 +372,18 @@ def register(mcp):
                         "membrane_pdbid": membrane_pdbid,
                     }
                 )
-                message = (
-                    "Membrane system built successfully. Use the generated MDP files with "
-                    f"gmx grompp -n {os.path.join(gmx_dir, 'index.ndx')}."
-                    if build_success
-                    else f"Membrane build is incomplete: {note}"
-                )
+                if build_success:
+                    # The membrane build now emits a full runnable system, so the
+                    # instructions match the soluble path instead of leaving the
+                    # caller to assemble grompp invocations by hand.
+                    message = (
+                        f"Membrane system built successfully!\n"
+                        f"To run the simulation:\n"
+                        f"  cd {gmx_dir}\n"
+                        f"  bash localrun.sh"
+                    )
+                else:
+                    message = f"Membrane build is incomplete: {note}"
                 payload = {
                     "success": build_success,
                     "partial": not build_success,

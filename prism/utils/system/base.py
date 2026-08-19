@@ -53,6 +53,7 @@ class SystemBuilderBase:
         overwrite: bool = False,
         pmf_mode: bool = False,
         box_extension: Optional[Tuple[float, float, float]] = None,
+        model_dirname: Optional[str] = None,
     ):
         """
         Initializes the SystemBuilder base.
@@ -74,12 +75,17 @@ class SystemBuilderBase:
         self.pmf_mode = pmf_mode
         self.box_extension = box_extension if box_extension else (0.0, 0.0, 2.0)
 
-        # Set model directory based on mode
-        if pmf_mode:
+        # Set model directory based on mode.  ``model_dirname`` lets a workflow
+        # that assembles its system elsewhere (the membrane path builds into
+        # GMX_PROLIG_MEMB via PACKMOL-Memgen) point this at its own directory,
+        # instead of leaving an empty GMX_PROLIG_MD behind as a decoy.
+        if model_dirname:
+            self.model_dir = self.output_dir / model_dirname
+        elif pmf_mode:
             self.model_dir = self.output_dir / "GMX_PROLIG_PMF"
         else:
             self.model_dir = self.output_dir / "GMX_PROLIG_MD"
-        self.model_dir.mkdir(exist_ok=True)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
 
     def _run_command(
         self, command: list, work_dir: str, input_str: Optional[str] = None, env: Optional[dict] = None,

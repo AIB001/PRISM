@@ -592,11 +592,12 @@ class PRISMBuilder(
             self.membrane_config = None
         self.membrane_mode = bool(self.membrane_config and self.membrane_config.enabled)
         self._validate_workflow_modes(membrane_mode=self.membrane_mode)
-        if self.membrane_mode and self.ligand_paths:
-            raise ValueError(
-                "Membrane mode currently builds protein-bilayer systems only; "
-                "ligand inputs are not yet incorporated."
-            )
+        # Ligand inputs ARE supported in membrane mode: ``run_membrane``
+        # parameterizes them with GAFF/GAFF2, hands the resulting AMBER
+        # frcmod/lib pair to PACKMOL-Memgen (--keepligs/--ligand_param) and
+        # embeds the ligand via a merged protein+ligand PDB.  The limitations
+        # that remain (one ligand, AMBER-family ligand force field) are
+        # enforced in the workflow, where the ligand is actually consumed.
 
         # Get force field and water model info
         if self.membrane_mode:
@@ -631,8 +632,23 @@ class PRISMBuilder(
 
         # Initialize sub-components
         self.mdp_generator = MDPGenerator(self.config, self.output_dir)
+        # In membrane mode the system is assembled by PACKMOL-Memgen inside
+        # GMX_PROLIG_MEMB, so point SystemBuilder there.  It is still needed
+        # for shared preparation steps (PTM staging runs in the model dir), but
+        # creating GMX_PROLIG_MD would leave an empty directory that looks like
+        # a real -- and runnable -- system.
+        membrane_dirname = None
+        if self.membrane_mode:
+            from ..membrane.builder import MEMBRANE_SYSTEM_DIRNAME
+
+            membrane_dirname = MEMBRANE_SYSTEM_DIRNAME
         self.system_builder = SystemBuilder(
-            self.config, self.output_dir, self.overwrite, pmf_mode=self.pmf_mode, box_extension=self.box_extension
+            self.config,
+            self.output_dir,
+            self.overwrite,
+            pmf_mode=self.pmf_mode,
+            box_extension=self.box_extension,
+            model_dirname=membrane_dirname,
         )
 
         self._print_initialization_info()
