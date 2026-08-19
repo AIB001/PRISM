@@ -9,6 +9,7 @@ import os
 import subprocess
 import shutil
 import re
+import tempfile
 from pathlib import Path
 import importlib.util
 
@@ -50,6 +51,13 @@ except ImportError:
 
 class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
     """GAFF force field generator wrapper"""
+
+    #: Default residue name used for the AMBER ligand library (.lib unit name).
+    LIGAND_RESNAME_DEFAULT = "LIG"
+
+    #: A PDB residue name only occupies columns 18-20; anything longer overflows
+    #: into the chain-ID column and silently corrupts downstream residue parsing.
+    _RESNAME_PATTERN = re.compile(r"^[A-Z0-9]{1,3}$")
 
     def __init__(self, ligand_path, output_dir, overwrite=False, charge_mode="bcc"):
         """
@@ -117,6 +125,14 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             "charge_method": "AM1-BCC" if self.charge_mode == "bcc" else "gas-phase",
         }
 
+    def _get_atom_type_flag(self):
+        """Get the atom type flag for antechamber (-at). GAFF2 overrides this."""
+        return "gaff"
+
+    def _get_leaprc(self):
+        """Get the appropriate leaprc file for tleap. GAFF2 overrides this."""
+        return "leaprc.gaff"
+
     def run(self):
         """Run the GAFF force field generation workflow"""
         print(f"\n{'='*60}")
@@ -148,6 +164,11 @@ class GAFFForceFieldGenerator(ForceFieldGeneratorBase):
             # Standardize to LIG naming
             lig_dir = self.standardize_to_LIG(ff_files)
             print_success("  Converted to GROMACS format")
+
+            # Build the AMBER ligand library (frcmod + lib) used to embed the
+            # ligand in a lipid bilayer. Must run before cleanup_temp_files(),
+            # which deletes the forcefield/ intermediates it reads. Never fatal.
+            self.generate_amber_ligand_library()
 
             # Cleanup
             self.cleanup_temp_files()
@@ -587,6 +608,272 @@ quit
 """)
 
         self.run_command(["tleap", "-f", os.path.basename(tleap_input)], cwd=ff_dir)
+
+    # ------------------------------------------------------------------
+    # AMBER ligand library (.frcmod + .lib) -- used to embed the ligand in a
+    # lipid bilayer via PACKMOL-Memgen's "--ligand_param FRCMOD:LIB" option.
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _validate_resname(cls, resname):
+        """
+        Validate and normalise an AMBER/PDB residue name.
+
+        A PDB residue name lives in columns 18-20, so it must be 1-3 characters.
+        A longer name overflows into the chain-ID column and silently corrupts
+        every downstream residue-name based classifier.
+
+        Parameters
+        ----------
+        resname : str
+            Candidate residue name. Case is normalised to upper.
+
+        Returns
+        -------
+        str : The validated, uppercased residue name.
+
+        Raises
+        ------
+        ValueError : If the name is not 1-3 uppercase alphanumeric characters.
+        """
+        if not isinstance(resname, str):
+            raise ValueError(f"Ligand residue name must be a string, got {type(resname).__name__}: {resname!r}")
+
+        candidate = resname.strip().upper()
+        if not cls._RESNAME_PATTERN.match(candidate):
+            raise ValueError(
+                f"Invalid ligand residue name {resname!r}: must be 1-3 uppercase alphanumeric "
+                f"characters (it occupies PDB columns 18-20; a longer name overflows into the "
+                f"chain-ID column)."
+            )
+        return candidate
+
+    @staticmethod
+    def _is_non_empty(file_path):
+        """True if the path exists and holds at least one byte."""
+        return os.path.isfile(file_path) and os.path.getsize(file_path) > 0
+
+    def generate_amber_ligand_library(self, resname=None):
+        """
+        Generate AMBER ligand-library files so the ligand can be embedded in a bilayer.
+
+        PACKMOL-Memgen embeds a ligand given ``--ligand_param FRCMOD:LIB``, i.e. an
+        AMBER ``.frcmod`` plus an OFF ``.lib``. Both are re-derived here from
+        ``forcefield/<stem>.mol2``, which the main workflow already produced with
+        AM1-BCC charges and GAFF atom types and which survives
+        :meth:`cleanup_temp_files`. The expensive ``sqm`` charge fit is therefore
+        **never** repeated -- the charges in that MOL2 are carried through as-is.
+
+        Products are written into ``<output_dir>/<get_output_dir_name()>`` rather
+        than ``forcefield/``, because :meth:`cleanup_temp_files` deletes ``*.frcmod``
+        from ``forcefield/``:
+
+        * ``<RESNAME>.frcmod``
+        * ``<RESNAME>.lib``       -- OFF library whose unit is named ``RESNAME``
+        * ``<RESNAME>_amber.pdb`` -- ``savepdb`` of that unit, so atom names and
+          ordering are guaranteed to match the ``.lib``
+
+        The residue-name trap
+        ---------------------
+        There are two independent names. The ``.lib`` *unit* name comes from the
+        tleap variable; the *residue* name inside that unit comes from the MOL2
+        substructure record (e.g. ``BNZ201`` -> ``BNZ``) and ``saveOff`` does not
+        change it. ``loadpdb`` matches a PDB residue name against the **unit**
+        name, and tleap exits 0 while writing a zero-byte topology when it fails
+        to match. Both names are therefore forced to ``RESNAME``: the residue name
+        via ``antechamber -rn`` and the unit name via the tleap variable.
+
+        Parameters
+        ----------
+        resname : str, optional
+            Residue/unit name to force. Defaults to the ``ligand_resname``
+            attribute if a caller set one, else ``LIGAND_RESNAME_DEFAULT``
+            (``"LIG"``). Must be 1-3 uppercase alphanumeric characters.
+
+        Returns
+        -------
+        tuple or None
+            ``(frcmod_path, lib_path, pdb_path)`` on success, or ``None`` if the
+            library could not be produced. Failure is never fatal: the GROMACS
+            outputs the soluble workflow needs are already complete by the time
+            this runs, so a membrane-only extra must not break a working build.
+        """
+        if resname is None:
+            resname = getattr(self, "ligand_resname", None) or self.LIGAND_RESNAME_DEFAULT
+        resname = self._validate_resname(resname)
+        self._amber_ligand_resname = resname
+
+        print("\n=== Generating AMBER ligand library (frcmod + lib) ===")
+
+        lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
+        source_mol2 = os.path.join(self.output_dir, "forcefield", f"{self.ligand_name}.mol2")
+
+        frcmod_file = os.path.join(lig_dir, f"{resname}.frcmod")
+        lib_file = os.path.join(lig_dir, f"{resname}.lib")
+        pdb_file = os.path.join(lig_dir, f"{resname}_amber.pdb")
+
+        work_dir = None
+        step = "initialization"
+        try:
+            if not self._is_non_empty(source_mol2):
+                raise FileNotFoundError(f"charged/typed MOL2 is missing or empty: {source_mol2}")
+
+            os.makedirs(lig_dir, exist_ok=True)
+
+            # Work in a scratch directory so antechamber/tleap droppings
+            # (ANTECHAMBER_*, ATOMTYPE.INF, leap.log, ...) never land in the
+            # published output directory, which nothing cleans up afterwards.
+            work_dir = tempfile.mkdtemp(prefix=".amber_lib_", dir=self.output_dir)
+
+            atom_type = self._get_atom_type_flag()  # "gaff" or "gaff2" (GAFF2 subclass hook)
+            is_gaff2 = atom_type == "gaff2"
+
+            local_mol2 = f"input_{resname}.mol2"
+            renamed_mol2 = f"{resname}_{atom_type}.mol2"
+            shutil.copy2(source_mol2, os.path.join(work_dir, local_mol2))
+
+            # 1) Force the residue name inside the MOL2.
+            #    No -c flag at all: "-rn" fails with "Cannot open file ()" when
+            #    combined with "-c rc", and the charges already present in the
+            #    input MOL2 are preserved anyway, so nothing needs refitting.
+            step = f"antechamber (-rn {resname})"
+            self.run_command(
+                [
+                    "antechamber",
+                    "-i", local_mol2,
+                    "-fi", "mol2",
+                    "-o", renamed_mol2,
+                    "-fo", "mol2",
+                    "-at", atom_type,
+                    "-dr", "no",
+                    "-rn", resname,
+                ],
+                cwd=work_dir,
+            )
+            if not self._is_non_empty(os.path.join(work_dir, renamed_mol2)):
+                raise RuntimeError(f"antechamber produced no MOL2 ({renamed_mol2})")
+
+            # 2) Missing-parameter frcmod for the renamed molecule.
+            step = "parmchk2"
+            parmchk_cmd = [
+                "parmchk2",
+                "-i", renamed_mol2,
+                "-f", "mol2",
+                "-o", f"{resname}.frcmod",
+                "-a", "Y",  # print all force field parameters
+            ]
+            if is_gaff2:
+                parmchk_cmd.extend(["-s", "2"])  # GAFF2 parameter set
+            self.run_command(parmchk_cmd, cwd=work_dir)
+            if not self._is_non_empty(os.path.join(work_dir, f"{resname}.frcmod")):
+                raise RuntimeError(f"parmchk2 produced no frcmod ({resname}.frcmod)")
+
+            # 3) saveOff/savepdb. The tleap VARIABLE name becomes the unit name,
+            #    so it must equal RESNAME for loadpdb to match later.
+            step = "tleap (saveOff/savepdb)"
+            tleap_input = os.path.join(work_dir, f"tleap_{resname}_lib.in")
+            with open(tleap_input, "w") as f:
+                f.write(f"""source {self._get_leaprc()}
+
+{resname} = loadmol2 {renamed_mol2}
+loadamberparams {resname}.frcmod
+
+saveOff {resname} {resname}.lib
+savepdb {resname} {resname}_amber.pdb
+
+quit
+""")
+            self.run_command(["tleap", "-f", os.path.basename(tleap_input)], cwd=work_dir)
+
+            # tleap exits 0 even when it fails, so validate the products instead
+            # of trusting the return code.
+            step = "validation"
+            produced = {
+                "frcmod": (os.path.join(work_dir, f"{resname}.frcmod"), frcmod_file),
+                "lib": (os.path.join(work_dir, f"{resname}.lib"), lib_file),
+                "pdb": (os.path.join(work_dir, f"{resname}_amber.pdb"), pdb_file),
+            }
+            for label, (built, _dest) in produced.items():
+                if not self._is_non_empty(built):
+                    raise RuntimeError(f"tleap produced a missing or empty {label} file: {os.path.basename(built)}")
+
+            self._verify_lib_unit_name(produced["lib"][0], resname)
+
+            for built, dest in produced.values():
+                shutil.copy2(built, dest)
+
+            self._amber_ligand_params = (frcmod_file, lib_file, pdb_file)
+            print_success(f"  AMBER ligand library generated (unit '{resname}')")
+            for _label, (_built, dest) in sorted(produced.items()):
+                print(f"    - {os.path.basename(dest)}")
+            return self._amber_ligand_params
+
+        except Exception as e:
+            # Membrane-only extra: never turn a working ligand build into a failure.
+            print_warning(
+                f"AMBER ligand library generation failed during {step}: {e}\n"
+                f"  The GROMACS outputs for the soluble workflow are unaffected.\n"
+                f"  Membrane embedding (packmol-memgen --ligand_param) will not be available."
+            )
+            self._amber_ligand_params = None
+            return None
+        finally:
+            if work_dir:
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+    @staticmethod
+    def _verify_lib_unit_name(lib_file, resname):
+        """
+        Assert that an OFF library really declares the expected unit.
+
+        An AMBER ``.lib`` starts with ``!!index array str`` followed by the
+        quoted unit name, so the second line must be ``"<RESNAME>"``.
+        """
+        with open(lib_file, "r") as f:
+            lines = f.read().splitlines()
+
+        if len(lines) < 2:
+            raise RuntimeError(f"{os.path.basename(lib_file)} is truncated ({len(lines)} lines)")
+
+        declared = lines[1].strip()
+        if declared != f'"{resname}"':
+            raise RuntimeError(
+                f'{os.path.basename(lib_file)} declares unit {declared} but "{resname}" was expected; '
+                f"the tleap variable name and the unit name are out of sync"
+            )
+
+    def get_amber_ligand_params(self, resname=None):
+        """
+        Return the AMBER ligand-library files produced for membrane embedding.
+
+        Returns
+        -------
+        tuple or None
+            ``(frcmod_path, lib_path, pdb_path)`` if all three exist and are
+            non-empty, otherwise ``None``. The paths are also resolved from disk,
+            so a cached run that short-circuited regeneration still reports the
+            files left by a previous run.
+        """
+        last_resname = getattr(self, "_amber_ligand_resname", None)
+        if resname is None:
+            resname = last_resname or getattr(self, "ligand_resname", None) or self.LIGAND_RESNAME_DEFAULT
+        resname = self._validate_resname(resname)
+
+        # Only trust the in-memory result when it belongs to the requested residue
+        # name, otherwise an explicit resname would be shadowed by a stale cache.
+        cached = getattr(self, "_amber_ligand_params", None)
+        if cached and resname == last_resname and all(self._is_non_empty(p) for p in cached):
+            return cached
+
+        lig_dir = os.path.join(self.output_dir, self.get_output_dir_name())
+        candidates = (
+            os.path.join(lig_dir, f"{resname}.frcmod"),
+            os.path.join(lig_dir, f"{resname}.lib"),
+            os.path.join(lig_dir, f"{resname}_amber.pdb"),
+        )
+        if all(self._is_non_empty(p) for p in candidates):
+            return candidates
+        return None
 
     def find_acpype_output(self, ff_dir):
         """Find the acpype output directory and files"""

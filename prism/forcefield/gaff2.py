@@ -110,6 +110,12 @@ class GAFF2ForceFieldGenerator(GAFFForceFieldGenerator):
             lig_dir = self.standardize_to_LIG(ff_files)
             print_success("  Converted to GROMACS format")
 
+            # Build the AMBER ligand library (frcmod + lib) for bilayer embedding.
+            # run() is fully overridden here, so this call cannot be inherited from
+            # GAFFForceFieldGenerator.run(); the method itself is inherited and picks
+            # up gaff2 via _get_atom_type_flag()/_get_leaprc(). Never fatal.
+            self.generate_amber_ligand_library()
+
             # Cleanup
             self.cleanup_temp_files()
 
