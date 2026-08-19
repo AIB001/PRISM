@@ -1,0 +1,18 @@
+PRISM bundled membrane patches -- third-party content notice
+===========================================================
+
+Pre-equilibrated AMBER Lipid21 bilayer patches derived from:
+Frankel, Patrick (2025). Amber Lipid21 bilayer simulations. Zenodo. https://doi.org/10.5281/zenodo.14776136 -- licensed CC-BY-4.0.
+Force field: Dickson, Walker & Gould, J. Chem. Theory Comput. 2022, 18, 1726-1736, doi:10.1021/acs.jctc.1c01217.
+
+CC-BY-4.0 full text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Under CC-BY-4.0 these files may be redistributed, including in modified form,
+provided attribution is given and changes are indicated. Changes made by PRISM:
+water and counter-ions removed; molecules wrapped whole into the periodic box
+in x and y; bilayer midplane translated to z = 0; molecules reordered so that
+each species forms one contiguous block; velocities dropped; stored gzipped.
+No coordinates were otherwise altered, rescaled or re-equilibrated.
+
+The upstream deposit also contains .top, .tpr and .xtc files which PRISM does
+not bundle; fetch them from the Zenodo record above if you need them.

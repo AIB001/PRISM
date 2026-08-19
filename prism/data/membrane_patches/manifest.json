@@ -1,0 +1,250 @@
+{
+  "description": "Pre-equilibrated Lipid21 bilayer patches for the PRISM fast membrane route.",
+  "attribution": "Pre-equilibrated AMBER Lipid21 bilayer patches derived from:\nFrankel, Patrick (2025). Amber Lipid21 bilayer simulations. Zenodo. https://doi.org/10.5281/zenodo.14776136 -- licensed CC-BY-4.0.\nForce field: Dickson, Walker & Gould, J. Chem. Theory Comput. 2022, 18, 1726-1736, doi:10.1021/acs.jctc.1c01217.",
+  "license": "CC-BY-4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "source_doi": "10.5281/zenodo.14776136",
+  "source_concept_doi": "10.5281/zenodo.14776135",
+  "source_record": "https://zenodo.org/records/14776136",
+  "derivation": "Each patch is the deposited production frame (<LIPID>.gro, the end of a 500 ns Lipid21 NPT run) with water and counter-ions removed, whole molecules wrapped into the box in xy, the bilayer midplane shifted to z=0, and molecules reordered to PRISM's species-contiguous ordering contract. Reproduce with prism.membrane.patch.derive_asset(); source_md5 identifies the exact Zenodo file.",
+  "units": "Angstrom",
+  "patches": {
+    "POPC": {
+      "filename": "POPC.gro.gz",
+      "sha256": "0319bc1194ffdca644cac0a6f4736b6fb47c69922c184974fb9e2b09680821f7",
+      "n_atoms": 17152,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "POPC",
+          128
+        ]
+      ],
+      "box": [
+        62.036,
+        62.3429,
+        79.4475
+      ],
+      "source_file": "POPC.gro",
+      "source_md5": "1d8cbfc36450b78cf2ff926867c02a66",
+      "measured": {
+        "area_per_lipid": 60.43,
+        "n_lower": 64,
+        "n_upper": 64,
+        "phosphate_thickness": 40.198,
+        "core_half_width": 14.757
+      },
+      "temperature_k": 300.0,
+      "reference_apl": 63.92,
+      "reference_note": "Lipid21 reference simulation 63.92 +/- 0.09 A^2 at 303 K (experiment 64.3); this run is at 300 K",
+      "aliases": [
+        "PC",
+        "POPC_LIPID21"
+      ]
+    },
+    "POPE": {
+      "filename": "POPE.gro.gz",
+      "sha256": "147e73f47042acd546df72fa61c34aa9786251c29c5af97467902b1d701350e4",
+      "n_atoms": 16000,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "POPE",
+          128
+        ]
+      ],
+      "box": [
+        58.9705,
+        58.7789,
+        87.2668
+      ],
+      "source_file": "POPE.gro",
+      "source_md5": "c3677f36dcdebf80d7f54cc346e523ba",
+      "measured": {
+        "area_per_lipid": 54.16,
+        "n_lower": 64,
+        "n_upper": 64,
+        "phosphate_thickness": 42.924,
+        "core_half_width": 17.215
+      },
+      "temperature_k": 310.0,
+      "reference_apl": 55.92,
+      "reference_note": "Lipid21 reference simulation 55.92 +/- 0.15 A^2 at 310 K (experiment 56.6)",
+      "aliases": [
+        "PE"
+      ]
+    },
+    "DMPC": {
+      "filename": "DMPC.gro.gz",
+      "sha256": "1e5479ba9be42dd86d42086242e1001ba4b84118d28cc67a782050fffb51889c",
+      "n_atoms": 15104,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "DMPC",
+          128
+        ]
+      ],
+      "box": [
+        61.6872,
+        61.4879,
+        76.8263
+      ],
+      "source_file": "DMPC.gro",
+      "source_md5": "7193d0f5807cb121cc884eac4d3718ef",
+      "measured": {
+        "area_per_lipid": 59.266,
+        "n_lower": 64,
+        "n_upper": 64,
+        "phosphate_thickness": 36.341,
+        "core_half_width": 13.506
+      },
+      "temperature_k": 314.0,
+      "reference_apl": 59.71,
+      "reference_note": "Lipid21 reference simulation 59.71 +/- 0.13 A^2 at 303 K (experiment 60.6); this run is at 314 K",
+      "aliases": []
+    },
+    "POPS": {
+      "filename": "POPS.gro.gz",
+      "sha256": "cdde827da7b137bb081419eeffe8bb3165163699dff84dd9f122ab75a373ce31",
+      "n_atoms": 16256,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "POPS",
+          128
+        ]
+      ],
+      "box": [
+        62.432,
+        62.6599,
+        77.7287
+      ],
+      "source_file": "POPS.gro",
+      "source_md5": "92244dd0345684085ccb7870c3afde0e",
+      "measured": {
+        "area_per_lipid": 61.125,
+        "n_lower": 64,
+        "n_upper": 64,
+        "phosphate_thickness": 39.403,
+        "core_half_width": 13.995
+      },
+      "temperature_k": 300.0,
+      "reference_apl": 61.78,
+      "reference_note": "Lipid21 reference simulation 61.78 +/- 0.34 A^2 at 298 K (experiment 62.7); this run is at 300 K. K+ counter-ions were dropped, so the membrane carries -1 e per POPS",
+      "aliases": [
+        "PS"
+      ]
+    },
+    "PSM": {
+      "filename": "PSM.gro.gz",
+      "sha256": "3c1c87367a244a9f98c54f437b92f54d76532152f2e06c4e1d01b3c5c326b98d",
+      "n_atoms": 16256,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "PSM",
+          128
+        ]
+      ],
+      "box": [
+        60.3257,
+        59.8507,
+        83.6168
+      ],
+      "source_file": "PSM.gro",
+      "source_md5": "8a993316d05cfd3ff33a09bd55a0a4b0",
+      "measured": {
+        "area_per_lipid": 56.415,
+        "n_lower": 64,
+        "n_upper": 64,
+        "phosphate_thickness": 39.691,
+        "core_half_width": 15.804
+      },
+      "temperature_k": 328.0,
+      "reference_apl": null,
+      "reference_note": "N-palmitoyl sphingomyelin at 328 K. Lipid21 is known to under-predict sphingomyelin area per lipid by 4-5 A^2",
+      "aliases": [
+        "SM",
+        "SM16",
+        "PSM16"
+      ]
+    },
+    "POPC_CHOL15": {
+      "filename": "POPC_CHOL15.gro.gz",
+      "sha256": "5fe7668c987f964544c6576663b097ebc27c34b023b5df8062d192c275b91ed9",
+      "n_atoms": 15952,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "CHL",
+          20
+        ],
+        [
+          "POPC",
+          108
+        ]
+      ],
+      "box": [
+        59.7958,
+        60.0916,
+        82.3691
+      ],
+      "source_file": "CHOL15.gro",
+      "source_md5": "f705edf0b9b36cfe74e6f3a9833b99a7",
+      "measured": {
+        "area_per_lipid": 66.541,
+        "n_lower": 54,
+        "n_upper": 54,
+        "phosphate_thickness": 41.003,
+        "core_half_width": 15.622
+      },
+      "temperature_k": 300.0,
+      "reference_apl": null,
+      "reference_note": "15 mol% cholesterol in POPC (108 POPC + 20 CHL). Cholesterol condenses the bilayer, so no pure-lipid APL reference applies",
+      "aliases": [
+        "POPC:CHOL",
+        "POPC_CHOL",
+        "CHOL15",
+        "POPC:CHOL15"
+      ]
+    },
+    "POPC_CHOL50": {
+      "filename": "POPC_CHOL50.gro.gz",
+      "sha256": "b93298ac24b9c8b63958784a6fec1f6bb696e731d45d9e1822c10d11274c4111",
+      "n_atoms": 13312,
+      "n_molecules": 128,
+      "composition": [
+        [
+          "CHL",
+          64
+        ],
+        [
+          "POPC",
+          64
+        ]
+      ],
+      "box": [
+        52.0627,
+        52.3203,
+        99.7233
+      ],
+      "source_file": "CHOL50.gro",
+      "source_md5": "1a7e8c583f50cde08dbdf638f8e0d4ce",
+      "measured": {
+        "area_per_lipid": 85.123,
+        "n_lower": 32,
+        "n_upper": 32,
+        "phosphate_thickness": 45.216,
+        "core_half_width": 17.715
+      },
+      "temperature_k": 300.0,
+      "reference_apl": null,
+      "reference_note": "50 mol% cholesterol in POPC (64 POPC + 64 CHL)",
+      "aliases": [
+        "CHOL50",
+        "POPC:CHOL50"
+      ]
+    }
+  }
+}
