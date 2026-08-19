@@ -117,3 +117,8 @@ prism/*/*/*.backup
 .claude/cclsp.json
 .claude/scheduled_tasks.json
 */GMX_PROLIG_FEP/_build/*/*.yaml
+
+# Membrane / ligand build outputs.  Every test build writes under example/ and a
+# single membrane system is hundreds of MB (9OMO alone is 1.3 GB), so the tree is
+# ignored wholesale.  Input structures are tracked explicitly with `git add -f`.
+example/
