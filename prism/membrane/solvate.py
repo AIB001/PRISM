@@ -137,6 +137,19 @@ WATER_NUMBER_DENSITY_NM3 = 33.4
 #: on a membrane.
 WATER_MOLARITY = 55.56
 
+#: How far a SUMMED system charge may sit from a whole number before PRISM
+#: treats it as a broken topology rather than as rounding noise.
+#:
+#: Deliberately looser than the 1e-3 used for a single ion's charge below, and
+#: the two must not be merged: one ion's charge is read from one line and is
+#: exact to its printed precision, while this compares a sum over ~10^5 per-atom
+#: charges.  Measured on a 6KQI membrane system, a genuinely +10 solute sums to
+#: +10.002.  The failure this guards against -- a molecule counted the wrong
+#: number of times, a truncated charge column -- moves the total by 0.5 e or
+#: more, so 0.05 separates the two cleanly with two orders of magnitude of
+#: headroom on each side.
+CHARGE_ROUNDING_TOLERANCE = 0.05
+
 #: Carbon van der Waals radius (nm) written into the membrane ``vdwradii.dat``.
 #: 0.375 nm is the value the GROMACS membrane tutorials use; the stock value is
 #: 0.17 nm.  Inflating it is necessary but *not* sufficient -- see the purge.
@@ -1566,6 +1579,25 @@ class MembraneSolvator(SystemBuilderBase, SolvationProcessorMixin, TopologyProce
                 )
         return n_pos, n_neg, effective
 
+    @staticmethod
+    def _round_to_integer_charge(charge: float, what: str) -> float:
+        """Snap a summed charge to the whole number it physically is.
+
+        Refuses rather than rounds when the value is not close to an integer:
+        that means the topology itself is wrong (a truncated charge column, a
+        molecule counted the wrong number of times), and quietly rounding it
+        would hide the real fault behind a plausible ion count.
+        """
+        nearest = round(charge)
+        if abs(charge - nearest) > CHARGE_ROUNDING_TOLERANCE:
+            raise MembraneSolvationError(
+                f"{what} is {charge:+.4f} e, which is not a whole number of elementary "
+                f"charges (nearest is {nearest:+.0f}). A molecular system's charge must be "
+                "integral, so the topology is inconsistent rather than merely imprecise. "
+                + _PACKMOL_HINT
+            )
+        return float(nearest)
+
     def _ion_counts(self, view: TopologyView, n_water: int, net_charge: float) -> Tuple[int, int]:
         """Explicit ion counts from the aqueous water count and the net charge.
 
@@ -1589,11 +1621,22 @@ class MembraneSolvator(SystemBuilderBase, SolvationProcessorMixin, TopologyProce
 
         # Neutralise on top of the salt, as genion -neutral would, but with the
         # solute charge read from the topology rather than from a tpr.
+        #
+        # Round the residual to the integer it physically is before deciding how
+        # many ions to add.  Summing ~10^5 per-atom charges printed to 6 decimal
+        # places accumulates a few thousandths, and ceil() promotes ANY positive
+        # excess to a whole extra ion: a +10 solute read as +10.002 was given 11
+        # chloride instead of 10, leaving the system at -1 e.  A 1e-9 epsilon
+        # cannot absorb that -- the error is a million times larger -- and the
+        # symptom is silent, because a system off by one elementary charge still
+        # builds and still runs, with the Ewald background quietly soaking up
+        # the difference.
         residual = net_charge + n_pos * q_pos + n_neg * q_neg
+        residual = self._round_to_integer_charge(residual, "Residual system charge")
         if residual > 0:
-            n_neg += int(math.ceil(residual / abs(q_neg) - 1e-9))
+            n_neg += int(math.ceil(residual / abs(q_neg) - CHARGE_ROUNDING_TOLERANCE))
         elif residual < 0:
-            n_pos += int(math.ceil(-residual / abs(q_pos) - 1e-9))
+            n_pos += int(math.ceil(-residual / abs(q_pos) - CHARGE_ROUNDING_TOLERANCE))
 
         if n_pos + n_neg > n_water:
             raise MembraneSolvationError(
