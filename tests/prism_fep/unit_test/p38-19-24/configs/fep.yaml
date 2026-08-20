@@ -7,7 +7,7 @@ forcefield:
 
 # Atom mapping parameters
 mapping:
-  dist_cutoff: 0.6      # Distance cutoff for mapping (Å)
+  dist_cutoff: 0.6      # Distance cutoff for mapping (nm)
   charge_cutoff: 0.05   # Charge difference cutoff
   charge_common: mean   # Charge assignment strategy for common atoms
   charge_reception: surround  # Charge reception method

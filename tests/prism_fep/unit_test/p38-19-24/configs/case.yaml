@@ -14,7 +14,7 @@ fundamental:
   params: match      # Parameter type (match/generate)
 
 model:
-  distance: 8        # Cutoff distance for mapping (Å)
+  distance: 8        # System-building distance in nm
   temperature: 310   # Temperature (K) - body temperature
   concentration: 0.15  # Salt concentration (M)
   disoff: 0          # Enable long-range dispersion corrections

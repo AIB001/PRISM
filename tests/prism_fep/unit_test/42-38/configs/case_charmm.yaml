@@ -1,4 +1,4 @@
-# Auto-generated from config.conf for PRISM-FEP test case
+# CHARMM/CGenFF case metadata for the 42-38 PRISM-FEP example
 case:
   group: hif2a
   name: 42-38
@@ -6,7 +6,7 @@ case:
 fundamental:
   ref: 42
   mut: 38
-  rec: sys.pdb
+  rec: receptor.pdb
 system:
 model:
   no_solvate: false

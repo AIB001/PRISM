@@ -126,7 +126,7 @@ CGenFF requires downloading force field files from the web server:
 2. Upload your ligand structure (MOL2/SDF)
 3. Download the generated files (PDB and TOP files)
 4. Place them in a directory
-5. Use `--ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files`
+5. Use `--forcefield charmm36-jul2022 --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files`
 
 **Note**: For halogens (F, Cl, Br, I), PRISM automatically removes lone pair (LP) atoms and transfers their charges to halogen atoms.
 
@@ -217,11 +217,12 @@ The documentation includes:
    # First download CGenFF files from https://cgenff.com/
 
    # Single ligand:
-   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 \
+     --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
 
    # Multiple ligands (requires one --forcefield-path per ligand):
    prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir \
-     --ligand-forcefield cgenff \
+     --forcefield charmm36-jul2022 --ligand-forcefield cgenff \
      -ffp /path/to/cgenff_ligand1 \
      -ffp /path/to/cgenff_ligand2
    ```
@@ -229,20 +230,20 @@ The documentation includes:
 5. **Using OPLS-AA**:
 
    ```bash
-   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield opls
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield oplsaa --ligand-forcefield opls
    ```
 
 6. **Using SwissParam force fields**:
 
    ```bash
    # MMFF-based
-   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield mmff
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield mmff
 
    # MATCH
-   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield match
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield match
 
    # Hybrid MMFF-based-MATCH
-   prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield hybrid
+   prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield hybrid
    ```
 
 7. **With custom configuration**:

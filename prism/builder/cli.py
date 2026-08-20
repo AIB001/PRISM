@@ -79,17 +79,13 @@ _ORIENT_METHOD_HELP = {
         "and a frame you prepared deliberately is left untouched. It fails closed: if MEMEMBED "
         "is needed and not installed, the build stops instead of packing an unoriented solute."
     ),
-    "preoriented": (
-        "'preoriented' trusts the input frame as given."
-    ),
+    "preoriented": ("'preoriented' trusts the input frame as given."),
     "memembed": (
         "'memembed' orients the structure with MEMEMBED. PRISM runs the binary itself -- "
         "PACKMOL-Memgen orients nothing -- which is what lets the fast route start from an "
         "unoriented structure."
     ),
-    "opm": (
-        "'opm' fetches an already-oriented structure from OPM by PDB id (--membrane-pdbid)."
-    ),
+    "opm": ("'opm' fetches an already-oriented structure from OPM by PDB id (--membrane-pdbid)."),
     "ppm": (
         "'ppm' is recognised but not automated: run the PPM server or the standalone 'immers' "
         "binary yourself and pass its output as preoriented."
@@ -156,18 +152,18 @@ Example usage:
   prism protein.pdb ligand.sdf -o output_dir --ligand-forcefield openff --forcefield amber14sb
 
   # Using OPLS-AA force field (via LigParGen server, requires internet)
-  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield opls
+  prism protein.pdb ligand.mol2 -o output_dir --forcefield oplsaa --ligand-forcefield opls
 
   # Using CGenFF force field (requires web-downloaded files)
   # Single ligand:
-  prism protein.pdb dummy.mol2 -o output_dir --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
+  prism protein.pdb dummy.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield cgenff --forcefield-path /path/to/cgenff_files
   # Multiple ligands (specify one --forcefield-path per ligand):
-  prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir --ligand-forcefield cgenff -ffp /path/to/cgenff1 -ffp /path/to/cgenff2
+  prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield cgenff -ffp /path/to/cgenff1 -ffp /path/to/cgenff2
 
   # Using SwissParam force fields (via SwissParam server, requires internet)
-  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield mmff    # MMFF-based
-  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield match   # MATCH
-  prism protein.pdb ligand.mol2 -o output_dir --ligand-forcefield hybrid  # Hybrid MMFF-based-MATCH
+  prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield mmff    # MMFF-based
+  prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield match   # MATCH
+  prism protein.pdb ligand.mol2 -o output_dir --forcefield charmm36-jul2022 --ligand-forcefield hybrid  # Hybrid MMFF-based-MATCH
 
   # With custom configuration file
   prism protein.pdb ligand.mol2 -o output_dir --config config.yaml
@@ -356,9 +352,7 @@ Example usage:
         default="phosaa19SB",
         help="AMBER phosphorylation parameter set for the tleap route (default: phosaa19SB)",
     )
-    ptm_group.add_argument(
-        "--list-ptms", action="store_true", help="List supported PTM codes and exit"
-    )
+    ptm_group.add_argument("--list-ptms", action="store_true", help="List supported PTM codes and exit")
 
     # Energy minimization
     em_group = parser.add_argument_group("Energy minimization")
@@ -563,7 +557,9 @@ Example usage:
         + f" Default: {membrane_field_defaults['orient']}.",
     )
     memb_group.add_argument(
-        "--membrane-pdbid", default=None, help="PDB id to fetch a pre-oriented structure from OPM (with --membrane-orient opm)"
+        "--membrane-pdbid",
+        default=None,
+        help="PDB id to fetch a pre-oriented structure from OPM (with --membrane-orient opm)",
     )
     memb_group.add_argument(
         "--membrane-no-validate-orientation",
@@ -681,8 +677,7 @@ Example usage:
     def _cli_option_provided(*option_names):
         """Whether argparse saw any alias for an option explicitly supplied."""
         return any(
-            parser._option_string_actions[option_name].dest in explicit_destinations
-            for option_name in option_names
+            parser._option_string_actions[option_name].dest in explicit_destinations for option_name in option_names
         )
 
     config_file_data = {}
@@ -759,20 +754,12 @@ Example usage:
         yaml_ions = {}
 
     nested_membrane_forcefield = (
-        yaml_membrane.get("protein_forcefield", yaml_membrane.get("forcefield"))
-        if effective_membrane
-        else None
+        yaml_membrane.get("protein_forcefield", yaml_membrane.get("forcefield")) if effective_membrane else None
     )
-    nested_membrane_water = (
-        yaml_membrane.get("water_model", yaml_membrane.get("water"))
-        if effective_membrane
-        else None
-    )
+    nested_membrane_water = yaml_membrane.get("water_model", yaml_membrane.get("water")) if effective_membrane else None
 
     if args.forcefield is None:
-        configured_forcefield = (
-            yaml_forcefield if yaml_forcefield is not None else nested_membrane_forcefield
-        )
+        configured_forcefield = yaml_forcefield if yaml_forcefield is not None else nested_membrane_forcefield
         if configured_forcefield is not None and (
             not isinstance(configured_forcefield, str) or not configured_forcefield.strip()
         ):
@@ -784,9 +771,7 @@ Example usage:
         )
     if effective_membrane and args.water is None:
         configured_water = yaml_water_model if yaml_water_model is not None else nested_membrane_water
-        if configured_water is not None and (
-            not isinstance(configured_water, str) or not configured_water.strip()
-        ):
+        if configured_water is not None and (not isinstance(configured_water, str) or not configured_water.strip()):
             parser.error("Configured water model must be a non-empty string.")
         args.water = configured_water if configured_water is not None else "tip3p"
 
@@ -798,9 +783,7 @@ Example usage:
     membrane_production_ns = (
         args.production_ns
         if _cli_option_provided("--production-ns")
-        else yaml_simulation.get(
-            "production_time_ns", yaml_simulation.get("production_ns", args.production_ns)
-        )
+        else yaml_simulation.get("production_time_ns", yaml_simulation.get("production_ns", args.production_ns))
     )
     membrane_salt_concentration = (
         args.salt_concentration
@@ -987,9 +970,7 @@ pressure_coupling:
     # Protein-only builds are valid when a membrane or a PTM/disulfide
     # modification is requested (both build a protein-only system that does
     # not need a ligand).
-    effective_ptm = bool(
-        args.ptm or args.ssbond or (config_file_data.get("ptm") is not None)
-    )
+    effective_ptm = bool(args.ptm or args.ssbond or (config_file_data.get("ptm") is not None))
     if not ligand_paths and not effective_membrane and not effective_ptm:
         parser.error(
             "At least one ligand file is required. Provide ligand path(s) as positional "
@@ -1012,9 +993,7 @@ pressure_coupling:
                 "ligands could only be dropped silently."
             )
         if args.ligand_forcefield not in WorkflowMixin.MEMBRANE_LIGAND_FORCEFIELDS:
-            supported = " or ".join(
-                f"--ligand-forcefield {ff}" for ff in WorkflowMixin.MEMBRANE_LIGAND_FORCEFIELDS
-            )
+            supported = " or ".join(f"--ligand-forcefield {ff}" for ff in WorkflowMixin.MEMBRANE_LIGAND_FORCEFIELDS)
             parser.error(
                 f"Membrane mode cannot embed a ligand parameterized with "
                 f"'{args.ligand_forcefield}': the bilayer is built in AMBER, so the ligand needs "
@@ -1214,9 +1193,7 @@ pressure_coupling:
             ptm_config = PTMConfig(
                 requests=cli_ptm_config.requests if cli_ptm_fields else yaml_ptm_config.requests,
                 disulfides=cli_ptm_config.disulfides if cli_ptm_fields else yaml_ptm_config.disulfides,
-                amber_phospho_ff=(
-                    args.phospho_ff if phospho_override else yaml_ptm_config.amber_phospho_ff
-                ),
+                amber_phospho_ff=(args.phospho_ff if phospho_override else yaml_ptm_config.amber_phospho_ff),
             )
         except ValueError as exc:
             parser.error(str(exc))
@@ -1298,17 +1275,11 @@ pressure_coupling:
             membrane_values["temperature"] = args.temperature
         if _cli_option_provided("--production-ns"):
             membrane_values["production_ns"] = args.production_ns
-        if "salt_concentration" not in membrane_values or _cli_option_provided(
-            "--salt-concentration", "-sc"
-        ):
+        if "salt_concentration" not in membrane_values or _cli_option_provided("--salt-concentration", "-sc"):
             membrane_values["salt_concentration"] = membrane_salt_concentration
-        if "positive_ion" not in membrane_values or _cli_option_provided(
-            "--positive-ion", "-pion"
-        ):
+        if "positive_ion" not in membrane_values or _cli_option_provided("--positive-ion", "-pion"):
             membrane_values["positive_ion"] = membrane_positive_ion
-        if "negative_ion" not in membrane_values or _cli_option_provided(
-            "--negative-ion", "-nion"
-        ):
+        if "negative_ion" not in membrane_values or _cli_option_provided("--negative-ion", "-nion"):
             membrane_values["negative_ion"] = membrane_negative_ion
 
         # PACKMOL-Memgen must use the same resolved global protein/water pair

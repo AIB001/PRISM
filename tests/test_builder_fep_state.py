@@ -52,6 +52,41 @@ class _DummyBuilder(FEPWorkflowMixin):
         raise RuntimeError("ff-generation-failed")
 
 
+@pytest.mark.parametrize(
+    ("ligand_forcefield", "protein_forcefield", "required_family"),
+    [
+        ("cgenff", "amber14sb", "CHARMM36"),
+        ("rtf", "amber14sb", "CHARMM36"),
+        ("mmff", "amber14sb", "CHARMM36"),
+        ("opls", "amber14sb", "OPLS"),
+        ("gaff2", "charmm36-jul2022", "AMBER"),
+    ],
+)
+def test_fep_rejects_incompatible_forcefield_families(tmp_path, ligand_forcefield, protein_forcefield, required_family):
+    builder = _DummyBuilder(tmp_path)
+    builder.ligand_forcefield = ligand_forcefield
+    builder.forcefield = {"name": protein_forcefield}
+
+    with pytest.raises(ValueError, match=f"requires a {required_family} protein force field"):
+        builder._validate_fep_forcefield_compatibility()
+
+
+def test_cgenff_fep_accepts_charmm36_protein_forcefield(tmp_path):
+    builder = _DummyBuilder(tmp_path)
+    builder.ligand_forcefield = "cgenff"
+    builder.forcefield = {"name": "charmm36-jul2022"}
+
+    builder._validate_fep_forcefield_compatibility()
+
+
+@pytest.mark.parametrize("ligand_forcefield", ["gaff", "gaff2", "openff"])
+def test_amber_compatible_ligand_forcefields_are_accepted(tmp_path, ligand_forcefield):
+    builder = _DummyBuilder(tmp_path)
+    builder.ligand_forcefield = ligand_forcefield
+
+    builder._validate_fep_forcefield_compatibility()
+
+
 def test_build_standard_system_restores_state_after_run_normal_failure(tmp_path):
     builder = _DummyBuilder(tmp_path)
     original_output = builder.output_dir

@@ -40,6 +40,33 @@ class FEPWorkflowMixin:
             normalized = os.path.dirname(normalized)
         return normalized
 
+    def _validate_fep_forcefield_compatibility(self) -> None:
+        """Reject FEP combinations with incompatible non-bonded conventions."""
+        ligand_forcefield = self.ligand_forcefield.lower()
+        protein_forcefield = self.forcefield["name"]
+        protein_forcefield_lower = protein_forcefield.lower()
+
+        required_family = {
+            "gaff": "amber",
+            "gaff2": "amber",
+            "openff": "amber",
+            "opls": "opls",
+            "cgenff": "charmm36",
+            "charmm-gui": "charmm36",
+            "rtf": "charmm36",
+            "mmff": "charmm36",
+            "match": "charmm36",
+            "hybrid": "charmm36",
+        }.get(ligand_forcefield)
+        if required_family is None or protein_forcefield_lower.startswith(required_family):
+            return
+
+        raise ValueError(
+            f"{ligand_forcefield.upper()} FEP requires a {required_family.upper()} protein force field; "
+            f"received {protein_forcefield!r}. This combination uses incompatible force-field "
+            "families or non-bonded conventions."
+        )
+
     def run_fep(self):
         """Run the FEP workflow: build standard MD systems, generate hybrid topology, create FEP scaffold"""
         from ..fep.modeling import FEPScaffoldBuilder
@@ -48,6 +75,8 @@ class FEPWorkflowMixin:
 
         if not self.mutant_ligand:
             raise ValueError("FEP mode requires --mutant ligand file")
+
+        self._validate_fep_forcefield_compatibility()
 
         try:
             # Create FEP output directory first

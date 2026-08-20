@@ -1,4 +1,5 @@
-# CGenFF force field configuration for p38-19-24
+# CGenFF profile for p38-19-24. Requires paired CGenFF website input files
+# supplied with --forcefield-path and a CHARMM36 protein force field.
 
 fundamental:
   ref: "19"

@@ -1,11 +1,10 @@
-# FEP-specific configuration for 42-38 system
+# Default GAFF2 FEP configuration for the 42-38 system
 # General PRISM parameters (temperature, salt concentration, etc.) are in config.conf
 
 forcefield:
-  # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
-  type: cgenff
-  # Force field specific parameters
-  params: {}  # CGenFF uses pre-generated files
+  # Ligand force field type; use with an AMBER protein force field.
+  type: gaff2
+  params: {}  # GAFF2 assigns AM1-BCC charges by default.
 
 mapping:
   dist_cutoff: 0.6
