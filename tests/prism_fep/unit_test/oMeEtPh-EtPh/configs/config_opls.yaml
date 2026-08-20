@@ -1,0 +1,24 @@
+# OPLS configuration for oMeEtPh-EtPh system
+
+fundamental:
+  ref: oMeEtPh
+  mut: EtPh
+  rec: receptor.pdb
+
+model:
+  distance: 8
+  temperature: 302.15
+  concentration: 0.05
+  disoff: 1
+
+simulation:
+  numofsteps: 500000
+  repeats: 4
+
+forcefield:
+  type: opls
+  params:
+    charge_model: cm1a
+
+other:
+  verbose: true

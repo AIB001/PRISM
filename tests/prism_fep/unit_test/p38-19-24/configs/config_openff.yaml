@@ -1,0 +1,23 @@
+# OpenFF force field configuration for p38-19-24
+
+fundamental:
+  ref: "19"
+  mut: "24"
+  rec: protein.pdb
+
+model:
+  distance: 8
+  temperature: 310
+  concentration: 0.15
+  disoff: 0
+
+simulation:
+  numofsteps: 500000
+  repeats: 6
+
+forcefield:
+  type: openff         # Open Force Field
+  params: {}           # OpenFF uses AM1-BCC charges
+
+other:
+  verbose: true

@@ -1,0 +1,35 @@
+execution:
+  fallback_to_cpu: true
+  gpu_selection: auto
+  mpi_processes: 1
+  num_gpus: 4
+  omp_threads: 14
+  parallel_windows: 4
+  use_gpu_bonded: true
+  use_gpu_nb: true
+  use_gpu_pme: true
+mapping:
+  dist_cutoff: 1.0
+  charge_cutoff: 0.06
+  charge_common: mean
+  charge_reception: surround
+fep:
+  coul_windows: 12
+  distribution: nonlinear
+  lambda_windows: 32
+  per_window_npt_time_ps: 100
+  production_time_ns: 10
+  replicas: 1
+  soft_core_alpha: 0.5
+  soft_core_sigma: 0.3
+  strategy: decoupled
+  vdw_windows: 20
+simulation:
+  dt: 0.002
+  em_nsteps: 100000
+  emstep: 0.01
+  emtol: 1000.0
+  equilibration_npt_time_ps: 500
+  equilibration_nvt_time_ps: 500
+  pressure: 1.0
+  temperature: 310

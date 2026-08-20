@@ -1,0 +1,41 @@
+forcefield: amber14sb_OL15
+replicas: 3
+mapping:
+  dist_cutoff: 0.6
+  charge_cutoff: 0.05
+  charge_common: mean
+  charge_reception: surround
+soft_core:
+  alpha: 0.5
+  sigma: 0.3
+lambda:
+  strategy: decoupled
+  distribution: nonlinear
+  windows: 32
+  coul_windows: 12
+  vdw_windows: 20
+simulation:
+  equilibration_nvt_time_ps: 500
+  equilibration_npt_time_ps: 500
+  production_time_ns: 2.0
+  dt: 0.002
+  temperature: 310
+  pressure: 1.0
+electrostatics:
+  rcoulomb: 1.0
+vdw:
+  rvdw: 1.0
+output:
+  trajectory_interval_ps: 500
+  energy_interval_ps: 10
+  log_interval_ps: 10
+execution:
+  mode: standard
+  total_cpus: 40
+  num_gpus: 4
+  parallel_windows: 4
+  use_gpu_pme: true
+protein:
+  forcefield: amber14sb_OL15
+  water_model: tip3p
+water_model: tip3p
