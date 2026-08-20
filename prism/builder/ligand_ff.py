@@ -193,9 +193,21 @@ class LigandForceFieldMixin:
             else:
                 final_ff_dir = os.path.join(ligand_ff_base_dir, f"{primary_output_dir}_{ligand_num}")
 
-            # Move files from temp directory to final location
-            if os.path.exists(final_ff_dir) and self.overwrite:
-                shutil.rmtree(final_ff_dir)
+            # Move files from temp directory to final location.  shutil.move
+            # into an EXISTING directory does not replace it: it moves the
+            # source *inside*, producing LIG.amb2gmx/LIG.amb2gmx, and the run
+            # after that dies on the nested path with a message naming a
+            # directory the user never created.  An existing destination is
+            # therefore either cleared or refused by name -- never moved into.
+            if os.path.exists(final_ff_dir):
+                if self.overwrite:
+                    shutil.rmtree(final_ff_dir)
+                else:
+                    raise FileExistsError(
+                        f"Ligand force field directory already exists: {final_ff_dir}. "
+                        "Its parameters are regenerated on every run rather than reused, so "
+                        "pass --overwrite to replace it, or build into a clean output directory."
+                    )
             shutil.move(temp_ff_dir, final_ff_dir)
 
             # Clean up temp directory
