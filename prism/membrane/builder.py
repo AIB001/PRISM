@@ -1165,7 +1165,7 @@ class MembraneBuilder:
         dry = build(solute_pdb, **extra)
         # A system that still carries a growth plan is an intermediate, not a
         # bilayer.  Checked here, before tleap spends four minutes on it.
-        self._refuse_ungrown_system(dry, system_dir)
+        self._refuse_ungrown_system(dry)
 
         log = [
             f"PRISM fast membrane route: bundled pre-equilibrated {lipid} patch",
