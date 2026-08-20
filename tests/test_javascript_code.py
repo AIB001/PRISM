@@ -29,10 +29,38 @@ class TestJavaScriptCodeModule:
         assert isinstance(js_code, str)
         assert len(js_code) > 0
 
-    def test_javascript_code_has_expected_size(self):
-        """JavaScript code should have expected size (around 55k chars)."""
+    def test_javascript_code_contains_every_part_exactly_once(self):
+        """The assembled bundle must be its parts, whole and unduplicated.
+
+        This replaces a ``50000 < len(js_code) < 60000`` character-count bound.
+        The count stood in for "modularisation lost nothing", but it cannot tell
+        a dropped section from an added feature: it began failing at 66458
+        characters because the visualisation grew, and the only way to keep it
+        passing was to widen it again after every change.
+
+        Concatenation is the property assembly actually has to satisfy, and it
+        does not drift as the code grows -- while still catching what the bound
+        was meant to catch: a part left out of the sum, or pasted in twice.
+        """
+        parts = [
+            get_contact_map_class_part1(),
+            get_contact_map_class_part2(),
+            get_drawing_methods(),
+            get_utility_functions(),
+        ]
         js_code = get_javascript_code()
-        assert 50000 < len(js_code) < 60000
+
+        for part in parts:
+            assert js_code.count(part) == 1, "a part is missing from the bundle, or duplicated in it"
+
+        # Parts must appear in assembly order: JavaScript is order-sensitive, so
+        # the same characters in the wrong sequence is a different program.
+        offsets = [js_code.index(part) for part in parts]
+        assert offsets == sorted(offsets)
+
+        # The bundle closes the document it opens. A truncated string could
+        # still contain every part and yet be unparsable HTML.
+        assert js_code.rstrip().endswith("</html>")
 
     def test_contact_map_class_part1(self):
         """Part 1 should contain ContactMap class initialization."""
