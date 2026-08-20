@@ -1162,41 +1162,31 @@ class MembraneConfig:
     #: equilibrated density, not away from it -- with zero sub-2.0 A overlaps and
     #: a converging EM.
     #:
-    #: **Why it is nonetheless off by default.**  Three reasons, in order of
-    #: weight, and only the third is about cost:
+    #: **Why it is on by default.**  It was opt-in while three things were true;
+    #: all three were settled by measurement on 6KQI, with the xy box fix in
+    #: place so the numbers are not confounded by the global vacuum stripe that
+    #: bug produced:
     #:
-    #: 1. *PRISM cannot finish it yet.*  The grow-back minimises the bilayer
-    #:    against a GROMACS topology, and on this route ``patch.py`` emits the
-    #:    solute in input order while the topology is in ``[ molecules ]`` order.
-    #:    On a disulfide-linked homodimer those differ -- measured on 9OMO, 11841
-    #:    of 24624 solute atoms land at an index holding a different atom -- so
-    #:    the minimisation aborts in ``mshift``.  ``MembraneBuilder`` refuses such
-    #:    a system rather than shipping lipids that overlap the real solute.  A
-    #:    default of ``"auto"`` would therefore fail *every* default patch build,
-    #:    which is the one thing a default must never do.
-    #: 2. *The symptom had a second, larger cause that is already fixed.*  The
-    #:    numbers above were measured while the patch route's xy box was also
-    #:    wrong.  That bug left a global vacuum stripe -- it, not the rim, is what
-    #:    put the system at -5325 bar -- and no equilibration recovers from it.
-    #:    With the box corrected, plain deletion gives a bilayer that is
-    #:    physically sound from the first step and merely reaches its equilibrium
-    #:    packing more slowly.  A rim annulus is a local defect that equilibration
-    #:    closes; that is an equilibration-time cost a user may reasonably choose
-    #:    to pay up front, which is what an opt-in is for.
-    #: 3. *Cost.*  The grow-back is 14 GROMACS minimisations (13 short, one full
-    #:    PME), measured at 821 s on 16 cores on top of a ~616 s build, against a
-    #:    stated ceiling of five minutes.  On by default takes a build already at
-    #:    2x the ceiling to roughly 4x it, for everyone -- including users who
-    #:    only want a system to look at.
+    #: 1. *The atom-order blocker is closed.*  The solute is rewritten into
+    #:    ``[ molecules ]`` order before the bilayer is built around it, so the
+    #:    coordinates the grow-back minimises and the topology it minimises
+    #:    against agree by construction rather than by luck.
+    #: 2. *The rim annulus is real and plain deletion does not fix it.*  With the
+    #:    box corrected, plain deletion still leaves the rim at 6.30 A -- van der
+    #:    Waals contact is ~3 A -- with 2 lipids within 4.5 A of the solute.  The
+    #:    grow-back gives 3.26 A and 42 lipids, and area per lipid moves 65.8 ->
+    #:    61.7 A^2, *toward* the patch's equilibrated 60.43 rather than away.
+    #:    Nothing is traded for the improvement.
+    #: 3. *The cost is not what it looked like.*  A protein-only 6KQI build with
+    #:    the grow-back takes 244 s end to end -- faster than OpenMM's 716 s for
+    #:    the same job, because minimising to convergence per increment allows a
+    #:    dozen large steps where OpenMM's 10 K dynamics needs ~60 small ones.
+    #:    The earlier 821 s figure was the grow-back measured alone on the larger
+    #:    mGluR7 dimer, not a build's total.
     #:
-    #: **What would flip this default to ``"auto"``:** the atom-order blocker in
-    #: (1) being closed, *and* a re-measurement of the rim gap and area per lipid
-    #: against plain deletion **with the box fix in place** still showing a
-    #: material gap (the pre-fix numbers cannot settle this, since the box bug
-    #: inflated both). If the grow-back's cost also came under ~200 s -- fewer,
-    #: larger increments, or relaxing only a shell of lipids around the solute
-    #: instead of a full PME minimisation each step -- reason (3) would stop
-    #: counting and (2) alone would not hold the default off.
+    #: Set it to ``None`` for plain clash deletion -- appreciably faster, and
+    #: sound as a starting structure, but its rim closes during equilibration
+    #: instead of at build time.
     #:
     #: **``"auto"`` is not a vague convenience, and 0.5 is not its safe
     #: equivalent.**  OpenMM shrinks by a flat 0.5 whatever the protein, which is
@@ -1211,7 +1201,7 @@ class MembraneConfig:
     #: returns 0.700 on this protein; it reduces to roughly 0.5 for a small one.
     #: So prefer ``"auto"``; reach for :data:`OPENMM_SHRINK_FACTOR` only to
     #: reproduce OpenMM or Wolf et al. deliberately, not as a default-by-analogy.
-    patch_shrink_factor: Optional[float | str] = None
+    patch_shrink_factor: Optional[float | str] = "auto"
     # ``allow_mixed_14_scaling`` was removed here.  It converted a system whose
     # AMBER 1-4 scaling is not uniform by applying the most common factor to
     # every 1-4 pair anyway -- knowingly wrong physics, offered because the
@@ -2151,8 +2141,10 @@ def parse_membrane_cli(
         # Normalised here (not merely passed through) because this field has a
         # *vocabulary* -- 'auto', and the off-spellings -- and normalising it at
         # the boundary is what ``solvate`` and ``bilayer_source`` do too.  The
-        # ``None`` fallback is unambiguous for once: the dataclass default is
-        # itself ``None``, so "flag not given" and "shrink off" coincide.
+        # ``None`` is argparse's "flag not given", which is why it goes through
+        # ``_or_default`` rather than straight in: the dataclass default is
+        # ``"auto"``, so passing the sentinel on would turn the shrink-and-grow
+        # off for every CLI build while the YAML path kept it on.
         patch_shrink_factor=_require_shrink_factor(
             _or_default(patch_shrink_factor, "patch_shrink_factor")
         ),

@@ -150,6 +150,24 @@ PATCH_PRMTOP = "bilayer_patch.prmtop"
 PATCH_INPCRD = "bilayer_patch.inpcrd"
 PATCH_LEAP_IN = "leap_patch.in"
 
+#: The shrink-deletion intermediate, written once so that tleap has something
+#: to parametrize before the grow-back can run.  Its lipids still overlap the
+#: solute; the file says so in a REMARK and
+#: :meth:`~prism.membrane.patch.DrySystem.write_parametrization_pdb` explains
+#: why writing it is nonetheless sound.  Only the shrink route writes it.
+PATCH_UNGROWN_PDB = "bilayer_patch_ungrown.pdb"
+#: The dry system's GROMACS topology, used ONLY to drive the grow-back's
+#: minimisations.  The deliverable topology is written later from the same
+#: prmtop by :meth:`MembraneBuilder._amber_to_gromacs`; this one exists earlier
+#: because ``grow_solute`` needs a force field before the build is finished.
+PATCH_DRY_TOP = "bilayer_patch_dry.top"
+#: Scratch directory holding the grow-back's per-increment GROMACS runs.  It is
+#: removed once the energies have been summarised into :data:`PATCH_GROW_LOG`.
+PATCH_GROW_DIR = "grow"
+#: The grow-back's per-increment energies and forces, kept as evidence that
+#: every minimisation actually converged.
+PATCH_GROW_LOG = "bilayer_patch_grow.log"
+
 #: Artifacts of the solute-preparation stage that precedes the patch route's
 #: tiling (see :meth:`MembraneBuilder._prepare_patch_solute`).  The prepared
 #: input and tleap's completed output are both kept: the difference between
@@ -183,6 +201,13 @@ PATCH_SOLUTE_INPCRD = "solute_complete.inpcrd"
 #: chains) and as the structure the bilayer was built around, not as a
 #: simulation input.
 PATCH_SOLUTE_RELAXED_PDB = "solute_relaxed.leap_order.pdb"
+#: The same solute, permuted into ``[ molecules ]`` order -- and therefore the
+#: one file of this stage that DOES match ``topol.top``.  It is what the patch
+#: module tiles around, so that every coordinate file downstream is in the one
+#: order GROMACS reads.  See
+#: :meth:`MembraneBuilder._reorder_solute_to_topology`; for most inputs it is a
+#: byte-for-byte copy of the file above.
+PATCH_SOLUTE_ORDERED_PDB = "solute_topology_order.pdb"
 PATCH_SOLUTE_MIN_IN = "min_solute.in"
 PATCH_SOLUTE_MIN_OUT = "min_solute.out"
 PATCH_SOLUTE_MIN_RST = "min_solute.rst"
@@ -1163,9 +1188,6 @@ class MembraneBuilder:
         # ordering is the whole point; see _prepare_patch_solute.
         solute_pdb, solute_log = self._prepare_patch_solute(oriented_pdb, system_dir, result)
         dry = build(solute_pdb, **extra)
-        # A system that still carries a growth plan is an intermediate, not a
-        # bilayer.  Checked here, before tleap spends four minutes on it.
-        self._refuse_ungrown_system(dry)
 
         log = [
             f"PRISM fast membrane route: bundled pre-equilibrated {lipid} patch",
@@ -1186,12 +1208,21 @@ class MembraneBuilder:
         # tleap itself.  PACKMOL-Memgen does the equivalent behind
         # ``--parametrize``; from here on the two routes are indistinguishable.
         dry_pdb = os.path.join(system_dir, PATCH_DRY_PDB)
-        dry.write_pdb(dry_pdb)
-        self._progress("parametrizing the dry patch system with tleap")
-        prmtop, inpcrd, leap_log = self._parametrize_with_tleap(
-            dry_pdb, self._patch_box(dry), system_dir, result
-        )
-        log.append(leap_log)
+        if getattr(dry, "needs_growth", False):
+            dry, prmtop, inpcrd, grow_log = self._grow_patch_bilayer(
+                dry, module, dry_pdb, system_dir, result
+            )
+            log.extend(grow_log)
+        else:
+            dry.write_pdb(dry_pdb)
+            self._progress("parametrizing the dry patch system with tleap")
+            prmtop, inpcrd, leap_log = self._parametrize_with_tleap(
+                dry_pdb, self._patch_box(dry), system_dir, result
+            )
+            log.append(leap_log)
+        # Whatever route got here, the system that leaves this method must be a
+        # bilayer and not an intermediate.
+        self._refuse_ungrown_system(dry)
         return packmol_memgen.PackmolMemgenResult(
             prmtop=prmtop,
             inpcrd=inpcrd,
@@ -1255,58 +1286,311 @@ class MembraneBuilder:
     def _refuse_ungrown_system(self, dry) -> None:
         """Refuse a system whose grow-back has not run. Returns None otherwise.
 
-        ``patch.py`` builds the shrink-and-grow system correctly, but PRISM
-        cannot yet finish it, and the honest thing is to say so before tleap
-        spends four minutes producing a topology for coordinates that must not
-        be shipped.  Two things have to be true before the grow-back can run
-        here, and on this route only the first is:
+        A post-condition, not a feature gate.  Between the shrink-deletion and
+        ``grow_solute`` the survivors sit inside the solute's real footprint --
+        on mGluR7 the closest heavy-atom pair is 0.27 A -- so a system that
+        still carries a growth plan is an intermediate, and shipping it would
+        hand tleap and then the user coordinates no minimiser can rescue.
 
-        1. *Ordering.*  The relaxer minimises the bilayer against a GROMACS
-           topology, so the topology has to exist before the grow-back rather
-           than after it.  That much is fine -- ``grow_solute`` never moves the
-           solute and tleap infers no bonds (PRISM declares every disulfide
-           explicitly, from solute geometry that the grow-back leaves
-           untouched), so a topology built before the grow is the same topology
-           that describes the system after it.
-
-        2. *Atom order.*  This is the blocker.  ``patch.py`` writes the relaxer's
-           coordinates with the solute in the order it read it, while the
-           topology PRISM hands the relaxer is in ``[ molecules ]`` order --
-           whole molecules, i.e. connected components of the bond graph.  On a
-           disulfide-linked homodimer those differ: measured on 9OMO, 11841 of
-           the solute's 24624 atoms sit at an index holding a different atom.
-           Pairing them gives the same multi-nanometre bonds Defect 3 is about,
-           and mdrun aborts in ``mshift`` -- so the minimisation the grow-back
-           depends on cannot run at all.
-
-        Closing (2) means feeding ``patch.py`` a solute that is already in
-        topology order, which changes the atom order of every patch build's
-        deliverable, not just the ones that ask for a shrink.  That is a bigger
-        change than this one, and it is not worth making blind for a feature
-        that is off by default and costs 821 s when on.
-
-        Raising is the right failure: the alternative is a system with 0.27 A
-        lipid-solute overlaps, which is exactly what ``DrySystem.write_pdb``
-        refuses to emit and what this check exists to explain rather than merely
-        trip over.
+        ``DrySystem`` refuses to write such a system too; this is the same rule
+        stated where the build can explain what it means, and it fires before
+        tleap spends four minutes on it.  It should now be unreachable: the
+        shrink route grows the system in :meth:`_grow_patch_bilayer` before
+        returning it.  Unreachable checks that guard a silent catastrophe are
+        worth their cost.
         """
         if not getattr(dry, "growth", None):
             return
         factor = getattr(dry.growth, "shrink_factor", None)
         stated = f"{factor:.3f}" if isinstance(factor, (int, float)) else str(factor)
         raise MembraneBuildError(
-            f"membrane patch_shrink_factor={stated} selected the shrink-and-grow lipid "
-            "packing, but PRISM cannot complete it yet: the bilayer minimisation it relies on "
-            "needs the solute in the same atom order as the topology, and on this route "
-            "patch.py emits the solute in input order while the topology is in [ molecules ] "
-            "order (on a disulfide-linked homodimer these differ in roughly half the solute's "
-            "atoms, which makes the minimisation abort in mshift). The lipids are currently "
-            f"placed against a shrunken solute and overlap the real one by "
-            f"{self._closest_full_size_contact(dry)}, so this system must not be written. "
-            "Rebuild without patch_shrink_factor (plain clash deletion): with the periodic box "
-            "corrected that gives a physically sound bilayer, at a wider lipid-protein rim that "
-            "equilibration closes."
+            f"The shrink-and-grow bilayer (patch_shrink_factor={stated}) reached the end of the "
+            "packing stage without its grow-back having run, so its lipids are still placed "
+            f"against a shrunken copy of the solute and overlap the real one by "
+            f"{self._closest_full_size_contact(dry)}. This system must not be written. Rebuild "
+            "without patch_shrink_factor to get plain clash deletion, which needs no grow-back."
         )
+
+    # ------------------------------------------------------------------ #
+    # The grow-back
+    #
+    # ``grow_solute`` needs a force field: it minimises the bilayer at every
+    # increment while the solute expands back to full size.  So the topology
+    # has to exist BEFORE the grow, which inverts this route's usual order --
+    # normally tleap runs on the finished geometry and that is that.
+    #
+    # Inverting it is sound, and cheap, for one reason each:
+    #
+    #   * *Sound.*  The grow moves atoms and only atoms.  It deletes nothing,
+    #     adds nothing and never touches the solute (which is frozen, not
+    #     restrained), and tleap infers no bond from a distance -- PRISM
+    #     declares every disulfide explicitly, from solute geometry the grow
+    #     leaves untouched.  So the topology of the ungrown system IS the
+    #     topology of the grown one.
+    #   * *Cheap.*  Because it is the same topology, the second tleap run that
+    #     the naive ordering would need is not needed: the grown coordinates are
+    #     written into the inpcrd the first run produced.  The only cost the
+    #     grow adds beyond its own minimisations is one extra ParmEd conversion,
+    #     of the dry system, to give the relaxer a .top.
+    #
+    # What makes the pairing safe is checked rather than assumed, in
+    # :meth:`_assert_relaxer_ordering`, because GROMACS pairs coordinates and
+    # topology by position and says nothing when they disagree.
+    # ------------------------------------------------------------------ #
+
+    #: Steepest-descent steps per intermediate grow increment.  The final
+    #: increment runs the full ``em.mdp`` instead (50000 steps to ``emtol``),
+    #: because that one produces the coordinates that are kept.
+    #:
+    #: The intermediates do not need convergence, they need the lipids out of
+    #: the way before the solute takes its next step outward, and the solute
+    #: only moves ~0.5 A per increment.  Capping them keeps the grow-back's cost
+    #: proportional to the number of increments rather than to how hard the
+    #: bilayer is to converge with a protein frozen inside it.
+    PATCH_GROW_STEPS = 400
+
+    def _grow_patch_bilayer(self, dry, module, dry_pdb: str, system_dir: str, result):
+        """Grow the shrunken solute back. Returns (grown, prmtop, inpcrd, log)."""
+        grow = self._first_attr(module, ("grow_solute",))
+        relaxer = self._first_attr(module, ("gromacs_relaxer",))
+        if grow is None or relaxer is None:
+            raise MembraneBuildError(
+                "prism.membrane.patch does not expose grow_solute/gromacs_relaxer, so the "
+                "shrink-and-grow packing selected by patch_shrink_factor cannot be completed. "
+                "Rebuild without patch_shrink_factor."
+            )
+        if self._gmx_command() is None:
+            raise MembraneBuildError(
+                "GROMACS was not found on PATH, and the shrink-and-grow packing selected by "
+                "patch_shrink_factor minimises the bilayer with gmx at every increment. Load a "
+                "GROMACS module, or rebuild without patch_shrink_factor (plain clash deletion "
+                "needs no force field and no gmx)."
+            )
+
+        box = self._patch_box(dry)
+        ungrown_pdb = os.path.join(system_dir, PATCH_UNGROWN_PDB)
+        # NOT write_pdb: this geometry is the intermediate, and write_pdb
+        # refuses it.  write_parametrization_pdb exists to say, in the file and
+        # in its own name, that the coordinates here are not a system.
+        dry.write_parametrization_pdb(ungrown_pdb)
+        self._progress(
+            "parametrizing the patch system with tleap (before the grow-back, which needs a "
+            "force field to relax the bilayer against)"
+        )
+        prmtop, inpcrd, leap_log = self._parametrize_with_tleap(
+            ungrown_pdb, box, system_dir, result
+        )
+
+        self._progress("converting the dry topology for the grow-back's minimisations")
+        parm, top = self._relaxer_topology(prmtop, dry, system_dir)
+
+        workdir = os.path.join(system_dir, PATCH_GROW_DIR)
+        mdps = write_membrane_mdps(
+            workdir,
+            temperature=self.config.temperature,
+            ff_family=self.config.family(),
+            production_ns=self.config.production_ns,
+            posres_fc_backbone=self.config.posres_fc_backbone,
+            posres_fc_sidechain=self.config.posres_fc_sidechain,
+            posres_fc_lipid=self.config.posres_fc_lipid,
+        )
+        final_mdp = mdps["em"]
+        step_mdp = self._capped_minimisation_mdp(
+            final_mdp, os.path.join(workdir, "em_step.mdp"), self.PATCH_GROW_STEPS
+        )
+
+        plan = dry.growth
+        steps = getattr(plan, "n_steps", 0)
+        self._progress(
+            f"growing the solute back to full size in {steps} increments, minimising the "
+            f"bilayer at each ({steps} GROMACS runs; this is the cost of the packing quality)"
+        )
+        relax = relaxer(
+            topology=top,
+            mdp=step_mdp,
+            final_mdp=final_mdp,
+            workdir=workdir,
+            gmx=self._gmx_command(),
+            keep_intermediates=False,
+            timeout=self.config.packmol_timeout,
+        )
+        grown = grow(dry, relax, progress=self._grow_progress)
+
+        report = getattr(grown, "growth_report", None)
+        self._write_grow_log(
+            os.path.join(system_dir, PATCH_GROW_LOG), report, getattr(relax, "energies", [])
+        )
+        shutil.rmtree(workdir, ignore_errors=True)
+
+        grown.write_pdb(dry_pdb)
+        self._apply_grown_coordinates(parm, grown, inpcrd, prmtop)
+
+        if report is not None:
+            result.info.append(
+                "Shrink-and-grow lipid packing (Wolf et al., the algorithm OpenMM's "
+                f"Modeller.addMembrane uses): {report.describe()}. The lipids were deleted "
+                "against a laterally shrunken copy of the solute and then closed in around it as "
+                "it grew back, instead of being deleted out to its full footprint."
+            )
+            for note in getattr(report, "notes", ()) or ():
+                result.warnings.append(f"Grow-back: {note}")
+        log = [leap_log]
+        if report is not None:
+            log.append(f"grow-back:         {report.describe()}")
+        log.append(f"grow-back energies: {os.path.basename(PATCH_GROW_LOG)}")
+        return grown, prmtop, inpcrd, log
+
+    def _grow_progress(self, description: str) -> None:
+        """Announce a grow increment without consuming a build-stage number.
+
+        ``_progress`` numbers build stages, and there are fourteen increments
+        inside one stage; running them through it would print "stage 21/12".
+        """
+        if self.verbose:
+            print_info(f"  {description}")
+
+    def _relaxer_topology(self, prmtop: str, dry, system_dir: str):
+        """Convert *prmtop* to a .top the grow-back can minimise against.
+
+        Returns ``(parm, top_path)``.  The loaded structure is handed back
+        because the grown coordinates are written through it afterwards, and
+        parsing a 30 MB prmtop twice for the same object is pure cost.
+        """
+        import parmed as pmd
+
+        parm = pmd.load_file(prmtop)
+        self._assert_relaxer_ordering(parm, dry, prmtop)
+        top = os.path.join(system_dir, PATCH_DRY_TOP)
+        # Same writer as the deliverable topology, so the parameters the
+        # grow-back minimises against are the parameters the system ships with
+        # -- including the 1-4 scaling ParmEd's own exporter loses.
+        save_gromacs_topology(
+            parm, top, overwrite=True, context="the grow-back's working topology"
+        )
+        return parm, top
+
+    def _assert_relaxer_ordering(self, parm, dry, prmtop: str) -> None:
+        """Refuse to minimise coordinates the topology does not describe.
+
+        Two facts have to hold, and GROMACS reports neither -- it pairs the
+        ``.gro`` and the ``.top`` by position and proceeds:
+
+        1. The topology's ``[ molecules ]`` expands to the prmtop's own atom
+           order, i.e. every molecule is already contiguous.  Otherwise ParmEd
+           writes ``[ molecules ]`` in connected-component order while the
+           coordinates stay in file order.  This is what
+           :meth:`_reorder_solute_to_topology` establishes upstream.
+        2. The prmtop lists the same atoms, in the same sequence, as the
+           ``.gro`` ``patch.py`` is about to write -- solute first, then the
+           surviving lipids.  This is what says tleap did not reorder anything
+           while reading the assembled PDB.
+
+        Together they mean the relaxer's coordinates and topology describe the
+        same atom at every index.  When they do not, the symptom is bonds tens
+        of nanometres long and an abort inside ``mshift``, which names neither
+        cause; so both are named here instead.
+        """
+        order = self._topology_atom_order(parm)
+        if order is not None and order != list(range(len(parm.atoms))):
+            moved = sum(1 for at, index in enumerate(order) if at != index)
+            raise MembraneBuildError(
+                f"{os.path.basename(prmtop)} does not list its molecules contiguously "
+                f"({moved} of {len(parm.atoms)} atoms would move when [ molecules ] is expanded), "
+                "so the topology the grow-back minimises against would describe a different atom "
+                "at every index than the coordinates it is given. The solute is put into "
+                f"[ molecules ] order before the bilayer is built ({PATCH_SOLUTE_ORDERED_PDB}), "
+                "so this means tleap regrouped the assembled system. Rebuild without "
+                "patch_shrink_factor."
+            )
+
+        expected = [
+            (str(res), str(name))
+            for res, name in zip(
+                list(dry.solute.res_names) + list(dry.lipids.res_names),
+                list(dry.solute.atom_names) + list(dry.lipids.atom_names),
+            )
+        ]
+        if len(expected) != len(parm.atoms):
+            raise MembraneBuildError(
+                f"{os.path.basename(prmtop)} holds {len(parm.atoms)} atoms but the patch module's "
+                f"system holds {len(expected)}, so the grow-back cannot pair them."
+            )
+        for index, ((res, name), atom) in enumerate(zip(expected, parm.atoms)):
+            if res[:3].strip() != atom.residue.name[:3].strip() or name != atom.name.strip():
+                raise MembraneBuildError(
+                    f"tleap reordered the assembled system while reading it: at atom {index + 1} "
+                    f"the patch module has {res}/{name} and {os.path.basename(prmtop)} has "
+                    f"{atom.residue.name}/{atom.name}. The grow-back pairs the two by position, "
+                    "so it would minimise every atom under another atom's parameters. Rebuild "
+                    "without patch_shrink_factor."
+                )
+
+    def _apply_grown_coordinates(self, parm, grown, inpcrd: str, prmtop: str) -> None:
+        """Write the grown coordinates into *inpcrd*, replacing tleap's.
+
+        tleap parametrized the system before the grow, so the coordinates it
+        wrote alongside the topology are the intermediate ones.  The atoms and
+        their order are unchanged by the grow -- asserted in
+        :meth:`_assert_relaxer_ordering`, which ran against this same ``parm``
+        -- so substituting coordinates is exact, and it is what saves a second
+        four-minute tleap run over the whole bilayer.
+        """
+        import numpy as np
+
+        parm.coordinates = np.vstack([grown.solute.xyz, grown.lipids.xyz])
+        if os.path.isfile(inpcrd):
+            os.remove(inpcrd)
+        parm.save(inpcrd, format="rst7", overwrite=True)
+        if not os.path.isfile(inpcrd):
+            raise MembraneBuildError(
+                f"The grown coordinates could not be written to {os.path.basename(inpcrd)}, so "
+                f"{os.path.basename(prmtop)} would still be paired with the pre-grow geometry."
+            )
+
+    @staticmethod
+    def _capped_minimisation_mdp(source: str, dest: str, nsteps: int) -> str:
+        """Copy *source*, capping ``nsteps``. Returns *dest*.
+
+        Derived from the protocol's own em.mdp rather than written out here, so
+        the intermediates minimise under the same cutoffs, the same vdW
+        treatment and the same electrostatics as everything else in the build.
+        The only thing that differs is how long they are allowed to run.
+        """
+        kept = [
+            line for line in open(source).read().splitlines()
+            if line.split("=")[0].strip().lower().replace("_", "-") != "nsteps"
+        ]
+        kept += [
+            "; capped by prism.membrane.builder for one grow-back increment",
+            f"nsteps                  = {int(nsteps)}",
+        ]
+        with open(dest, "w") as handle:
+            handle.write("\n".join(kept) + "\n")
+        return dest
+
+    @staticmethod
+    def _write_grow_log(path: str, report, energies) -> None:
+        """Record what each increment's minimisation reached.
+
+        The grow-back's whole claim is that the bilayer was relaxed at every
+        increment, and the only evidence for that is the energies -- which
+        otherwise vanish with the scratch directory the runs happened in.
+        """
+        lines = [
+            "# PRISM shrink-and-grow: bilayer minimisation per increment",
+            "# potential in kJ/mol, fmax in kJ/mol/nm, converged 1/0 as gmx reported it",
+        ]
+        if report is not None:
+            lines.append(f"# {report.describe()}")
+        lines.append("# step        potential            fmax  converged")
+        for step, entry in enumerate(energies or []):
+            lines.append(
+                f"{step:6d}  {entry.get('potential', float('nan')):16.6g}"
+                f"  {entry.get('fmax', float('nan')):14.6g}"
+                f"  {int(entry.get('converged', 0)):9d}"
+            )
+        with open(path, "w") as handle:
+            handle.write("\n".join(lines) + "\n")
 
     @staticmethod
     def _closest_full_size_contact(dry) -> str:
@@ -1412,6 +1696,9 @@ class MembraneBuilder:
         complete, relaxation = self._relax_completed_solute(
             complete, prmtop, inpcrd, system_dir, result
         )
+        complete, ordering = self._reorder_solute_to_topology(
+            complete, prmtop, system_dir, result
+        )
 
         log = [
             f"solute prepared:   {os.path.basename(complete)} "
@@ -1423,6 +1710,7 @@ class MembraneBuilder:
         ]
         log.extend(f"    {entry}" for entry in described)
         log.extend(relaxation)
+        log.extend(ordering)
 
         result.info.append(
             f"Solute completed by tleap before the bilayer was built around it: "
@@ -1614,6 +1902,255 @@ class MembraneBuilder:
         if pairs.size == 0:
             return 0
         return int(np.count_nonzero(np.abs(owner[pairs[:, 0]] - owner[pairs[:, 1]]) > 1))
+
+    # ------------------------------------------------------------------ #
+    # Putting the solute into topology order before it is tiled around
+    #
+    # A .gro carries no molecule information: GROMACS pairs it with the
+    # topology by position, expanding ``[ molecules ]`` in order, so every
+    # coordinate file PRISM writes for this system has to be in that order.
+    # ``_save_coordinates`` already does that for the deliverable, by permuting
+    # the converted structure at the very end.
+    #
+    # The grow-back cannot wait until the end.  It minimises the bilayer
+    # fourteen times *during* the build, against coordinates ``patch.py``
+    # writes, and ``patch.py`` writes the solute in the order it read it.  On a
+    # disulfide-linked homodimer those two orders differ in roughly half the
+    # solute's atoms (measured on 9OMO: 11841 of 24624), every atom then gets
+    # another atom's parameters, and mdrun aborts in ``mshift`` over bonds
+    # 17 nm long.
+    #
+    # Rather than teach ``patch.py`` a second ordering rule -- a divergent copy
+    # of an ordering rule is exactly the failure this is about -- the solute is
+    # permuted into ``[ molecules ]`` order HERE, before it is handed over, so
+    # everything downstream reads and writes one order and the two agree by
+    # construction.  The permutation is ``_topology_atom_order``'s, the same
+    # function ``_save_coordinates`` uses, applied to the solute's own prmtop.
+    #
+    # Two consequences worth stating plainly.
+    #
+    #   * The deliverable's atom order does NOT change.  ``_save_coordinates``
+    #     applies the same grouping at the end either way, and grouping an
+    #     already-grouped list is the identity, so ``system.gro`` comes out
+    #     byte-identical in order.  What changes is the order of the
+    #     intermediates -- the solute PDB, the dry bilayer PDB and the prmtop --
+    #     which now agree with it instead of disagreeing.
+    #   * For most inputs the permutation IS the identity.  Measured on 6KQI (a
+    #     monomer whose segments are contiguous in the file) nothing moves, and
+    #     the step reduces to a copy.  It only bites when a molecule's atoms are
+    #     interleaved with another's, which is what an inter-protomer disulfide
+    #     does.
+    # ------------------------------------------------------------------ #
+
+    def _reorder_solute_to_topology(self, solute_pdb, prmtop, system_dir, result):
+        """Rewrite *solute_pdb* in ``[ molecules ]`` order. Returns (path, log).
+
+        The permutation is derived from *prmtop* -- tleap's own topology for
+        this very structure -- so it is the grouping the bilayer's topology will
+        be written with too.
+
+        TER records travel with their atoms rather than being re-derived at
+        molecule boundaries.  A molecule is a connected component of the bond
+        graph, and a component joined by a disulfide spans two chains that must
+        stay separated: re-deriving TER from components would fuse them into one
+        chain and tleap would build a peptide bond where the crystal has none.
+        Carrying the original flag preserves every chain break exactly.
+        """
+        ordered = os.path.join(system_dir, PATCH_SOLUTE_ORDERED_PDB)
+        try:
+            import parmed as pmd
+
+            parm = pmd.load_file(prmtop)
+        except Exception as exc:
+            # Without the topology there is no permutation to derive, so the
+            # solute is passed through in the order it arrived.  That is the
+            # pre-existing behaviour, and it is correct for every solute whose
+            # molecules are already contiguous -- which is most of them.  What
+            # it is not is *checked*, so it is said out loud, here and in the
+            # file's own header.
+            result.warnings.append(
+                f"The solute's topology could not be read ({exc}), so PRISM could not confirm "
+                "that the solute is in [ molecules ] order before the bilayer is built around "
+                "it. Plain clash deletion is unaffected; a shrink-and-grow build will refuse "
+                "later rather than minimise a scrambled system."
+            )
+            header, records, ter_after = self._read_pdb_records(solute_pdb)
+            self._write_pdb_records(
+                ordered, records, ter_after, header=header,
+                remarks=[
+                    "PRISM: completed solute, in tleap's savepdb order.",
+                    "",
+                    "PRISM could not read this structure's topology, so it could not check",
+                    "that the order below is the order [ molecules ] expands to. It usually",
+                    "is -- they differ only when a molecule's atoms are interleaved with",
+                    "another's, which an inter-protomer disulfide does. Take coordinates",
+                    "from system.gro, which is written in the topology's order and checked",
+                    "against it.",
+                ],
+            )
+            return ordered, [
+                "  solute atom order:                 unchecked (no topology)"
+            ]
+
+        order = self._topology_atom_order(parm)
+        header, records, ter_after = self._read_pdb_records(solute_pdb)
+        if len(records) != len(parm.atoms):
+            raise MembraneBuildError(
+                f"{os.path.basename(solute_pdb)} holds {len(records)} atoms but "
+                f"{os.path.basename(prmtop)} holds {len(parm.atoms)}, so the solute cannot be put "
+                "into the order its own topology implies."
+            )
+        self._assert_pdb_matches_parm(records, parm, solute_pdb, prmtop)
+
+        if order is None:
+            order = list(range(len(records)))
+        moved = sum(1 for at, index in enumerate(order) if at != index)
+        # Written through the same writer whether or not anything moved.  A
+        # copy would be cheaper in the identity case and was wrong: it inherits
+        # the source file's header, and the source is the one that says "THIS
+        # FILE DOES NOT MATCH topol.top" -- which is exactly what this file is
+        # not.  One writer, one header, true in both cases.
+        self._write_pdb_records(
+            ordered,
+            [records[index] for index in order],
+            [ter_after[index] for index in order],
+            remarks=self._topology_order_remarks(
+                len(records), moved, os.path.basename(solute_pdb)
+            ),
+            header=header,
+        )
+        if not moved:
+            return ordered, [
+                "  solute atom order:                 already [ molecules ] order "
+                "(no atom moved)"
+            ]
+
+        result.info.append(
+            f"Solute permuted into [ molecules ] order before the bilayer was built around it: "
+            f"{moved} of {len(records)} atom(s) changed index. Its molecules are interleaved in "
+            "the input (an inter-protomer disulfide makes one molecule span both ends of the "
+            "file), and every coordinate file GROMACS reads for this system has to be in the "
+            "order [ molecules ] expands to."
+        )
+        return ordered, [
+            f"  solute atom order:                 permuted into [ molecules ] order "
+            f"({moved} of {len(records)} atoms moved)"
+        ]
+
+    @staticmethod
+    def _read_pdb_records(pdb_path: str):
+        """(header lines, ATOM/HETATM lines, per-atom "TER followed" flags).
+
+        The TER convention matches ``patch.read_solute``'s: a TER is recorded
+        against the atom before it, which is what lets the flag be permuted with
+        its atom.  Header lines are the REMARK/CRYST1 records ahead of the first
+        atom; anything after it that is not an atom or a TER is dropped, because
+        the only consumers are tleap and ``patch.read_solute``, neither of which
+        reads it.
+        """
+        header: List[str] = []
+        records: List[str] = []
+        ter_after: List[bool] = []
+        with open(pdb_path) as handle:
+            for line in handle:
+                line = line.rstrip("\n").rstrip("\r")
+                if line.startswith(("ATOM", "HETATM")):
+                    records.append(line)
+                    ter_after.append(False)
+                elif line.startswith("TER") and ter_after:
+                    ter_after[-1] = True
+                elif not records and line.startswith(("REMARK", "CRYST1", "HEADER", "TITLE")):
+                    header.append(line)
+        if not records:
+            raise MembraneBuildError(f"No ATOM/HETATM records in {os.path.basename(pdb_path)}.")
+        return header, records, ter_after
+
+    @staticmethod
+    def _write_pdb_records(
+        pdb_path: str,
+        records: Sequence[str],
+        ter_after: Sequence[bool],
+        remarks: Sequence[str] = (),
+        header: Sequence[str] = (),
+    ) -> None:
+        """Write *records* with serials renumbered and TER where flagged.
+
+        Only the serial column is rewritten.  Chain ids, insertion codes,
+        occupancies, B-factors and element symbols are echoed verbatim, so the
+        permuted file differs from its source in exactly two ways: the order of
+        the lines, and the numbers in columns 7-11.
+        """
+        # Hard-wrapped, not merely written short: a REMARK is a fixed-width
+        # record and a long one is a malformed line in a file other tools parse.
+        lines: List[str] = []
+        for chunk in remarks:
+            while len(chunk) > 69:
+                cut = chunk.rfind(" ", 0, 69)
+                cut = cut if cut > 0 else 69
+                lines.append(f"REMARK   1 {chunk[:cut]}")
+                chunk = chunk[cut:].lstrip()
+            lines.append(f"REMARK   1 {chunk}".rstrip())
+        lines.extend(line for line in header if not line.startswith("REMARK"))
+        serial = 0
+        for record, ends in zip(records, ter_after):
+            serial += 1
+            padded = record.ljust(80)
+            lines.append(padded[:6] + "%5d" % (serial % 100000) + padded[11:80].rstrip())
+            if ends:
+                serial += 1
+                lines.append("TER   %5d" % (serial % 100000))
+        lines.append("END")
+        with open(pdb_path, "w", newline="\n") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+    @staticmethod
+    def _assert_pdb_matches_parm(records, parm, pdb_path: str, prmtop: str) -> None:
+        """Refuse a PDB/prmtop pair that does not list the same atoms.
+
+        The permutation about to be applied is read from the topology and
+        applied to the PDB, so "these two describe the same unit in the same
+        order" is the assumption the whole step rests on.  Comparing residue and
+        atom names is exact and costs one pass.
+        """
+        for index, (record, atom) in enumerate(zip(records, parm.atoms)):
+            if record[17:20].strip() != atom.residue.name[:3].strip() or (
+                record[12:16].strip() != atom.name.strip()
+            ):
+                raise MembraneBuildError(
+                    f"{os.path.basename(pdb_path)} and {os.path.basename(prmtop)} disagree at atom "
+                    f"{index + 1}: the PDB has {record[17:20].strip()}/{record[12:16].strip()} and "
+                    f"the topology has {atom.residue.name}/{atom.name}. They were written by the "
+                    "same tleap run, so this means one of them is stale; rebuild with --overwrite."
+                )
+
+    @staticmethod
+    def _topology_order_remarks(n_atoms: int, moved: int, source: str) -> List[str]:
+        """The header that says which order this file IS in."""
+        how = (
+            [
+                "grouped so that each molecule -- each connected component of the",
+                f"bond graph -- is contiguous. {moved} of the {n_atoms} atoms had to",
+                "move to reach that order.",
+            ]
+            if moved else
+            [
+                f"already grouped that way: none of the {n_atoms} atoms had to move.",
+            ]
+        )
+        return [
+            "PRISM: completed solute, in [ molecules ] order.",
+            "",
+            "THIS FILE MATCHES topol.top. It holds the same atoms as",
+            f"{source},",
+            *how,
+            "",
+            "That is the order GROMACS expands [ molecules ] into, and therefore",
+            "the order every coordinate file for this system is written in.",
+            "",
+            "The bilayer was tiled and de-clashed around these coordinates, and the",
+            "grow-back minimised the lipids against them, so this is the structure",
+            "system.gro's solute block is derived from.",
+        ]
 
     @classmethod
     def _apply_restart_coordinates(
@@ -2404,7 +2941,12 @@ class MembraneBuilder:
         # The solute the patch route hands tleap.  A leftover describes the
         # PREVIOUS run's protein, and this run would tile a bilayer around it.
         PATCH_SOLUTE_INPUT_PDB, PATCH_SOLUTE_COMPLETE_PDB, PATCH_SOLUTE_RELAXED_PDB,
+        PATCH_SOLUTE_ORDERED_PDB,
         PATCH_SOLUTE_PRMTOP, PATCH_SOLUTE_INPCRD, PATCH_SOLUTE_MIN_RST,
+        # Shrink-and-grow leftovers.  A stale dry topology is the worst of them:
+        # it would be handed to the grow-back as if it described this run's
+        # lipid set, and grompp pairs it with the coordinates by position.
+        PATCH_DRY_TOP, PATCH_GROW_LOG,
     )
     #: Everything ``overwrite`` clears: the above plus informational leftovers
     #: and the byproducts of the GROMACS solvation stage.

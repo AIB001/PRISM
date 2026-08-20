@@ -1513,11 +1513,50 @@ class DrySystem:
         consecutive residues always get different numbers.
         """
         self._refuse_if_ungrown("write a PDB")
+        return self._write_pdb(path)
+
+    def write_parametrization_pdb(self, path: os.PathLike | str) -> Path:
+        """Write the system for a topology generator, NOT as a system.
+
+        The grow-back is a chicken-and-egg: :func:`grow_solute` relaxes the
+        bilayer with a force field, so a topology has to exist before the first
+        increment -- but the only file the system exists as, at that moment, is
+        the shrink-deletion intermediate whose lipids still overlap the solute.
+        This writes exactly that file, once, so tleap can read it.
+
+        It is sound because parametrization reads atom *identity and order*,
+        never geometry: tleap assigns parameters from residue templates and
+        infers no bond from a distance (PRISM declares every disulfide
+        explicitly), so the topology it returns is the topology of the finished
+        system, which is what makes it legitimate to keep using after the grow.
+        The coordinates in this file are not, and must never reach a simulator
+        -- which is why this is a separate name rather than a flag on
+        :meth:`write_pdb`, and why :meth:`write_pdb` goes on refusing.  The
+        REMARK says the same thing to whoever opens the file.
+
+        Passing a finished (grown) system is allowed and simply writes it; the
+        method's contract is "geometry not guaranteed", not "geometry wrong".
+        """
+        note = "PARAMETRIZATION INPUT ONLY -- do not simulate these coordinates."
+        if self.growth is not None:
+            note += (
+                f"  Built with shrink_factor={self.growth.shrink_factor:.3f}; the "
+                "lipids still overlap the solute and grow_solute() has not run."
+            )
+        return self._write_pdb(path, remarks=(note,))
+
+    def _write_pdb(
+        self, path: os.PathLike | str, remarks: Sequence[str] = ()
+    ) -> Path:
+        """The PDB writer itself, with no opinion on whether it should run."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         lines: List[str] = [
             "REMARK   1 PRISM fast membrane route: pre-equilibrated Lipid21 patch",
         ]
+        for remark in remarks:
+            for chunk in _wrap_remark(remark):
+                lines.append(f"REMARK   1 {chunk}")
         for chunk in _wrap_remark(patch_citation()):
             lines.append(f"REMARK   1 {chunk}")
         lines.append(
