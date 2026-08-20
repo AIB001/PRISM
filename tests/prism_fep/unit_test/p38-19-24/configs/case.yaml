@@ -1,0 +1,27 @@
+# p38-19-24 FEP transformation metadata
+# P38α MAP kinase inhibitor series: 19→24 transformation
+
+case:
+  group: P38
+  name: 19-24
+  path: P38/19-24
+
+fundamental:
+  ref: "19"          # Reference ligand ID
+  mut: "24"          # Mutant ligand ID
+  rec: protein.pdb   # Receptor PDB file
+  add_pdb: crw.pdb   # Additional PDB (water molecules)
+  params: match      # Parameter type (match/generate)
+
+model:
+  distance: 8        # Cutoff distance for mapping (Å)
+  temperature: 310   # Temperature (K) - body temperature
+  concentration: 0.15  # Salt concentration (M)
+  disoff: 0          # Enable long-range dispersion corrections
+
+simulation:
+  numofsteps: 500000 # Total simulation steps (for reference)
+  repeats: 6         # Number of FEP repeats
+
+other:
+  verbose: true      # Enable verbose output

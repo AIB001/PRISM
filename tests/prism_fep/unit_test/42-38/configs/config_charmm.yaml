@@ -1,0 +1,25 @@
+# General PRISM configuration for 42-38 system
+
+fundamental:
+  ref: "42"
+  mut: "38"
+  rec: receptor.pdb
+
+model:
+  distance: 8
+  temperature: 302.15
+  concentration: 0.05
+  disoff: 1
+
+simulation:
+  numofsteps: 500000
+  repeats: 4
+
+forcefield:
+  # Ligand force field type (using pre-generated CGenFF files)
+  type: cgenff
+  # Force field specific parameters
+  params: {}  # CGenFF uses pre-generated files
+
+other:
+  verbose: true

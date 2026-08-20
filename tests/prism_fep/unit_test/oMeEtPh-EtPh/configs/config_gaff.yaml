@@ -1,0 +1,28 @@
+# General PRISM configuration for oMeEtPh-EtPh system
+
+fundamental:
+  ref: oMeEtPh
+  mut: EtPh
+  rec: receptor.pdb
+
+model:
+  distance: 8
+  temperature: 302.15
+  concentration: 0.05
+  disoff: 1
+
+simulation:
+  numofsteps: 500000
+  repeats: 4
+
+forcefield:
+  # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+  type: gaff
+  # Force field specific parameters
+  params:
+    charge_mode: bcc  # For GAFF/GAFF2: bcc, gas, or resp
+    # charge_model: cm1a  # For OPLS: cm1a or cm5
+    # version: 2.1.1  # For OpenFF: force field version
+
+other:
+  verbose: true

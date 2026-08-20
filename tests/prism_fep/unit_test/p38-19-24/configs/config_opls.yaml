@@ -1,0 +1,23 @@
+# OPLS-AA force field configuration for p38-19-24
+
+fundamental:
+  ref: "19"
+  mut: "24"
+  rec: protein.pdb
+
+model:
+  distance: 8
+  temperature: 310
+  concentration: 0.15
+  disoff: 0
+
+simulation:
+  numofsteps: 500000
+  repeats: 6
+
+forcefield:
+  type: opls           # OPLS-AA force field
+  params: {}           # OPLS uses automatic charge assignment
+
+other:
+  verbose: true

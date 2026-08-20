@@ -122,3 +122,5 @@ prism/*/*/*.backup
 # single membrane system is hundreds of MB (9OMO alone is 1.3 GB), so the tree is
 # ignored wholesale.  Input structures are tracked explicitly with `git add -f`.
 example/
+
+tests/gxf/

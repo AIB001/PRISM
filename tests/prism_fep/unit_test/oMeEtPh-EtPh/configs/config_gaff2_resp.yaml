@@ -1,0 +1,28 @@
+# General PRISM configuration for oMeEtPh-EtPh system (GAFF2 + RESP)
+
+fundamental:
+  ref: oMeEtPh
+  mut: EtPh
+  rec: receptor.pdb
+
+model:
+  distance: 8
+  temperature: 302.15
+  concentration: 0.05
+  disoff: 1
+
+simulation:
+  numofsteps: 500000
+  repeats: 4
+
+forcefield:
+  # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+  type: gaff2
+  # Force field specific parameters
+  params:
+    charge_mode: resp  # Use Gaussian for RESP charges
+    gaussian_method: hf  # Use HF method for RESP
+    # gaussian_method can be: hf, b3lyp, etc.
+
+other:
+  verbose: true

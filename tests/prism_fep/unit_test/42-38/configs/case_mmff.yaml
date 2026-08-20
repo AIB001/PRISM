@@ -1,0 +1,11 @@
+# MMFF force field configuration for 42-38 system
+# Standard MD parameters for system building
+
+md:
+  em_steps: 10000
+  nvt_ps: 500
+  npt_ps: 500
+  production_ns: 500
+  dt: 0.002
+  temperature: 310
+  pressure: 1.0

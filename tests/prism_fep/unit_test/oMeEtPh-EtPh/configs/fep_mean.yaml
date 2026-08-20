@@ -1,0 +1,7 @@
+# FEP-specific parameters - charge_common: mean
+
+mapping:
+  dist_cutoff: 1.0
+  charge_cutoff: 0.06
+  charge_common: mean
+  charge_reception: surround

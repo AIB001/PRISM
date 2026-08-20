@@ -1,0 +1,53 @@
+# FEP-specific configuration for p38-19-24 transformation
+
+# Force field type (will be overridden by CLI --ligand-forcefield)
+forcefield:
+  type: gaff2
+  params: {}
+
+# Atom mapping parameters
+mapping:
+  dist_cutoff: 0.6      # Distance cutoff for mapping (Å)
+  charge_cutoff: 0.05   # Charge difference cutoff
+  charge_common: mean   # Charge assignment strategy for common atoms
+  charge_reception: surround  # Charge reception method
+
+# Soft-core parameters for FEP
+soft_core:
+  alpha: 0.5           # Soft-core alpha parameter
+  sigma: 0.3           # Soft-core sigma (nm)
+  power: 2             # Soft-core power
+
+# Lambda window configuration
+lambda:
+  strategy: decoupled  # Strategy: 'coupled', 'decoupled', or 'custom'
+  distribution: nonlinear  # Distribution: 'linear', 'nonlinear', 'quadratic'
+  coul_windows: 4     # Electrostatics windows (decoupled mode)
+  vdw_windows: 7      # VDW windows (decoupled mode)
+
+# Simulation parameters
+simulation:
+  equilibration_nvt_time_ps: 500   # NVT equilibration time (ps)
+  equilibration_npt_time_ps: 500   # NPT equilibration time (ps)
+  production_time_ns: 1.0          # Production time per window (ns)
+  dt: 0.002                        # Time step (ps)
+  temperature: 310                 # Temperature (K)
+  pressure: 1.0                    # Pressure (bar)
+
+# Nonbonded parameters
+electrostatics:
+  rcoulomb: 1.0               # Coulomb cutoff (nm)
+
+vdw:
+  rvdw: 1.0                   # VDW cutoff (nm)
+  rvdw_switch: 0.9            # VDW switch distance (nm)
+
+# Output control
+output:
+  trajectory_interval_ps: 10   # Trajectory save interval (ps)
+  energy_interval_ps: 10      # Energy save interval (ps)
+  log_interval_ps: 10         # Log save interval (ps)
+
+# Execution mode
+execution:
+  mode: standard        # Execution mode: 'standard' or 'repex'

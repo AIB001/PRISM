@@ -1,0 +1,7 @@
+# FEP-specific parameters - charge_common: mut
+
+mapping:
+  dist_cutoff: 1.0
+  charge_cutoff: 0.06
+  charge_common: mut
+  charge_reception: surround

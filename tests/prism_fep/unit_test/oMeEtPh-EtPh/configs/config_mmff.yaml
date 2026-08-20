@@ -1,0 +1,25 @@
+# General PRISM configuration for oMeEtPh-EtPh system (MMFF)
+
+fundamental:
+  ref: oMeEtPh
+  mut: EtPh
+  rec: receptor.pdb
+
+model:
+  distance: 8
+  temperature: 302.15
+  concentration: 0.05
+  disoff: 1
+
+simulation:
+  numofsteps: 500000
+  repeats: 4
+
+forcefield:
+  # Ligand force field type (gaff, gaff2, openff, cgenff, opls, mmff, match, hybrid)
+  type: mmff
+  # Force field specific parameters
+  params: {}  # MMFF uses SwissParam server
+
+other:
+  verbose: true
