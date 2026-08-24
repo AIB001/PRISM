@@ -6,6 +6,8 @@ import io
 import json
 import tarfile
 import threading
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,39 @@ from prism.generation.execution import _artifacts
 from prism.generation.registry import model_ids
 from prism.generation.runner import load_generation_config
 from prism.generation.weights import WeightsDownloadError, WeightsNotAvailableError
+
+
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+@pytest.fixture(autouse=True)
+def no_internet(monkeypatch):
+    """Fail loudly rather than fetch from a real publisher.
+
+    A fixture that stripped one acquisition route but left ``download_url``
+    behind once turned this suite into a 600 MiB download from Zenodo and a
+    2.5-hour run that still reported the failure it was written to catch.
+    Every transfer here belongs to the local mirror fixture.
+    """
+    real_urlopen = urllib.request.urlopen
+
+    def guarded(request, *args, **kwargs):
+        url = getattr(request, "full_url", request)
+        host = urllib.parse.urlsplit(url).hostname
+        if host not in _LOOPBACK:
+            raise AssertionError(
+                f"the test suite tried to download from {host!r}; point the "
+                "manifest under test at the local mirror fixture instead"
+            )
+        return real_urlopen(request, *args, **kwargs)
+
+    monkeypatch.setattr(urllib.request, "urlopen", guarded)
+
+
+def test_the_suite_cannot_reach_the_internet():
+    """A guard that silently passes is worse than no guard at all."""
+    with pytest.raises(AssertionError, match="tried to download"):
+        urllib.request.urlopen("https://zenodo.org/records/8183747")
 
 
 # ---------------------------------------------------------------------------
