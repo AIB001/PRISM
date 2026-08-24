@@ -1,10 +1,12 @@
 {
-  "description": "Checkpoints required by the six structure-based generation models orchestrated by prism.generation. The bytes are NOT part of a PRISM install; this manifest records where each artifact belongs, how big it is, what its SHA256 must be, and whether PRISM is permitted to mirror it.",
-  "version": 1,
+  "description": "Checkpoints required by the six structure-based generation models orchestrated by prism.generation. The bytes are NOT part of a PRISM install; this manifest records where each artifact belongs, how big it is, what its SHA256 must be, and how PRISM may obtain it.",
+  "version": 2,
   "layout": "Paths are relative to $PRISM_MODELS_DIR (default $XDG_CACHE_HOME/prism/models, else ~/.cache/prism/models). The tree deliberately mirrors the upstream release layout and the cluster deployment layout (<models_dir>/<model>/...), so an existing prism-models directory can be used by pointing PRISM_MODELS_DIR at it without moving a single file.",
+  "acquisition": "Each artifact declares at most one route. 'mirror_asset' is fetched from mirror.base_url; 'download_url' is fetched straight from the publisher; 'archive' names an entry in the model's 'archives' block from which 'archive_member' is extracted. An artifact with no route at all is one the user must place by hand, and the upstream_* fields say how.",
   "mirror": {
     "base_url": "https://github.com/AIB002/PRISM_Model_Weights/releases/download/v1",
     "note": "Artifacts are fetched from <base_url>/<mirror_asset>. Override at runtime with PRISM_MODELS_MIRROR, which also accepts a file:// URL for offline clusters. Only artifacts with redistributable=true may ever be given a mirror_asset.",
+    "scope": "PRISM mirrors only what cannot be fetched automatically. TargetDiff, Pocket2Mol and MolCRAFT publish their checkpoints through Google Drive, which defeats scripted download (virus-scan interstitials, per-file download quotas that lock out for a day, and no access at all from some networks), so those three are mirrored. PocketXMol, FLOWR and DiffSBDD publish on Zenodo, which serves stable direct URLs, so PRISM fetches those from the publisher and mirrors nothing.",
     "licence_note": "Every mirrored artifact keeps its upstream licence; mirroring is redistribution, not relicensing. MolCRAFT is NonCommercial and ShareAlike, so a PRISM mirror of it may not be used commercially. Attribution for each artifact is in its 'attribution' field and is printed on download."
   },
   "models": {
@@ -20,7 +22,7 @@
       "redistributable": true,
       "attribution": "TargetDiff checkpoint by Jiaqi Guan et al., MIT licensed (upstream spells the file LICIENCE, which is why GitHub does not auto-detect it).",
       "upstream_url": "https://github.com/guanjq/targetdiff",
-      "upstream_instructions": "Follow the 'Pretrained models' section of the upstream README and save pretrained_diffusion.pt at the path above.",
+      "upstream_instructions": "Follow the 'Pretrained models' section of the upstream README; the checkpoint lives in a Google Drive folder. Save pretrained_diffusion.pt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "targetdiff/checkpoints/pretrained_diffusion.pt",
@@ -42,41 +44,13 @@
       "redistributable": true,
       "attribution": "Pocket2Mol checkpoint by Xingang Peng et al., MIT licensed.",
       "upstream_url": "https://github.com/pengxingang/Pocket2Mol",
-      "upstream_instructions": "Download the pretrained checkpoint linked from the upstream README and save pretrained_Pocket2Mol.pt at the path above.",
+      "upstream_instructions": "See ckpt/README.md in the upstream repository; the checkpoint lives in a Google Drive folder. Save it as pretrained_Pocket2Mol.pt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "pocket2mol/checkpoints/pretrained_Pocket2Mol.pt",
           "sha256": "e9d8152dfdf034dabf48e566904e9d7c6cc1b96843bdc4d0026d891678913911",
           "size_bytes": 44921289,
           "mirror_asset": "pocket2mol-pretrained_Pocket2Mol.pt"
-        }
-      }
-    },
-    "pocketxmol": {
-      "title": "PocketXMol",
-      "source": {
-        "repo": "https://github.com/pengxingang/PocketXMol",
-        "commit": "65488cf635c856101dbe703ac97e2f10f58e005c",
-        "license": "MIT"
-      },
-      "weights_license": "CC-BY-4.0",
-      "weights_license_url": "https://creativecommons.org/licenses/by/4.0/",
-      "redistributable": true,
-      "attribution": "PocketXMol model release, Zenodo record 17801271, version 1.0.0, licensed CC BY 4.0. The source repository is MIT; the weights carry the Zenodo licence.",
-      "upstream_url": "https://zenodo.org/records/17801271",
-      "upstream_instructions": "Zenodo record 17801271; unpack so that data/trained_models/pxm/ lands under <models_dir>/pocketxmol/weights/.",
-      "artifacts": {
-        "checkpoint": {
-          "relpath": "pocketxmol/weights/data/trained_models/pxm/checkpoints/pocketxmol.ckpt",
-          "sha256": "76d918122e598a3c53c77727898659f059d217e680834b7d223b0205c2715c3a",
-          "size_bytes": 243496215,
-          "mirror_asset": "pocketxmol-pocketxmol.ckpt"
-        },
-        "train_config": {
-          "relpath": "pocketxmol/weights/data/trained_models/pxm/train_config/train.yml",
-          "sha256": "7225ef261d7bf20afeec6b41760a7dda8608110a37cb3361395ab49c49a0963d",
-          "size_bytes": 10293,
-          "mirror_asset": "pocketxmol-train.yml"
         }
       }
     },
@@ -92,13 +66,53 @@
       "redistributable": true,
       "attribution": "MolCRAFT checkpoint by the MolCRAFT authors, licensed CC BY-NC-SA 4.0. NonCommercial use only; derivative weights must be shared under the same licence.",
       "upstream_url": "https://github.com/AlgoMole/MolCRAFT",
-      "upstream_instructions": "Follow the checkpoint link in the upstream README and save molcraft.ckpt at the path above.",
+      "upstream_instructions": "The upstream README links the checkpoint on Google Drive, with a mirror on Hugging Face at GenSI/MolCRAFT. Save molcraft.ckpt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "molcraft/checkpoints/molcraft.ckpt",
           "sha256": "0a54f9bfb847ea87e7aec538df90a009c8c49d12a7b5d09947d04b7f9444e024",
           "size_bytes": 44543296,
           "mirror_asset": "molcraft-molcraft.ckpt"
+        }
+      }
+    },
+    "pocketxmol": {
+      "title": "PocketXMol",
+      "source": {
+        "repo": "https://github.com/pengxingang/PocketXMol",
+        "commit": "65488cf635c856101dbe703ac97e2f10f58e005c",
+        "license": "MIT"
+      },
+      "weights_license": "CC-BY-4.0",
+      "weights_license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "redistributable": true,
+      "attribution": "PocketXMol model release, Zenodo record 17801271, version 1.0.0, licensed CC BY 4.0. The source repository is MIT; the weights carry the Zenodo licence.",
+      "upstream_url": "https://zenodo.org/records/17801271",
+      "upstream_instructions": "Zenodo record 17801271; download model_weights.tar.gz and unpack it so that data/trained_models/pxm/ lands under <models_dir>/pocketxmol/weights/.",
+      "archives": {
+        "weights": {
+          "url": "https://zenodo.org/records/17801271/files/model_weights.tar.gz?download=1",
+          "size_bytes": 640300872,
+          "md5": "d92f279750f4e4a2ee63fc5b9dbed3ae",
+          "note": "Zenodo publishes every trained model in one bundle. PRISM downloads it once, extracts only the two files below, verifies each against its SHA256, and deletes the bundle -- 611 MiB in to keep 232 MiB."
+        }
+      },
+      "artifacts": {
+        "checkpoint": {
+          "relpath": "pocketxmol/weights/data/trained_models/pxm/checkpoints/pocketxmol.ckpt",
+          "sha256": "76d918122e598a3c53c77727898659f059d217e680834b7d223b0205c2715c3a",
+          "size_bytes": 243496215,
+          "mirror_asset": null,
+          "archive": "weights",
+          "archive_member": "data/trained_models/pxm/checkpoints/pocketxmol.ckpt"
+        },
+        "train_config": {
+          "relpath": "pocketxmol/weights/data/trained_models/pxm/train_config/train.yml",
+          "sha256": "7225ef261d7bf20afeec6b41760a7dda8608110a37cb3361395ab49c49a0963d",
+          "size_bytes": 10293,
+          "mirror_asset": null,
+          "archive": "weights",
+          "archive_member": "data/trained_models/pxm/train_config/train.yml"
         }
       }
     },
@@ -120,7 +134,8 @@
           "relpath": "flowr/checkpoints/flowr_noHs.ckpt",
           "sha256": "1e26e06181fa0d6850a159a12acac36847853f979f76b8fdaa148ed3b502a077",
           "size_bytes": 629067043,
-          "mirror_asset": "flowr-flowr_noHs.ckpt"
+          "mirror_asset": null,
+          "download_url": "https://zenodo.org/records/15737419/files/flowr_noHs.ckpt?download=1"
         }
       }
     },
@@ -131,18 +146,19 @@
         "commit": null,
         "license": "MIT"
       },
-      "weights_license": "MIT",
-      "weights_license_url": "https://github.com/arneschneuing/DiffSBDD/blob/main/LICENSE",
+      "weights_license": "CC-BY-4.0",
+      "weights_license_url": "https://zenodo.org/record/8183747",
       "redistributable": true,
-      "attribution": "DiffSBDD checkpoint by Arne Schneuing, Yuanqi Du, Charles Harris et al., MIT licensed.",
-      "upstream_url": "https://github.com/arneschneuing/DiffSBDD",
-      "upstream_instructions": "Download crossdocked_fullatom_cond.ckpt from the upstream release and save it at the path above. The checkout used for integration was copied without its .git directory, so no source commit is pinned yet; pin one before regenerating.",
+      "attribution": "DiffSBDD checkpoint from Zenodo record 8183747, licensed CC BY 4.0. The source repository is MIT; the published weights carry the Zenodo licence.",
+      "upstream_url": "https://zenodo.org/record/8183747",
+      "upstream_instructions": "Zenodo record 8183747; save crossdocked_fullatom_cond.ckpt at the path above. The checkout used for integration was copied without its .git directory, so no source commit is pinned yet; pin one before regenerating.",
       "artifacts": {
         "checkpoint": {
           "relpath": "diffsbdd/checkpoints/crossdocked_fullatom_cond.ckpt",
           "sha256": "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c",
           "size_bytes": 17861341,
-          "mirror_asset": "diffsbdd-crossdocked_fullatom_cond.ckpt"
+          "mirror_asset": null,
+          "download_url": "https://zenodo.org/record/8183747/files/crossdocked_fullatom_cond.ckpt?download=1"
         }
       }
     }

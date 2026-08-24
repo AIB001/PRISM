@@ -351,43 +351,112 @@ model needs.
 |---|---|
 | What each model needs | `manifest.json` — relpath, sha256, size, licence, upstream URL |
 | Where it goes | `PRISM_MODELS_DIR` → `$XDG_CACHE_HOME/prism/models` → `~/.cache/prism/models` |
-| Where it comes from | `mirror.base_url` in the manifest, overridable with `PRISM_MODELS_MIRROR` |
+| Where it comes from | the artifact's one acquisition route (below) |
 | User-facing commands | `prism weights {list,path,download,verify}` |
 
 This mirrors `prism/membrane/patch.py`, which solved the same problem for the
 bilayer patches: env-var override, package-relative default, and a descriptive
 not-available error instead of a `FileNotFoundError`.
 
-**Two rules that are enforced, not documented.**
+### Three routes, one per artifact
 
-1. *Only redistributable weights may carry a mirror asset.* All six upstream
-   licences do permit redistribution, so all six are mirrored — but that is a
-   fact about today's licences, not a property of the code. Adding a
+`manifest.json` is `"version": 2`. Every artifact declares **exactly one** of:
+
+| Route | Field(s) | Used for |
+|---|---|---|
+| PRISM mirror | `mirror_asset` | TargetDiff, Pocket2Mol, MolCRAFT |
+| publisher | `download_url` | FLOWR, DiffSBDD |
+| publisher bundle | `archive` + `archive_member` | PocketXMol (both artifacts) |
+
+No route at all means the user places the file by hand, and `upstream_url` /
+`upstream_instructions` say how. Two routes on one artifact raises at manifest
+load: it is not a richer manifest, it is an unanswered question about which one
+is authoritative.
+
+**The split is about the host, not the licence.** All six licences permit
+redistribution. TargetDiff, Pocket2Mol and MolCRAFT publish through Google
+Drive, which cannot be scripted — virus-scan interstitials on large files, a
+per-file quota that locks out for a day once tripped, and no access at all from
+some networks. Those three are mirrored. The other three are on Zenodo, which
+serves stable direct URLs, so mirroring them would only add a copy to keep in
+step with upstream. Mirroring is the fallback, not the default; if a publisher
+moves to a scriptable host, its asset should leave the mirror.
+
+An earlier version mirrored all seven artifacts (966 MiB). The hybrid cuts the
+upload to 117 MiB — the three unscriptable checkpoints happen to be the three
+smallest. The measured counter-argument, recorded because it is a real cost:
+on the development network Zenodo delivered 11.5–16.3 KB/s and dropped
+connections mid-transfer, against 28.4–47.8 KB/s from the GitHub release CDN.
+Where bandwidth to Zenodo is poor, `PRISM_MODELS_MIRROR` pointed at a local or
+institutional copy is the answer, not widening the mirror.
+
+**PocketXMol costs more to fetch than it occupies.** Zenodo publishes every
+trained model in one 611 MiB bundle; PRISM wants 232 MiB of it. Both members
+are taken in a single pass, each verified against its own SHA256, and the
+bundle is deleted once nothing needs it. The CLI states the bundle size before
+starting, because watching 611 MiB arrive for a "232 MiB missing" artifact
+otherwise reads as a bug.
+
+### Rules that are enforced, not documented
+
+1. *Only redistributable weights may carry a mirror asset.* Adding a
    `mirror_asset` to a model whose `redistributable` is false raises at
    **manifest load**, so the mistake surfaces on any command that touches
    weights rather than at upload time. A non-redistributable model must instead
-   carry an `upstream_url` or `upstream_instructions`. Both rules are asserted
-   in `tests/test_generation_weights.py` against a synthetic manifest, so they
-   keep testing the rule after the licence facts change.
+   carry an `upstream_url` or `upstream_instructions`. Asserted in
+   `tests/test_generation_weights.py` against a synthetic manifest, so the rule
+   keeps being tested after the licence facts change.
 
    Mirroring is redistribution, not relicensing — each artifact keeps its
    upstream terms, and `attribution` is printed on download:
 
    | Weights | Licence | Note |
    |---|---|---|
-   | TargetDiff, Pocket2Mol, DiffSBDD | MIT | TargetDiff's licence file is spelled `LICIENCE` upstream, so GitHub's detector reports "no licence" — it is MIT (Copyright (c) 2023 Jiaqi Guan) |
-   | PocketXMol, FLOWR | CC BY 4.0 | both repos are MIT, but the **weights** are published on Zenodo under CC BY 4.0 (records 17801271 and 15737419); the Zenodo licence is the one that governs the checkpoint |
+   | TargetDiff, Pocket2Mol | MIT | TargetDiff's licence file is spelled `LICIENCE` upstream, so GitHub's detector reports "no licence" — it is MIT (Copyright (c) 2023 Jiaqi Guan) |
+   | PocketXMol, FLOWR, DiffSBDD | CC BY 4.0 | all three repos are MIT, but the **weights** are published on Zenodo under CC BY 4.0 (records 17801271, 15737419, 8183747); the Zenodo licence governs the checkpoint |
    | MolCRAFT | CC BY-NC-SA 4.0 | NonCommercial and ShareAlike — a PRISM mirror of it may not be used commercially |
 
    The code/weights split matters: a model's repository licence does not
    automatically cover a checkpoint hosted elsewhere. Check the host of the
    file you are actually redistributing.
 2. *A download is installed only after it verifies.* Bytes stream into
-   `<target>.part`, are hashed while streaming, and are moved into place only
-   when both the SHA256 and the byte count match. Any failure unlinks the
-   partial file, so a tampered mirror cannot replace a checkpoint that is
-   already good. Mirror URLs are restricted to `https` and `file` (plus `http`
-   on loopback, for tests).
+   `<target>.part` and are moved into place only when both the SHA256 and the
+   byte count match. Any failure unlinks the partial file, so a tampered mirror
+   cannot replace a checkpoint that is already good. Download URLs — mirror,
+   publisher and bundle alike — are restricted to `https` and `file` (plus
+   `http` on loopback, for tests), and that check runs at manifest load as well
+   as at download time.
+
+   The digest is computed by **re-reading the finished file**, not by hashing
+   blocks as they stream. Across a resumed transfer an incremental digest and
+   the bytes on disk can disagree, and the digest is the one thing here that has
+   to be trustworthy.
+3. *A dropped transfer resumes; it does not restart.* Verified against the real
+   thing: a DiffSBDD download died after 2.8 of 17.9 MB at 14.5 KB/s, and the
+   hash check correctly discarded the truncated file — but the next attempt
+   started from zero, which on a 600 MiB checkpoint means never finishing. Each
+   attempt now sends a `Range` header for what is already on disk, with a budget
+   of `_DOWNLOAD_ATTEMPTS` tries; a server that ignores the range forces a clean
+   restart rather than splicing two copies together.
+
+   `http.client.IncompleteRead` is caught explicitly. A server that announces a
+   Content-Length and then hangs up raises it, it is **not** an `OSError`, and
+   it is exactly the failure the retry loop exists to survive — before it was
+   named, that case escaped as a traceback.
+
+   Two constants make the difference between "slow" and "hung", and both were
+   found the hard way against Zenodo at ~20 KB/s:
+
+   - `_STREAM_BLOCK` is 256 KiB, not the 4 MiB used for reading local files.
+     `response.read(n)` blocks until it has `n` bytes, so a 4 MiB socket block
+     on a 20 KB/s link means three minutes between writes: the progress bar
+     sits still, the `.part` file stays at zero, and the download looks dead
+     when it is working perfectly. A dropped connection also loses the whole
+     unwritten block.
+   - `_SOCKET_TIMEOUT` is 60 s per read. `urlopen` has **no** timeout by
+     default, so a connection that opens and then delivers nothing blocks
+     forever — no retry, no error, no output. It is a per-read timeout, so a
+     slow-but-progressing transfer is never cut off.
 
 **Preflight covers the dry run too.** `execution._artifacts()` verifies
 checkpoints, but it is never reached with `--dry-run`, so a validation pass
@@ -409,17 +478,23 @@ manifest, so the two cannot drift.
 cluster layout above — resolves all seven artifacts with no file moves. That
 was a layout constraint on the manifest, not a coincidence.
 
-**Where the mirror lives.** The artifacts are GitHub **release assets**, not
-files in a git tree: GitHub rejects any file over 100 MiB on push, and two of
-the checkpoints are 232 MiB and 600 MiB. Release assets allow 2 GiB each and
-are served over plain HTTPS with no authentication. This is why `mirror_asset`
-is a flat file name rather than a path — a release is a flat namespace, which
-is also why the names are prefixed with the model (`flowr-flowr_noHs.ckpt`) and
-why a test asserts they are unique.
+**Where the mirror lives.** `AIB002/PRISM_Model_Weights`, as GitHub **release
+assets** rather than files in a git tree. Release assets allow 2 GiB each and
+are served over plain HTTPS with no authentication; a git tree rejects any file
+over 100 MiB on push, and a repository that once held a checkpoint stays large
+forever. This is why `mirror_asset` is a flat file name rather than a path — a
+release is a flat namespace, which is also why the names are prefixed with the
+model (`molcraft-molcraft.ckpt`) and why a test asserts they are unique.
 
 Git LFS was rejected: the free tier is 1 GiB of storage and 1 GiB of bandwidth
-per month, so a single 966 MiB mirror would exhaust storage on upload and allow
-roughly one full download per month.
+per month, so even the 117 MiB mirror would allow roughly nine full downloads
+per month, and the 966 MiB one would have exhausted storage on upload.
+
+Uploading is a REST call, so an SSH key is not enough — `scripts/upload_release.sh`
+in that repository needs a token with `contents: write`. It verifies every file
+against `SHA256SUMS` before uploading anything: a wrong byte in the mirror
+becomes a failed hash check on every user's machine, and the mirror is the one
+place where that cannot be caught later.
 
 ---
 

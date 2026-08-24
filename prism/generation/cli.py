@@ -296,6 +296,29 @@ def _print_weights_header() -> None:
     print()
 
 
+def _print_bundle_notes(specs, wanted) -> None:
+    """Warn that a bundled artifact costs more to fetch than it occupies.
+
+    A user looking at "232 MiB missing" and then watching 611 MiB come down
+    would reasonably think something is wrong, so the difference is stated
+    before it happens rather than explained afterwards. Only bundles that will
+    actually be fetched are announced.
+    """
+    for spec in specs:
+        for archive in spec.archives.values():
+            if not any(
+                artifact.archive == archive.name
+                for artifact in spec.artifacts.values()
+                if (artifact.model, artifact.name) in wanted
+            ):
+                continue
+            print(
+                f"  {spec.model}: the publisher ships one bundle of "
+                f"{weights.format_size(archive.size_bytes)} containing these; "
+                "PRISM extracts what it needs and deletes the rest."
+            )
+
+
 def _download_progress(label: str, done: int, total: int) -> None:
     if not sys.stderr.isatty():
         return
@@ -321,31 +344,33 @@ def weights_main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"{'MODEL':<12}{'ARTIFACT':<14}{'SIZE':>10}  {'STATUS':<16}{'LICENCE':<20}SOURCE")
             for artifact, status in report:
                 spec = specs[artifact.model]
-                source = "PRISM mirror" if artifact.mirror_asset else "upstream only"
                 print(
                     f"{artifact.model:<12}{artifact.name:<14}"
                     f"{weights.format_size(artifact.size_bytes):>10}  {status:<16}"
-                    f"{spec.weights_license:<20}{source}"
+                    f"{spec.weights_license:<20}{artifact.source_label}"
                 )
             outstanding = [(artifact, status) for artifact, status in report if status != "present"]
             print()
             if outstanding:
                 total = sum(artifact.size_bytes for artifact, _ in outstanding)
-                upstream_only = [a for a, _ in outstanding if a.mirror_asset is None]
+                manual = [a for a, _ in outstanding if not a.is_fetchable]
                 summary = (
                     f"{len(outstanding)} of {len(report)} artifact(s) unavailable "
                     f"({weights.format_size(total)}). Run 'prism weights download'"
                 )
-                if upstream_only:
-                    # Only reachable if a model loses its mirror asset; the shipped
-                    # manifest mirrors all six.
+                if manual:
+                    # Only reachable if an artifact loses its route; the shipped
+                    # manifest gives all seven one.
                     summary += (
-                        " for the mirrored ones; the rest are listed with upstream "
-                        "instructions when a run needs them."
+                        " for the ones PRISM can fetch; the rest are listed with "
+                        "upstream instructions when a run needs them."
                     )
                 else:
                     summary += " to fetch them."
                 print(summary)
+                _print_bundle_notes(
+                    specs.values(), {(a.model, a.name) for a, _ in outstanding}
+                )
                 return 1 if command == "verify" else 0
             print(f"All {len(report)} artifact(s) present.")
             return 0
@@ -358,16 +383,24 @@ def weights_main(argv: Optional[Sequence[str]] = None) -> int:
 
         if command == "download":
             specs = weights.model_specs(models)
-            mirrorable = [spec for spec in specs if spec.redistributable]
-            upstream_only = [spec for spec in specs if not spec.redistributable]
-            if not mirrorable:
+            fetchable = [spec for spec in specs if spec.is_fetchable]
+            manual = [spec for spec in specs if not spec.is_fetchable]
+            if not fetchable:
                 print(weights.describe_missing(weights.missing_artifacts(models)) or "Nothing to download.")
                 return 1
             _print_weights_header()
-            for spec in mirrorable:
+            # Hash once: an artifact can be 600 MiB, so deciding what to fetch
+            # and announcing which bundles that implies must share one pass.
+            wanted = {
+                (artifact.model, artifact.name)
+                for spec in fetchable
+                for artifact in spec.artifacts.values()
+                if args.force or weights.artifact_status(artifact, verify=True) != "present"
+            }
+            _print_bundle_notes(fetchable, wanted)
+            for spec in fetchable:
                 for artifact in spec.artifacts.values():
-                    status = weights.artifact_status(artifact, verify=True)
-                    if status == "present" and not args.force:
+                    if (artifact.model, artifact.name) not in wanted:
                         print(f"  {artifact.model}/{artifact.name}  already present")
                         continue
                     target = weights.download_artifact(
@@ -379,12 +412,9 @@ def weights_main(argv: Optional[Sequence[str]] = None) -> int:
                     print(f"  {artifact.model}/{artifact.name}  -> {target}")
                 if spec.attribution:
                     print(f"      {spec.attribution}")
-            for spec in upstream_only:
+            for spec in manual:
                 print()
-                print(
-                    f"{spec.title} is not redistributed by PRISM (licence: {spec.weights_license}); "
-                    "fetch it from upstream:"
-                )
+                print(weights.manual_reason(spec) + "; download them yourself:")
                 if spec.upstream_url:
                     print(f"  {spec.upstream_url}")
                 for artifact in spec.artifacts.values():

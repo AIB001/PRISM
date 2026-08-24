@@ -10,16 +10,20 @@
 #
 # Prerequisites:
 #   1. prism weights download                  # all six checkpoints, ~966 MiB
+#      (PocketXMol arrives inside a 611 MiB publisher bundle, so about 1.3 GiB
+#      crosses the wire in total; the bundle is deleted once unpacked)
 #   2. git clone --depth 1 <repo> ${PRISM_MODELS_DIR}/<model>/source
 #      then `git checkout <model_commit>` -- the commits pinned below are the
 #      ones the wrappers were written against
 #   3. one Conda environment per model, named prism-gen-<model> by convention
 #      (DiffSBDD deliberately reuses prism-gen-molcraft)
 #
-# Every upstream licence permits redistribution, so PRISM mirrors all six sets
-# of weights. They keep their upstream licences: MolCRAFT is CC BY-NC-SA 4.0
-# (NonCommercial, ShareAlike), PocketXMol and FLOWR are CC BY 4.0, and the rest
-# are MIT. `prism weights list` prints the licence per artifact.
+# PRISM mirrors TargetDiff, Pocket2Mol and MolCRAFT, whose publisher is Google
+# Drive; PocketXMol, FLOWR and DiffSBDD are fetched straight from Zenodo. All
+# six keep their upstream licences: MolCRAFT is CC BY-NC-SA 4.0 (NonCommercial,
+# ShareAlike), the three Zenodo checkpoints are CC BY 4.0, and TargetDiff and
+# Pocket2Mol are MIT. `prism weights list` prints the licence and the source per
+# artifact.
 models:
   targetdiff:
     enabled: true

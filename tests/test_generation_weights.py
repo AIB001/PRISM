@@ -2,7 +2,9 @@
 
 import hashlib
 import http.server
+import io
 import json
+import tarfile
 import threading
 from pathlib import Path
 
@@ -37,10 +39,20 @@ def _manifest_with(tmp_path, mutate):
 
 
 def _make_upstream_only(raw, model):
+    """Strip every acquisition route from a model, as a licence change would.
+
+    All three routes have to go: a model that keeps its ``download_url`` is
+    still fetchable, and the tests below are about what PRISM says when it can
+    obtain nothing at all.
+    """
     entry = raw["models"][model]
     entry["redistributable"] = False
+    entry.pop("archives", None)
     for artifact in entry["artifacts"].values():
         artifact["mirror_asset"] = None
+        artifact.pop("download_url", None)
+        artifact.pop("archive", None)
+        artifact.pop("archive_member", None)
 
 
 def test_manifest_ships_with_the_package():
@@ -97,11 +109,65 @@ def test_every_mirrored_model_carries_an_attribution():
             )
 
 
-def test_the_shipped_manifest_mirrors_every_model():
-    """All six upstream licences permit redistribution; a regression here is a licence change."""
+def test_every_artifact_declares_exactly_one_acquisition_route():
+    """Two routes to one file leaves open which of them is authoritative."""
     for spec in weights.model_specs():
         for artifact in spec.artifacts.values():
-            assert artifact.mirror_asset, f"{spec.model}/{artifact.name} is no longer mirrored"
+            routes = [
+                name
+                for name, value in (
+                    ("mirror_asset", artifact.mirror_asset),
+                    ("download_url", artifact.download_url),
+                    ("archive", artifact.archive),
+                )
+                if value
+            ]
+            assert len(routes) == 1, (
+                f"{spec.model}/{artifact.name} declares {len(routes)} routes ({routes or 'none'}); "
+                "every artifact needs exactly one"
+            )
+
+
+def test_the_shipped_manifest_can_fetch_every_artifact():
+    """No user of the six shipped models should have to fetch a file by hand."""
+    for spec in weights.model_specs():
+        for artifact in spec.artifacts.values():
+            assert artifact.is_fetchable, (
+                f"{spec.model}/{artifact.name} has no acquisition route, so "
+                "'prism weights download' would leave it to the user"
+            )
+
+
+def test_publisher_downloads_go_over_https():
+    """A checkpoint fetched in the clear can be swapped in transit."""
+    for spec in weights.model_specs():
+        for archive in spec.archives.values():
+            assert archive.url.startswith("https://"), f"{spec.model} bundle is not https"
+        for artifact in spec.artifacts.values():
+            if artifact.download_url:
+                assert artifact.download_url.startswith("https://"), (
+                    f"{spec.model}/{artifact.name} is not fetched over https"
+                )
+
+
+def test_mirroring_is_reserved_for_what_cannot_be_fetched_from_the_publisher():
+    """PRISM hosts only the checkpoints whose publisher defeats scripted download.
+
+    Every mirrored byte is one PRISM has to store, serve and keep in step with
+    upstream, so the mirror is the fallback and not the default. A new
+    ``mirror_asset`` on a model that already had a working publisher URL is the
+    regression this guards against.
+    """
+    mirrored = {
+        spec.model
+        for spec in weights.model_specs()
+        for artifact in spec.artifacts.values()
+        if artifact.mirror_asset
+    }
+    assert mirrored == {"targetdiff", "pocket2mol", "molcraft"}, (
+        "these three publish through Google Drive, which cannot be scripted; "
+        "the other three serve stable Zenodo URLs and must not be mirrored"
+    )
 
 
 def test_the_shipped_manifest_points_at_a_mirror(monkeypatch):
@@ -134,6 +200,53 @@ def test_manifest_rejects_a_mirror_asset_on_a_non_redistributable_model(tmp_path
 
     with pytest.raises(ConfigurationError, match="not redistributable"):
         weights.load_manifest(_manifest_with(tmp_path, revoke))
+
+
+def test_manifest_rejects_two_acquisition_routes(tmp_path):
+    def double_up(raw):
+        artifact = raw["models"]["flowr"]["artifacts"]["checkpoint"]
+        artifact["mirror_asset"] = "flowr-flowr_noHs.ckpt"
+
+    with pytest.raises(ConfigurationError, match="more than one acquisition route"):
+        weights.load_manifest(_manifest_with(tmp_path, double_up))
+
+
+def test_manifest_rejects_an_archive_that_is_not_declared(tmp_path):
+    def dangle(raw):
+        raw["models"]["flowr"]["artifacts"]["checkpoint"].pop("download_url")
+        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive"] = "weights"
+        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive_member"] = "flowr.ckpt"
+
+    with pytest.raises(ConfigurationError, match="which flowr does not declare"):
+        weights.load_manifest(_manifest_with(tmp_path, dangle))
+
+
+def test_manifest_rejects_an_archive_member_with_no_archive(tmp_path):
+    def orphan(raw):
+        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive_member"] = "flowr.ckpt"
+
+    with pytest.raises(ConfigurationError, match="without naming an 'archive'"):
+        weights.load_manifest(_manifest_with(tmp_path, orphan))
+
+
+def test_manifest_rejects_an_insecure_publisher_url(tmp_path):
+    """The scheme rule applies to publisher URLs, not only to the mirror."""
+
+    def downgrade(raw):
+        raw["models"]["flowr"]["artifacts"]["checkpoint"]["download_url"] = (
+            "http://zenodo.org/records/15737419/files/flowr_noHs.ckpt"
+        )
+
+    with pytest.raises(ConfigurationError, match="Refusing to download"):
+        weights.load_manifest(_manifest_with(tmp_path, downgrade))
+
+
+def test_manifest_rejects_an_insecure_bundle_url(tmp_path):
+    def downgrade(raw):
+        raw["models"]["pocketxmol"]["archives"]["weights"]["url"] = "ftp://example.invalid/bundle.tar.gz"
+
+    with pytest.raises(ConfigurationError, match="Refusing to download"):
+        weights.load_manifest(_manifest_with(tmp_path, downgrade))
 
 
 @pytest.mark.parametrize("relpath", ["/abs/x.ckpt", "../escape.ckpt", "a/../../b.ckpt"])
@@ -413,21 +526,32 @@ def mirror(tmp_path):
         server.server_close()
 
 
+def _mirrored(payload, sha256=None, size_bytes=None):
+    """A mirror-routed artifact of a size a test can serve.
+
+    The three mirrored checkpoints are 33-45 MiB, so transport tests describe
+    their own artifact rather than moving that much data through a test server.
+    It still belongs to a real model, because ``download_artifact`` looks the
+    model up in the manifest to explain itself when a fetch is refused.
+    """
+    return weights.ArtifactSpec(
+        model="targetdiff",
+        name="checkpoint",
+        relpath="targetdiff/checkpoints/pretrained_diffusion.pt",
+        sha256=sha256 or hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload) if size_bytes is None else size_bytes,
+        mirror_asset="targetdiff-pretrained_diffusion.pt",
+    )
+
+
 def _publish(mirror_root, artifact, payload):
     (mirror_root / artifact.mirror_asset).write_bytes(payload)
 
 
-def test_download_verifies_and_installs(weights_dir, mirror, monkeypatch):
+def test_download_verifies_and_installs(weights_dir, mirror):
     root, base = mirror
-    artifact = _artifact("pocketxmol", "train_config")
-    payload = artifact.path.name.encode() * 3
-    digest = hashlib.sha256(payload).hexdigest()
-    monkeypatch.setattr(
-        weights,
-        "model_specs",
-        _patched_specs(artifact, sha256=digest, size_bytes=len(payload)),
-    )
-    artifact = weights.model_specs(["pocketxmol"])[0].artifacts["train_config"]
+    payload = b"pretrained diffusion weights" * 64
+    artifact = _mirrored(payload)
     _publish(root, artifact, payload)
     written = weights.download_artifact(artifact, base_url=base)
     assert written.read_bytes() == payload
@@ -436,12 +560,31 @@ def test_download_verifies_and_installs(weights_dir, mirror, monkeypatch):
 
 def test_a_corrupt_download_is_discarded(weights_dir, mirror):
     root, base = mirror
-    artifact = _artifact("pocketxmol", "train_config")
-    _publish(root, artifact, b"y" * artifact.size_bytes)
+    payload = b"y" * 4096
+    artifact = _mirrored(payload, sha256="0" * 64)
+    _publish(root, artifact, payload)
     with pytest.raises(WeightsDownloadError, match="SHA256 mismatch"):
         weights.download_artifact(artifact, base_url=base)
     assert not artifact.path.exists(), "a failed download must not be left in place"
     assert not artifact.path.with_name(artifact.path.name + ".part").exists()
+
+
+def test_a_publisher_download_needs_no_mirror(weights_dir, mirror, monkeypatch):
+    """The Zenodo-hosted checkpoints are fetched with the mirror unconfigured."""
+    root, base = mirror
+    monkeypatch.delenv(weights.MIRROR_ENV, raising=False)
+    payload = b"flowr checkpoint" * 32
+    (root / "flowr_noHs.ckpt").write_bytes(payload)
+    artifact = weights.ArtifactSpec(
+        model="flowr",
+        name="checkpoint",
+        relpath="flowr/checkpoints/flowr_noHs.ckpt",
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+        mirror_asset=None,
+        download_url=f"{base}/flowr_noHs.ckpt",
+    )
+    assert weights.download_artifact(artifact).read_bytes() == payload
 
 
 def test_download_refuses_a_non_redistributable_artifact(weights_dir, mirror, tmp_path):
@@ -457,7 +600,7 @@ def test_download_refuses_a_non_redistributable_artifact(weights_dir, mirror, tm
 
 
 def test_download_refuses_an_insecure_mirror(weights_dir):
-    artifact = _artifact("pocketxmol", "train_config")
+    artifact = _mirrored(b"unused")
     with pytest.raises(WeightsDownloadError, match="Refusing to download"):
         weights.download_artifact(artifact, base_url="http://example.com/weights")
 
@@ -465,7 +608,7 @@ def test_download_refuses_an_insecure_mirror(weights_dir):
 def test_download_explains_itself_when_no_mirror_is_configured(weights_dir, tmp_path, monkeypatch):
     monkeypatch.delenv(weights.MIRROR_ENV, raising=False)
     manifest = _manifest_with(tmp_path, lambda raw: raw["mirror"].update({"base_url": None}))
-    artifact = weights.model_specs(["pocketxmol"], manifest)[0].artifacts["train_config"]
+    artifact = weights.model_specs(["molcraft"], manifest)[0].artifacts["checkpoint"]
     with pytest.raises(WeightsDownloadError) as excinfo:
         weights.download_artifact(artifact, path=manifest)
     message = str(excinfo.value)
@@ -476,6 +619,276 @@ def test_download_explains_itself_when_no_mirror_is_configured(weights_dir, tmp_
 def test_mirror_env_overrides_the_manifest(weights_dir, monkeypatch):
     monkeypatch.setenv(weights.MIRROR_ENV, "https://example.invalid/prism-weights")
     assert weights.mirror_base_url() == "https://example.invalid/prism-weights"
+
+
+# ---------------------------------------------------------------------------
+# Interrupted transfers
+#
+# A 600 MB checkpoint on a slow link is dropped mid-transfer often enough that
+# restarting from zero means never finishing. These tests hold the server end
+# of that story.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def flaky_mirror():
+    """Serve one payload, dropping the first connection halfway through."""
+    state = {
+        "payload": b"",
+        "drop_first": True,
+        "drop_every": False,
+        "honour_range": True,
+        "lie_about_range": False,
+        "starts": [],
+    }
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):  # noqa: ARG002 - silence the test server
+            pass
+
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's spelling
+            payload = state["payload"]
+            header = self.headers.get("Range")
+            start = int(header.split("=", 1)[1].split("-", 1)[0]) if header else 0
+            if header and state["lie_about_range"]:
+                # 206, but for a range nobody asked for.
+                start = 0
+                ranged = True
+            else:
+                ranged = bool(header) and state["honour_range"]
+            state["starts"].append(start if ranged else 0)
+            body = payload[start:] if ranged else payload
+            if ranged:
+                self.send_response(206)
+                self.send_header(
+                    "Content-Range", f"bytes {start}-{len(payload) - 1}/{len(payload)}"
+                )
+            else:
+                self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if state["drop_every"] or (state["drop_first"] and len(state["starts"]) == 1):
+                # Announce the full length, then hang up halfway: the client
+                # sees IncompleteRead, which is what a real dropped transfer
+                # looks like.
+                self.wfile.write(body[: len(body) // 2])
+                self.close_connection = True
+                return
+            self.wfile.write(body)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_dropped_transfer_resumes_from_what_arrived(weights_dir, flaky_mirror):
+    state, base = flaky_mirror
+    payload = bytes(range(256)) * 256
+    state["payload"] = payload
+    artifact = _mirrored(payload)
+
+    written = weights.download_artifact(artifact, base_url=base)
+
+    assert written.read_bytes() == payload
+    assert state["starts"] == [0, len(payload) // 2], (
+        "the second attempt must ask for the remaining bytes, not the whole file"
+    )
+
+
+def test_a_server_that_ignores_range_restarts_cleanly(weights_dir, flaky_mirror):
+    """A restart must replace the partial file, never be appended to it."""
+    state, base = flaky_mirror
+    payload = bytes(range(256)) * 256
+    state["payload"] = payload
+    state["honour_range"] = False
+    artifact = _mirrored(payload)
+
+    written = weights.download_artifact(artifact, base_url=base)
+
+    assert written.read_bytes() == payload, "a spliced file would be longer and hash wrong"
+    assert state["starts"] == [0, 0]
+
+
+def test_a_partial_response_for_the_wrong_range_is_not_appended(weights_dir, flaky_mirror):
+    """206 is not enough; it has to be the range that was asked for."""
+    state, base = flaky_mirror
+    payload = bytes(range(256)) * 256
+    state["payload"] = payload
+    state["lie_about_range"] = True
+    artifact = _mirrored(payload)
+
+    written = weights.download_artifact(artifact, base_url=base)
+
+    assert written.read_bytes() == payload
+
+
+def test_a_transfer_that_never_completes_installs_nothing(weights_dir, flaky_mirror, monkeypatch):
+    """Retries are a budget, not a loop: giving up leaves no half a checkpoint."""
+    state, base = flaky_mirror
+    payload = b"a" * 4096
+    state["payload"] = payload
+    state["drop_every"] = True
+    monkeypatch.setattr(weights, "_DOWNLOAD_ATTEMPTS", 2)
+    artifact = _mirrored(payload)
+
+    with pytest.raises(WeightsDownloadError, match="after 2 attempts"):
+        weights.download_artifact(artifact, base_url=base)
+
+    assert not artifact.path.exists()
+    assert not artifact.path.with_name(artifact.path.name + ".part").exists()
+
+
+# ---------------------------------------------------------------------------
+# Publisher bundles
+#
+# PocketXMol publishes every trained model in one 611 MiB tarball; PRISM wants
+# two files out of it. These tests cover the single pass that takes them.
+# ---------------------------------------------------------------------------
+
+_CKPT_MEMBER = "data/trained_models/pxm/checkpoints/pocketxmol.ckpt"
+_CONFIG_MEMBER = "data/trained_models/pxm/train_config/train.yml"
+
+
+def _write_bundle(path, members, prefix="./model_weights/"):
+    """Build a tarball whose members sit under a wrapper directory.
+
+    Publishers re-roll bundles with and without a leading ``./`` or a top-level
+    directory, so the fixture uses the awkward layout on purpose -- matching an
+    exact string would pass here and fail on the real file.
+    """
+    with tarfile.open(path, "w:gz") as tar:
+        for name, payload in members.items():
+            info = tarfile.TarInfo(prefix + name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    return path.read_bytes()
+
+
+def _bundle_manifest(tmp_path, served, members, **overrides):
+    """A manifest whose PocketXMol bundle is the local tarball."""
+
+    def rewrite(raw):
+        entry = raw["models"]["pocketxmol"]
+        entry["archives"]["weights"] = {
+            "url": served["url"],
+            "size_bytes": len(served["bytes"]),
+            "md5": hashlib.md5(served["bytes"]).hexdigest(),
+            "note": "test bundle",
+            **overrides,
+        }
+        for name, member in (("checkpoint", _CKPT_MEMBER), ("train_config", _CONFIG_MEMBER)):
+            payload = members[member]
+            entry["artifacts"][name]["sha256"] = hashlib.sha256(payload).hexdigest()
+            entry["artifacts"][name]["size_bytes"] = len(payload)
+
+    return _manifest_with(tmp_path, rewrite)
+
+
+@pytest.fixture()
+def bundle(tmp_path, mirror):
+    """Serve a two-member tarball and return the manifest that describes it."""
+    root, base = mirror
+    members = {_CKPT_MEMBER: b"checkpoint bytes" * 16, _CONFIG_MEMBER: b"train:\n  seed: 0\n"}
+    payload = _write_bundle(root / "model_weights.tar.gz", members)
+    served = {"url": f"{base}/model_weights.tar.gz", "bytes": payload}
+    return members, _bundle_manifest(tmp_path, served, members), served
+
+
+def test_a_bundle_yields_every_member_it_was_downloaded_for(weights_dir, bundle):
+    members, manifest, _ = bundle
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+
+    weights.download_artifact(spec.artifacts["checkpoint"], path=manifest)
+
+    assert spec.artifacts["checkpoint"].path.read_bytes() == members[_CKPT_MEMBER]
+    assert spec.artifacts["train_config"].path.read_bytes() == members[_CONFIG_MEMBER], (
+        "both members come out of one download; leaving the sibling behind "
+        "would cost a second 611 MiB transfer"
+    )
+
+
+def test_the_bundle_is_deleted_once_nothing_needs_it(weights_dir, bundle):
+    _, manifest, _ = bundle
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+
+    weights.download_artifact(spec.artifacts["checkpoint"], path=manifest)
+
+    cached = weights.archive_cache_path(spec.archives["weights"])
+    assert not cached.exists(), "611 MiB must not stay behind to keep 232 MiB"
+    assert not cached.parent.exists()
+
+
+def test_a_bundle_missing_its_member_is_reported_against_the_manifest(weights_dir, tmp_path, mirror):
+    """A re-rolled bundle is a manifest problem, and the message says so."""
+    root, base = mirror
+    members = {_CKPT_MEMBER: b"checkpoint bytes" * 16, _CONFIG_MEMBER: b"train:\n  seed: 0\n"}
+    payload = _write_bundle(root / "model_weights.tar.gz", {_CONFIG_MEMBER: members[_CONFIG_MEMBER]})
+    manifest = _bundle_manifest(
+        tmp_path, {"url": f"{base}/model_weights.tar.gz", "bytes": payload}, members
+    )
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+
+    with pytest.raises(WeightsDownloadError) as excinfo:
+        weights.download_artifact(spec.artifacts["checkpoint"], path=manifest)
+
+    message = str(excinfo.value)
+    assert "does not contain" in message
+    assert _CKPT_MEMBER in message
+    assert "'archive_member'" in message
+    assert not spec.artifacts["checkpoint"].path.exists()
+    assert spec.artifacts["train_config"].path.exists(), (
+        "the member that was found verified against its own SHA256, so it is "
+        "kept -- discarding it would only buy another download of the bundle"
+    )
+
+
+def test_a_tampered_bundle_is_refused_before_anything_is_extracted(weights_dir, tmp_path, mirror):
+    root, base = mirror
+    members = {_CKPT_MEMBER: b"checkpoint bytes" * 16, _CONFIG_MEMBER: b"train:\n  seed: 0\n"}
+    payload = _write_bundle(root / "model_weights.tar.gz", members)
+    manifest = _bundle_manifest(
+        tmp_path,
+        {"url": f"{base}/model_weights.tar.gz", "bytes": payload},
+        members,
+        md5="0" * 32,
+    )
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+
+    with pytest.raises(WeightsDownloadError, match="MD5 mismatch"):
+        weights.download_artifact(spec.artifacts["checkpoint"], path=manifest)
+    assert not spec.artifacts["checkpoint"].path.exists()
+
+
+def test_a_cached_bundle_is_not_downloaded_twice(weights_dir, bundle):
+    """An interrupted extraction must not pay for the bundle again."""
+    members, manifest, served = bundle
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+    cached = weights.archive_cache_path(spec.archives["weights"])
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(served["bytes"])
+
+    calls = []
+
+    def _explode(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("the cached bundle should have been reused")
+
+    original = weights._stream
+    weights._stream = _explode
+    try:
+        weights.download_artifact(spec.artifacts["checkpoint"], path=manifest)
+    finally:
+        weights._stream = original
+
+    assert not calls
+    assert spec.artifacts["checkpoint"].path.read_bytes() == members[_CKPT_MEMBER]
 
 
 def _patched_specs(artifact, sha256, size_bytes):
@@ -565,6 +978,27 @@ def test_weights_download_of_an_upstream_only_model_explains_itself(
     monkeypatch.setattr(weights, "manifest_path", lambda: manifest)
     assert weights_main(["download", "--model", "flowr"]) == 1
     assert "not redistributed by PRISM" in capsys.readouterr().out
+
+
+def test_weights_download_fetches_and_then_reports_what_it_kept(
+    weights_dir, bundle, monkeypatch, capsys
+):
+    members, manifest, _ = bundle
+    monkeypatch.setattr(weights, "manifest_path", lambda: manifest)
+
+    assert weights_main(["download", "--model", "pocketxmol"]) == 0
+    first = capsys.readouterr().out
+    assert "the publisher ships one bundle of" in first
+    spec = weights.model_specs(["pocketxmol"], manifest)[0]
+    assert spec.artifacts["checkpoint"].path.read_bytes() == members[_CKPT_MEMBER]
+
+    assert weights_main(["download", "--model", "pocketxmol"]) == 0
+    second = capsys.readouterr().out
+    assert second.count("already present") == 2
+    assert "the publisher ships one bundle of" not in second, (
+        "announcing a 611 MiB download that will not happen reads as a threat "
+        "to re-fetch what is already on disk"
+    )
 
 
 def test_weights_rejects_an_unknown_model(weights_dir):

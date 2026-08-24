@@ -222,7 +222,7 @@ other — never mix them.**
 | What | Repository | Account | Remote |
 |---|---|---|---|
 | PRISM source, docs, tests, the weights **manifest** | `AIB001/PRISM`, branch `main` | AIB001 | `git@github.com:AIB001/PRISM.git` |
-| Generative-model **checkpoints** (~966 MiB) | `AIB002/PRISM_Model_Weights`, release assets | AIB002 | `git@github-aib002:AIB002/PRISM_Model_Weights.git` |
+| The mirrored **checkpoints** (3 of 6, ~117 MiB) | `AIB002/PRISM_Model_Weights`, release assets | AIB002 | `git@github-aib002:AIB002/PRISM_Model_Weights.git` |
 
 Rules:
 
@@ -230,14 +230,19 @@ Rules:
    `*.ckpt`, `*.pt`, `*.pth`, `*.part` under `prism/data/model_weights/` and the
    `prism-models/` trees. Only `prism/data/model_weights/manifest.json` — which
    describes the weights — is tracked in `AIB001/PRISM`.
-2. **Weights are uploaded as GitHub release assets**, not committed. Files over
-   100 MiB cannot be pushed to a git tree at all, and two of the checkpoints are
-   232 MiB and 600 MiB. Release assets allow 2 GiB each.
-3. **Publishing a new checkpoint is a two-repo change**: upload the asset to
+2. **Only what cannot be fetched from its publisher is mirrored.** TargetDiff,
+   Pocket2Mol and MolCRAFT publish through Google Drive, which defeats scripted
+   download, so PRISM hosts those three. PocketXMol, FLOWR and DiffSBDD serve
+   stable Zenodo URLs and are fetched directly — do not add them to the mirror.
+3. **Weights are uploaded as GitHub release assets**, not committed. Files over
+   100 MiB cannot be pushed to a git tree at all. Release assets allow 2 GiB
+   each.
+4. **Publishing a new checkpoint is a two-repo change**: upload the asset to
    `AIB002/PRISM_Model_Weights`, then update `relpath`/`sha256`/`size_bytes`/
    `mirror_asset` in the manifest and commit *that* to `AIB001/PRISM`. The two
    must be updated together or `prism weights download` fails its hash check.
-4. **Both accounts are configured over SSH**, never HTTPS. AIB002 uses a
+5. **Both accounts are configured over SSH**, never HTTPS. AIB002 uses a
    dedicated key via the `github-aib002` host alias in `~/.ssh/config`, because
-   GitHub refuses to register one public key on two accounts.
-5. **Nothing is pushed without asking.** This applies to both repositories.
+   GitHub refuses to register one public key on two accounts. Release-asset
+   upload is a REST call and needs a token as well — an SSH key cannot do it.
+6. **Nothing is pushed without asking.** This applies to both repositories.
