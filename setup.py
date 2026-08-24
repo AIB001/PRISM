@@ -116,7 +116,13 @@ setup(
     },
     include_package_data=True,
     package_data={
-        "prism": ["configs/*.yaml"],
+        "prism": [
+            "configs/*.yaml",
+            # The equilibrated bilayer patches are read at build time through
+            # prism.membrane.patch.patch_data_dir(); without them a non-editable
+            # install raises PatchNotAvailableError on every membrane build.
+            "data/membrane_patches/*",
+        ],
     },
     zip_safe=False,  # Important for proper package loading
 )
