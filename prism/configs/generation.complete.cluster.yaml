@@ -4,7 +4,7 @@
 # with the directory that holds the PRISM checkout, the per-model Conda
 # environments, and the model sources/checkpoints, e.g.
 #
-#   sed -i 's|/public/home/USER|/public/home/somnis|g' generation.complete.cluster.yaml
+#   sed -i "s|/public/home/USER|$HOME|g" generation.complete.cluster.yaml
 #
 # Slurm fields (partition/account/executable/time) are cluster-specific and
 # must match the target cluster. DiffSBDD reuses the MolCRAFT environment.

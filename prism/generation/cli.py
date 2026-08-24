@@ -331,12 +331,21 @@ def weights_main(argv: Optional[Sequence[str]] = None) -> int:
             print()
             if outstanding:
                 total = sum(artifact.size_bytes for artifact, _ in outstanding)
-                print(
+                upstream_only = [a for a, _ in outstanding if a.mirror_asset is None]
+                summary = (
                     f"{len(outstanding)} of {len(report)} artifact(s) unavailable "
-                    f"({weights.format_size(total)}). Run 'prism weights download' for the "
-                    "mirrored ones; the rest are listed with upstream instructions when a "
-                    "run needs them."
+                    f"({weights.format_size(total)}). Run 'prism weights download'"
                 )
+                if upstream_only:
+                    # Only reachable if a model loses its mirror asset; the shipped
+                    # manifest mirrors all six.
+                    summary += (
+                        " for the mirrored ones; the rest are listed with upstream "
+                        "instructions when a run needs them."
+                    )
+                else:
+                    summary += " to fetch them."
+                print(summary)
                 return 1 if command == "verify" else 0
             print(f"All {len(report)} artifact(s) present.")
             return 0

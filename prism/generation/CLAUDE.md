@@ -310,16 +310,20 @@ concurrency-induced timeouts, not chemistry.
 
 ## Cluster deployment
 
-Access: `ssh -p 43276 somnis@10.77.14.128` — **port 43276, not 22**. No outbound
-internet from the cluster; download locally and transfer.
+Host details (address, port, account) are deployment-specific and belong in your
+own notes or SSH config, not in this repository. What matters here is the
+layout, which the wrappers and the weights manifest both assume.
 
-| Item | Path |
+Clusters typically have **no outbound internet**: run `prism weights download`
+on a machine that does, then transfer `$PRISM_MODELS_DIR` across, or serve it
+with `PRISM_MODELS_MIRROR=file:///path/to/mirror`.
+
+| Item | Path (under the deployment root) |
 |---|---|
-| Model sources + checkpoints | `/public/home/somnis/prism-models/<model>/` |
-| Conda environments | `/public/home/somnis/conda-envs/prism-gen-<model>/` |
+| Model sources + checkpoints | `<root>/prism-models/<model>/` — point `PRISM_MODELS_DIR` here |
+| Conda environments | `<root>/conda-envs/prism-gen-<model>/` |
 | DiffSBDD | reuses `prism-gen-molcraft` (zero extra install; stubs `wandb`, `imageio`) |
-| Benchmark configs | `/public/home/somnis/prism-benchmarks/generation-3x3-20260814/config/` |
-| Working CLI test setup | `/public/home/somnis/prism-cli-mcp-test/` |
+| Benchmark configs | `<root>/prism-benchmarks/<run-id>/config/` |
 
 **Scheduling notes**
 
@@ -356,14 +360,28 @@ not-available error instead of a `FileNotFoundError`.
 
 **Two rules that are enforced, not documented.**
 
-1. *Only redistributable weights may carry a mirror asset.* Four of the six
-   models publish weights with no redistribution licence (FLOWR, TargetDiff,
-   Pocket2Mol, DiffSBDD); PocketXMol is CC BY 4.0 and MolCRAFT is
-   CC BY-NC-SA 4.0. Adding a `mirror_asset` to a model whose `redistributable`
-   is false raises at **manifest load**, so the mistake surfaces on any command
-   that touches weights rather than at upload time. A non-redistributable model
-   must instead carry an `upstream_url` or `upstream_instructions`; both rules
-   are asserted in `tests/test_generation_weights.py`.
+1. *Only redistributable weights may carry a mirror asset.* All six upstream
+   licences do permit redistribution, so all six are mirrored — but that is a
+   fact about today's licences, not a property of the code. Adding a
+   `mirror_asset` to a model whose `redistributable` is false raises at
+   **manifest load**, so the mistake surfaces on any command that touches
+   weights rather than at upload time. A non-redistributable model must instead
+   carry an `upstream_url` or `upstream_instructions`. Both rules are asserted
+   in `tests/test_generation_weights.py` against a synthetic manifest, so they
+   keep testing the rule after the licence facts change.
+
+   Mirroring is redistribution, not relicensing — each artifact keeps its
+   upstream terms, and `attribution` is printed on download:
+
+   | Weights | Licence | Note |
+   |---|---|---|
+   | TargetDiff, Pocket2Mol, DiffSBDD | MIT | TargetDiff's licence file is spelled `LICIENCE` upstream, so GitHub's detector reports "no licence" — it is MIT (Copyright (c) 2023 Jiaqi Guan) |
+   | PocketXMol, FLOWR | CC BY 4.0 | both repos are MIT, but the **weights** are published on Zenodo under CC BY 4.0 (records 17801271 and 15737419); the Zenodo licence is the one that governs the checkpoint |
+   | MolCRAFT | CC BY-NC-SA 4.0 | NonCommercial and ShareAlike — a PRISM mirror of it may not be used commercially |
+
+   The code/weights split matters: a model's repository licence does not
+   automatically cover a checkpoint hosted elsewhere. Check the host of the
+   file you are actually redistributing.
 2. *A download is installed only after it verifies.* Bytes stream into
    `<target>.part`, are hashed while streaming, and are moved into place only
    when both the SHA256 and the byte count match. Any failure unlinks the
@@ -390,6 +408,18 @@ manifest, so the two cannot drift.
 `PRISM_MODELS_DIR` pointed at an existing `prism-models/<model>/` tree — the
 cluster layout above — resolves all seven artifacts with no file moves. That
 was a layout constraint on the manifest, not a coincidence.
+
+**Where the mirror lives.** The artifacts are GitHub **release assets**, not
+files in a git tree: GitHub rejects any file over 100 MiB on push, and two of
+the checkpoints are 232 MiB and 600 MiB. Release assets allow 2 GiB each and
+are served over plain HTTPS with no authentication. This is why `mirror_asset`
+is a flat file name rather than a path — a release is a flat namespace, which
+is also why the names are prefixed with the model (`flowr-flowr_noHs.ckpt`) and
+why a test asserts they are unique.
+
+Git LFS was rejected: the free tier is 1 GiB of storage and 1 GiB of bandwidth
+per month, so a single 966 MiB mirror would exhaust storage on upload and allow
+roughly one full download per month.
 
 ---
 
@@ -433,14 +463,13 @@ and `tests/test_rtf_forcefield.py` (its input `24.rtf` is not tracked in git).
    selection semantics, the QC layer, or `prism prepare-md`.
 6. **MolCRAFT CPU support may be recoverable** by injecting
    `accelerator="cpu"` into its Lightning Trainer from the launcher. Untested.
-7. **No weights mirror is published yet.** `mirror.base_url` in the manifest is
-   `null`, so `prism weights download` currently explains itself and exits
-   non-zero unless `PRISM_MODELS_MIRROR` is set. Publishing means uploading the
-   three redistributable assets (275 MiB of the 966 MiB total) and filling in
-   that one field.
-8. **DiffSBDD's `model_commit` is unpinned** — empty in the configs, `null` in
+7. **DiffSBDD's `model_commit` is unpinned** — empty in the configs, `null` in
    the manifest. The other five are pinned to the commits the wrappers were
    written against.
+8. **FLOWR's upstream repo has no committed LICENSE file.** Its README states
+   MIT, and the checkpoint on Zenodo is explicitly CC BY 4.0 (which is what
+   PRISM mirrors under), but the source tree itself is only licensed by that
+   README sentence.
 
 ---
 

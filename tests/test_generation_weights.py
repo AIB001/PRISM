@@ -22,6 +22,27 @@ from prism.generation.weights import WeightsDownloadError, WeightsNotAvailableEr
 # ---------------------------------------------------------------------------
 
 
+def _manifest_with(tmp_path, mutate):
+    """Write a copy of the shipped manifest with one edit applied.
+
+    Licence facts change; the rules about them must not. Tests that need a
+    non-redistributable model build one here instead of pinning whichever model
+    happens to be unmirrored today.
+    """
+    raw = json.loads(weights.manifest_path().read_text(encoding="utf-8"))
+    mutate(raw)
+    target = tmp_path / "manifest.json"
+    target.write_text(json.dumps(raw), encoding="utf-8")
+    return target
+
+
+def _make_upstream_only(raw, model):
+    entry = raw["models"][model]
+    entry["redistributable"] = False
+    for artifact in entry["artifacts"].values():
+        artifact["mirror_asset"] = None
+
+
 def test_manifest_ships_with_the_package():
     assert weights.manifest_path().is_file(), (
         "prism/data/model_weights/manifest.json must ship with the package; "
@@ -60,21 +81,59 @@ def test_only_redistributable_models_carry_a_mirror_asset():
                 )
 
 
-def test_non_redistributable_models_tell_the_user_where_to_get_the_file():
+def test_every_model_documents_its_upstream_source():
+    """Mirroring a checkpoint does not remove the obligation to say where it came from."""
     for spec in weights.model_specs():
-        if not spec.redistributable:
-            assert spec.upstream_url or spec.upstream_instructions, (
-                f"{spec.model} cannot be mirrored, so it must document an upstream source"
+        assert spec.upstream_url or spec.upstream_instructions, (
+            f"{spec.model} must document an upstream source"
+        )
+
+
+def test_every_mirrored_model_carries_an_attribution():
+    for spec in weights.model_specs():
+        if any(artifact.mirror_asset for artifact in spec.artifacts.values()):
+            assert spec.attribution, (
+                f"{spec.model} is redistributed by PRISM, so it must name whom to credit"
             )
 
 
+def test_the_shipped_manifest_mirrors_every_model():
+    """All six upstream licences permit redistribution; a regression here is a licence change."""
+    for spec in weights.model_specs():
+        for artifact in spec.artifacts.values():
+            assert artifact.mirror_asset, f"{spec.model}/{artifact.name} is no longer mirrored"
+
+
+def test_the_shipped_manifest_points_at_a_mirror(monkeypatch):
+    monkeypatch.delenv(weights.MIRROR_ENV, raising=False)
+    base = weights.mirror_base_url()
+    assert base and base.startswith("https://"), "the weights mirror must be configured and https"
+
+
+def test_mirror_asset_names_are_unique():
+    """Every asset lands in one flat release, so two models cannot claim one name."""
+    assets = [
+        artifact.mirror_asset
+        for spec in weights.model_specs()
+        for artifact in spec.artifacts.values()
+        if artifact.mirror_asset
+    ]
+    assert len(assets) == len(set(assets))
+
+
 def test_manifest_rejects_a_mirror_asset_on_a_non_redistributable_model(tmp_path):
-    raw = json.loads(weights.manifest_path().read_text(encoding="utf-8"))
-    raw["models"]["flowr"]["artifacts"]["checkpoint"]["mirror_asset"] = "flowr.ckpt"
-    poisoned = tmp_path / "manifest.json"
-    poisoned.write_text(json.dumps(raw), encoding="utf-8")
+    """The licence gate fires on the combination, whatever the shipped manifest says."""
+
+    def revoke(raw):
+        model = next(
+            name
+            for name, entry in raw["models"].items()
+            if any(artifact.get("mirror_asset") for artifact in entry["artifacts"].values())
+        )
+        raw["models"][model]["redistributable"] = False
+
     with pytest.raises(ConfigurationError, match="not redistributable"):
-        weights.load_manifest(poisoned)
+        weights.load_manifest(_manifest_with(tmp_path, revoke))
 
 
 @pytest.mark.parametrize("relpath", ["/abs/x.ckpt", "../escape.ckpt", "a/../../b.ckpt"])
@@ -159,10 +218,18 @@ def test_ensure_available_lists_every_missing_artifact(weights_dir):
     message = str(excinfo.value)
     assert "pocketxmol/checkpoint" in message
     assert "flowr/checkpoint" in message
-    # pocketxmol may be mirrored, flowr may not: the message has to say both.
-    assert "prism weights download --model pocketxmol" in message
-    assert "not redistributed by PRISM" in message
+    assert "prism weights download --model pocketxmol --model flowr" in message
     assert str(weights_dir) in message
+
+
+def test_ensure_available_names_the_upstream_source_when_a_model_is_not_mirrored(weights_dir, tmp_path):
+    manifest = _manifest_with(tmp_path, lambda raw: _make_upstream_only(raw, "flowr"))
+    with pytest.raises(WeightsNotAvailableError) as excinfo:
+        weights.ensure_available(["flowr"], path=manifest)
+    message = str(excinfo.value)
+    assert "not redistributed by PRISM" in message
+    assert "zenodo.org/records/15737419" in message
+    assert "prism weights download" not in message.split("not redistributed by PRISM")[0]
 
 
 def test_ensure_available_is_silent_when_everything_is_there(weights_dir):
@@ -377,14 +444,16 @@ def test_a_corrupt_download_is_discarded(weights_dir, mirror):
     assert not artifact.path.with_name(artifact.path.name + ".part").exists()
 
 
-def test_download_refuses_a_non_redistributable_artifact(weights_dir, mirror):
+def test_download_refuses_a_non_redistributable_artifact(weights_dir, mirror, tmp_path):
     _, base = mirror
-    artifact = _artifact("flowr", "checkpoint")
+    manifest = _manifest_with(tmp_path, lambda raw: _make_upstream_only(raw, "flowr"))
+    artifact = weights.model_specs(["flowr"], manifest)[0].artifacts["checkpoint"]
     with pytest.raises(WeightsNotAvailableError) as excinfo:
-        weights.download_artifact(artifact, base_url=base)
+        weights.download_artifact(artifact, base_url=base, path=manifest)
     message = str(excinfo.value)
     assert "not redistributed by PRISM" in message
     assert "zenodo.org/records/15737419" in message
+    assert not artifact.path.exists()
 
 
 def test_download_refuses_an_insecure_mirror(weights_dir):
@@ -393,11 +462,12 @@ def test_download_refuses_an_insecure_mirror(weights_dir):
         weights.download_artifact(artifact, base_url="http://example.com/weights")
 
 
-def test_download_explains_itself_when_no_mirror_is_configured(weights_dir, monkeypatch):
+def test_download_explains_itself_when_no_mirror_is_configured(weights_dir, tmp_path, monkeypatch):
     monkeypatch.delenv(weights.MIRROR_ENV, raising=False)
-    artifact = _artifact("pocketxmol", "train_config")
+    manifest = _manifest_with(tmp_path, lambda raw: raw["mirror"].update({"base_url": None}))
+    artifact = weights.model_specs(["pocketxmol"], manifest)[0].artifacts["train_config"]
     with pytest.raises(WeightsDownloadError) as excinfo:
-        weights.download_artifact(artifact)
+        weights.download_artifact(artifact, path=manifest)
     message = str(excinfo.value)
     assert "No weights mirror is configured" in message
     assert str(artifact.path) in message
@@ -488,7 +558,11 @@ def test_weights_verify_passes_on_a_complete_model(weights_dir, monkeypatch):
     assert weights_main(["verify", "--model", "diffsbdd"]) == 0
 
 
-def test_weights_download_of_an_upstream_only_model_explains_itself(weights_dir, capsys):
+def test_weights_download_of_an_upstream_only_model_explains_itself(
+    weights_dir, tmp_path, monkeypatch, capsys
+):
+    manifest = _manifest_with(tmp_path, lambda raw: _make_upstream_only(raw, "flowr"))
+    monkeypatch.setattr(weights, "manifest_path", lambda: manifest)
     assert weights_main(["download", "--model", "flowr"]) == 1
     assert "not redistributed by PRISM" in capsys.readouterr().out
 

@@ -553,7 +553,7 @@ def test_slurm_execution_renders_resource_request_and_conda_path(tmp_path, monke
     config = {
         "enabled": True,
         "backend": "slurm",
-        "environment": "/public/home/somnis/conda-envs/prism-gen-targetdiff",
+        "environment": "/opt/conda-envs/prism-gen-targetdiff",
         "slurm": {
             "executable": "/opt/gridview/slurm/bin/srun",
             "partition": "debug",
@@ -596,7 +596,7 @@ def test_slurm_execution_renders_resource_request_and_conda_path(tmp_path, monke
     assert command[command.index("--gres") + 1] == "gpu:1"
     assert command[command.index("--mem") + 1] == "24G"
     assert command[command.index("conda") + 3] == "-p"
-    assert "/public/home/somnis/conda-envs/prism-gen-targetdiff" in command
+    assert "/opt/conda-envs/prism-gen-targetdiff" in command
     assert command[-1] == "cuda:0"
 
 

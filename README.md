@@ -242,8 +242,9 @@ each one belongs, its SHA256, and its licence; the bytes are fetched on demand.
 ```bash
 prism weights list                        # what is needed, what is present
 prism weights list --verify               # re-hash everything that is present
+prism weights download                    # fetch all six (~966 MiB)
+prism weights download --model molcraft   # or just one
 prism weights path --model molcraft       # where a checkpoint belongs
-prism weights download --model pocketxmol # fetch what PRISM may redistribute
 prism weights verify --model flowr        # exit non-zero if unusable
 ```
 
@@ -251,13 +252,20 @@ Weights are stored in `~/.cache/prism/models` by default (`$XDG_CACHE_HOME` is
 honored). Set `PRISM_MODELS_DIR` to keep them elsewhere or to point PRISM at a
 tree that already exists — a shared cluster directory, for instance.
 
-Only PocketXMol and MolCRAFT carry a licence that lets PRISM redistribute their
-weights. The other four must be fetched from upstream; `prism weights list`
-marks which is which, and any command that needs a missing file prints the
-upstream URL and the exact path to save it to rather than failing obscurely.
+Every upstream licence permits redistribution, so all six checkpoints are
+mirrored at [PRISM_Model_Weights](https://github.com/AIB002/PRISM_Model_Weights).
+They keep their upstream licences, which `prism weights list` prints per
+artifact and `prism weights download` prints as it fetches:
+
+| Weights | Licence | Implication |
+|---|---|---|
+| TargetDiff, Pocket2Mol, DiffSBDD | MIT | attribution |
+| PocketXMol, FLOWR | CC BY 4.0 | attribution |
+| MolCRAFT | CC BY-NC-SA 4.0 | **NonCommercial**, ShareAlike |
+
 Download integrity is enforced by SHA256 against the manifest, so a truncated
 or tampered file is discarded instead of installed. Set `PRISM_MODELS_MIRROR`
-to serve the mirrored files from your own host (`https://`, or `file://` for an
+to serve the files from your own host (`https://`, or `file://` for an
 air-gapped cluster).
 
 A generation run refuses to start if a selected model's weights are missing,

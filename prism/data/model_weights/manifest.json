@@ -3,8 +3,9 @@
   "version": 1,
   "layout": "Paths are relative to $PRISM_MODELS_DIR (default $XDG_CACHE_HOME/prism/models, else ~/.cache/prism/models). The tree deliberately mirrors the upstream release layout and the cluster deployment layout (<models_dir>/<model>/...), so an existing prism-models directory can be used by pointing PRISM_MODELS_DIR at it without moving a single file.",
   "mirror": {
-    "base_url": null,
-    "note": "Set to the release download base URL of the PRISM weights repository once it exists; artifacts are fetched from <base_url>/<mirror_asset>. Override at runtime with PRISM_MODELS_MIRROR, which also accepts a file:// URL for offline clusters. Only artifacts with redistributable=true may ever be given a mirror_asset."
+    "base_url": "https://github.com/AIB002/PRISM_Model_Weights/releases/download/v1",
+    "note": "Artifacts are fetched from <base_url>/<mirror_asset>. Override at runtime with PRISM_MODELS_MIRROR, which also accepts a file:// URL for offline clusters. Only artifacts with redistributable=true may ever be given a mirror_asset.",
+    "licence_note": "Every mirrored artifact keeps its upstream licence; mirroring is redistribution, not relicensing. MolCRAFT is NonCommercial and ShareAlike, so a PRISM mirror of it may not be used commercially. Attribution for each artifact is in its 'attribution' field and is printed on download."
   },
   "models": {
     "targetdiff": {
@@ -12,18 +13,20 @@
       "source": {
         "repo": "https://github.com/guanjq/targetdiff",
         "commit": "142f1eb7178480d435fe0b8cb95a99beb48997c7",
-        "license": "unspecified"
+        "license": "MIT"
       },
-      "weights_license": "unspecified",
-      "redistributable": false,
+      "weights_license": "MIT",
+      "weights_license_url": "https://github.com/guanjq/targetdiff/blob/main/LICIENCE",
+      "redistributable": true,
+      "attribution": "TargetDiff checkpoint by Jiaqi Guan et al., MIT licensed (upstream spells the file LICIENCE, which is why GitHub does not auto-detect it).",
       "upstream_url": "https://github.com/guanjq/targetdiff",
-      "upstream_instructions": "Follow the 'Pretrained models' section of the upstream README and save pretrained_diffusion.pt at the path above. The upstream checkout carries no LICENSE file, so PRISM does not mirror this checkpoint.",
+      "upstream_instructions": "Follow the 'Pretrained models' section of the upstream README and save pretrained_diffusion.pt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "targetdiff/checkpoints/pretrained_diffusion.pt",
           "sha256": "8977821339ba31b7103b46835ef4ddbf7f15f3f2efc5cb1f2a405e7905b09db6",
           "size_bytes": 33092213,
-          "mirror_asset": null
+          "mirror_asset": "targetdiff-pretrained_diffusion.pt"
         }
       }
     },
@@ -32,18 +35,20 @@
       "source": {
         "repo": "https://github.com/pengxingang/Pocket2Mol",
         "commit": "836a0c4ce487297ad24bc54ac2ebd163de13242c",
-        "license": "unspecified"
+        "license": "MIT"
       },
-      "weights_license": "unspecified",
-      "redistributable": false,
+      "weights_license": "MIT",
+      "weights_license_url": "https://github.com/pengxingang/Pocket2Mol/blob/main/LICENSE",
+      "redistributable": true,
+      "attribution": "Pocket2Mol checkpoint by Xingang Peng et al., MIT licensed.",
       "upstream_url": "https://github.com/pengxingang/Pocket2Mol",
-      "upstream_instructions": "Download the pretrained checkpoint linked from the upstream README and save pretrained_Pocket2Mol.pt at the path above. The upstream checkout carries no LICENSE file, so PRISM does not mirror this checkpoint.",
+      "upstream_instructions": "Download the pretrained checkpoint linked from the upstream README and save pretrained_Pocket2Mol.pt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "pocket2mol/checkpoints/pretrained_Pocket2Mol.pt",
           "sha256": "e9d8152dfdf034dabf48e566904e9d7c6cc1b96843bdc4d0026d891678913911",
           "size_bytes": 44921289,
-          "mirror_asset": null
+          "mirror_asset": "pocket2mol-pretrained_Pocket2Mol.pt"
         }
       }
     },
@@ -57,7 +62,7 @@
       "weights_license": "CC-BY-4.0",
       "weights_license_url": "https://creativecommons.org/licenses/by/4.0/",
       "redistributable": true,
-      "attribution": "PocketXMol model release, Zenodo record 17801271, version 1.0.0, licensed CC BY 4.0.",
+      "attribution": "PocketXMol model release, Zenodo record 17801271, version 1.0.0, licensed CC BY 4.0. The source repository is MIT; the weights carry the Zenodo licence.",
       "upstream_url": "https://zenodo.org/records/17801271",
       "upstream_instructions": "Zenodo record 17801271; unpack so that data/trained_models/pxm/ lands under <models_dir>/pocketxmol/weights/.",
       "artifacts": {
@@ -100,20 +105,22 @@
     "flowr": {
       "title": "FLOWR",
       "source": {
-        "repo": "https://github.com/CDDLeiden/FLOWR",
+        "repo": "https://github.com/jule-c/flowr",
         "commit": "bbb8bfb4e8d8dd16bff1d56a7f96246920e643ba",
-        "license": "unspecified"
+        "license": "MIT"
       },
-      "weights_license": "unspecified",
-      "redistributable": false,
+      "weights_license": "CC-BY-4.0",
+      "weights_license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "redistributable": true,
+      "attribution": "FLOWR checkpoint from Zenodo record 15737419, licensed CC BY 4.0. The source repository states MIT in its README; the published weights carry the Zenodo licence.",
       "upstream_url": "https://zenodo.org/records/15737419",
-      "upstream_instructions": "Zenodo record 15737419; save flowr_noHs.ckpt at the path above. The upstream README states MIT but the pinned checkout ships no LICENSE file and the Zenodo record carries no machine-readable licence, so PRISM does not mirror this checkpoint.",
+      "upstream_instructions": "Zenodo record 15737419; save flowr_noHs.ckpt at the path above.",
       "artifacts": {
         "checkpoint": {
           "relpath": "flowr/checkpoints/flowr_noHs.ckpt",
           "sha256": "1e26e06181fa0d6850a159a12acac36847853f979f76b8fdaa148ed3b502a077",
           "size_bytes": 629067043,
-          "mirror_asset": null
+          "mirror_asset": "flowr-flowr_noHs.ckpt"
         }
       }
     },
@@ -122,18 +129,20 @@
       "source": {
         "repo": "https://github.com/arneschneuing/DiffSBDD",
         "commit": null,
-        "license": "unspecified"
+        "license": "MIT"
       },
-      "weights_license": "unspecified",
-      "redistributable": false,
+      "weights_license": "MIT",
+      "weights_license_url": "https://github.com/arneschneuing/DiffSBDD/blob/main/LICENSE",
+      "redistributable": true,
+      "attribution": "DiffSBDD checkpoint by Arne Schneuing, Yuanqi Du, Charles Harris et al., MIT licensed.",
       "upstream_url": "https://github.com/arneschneuing/DiffSBDD",
-      "upstream_instructions": "Download crossdocked_fullatom_cond.ckpt from the upstream release and save it at the path above. The checkout used for integration was copied without its .git directory, so no source commit is pinned yet; pin one before regenerating. The checkout carries no LICENSE file, so PRISM does not mirror this checkpoint.",
+      "upstream_instructions": "Download crossdocked_fullatom_cond.ckpt from the upstream release and save it at the path above. The checkout used for integration was copied without its .git directory, so no source commit is pinned yet; pin one before regenerating.",
       "artifacts": {
         "checkpoint": {
           "relpath": "diffsbdd/checkpoints/crossdocked_fullatom_cond.ckpt",
           "sha256": "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c",
           "size_bytes": 17861341,
-          "mirror_asset": null
+          "mirror_asset": "diffsbdd-crossdocked_fullatom_cond.ckpt"
         }
       }
     }

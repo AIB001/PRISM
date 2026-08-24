@@ -9,17 +9,17 @@
 #   ${PRISM_WRAPPERS_DIR}  prism/generation/wrappers inside the installed package
 #
 # Prerequisites:
-#   1. prism weights download                  # mirrored checkpoints
-#      ...plus the upstream downloads it lists for the rest
+#   1. prism weights download                  # all six checkpoints, ~966 MiB
 #   2. git clone --depth 1 <repo> ${PRISM_MODELS_DIR}/<model>/source
 #      then `git checkout <model_commit>` -- the commits pinned below are the
 #      ones the wrappers were written against
 #   3. one Conda environment per model, named prism-gen-<model> by convention
 #      (DiffSBDD deliberately reuses prism-gen-molcraft)
 #
-# Only pocketxmol and molcraft may be mirrored by PRISM; the other four have no
-# redistributable licence, so their checkpoints have to be fetched by hand.
-# `prism weights list` shows which is which.
+# Every upstream licence permits redistribution, so PRISM mirrors all six sets
+# of weights. They keep their upstream licences: MolCRAFT is CC BY-NC-SA 4.0
+# (NonCommercial, ShareAlike), PocketXMol and FLOWR are CC BY 4.0, and the rest
+# are MIT. `prism weights list` prints the licence per artifact.
 models:
   targetdiff:
     enabled: true
