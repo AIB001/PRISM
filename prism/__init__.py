@@ -11,6 +11,7 @@ A comprehensive tool for building protein-ligand systems for molecular dynamics 
 
 import os
 import multiprocessing
+from importlib import import_module
 
 # Enable automatic OpenMP parallelization for trajectory analysis
 # Set OMP_NUM_THREADS to use all available CPU cores by default
@@ -21,30 +22,35 @@ if "OMP_NUM_THREADS" not in os.environ:
 __version__ = "1.2.0"
 __author__ = "PRISM Development Team"
 
-from .builder import PRISMBuilder
-from .core import PRISMSystem  # Deprecated - use PRISMBuilder directly
-from .sim import model
-from .analysis import IntegratedProteinLigandAnalyzer as TrajAnalysis
+_LAZY_ATTRIBUTES = {
+    "PRISMBuilder": (".builder", "PRISMBuilder"),
+    "PRISMSystem": (".core", "PRISMSystem"),
+    "TrajAnalysis": (".analysis", "IntegratedProteinLigandAnalyzer"),
+    "model": (".sim", "model"),
+    "modeling": (".modeling", None),
+    "pmf": (".pmf", None),
+    "gaussian": (".gaussian", None),
+    "rest2": (".rest2", None),
+}
 
-try:
-    from . import modeling
-except ImportError:
-    modeling = None
 
-try:
-    from . import pmf
-except ImportError:
-    pmf = None
-
-try:
-    from . import gaussian
-except ImportError:
-    gaussian = None
-
-try:
-    from . import rest2
-except ImportError:
-    rest2 = None
+def __getattr__(name):
+    """Import heavyweight simulation modules only when their API is requested."""
+    try:
+        module_name, attribute = _LAZY_ATTRIBUTES[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    try:
+        module = import_module(module_name, __name__)
+    except ImportError:
+        if attribute is None:
+            value = None
+        else:
+            raise
+    else:
+        value = module if attribute is None else getattr(module, attribute)
+    globals()[name] = value
+    return value
 
 
 # High-level API functions
@@ -85,6 +91,8 @@ def system(protein_path, ligand_path, config=None, **kwargs):
     >>> builder = PRISMBuilder("protein.pdb", "ligand.mol2")
     >>> builder.run()
     """
+    from .core import PRISMSystem
+
     return PRISMSystem(protein_path, ligand_path, config=config, **kwargs)
 
 
@@ -124,6 +132,8 @@ def build_system(protein_path, ligand_path, output_dir="prism_output", **kwargs)
     >>> builder = PRISMBuilder("protein.pdb", "ligand.mol2")
     >>> output_path = builder.run()
     """
+    from .core import PRISMSystem
+
     system_obj = PRISMSystem(protein_path, ligand_path, output_dir=output_dir, **kwargs)
     return system_obj.build()
 
@@ -219,7 +229,9 @@ def analyze_trajectory(topology, trajectory, ligand_resname="LIG", output_dir="a
     >>> analysis = pm.analyze_trajectory("complex.pdb", "trajectory.dcd",
     ...                                  ligand_resname="MOL")
     """
-    traj = TrajAnalysis(topology, trajectory, ligand_resname=ligand_resname)
+    from .analysis import IntegratedProteinLigandAnalyzer
+
+    traj = IntegratedProteinLigandAnalyzer(topology, trajectory, ligand_resname=ligand_resname)
     traj.analyze_all(output_dir=output_dir)
     return traj
 
