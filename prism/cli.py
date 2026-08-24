@@ -71,6 +71,11 @@ def main(argv: Optional[Sequence[str]] = None):
 
         return prepare_md_main(arguments[1:])
 
+    if arguments and arguments[0] == "weights":
+        from .generation.cli import weights_main
+
+        return weights_main(arguments[1:])
+
     try:
         generation, forwarded = _extract_generation_flag(arguments)
     except ValueError as exc:

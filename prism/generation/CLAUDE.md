@@ -6,7 +6,7 @@ This file records the decisions that are **not** recoverable from the code, the
 measurements behind them, and the traps that have already been paid for. Read
 the invariants section before changing anything in this module.
 
-Last substantive update: 2026-08-21.
+Last substantive update: 2026-08-24.
 
 ## Module Overview
 
@@ -32,6 +32,7 @@ Slurm backends.
 - `adapters/` — per-model capability contracts and command placeholders
 - `wrappers/` — the actual call into each upstream entry point
 - `execution.py` — command rendering, artifact verification, process control
+- `weights.py` — checkpoint inventory, discovery, preflight, download
 - `pocket.py` / `protein.py` — pocket normalization, pocket PDB extraction
 - `postprocess.py` — record splitting, QC invocation, quarantine, reports
 - `quality.py` — the quality-control engine
@@ -335,10 +336,68 @@ beam 50 (2h46m at beam 300 running to completion).
 
 ---
 
+## Weights distribution
+
+The six checkpoints total 966 MiB. They are not in the package, not in the
+repository, and not in any wheel — `prism/data/model_weights/manifest.json` is
+the only thing that ships, and it is the single source of truth for what a
+model needs.
+
+| Concern | Where it lives |
+|---|---|
+| What each model needs | `manifest.json` — relpath, sha256, size, licence, upstream URL |
+| Where it goes | `PRISM_MODELS_DIR` → `$XDG_CACHE_HOME/prism/models` → `~/.cache/prism/models` |
+| Where it comes from | `mirror.base_url` in the manifest, overridable with `PRISM_MODELS_MIRROR` |
+| User-facing commands | `prism weights {list,path,download,verify}` |
+
+This mirrors `prism/membrane/patch.py`, which solved the same problem for the
+bilayer patches: env-var override, package-relative default, and a descriptive
+not-available error instead of a `FileNotFoundError`.
+
+**Two rules that are enforced, not documented.**
+
+1. *Only redistributable weights may carry a mirror asset.* Four of the six
+   models publish weights with no redistribution licence (FLOWR, TargetDiff,
+   Pocket2Mol, DiffSBDD); PocketXMol is CC BY 4.0 and MolCRAFT is
+   CC BY-NC-SA 4.0. Adding a `mirror_asset` to a model whose `redistributable`
+   is false raises at **manifest load**, so the mistake surfaces on any command
+   that touches weights rather than at upload time. A non-redistributable model
+   must instead carry an `upstream_url` or `upstream_instructions`; both rules
+   are asserted in `tests/test_generation_weights.py`.
+2. *A download is installed only after it verifies.* Bytes stream into
+   `<target>.part`, are hashed while streaming, and are moved into place only
+   when both the SHA256 and the byte count match. Any failure unlinks the
+   partial file, so a tampered mirror cannot replace a checkpoint that is
+   already good. Mirror URLs are restricted to `https` and `file` (plus `http`
+   on loopback, for tests).
+
+**Preflight covers the dry run too.** `execution._artifacts()` verifies
+checkpoints, but it is never reached with `--dry-run`, so a validation pass
+used to report PLANNED for a model whose weights did not exist. `runner.run()`
+now calls `weights.preflight()` on both paths, and a missing checkpoint is
+reported as `MODEL_WEIGHTS_MISSING` in `status.json`.
+
+**Config placeholders are deliberately narrow.** `load_generation_config()`
+expands exactly two names — `${PRISM_MODELS_DIR}` and `${PRISM_WRAPPERS_DIR}` —
+and not `os.path.expandvars`. Every string in a generation config can end up as
+a command-line argument, so general environment expansion would let a config
+file exfiltrate the environment it runs in.
+
+`prism/configs/generation.local.example.yaml` is the portable six-model config
+built on those placeholders; a test asserts its paths and hashes agree with the
+manifest, so the two cannot drift.
+
+`PRISM_MODELS_DIR` pointed at an existing `prism-models/<model>/` tree — the
+cluster layout above — resolves all seven artifacts with no file moves. That
+was a layout constraint on the manifest, not a coincidence.
+
+---
+
 ## Testing
 
 ```bash
 pytest tests/test_generation.py            # orchestration, wrappers, execution
+pytest tests/test_generation_weights.py    # manifest, discovery, preflight, download
 pytest tests/test_generation_quality.py    # QC engine, quarantine, repair proposals
 pytest tests/test_generation_calibration.py  # threshold answer keys
 pytest tests/test_mcp_generation.py        # MCP tool contracts
@@ -374,6 +433,14 @@ and `tests/test_rtf_forcefield.py` (its input `24.rtf` is not tracked in git).
    selection semantics, the QC layer, or `prism prepare-md`.
 6. **MolCRAFT CPU support may be recoverable** by injecting
    `accelerator="cpu"` into its Lightning Trainer from the launcher. Untested.
+7. **No weights mirror is published yet.** `mirror.base_url` in the manifest is
+   `null`, so `prism weights download` currently explains itself and exits
+   non-zero unless `PRISM_MODELS_MIRROR` is set. Publishing means uploading the
+   three redistributable assets (275 MiB of the 966 MiB total) and filling in
+   that one field.
+8. **DiffSBDD's `model_commit` is unpinned** — empty in the configs, `null` in
+   the manifest. The other five are pinned to the commits the wrappers were
+   written against.
 
 ---
 

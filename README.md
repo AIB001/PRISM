@@ -233,12 +233,48 @@ For a mixed selection, one reference ligand satisfies every selected model that
 requires it; direct models continue to use the normalized pocket geometry. Run
 `prism generate --list-models` to inspect the registered modes.
 
+#### Model weights
+
+The checkpoints are about 1 GB in total and are **not** part of the PRISM
+package or repository. `prism/data/model_weights/manifest.json` records where
+each one belongs, its SHA256, and its licence; the bytes are fetched on demand.
+
+```bash
+prism weights list                        # what is needed, what is present
+prism weights list --verify               # re-hash everything that is present
+prism weights path --model molcraft       # where a checkpoint belongs
+prism weights download --model pocketxmol # fetch what PRISM may redistribute
+prism weights verify --model flowr        # exit non-zero if unusable
+```
+
+Weights are stored in `~/.cache/prism/models` by default (`$XDG_CACHE_HOME` is
+honored). Set `PRISM_MODELS_DIR` to keep them elsewhere or to point PRISM at a
+tree that already exists — a shared cluster directory, for instance.
+
+Only PocketXMol and MolCRAFT carry a licence that lets PRISM redistribute their
+weights. The other four must be fetched from upstream; `prism weights list`
+marks which is which, and any command that needs a missing file prints the
+upstream URL and the exact path to save it to rather than failing obscurely.
+Download integrity is enforced by SHA256 against the manifest, so a truncated
+or tampered file is discarded instead of installed. Set `PRISM_MODELS_MIRROR`
+to serve the mirrored files from your own host (`https://`, or `file://` for an
+air-gapped cluster).
+
+A generation run refuses to start if a selected model's weights are missing,
+including under `--dry-run`, so a validation pass cannot report PLANNED for a
+model that would die on a missing checkpoint.
+
 Copy `prism/configs/generation.yaml`, enable the selected model, and configure a
 wrapper command. Commands must be YAML lists (they are never passed through a
 shell) and may use placeholders including `{protein}`, `{pocket}`, `{output}`,
 `{reference_ligand}`, `{num_samples}`, `{seed}`, `{device}`, `{center_x}`,
 `{center_y}`, `{center_z}`, and model-specific values such as `{bbox_size}`.
 Pass the file with `--generation-config`.
+
+`prism/configs/generation.local.example.yaml` is a ready-made six-model Conda
+configuration with no machine-specific paths in it: it refers to the weights as
+`${PRISM_MODELS_DIR}/...` and to the wrappers as `${PRISM_WRAPPERS_DIR}/...`,
+and PRISM expands those two names (and only those two) when the file is loaded.
 
 Each model writes an independent status and log directory. Valid 3D SDF records
 are split into individual candidate files and also collected into

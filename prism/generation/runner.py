@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional
 
 import yaml
 
+from . import weights
 from .adapters.base import ModelAdapter
 from .errors import CapabilityError, ConfigurationError, GenerationError, InputError
 from .pocket import normalize_pocket
@@ -26,6 +27,33 @@ from .types import (
 )
 
 
+def config_placeholders() -> Dict[str, str]:
+    """Return the substitutions a generation config may use in its strings.
+
+    Only these two are expanded. A generation config is executable input --
+    every string in it can end up in a command line -- so it does not get
+    general ``os.path.expandvars`` access to the environment; it gets the two
+    locations that genuinely move between machines.
+    """
+    return {
+        weights.MODELS_DIR_ENV: str(weights.models_dir()),
+        "PRISM_WRAPPERS_DIR": str(Path(__file__).resolve().parent / "wrappers"),
+    }
+
+
+def _expand_placeholders(value: Any, substitutions: Mapping[str, str]) -> Any:
+    if isinstance(value, str):
+        expanded = value
+        for name, replacement in substitutions.items():
+            expanded = expanded.replace("${" + name + "}", replacement)
+        return expanded
+    if isinstance(value, dict):
+        return {key: _expand_placeholders(item, substitutions) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_placeholders(item, substitutions) for item in value]
+    return value
+
+
 def load_generation_config(path: Optional[Path] = None) -> Dict[str, Any]:
     try:
         if path is None:
@@ -38,7 +66,7 @@ def load_generation_config(path: Optional[Path] = None) -> Dict[str, Any]:
         raise ConfigurationError(f"Unable to read generation config '{location}': {exc}") from exc
     if not isinstance(value, dict):
         raise ConfigurationError("Generation config must contain a top-level YAML mapping")
-    return value
+    return _expand_placeholders(value, config_placeholders())
 
 
 def _utc_now() -> str:
@@ -261,6 +289,11 @@ class GenerationRunner:
 
     def run(self) -> Dict[str, Any]:
         self._validate_request()
+        if not self.request.dry_run:
+            # Checked before anything is staged: the first model would
+            # otherwise fail after the inputs are written, and the other five
+            # would never be examined at all.
+            weights.preflight(self.config, self.request.models)
         pocket = normalize_pocket(
             self.request.pocket,
             kind=self.request.pocket_kind,
@@ -295,6 +328,11 @@ class GenerationRunner:
             if self.request.dry_run:
                 try:
                     self.adapters[model].check_capabilities(pocket)
+                    # A dry run that reported PLANNED and then failed on a
+                    # missing checkpoint would defeat its own purpose, so the
+                    # weights are checked here too -- reported per model rather
+                    # than raised, because reporting is what a dry run is for.
+                    weights.preflight(self.config, [model])
                     result = ModelRunResult(model=model, status="PLANNED", requested=self.request.num_samples)
                 except GenerationError as exc:
                     result = ModelRunResult(

@@ -125,6 +125,9 @@ setup(
             # prism.membrane.patch.patch_data_dir(); without them a non-editable
             # install raises PatchNotAvailableError on every membrane build.
             "data/membrane_patches/*",
+            # Describes every generative-model checkpoint. The checkpoints
+            # themselves are downloaded on demand and are never packaged.
+            "data/model_weights/*.json",
         ],
     },
     zip_safe=False,  # Important for proper package loading

@@ -125,3 +125,15 @@ prism/*/*/*.backup
 example/
 
 tests/gxf/
+
+# Generative-model checkpoints (~1 GB) and the upstream source checkouts they
+# need.  They live in $PRISM_MODELS_DIR (default ~/.cache/prism/models), which
+# is outside the repository; these entries only catch a copy dropped in-tree
+# during development.  prism/data/model_weights/manifest.json describes them
+# and IS tracked -- only the bytes are ignored.
+prism-models/
+.prism-models/
+prism/data/model_weights/*.ckpt
+prism/data/model_weights/*.pt
+prism/data/model_weights/*.pth
+prism/data/model_weights/*.part

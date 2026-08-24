@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 
 from .errors import ConfigurationError, ExecutionFailure
+from .weights import WeightsNotAvailableError, artifact_for_path, describe_missing
 
 
 @dataclass
@@ -156,6 +157,19 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _missing_artifact_error(name: str, source: Path) -> ConfigurationError:
+    """Distinguish an unconfigured path from an undownloaded checkpoint.
+
+    Both are "the file is not there", but only one of them has a remedy PRISM
+    can offer, so a path the weights manifest recognises gets the download
+    instructions instead of a bare "does not exist".
+    """
+    artifact = artifact_for_path(source)
+    if artifact is None:
+        return ConfigurationError(f"Artifact '{name}' does not exist: {source}")
+    return WeightsNotAvailableError(describe_missing([(artifact, "missing")]))
+
+
 def _artifacts(
     model_config: Mapping[str, Any], backend: Any
 ) -> Tuple[Dict[str, str], List[Tuple[Path, str]], Dict[str, str]]:
@@ -178,12 +192,18 @@ def _artifacts(
             raise ConfigurationError(f"Artifact '{name}' requires a 64-character 'sha256'")
         source = Path(source_value).expanduser().resolve()
         if not source.is_file():
-            raise ConfigurationError(f"Artifact '{name}' does not exist: {source}")
+            raise _missing_artifact_error(name, source)
         actual_hash = _sha256(source)
         if actual_hash.lower() != expected_hash.lower():
-            raise ConfigurationError(
-                f"Artifact '{name}' SHA256 mismatch: expected {expected_hash.lower()}, got {actual_hash}"
-            )
+            message = f"Artifact '{name}' SHA256 mismatch: expected {expected_hash.lower()}, got {actual_hash}"
+            managed = artifact_for_path(source)
+            if managed is not None:
+                message += (
+                    "\nThis file is managed by PRISM; re-fetch it with "
+                    f"'prism weights download --model {managed.model} --force' or check the whole "
+                    "inventory with 'prism weights verify'."
+                )
+            raise ConfigurationError(message)
         hashes[name] = actual_hash
         if backend == "docker":
             target = specification.get("container_path")
