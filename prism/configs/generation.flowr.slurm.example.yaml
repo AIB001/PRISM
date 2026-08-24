@@ -1,0 +1,51 @@
+models:
+  flowr:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-flowr"
+    model_commit: "bbb8bfb4e8d8dd16bff1d56a7f96246920e643ba"
+    pocket_cutoff: 6.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "02:00:00"
+      gpus: 1
+      cpus_per_task: 6
+      memory: 48G
+      job_name: prism-flowr
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/flowr/checkpoints/flowr_noHs.ckpt"
+        sha256: "1e26e06181fa0d6850a159a12acac36847853f979f76b8fdaa148ed3b502a077"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/flowr.py"
+      - --flowr-root
+      - "/public/home/USER/prism-models/flowr/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --pocket-mode
+      - "{flowr_pocket_mode}"
+      - --pocket-cutoff
+      - "{flowr_pocket_cutoff}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-cost
+      - "100"
+      - --num-workers
+      - "6"
+      - --integration-steps
+      - "100"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 7200

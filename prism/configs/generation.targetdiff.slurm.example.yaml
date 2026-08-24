@@ -1,0 +1,40 @@
+models:
+  targetdiff:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-targetdiff"
+    model_commit: "142f1eb7178480d435fe0b8cb95a99beb48997c7"
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:45:00"
+      gpus: 1
+      cpus_per_task: 4
+      memory: 24G
+      job_name: prism-targetdiff
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/targetdiff/checkpoints/pretrained_diffusion.pt"
+        sha256: "REPLACE_WITH_64_CHARACTER_CHECKPOINT_SHA256"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/targetdiff.py"
+      - --targetdiff-root
+      - "/public/home/USER/prism-models/targetdiff/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --pocket
+      - "{pocket}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "5"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600

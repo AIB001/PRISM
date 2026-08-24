@@ -1,0 +1,34 @@
+models:
+  targetdiff:
+    enabled: true
+    backend: docker
+    # Replace this example with an immutable image digest built from official
+    # TargetDiff commit 142f1eb7178480d435fe0b8cb95a99beb48997c7.
+    image: "local/prism-targetdiff@sha256:REPLACE_WITH_IMAGE_DIGEST"
+    model_commit: "142f1eb7178480d435fe0b8cb95a99beb48997c7"
+    artifacts:
+      checkpoint:
+        path: "/absolute/path/to/pretrained_diffusion.pt"
+        sha256: "REPLACE_WITH_64_CHARACTER_CHECKPOINT_SHA256"
+        container_path: "/opt/checkpoints/pretrained_diffusion.pt"
+    command:
+      - python
+      - /opt/prism_wrappers/targetdiff.py
+      - --targetdiff-root
+      - /opt/targetdiff
+      - --checkpoint
+      - "{checkpoint}"
+      - --pocket
+      - "{pocket}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "32"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 86400

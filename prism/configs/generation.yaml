@@ -1,0 +1,40 @@
+# External model environments are intentionally not installed with PRISM.
+# Copy this file, pin an image digest or Conda environment, configure the
+# model's wrapper command, then pass it with --generation-config.
+models:
+  pocket2mol:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]
+  targetdiff:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]
+  molcraft:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]
+  flowr:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]
+  pocketxmol:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]
+  diffsbdd:
+    enabled: false
+    backend: docker
+    image: ""
+    command: []
+    output_patterns: ["raw/**/*.sdf"]

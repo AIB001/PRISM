@@ -191,6 +191,126 @@ The documentation includes:
 
 ## Quick Start
 
+### Protein-pocket ligand generation (experimental)
+
+PRISM provides an orchestration layer for Pocket2Mol, TargetDiff, PocketXMol,
+MolCRAFT, FLOWR, and DiffSBDD. The model environments and checkpoints are
+deliberately kept outside the PRISM Python environment and run through
+configured Docker, Conda, or Slurm backends.
+
+```bash
+# Validate and stage a request without launching a model
+prism generate \
+  --model targetdiff \
+  --protein protein.pdb \
+  --pocket pocket.pdb \
+  --output generated_ligand \
+  --dry-run
+
+# The compatibility form is equivalent
+prism --generation true \
+  --model pocket2mol \
+  --protein protein.pdb \
+  --pocket reference.sdf \
+  --output generated_ligand
+```
+
+Repeat `--model` to run several models, or use `--model all`. Pocket inputs are
+interpreted by scientific meaning: PDB as a cropped pocket structure,
+SDF/MOL/MOL2 as a reference ligand, TXT as a residue list, and YAML as a strict
+center/residue/reference specification. Use `--pocket-kind` to make the meaning
+explicit and `--reference-ligand` for models such as FLOWR and MolCRAFT.
+
+The CLI distinguishes two generation modes and validates the shared input
+before it creates the output directory:
+
+| Mode | Models | Reference-ligand behavior |
+|---|---|---|
+| Direct | Pocket2Mol, TargetDiff, PocketXMol | No conditioning ligand is required. A ligand may still be supplied as `--pocket` to locate the pocket. A separate unused `--reference-ligand` is rejected. |
+| Reference-guided | MolCRAFT, FLOWR | A reference ligand is mandatory. MolCRAFT accepts SDF; FLOWR accepts SDF or PDB. |
+
+For a mixed selection, one reference ligand satisfies every selected model that
+requires it; direct models continue to use the normalized pocket geometry. Run
+`prism generate --list-models` to inspect the registered modes.
+
+Copy `prism/configs/generation.yaml`, enable the selected model, and configure a
+wrapper command. Commands must be YAML lists (they are never passed through a
+shell) and may use placeholders including `{protein}`, `{pocket}`, `{output}`,
+`{reference_ligand}`, `{num_samples}`, `{seed}`, `{device}`, `{center_x}`,
+`{center_y}`, `{center_z}`, and model-specific values such as `{bbox_size}`.
+Pass the file with `--generation-config`.
+
+Each model writes an independent status and log directory. Valid 3D SDF records
+are split into individual candidate files and also collected into
+`candidates.sdf`, `summary.csv`, and `manifest.json` under the requested output
+directory. A failed model does not stop the remaining selected models.
+
+TargetDiff has the first concrete runtime contract. Start from
+`prism/configs/generation.targetdiff.example.yaml`, replace the image and
+checkpoint placeholders with immutable digests, and consult
+`prism/generation/environments/targetdiff/README.md`. PRISM can pass a cropped
+pocket PDB directly or extract one from a reference ligand, center, or residue
+specification. The checkpoint SHA256 is verified before its read-only container
+mount; unpinned Docker images are rejected by default.
+
+Pocket2Mol also has a concrete Slurm runtime contract. Start from
+`prism/configs/generation.pocket2mol.slurm.example.yaml` and consult
+`prism/generation/environments/pocket2mol/README.md`. Its official custom-pocket
+entry point requires a full protein PDB, a center, and one cubic side length.
+PRISM calculates the center from a reference ligand or cropped pocket structure
+and uses at least the official 23 Å box by default. A configured radius takes
+precedence as a box of `2 * radius`. Pocket2Mol's official checkpoint is loaded
+through a strict pickle allowlist, rewritten to a trusted per-run copy, and
+verified by SHA256 before inference.
+
+PocketXMol has a concrete Slurm runtime contract as well. Start from
+`prism/configs/generation.pocketxmol.slurm.example.yaml` and consult
+`prism/generation/environments/pocketxmol/README.md`. Its custom SBDD path
+accepts a full protein PDB plus either a reference ligand or an explicit pocket
+center. PRISM defaults to the upstream-recommended 10 Å radius for a reference
+ligand and 15 Å for a center, while an explicit pocket radius takes precedence.
+The wrapper uses the official model and sampler but replaces the inference
+script's training-only PyTorch Lightning import with a minimal feature-dimension
+bridge. The published checkpoint is verified, loaded through a strict pickle
+allowlist, and rewritten inside the run directory before upstream inference.
+
+MolCRAFT is available through
+`prism/configs/generation.molcraft.slurm.example.yaml`; its runtime notes and
+noncommercial/share-alike license warning are in
+`prism/generation/environments/molcraft/README.md`. The public custom-pocket
+path requires a PDB structure plus reference SDF. PRISM extracts center and
+residue pockets before launch, reconstructs the checkpoint's embedded config
+in an isolated run directory, and skips optional docking-only imports.
+
+FLOWR is available through
+`prism/configs/generation.flowr.slurm.example.yaml` and
+`prism/generation/environments/flowr/README.md`. It requires a reference SDF or
+PDB in this initial integration. The wrapper calls the official rigid-pocket
+generator without optional protonation or interaction-recovery evaluation.
+Upstream recommends about 40 GB GPU memory, so smaller GPUs may require a
+single-molecule smoke test and can still be unsupported. Review the documented
+upstream source/checkpoint licensing gap before redistribution.
+
+The pinned MolCRAFT and FLOWR paths have both completed real one-molecule,
+10-step GPU smoke runs on a 24 GB RTX 3090. These checks validate installation
+and end-to-end SDF production; they are not throughput or quality benchmarks.
+
+Every candidate is quality-checked before it is reported. Molecules that fail
+chemically are quarantined with a written repair proposal rather than deleted
+or silently corrected, because a bond order that sanitizes is not evidence it
+is the one the model intended. Geometry, pose, and plausibility problems are
+reported as warnings and do not withhold a molecule. Thresholds are calibrated
+so that experimentally determined ligands pass with no flags.
+
+No model emits explicit hydrogens, and parameterization does not reject such a
+ligand -- it writes a topology with no hydrogens at all. Use `prism prepare-md`
+to export MD-ready ligands from a finished run; it hands over only files
+verified to carry hydrogens and prints the build command for them.
+
+```bash
+prism prepare-md generated_ligand -o md_inputs --only-pass --limit 10
+```
+
 ### Basic Usage
 
 1. **Using GAFF (default)**:

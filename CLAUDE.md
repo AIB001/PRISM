@@ -141,6 +141,10 @@ builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
 
 - **FEP Module**: See `prism/fep/CLAUDE.md` for FEP-specific guidelines and troubleshooting
 - **PMF Module**: See `prism/pmf/CLAUDE.md` for PMF-specific guidelines
+- **Generation Module**: See `prism/generation/CLAUDE.md` for the six generative
+  models, the quality-control invariants, cluster deployment, and the measured
+  findings behind the current thresholds. Read it before changing anything under
+  `prism/generation/`.
 
 ## Entry Points
 

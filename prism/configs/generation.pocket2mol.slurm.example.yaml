@@ -1,0 +1,47 @@
+models:
+  pocket2mol:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-pocket2mol"
+    model_commit: "836a0c4ce487297ad24bc54ac2ebd163de13242c"
+    default_bbox_size: 23.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "02:00:00"
+      gpus: 1
+      cpus_per_task: 1
+      memory: 24G
+      job_name: prism-pocket2mol
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/pocket2mol/checkpoints/pretrained_Pocket2Mol.pt"
+        sha256: "e9d8152dfdf034dabf48e566904e9d7c6cc1b96843bdc4d0026d891678913911"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/pocket2mol.py"
+      - --pocket2mol-root
+      - "/public/home/USER/prism-models/pocket2mol/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --center
+      - "{center_x}"
+      - "{center_y}"
+      - "{center_z}"
+      - --bbox-size
+      - "{bbox_size}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --beam-size
+      - "300"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 7200

@@ -1,0 +1,46 @@
+models:
+  molcraft:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-molcraft"
+    model_commit: "743dfb5198c44ca0cec180822bd54258f9d386f1"
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "01:00:00"
+      gpus: 1
+      cpus_per_task: 4
+      memory: 32G
+      job_name: prism-molcraft
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/molcraft/checkpoints/molcraft.ckpt"
+        sha256: "0a54f9bfb847ea87e7aec538df90a009c8c49d12a7b5d09947d04b7f9444e024"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/molcraft.py"
+      - --molcraft-root
+      - "/public/home/USER/prism-models/molcraft/source/MolCRAFT"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "16"
+      - --sample-steps
+      - "100"
+      - --sample-num-atoms
+      - prior
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600

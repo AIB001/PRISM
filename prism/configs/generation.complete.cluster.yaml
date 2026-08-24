@@ -1,0 +1,293 @@
+# Complete six-model Slurm configuration (portable template).
+#
+# All paths use the /public/home/USER/ placeholder by convention: replace it
+# with the directory that holds the PRISM checkout, the per-model Conda
+# environments, and the model sources/checkpoints, e.g.
+#
+#   sed -i 's|/public/home/USER|/public/home/somnis|g' generation.complete.cluster.yaml
+#
+# Slurm fields (partition/account/executable/time) are cluster-specific and
+# must match the target cluster. DiffSBDD reuses the MolCRAFT environment.
+models:
+  targetdiff:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-targetdiff"
+    model_commit: "142f1eb7178480d435fe0b8cb95a99beb48997c7"
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:45:00"
+      gpus: 1
+      cpus_per_task: 4
+      memory: 24G
+      job_name: prism-targetdiff-bench
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/targetdiff/checkpoints/pretrained_diffusion.pt"
+        sha256: "8977821339ba31b7103b46835ef4ddbf7f15f3f2efc5cb1f2a405e7905b09db6"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/targetdiff.py"
+      - --targetdiff-root
+      - "/public/home/USER/prism-models/targetdiff/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --pocket
+      - "{pocket}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "10"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600
+
+  pocket2mol:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-pocket2mol"
+    model_commit: "836a0c4ce487297ad24bc54ac2ebd163de13242c"
+    default_bbox_size: 23.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:55:00"
+      gpus: 1
+      cpus_per_task: 1
+      memory: 24G
+      job_name: prism-pocket2mol-bench
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/pocket2mol/checkpoints/pretrained_Pocket2Mol.pt"
+        sha256: "e9d8152dfdf034dabf48e566904e9d7c6cc1b96843bdc4d0026d891678913911"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/pocket2mol.py"
+      - --pocket2mol-root
+      - "/public/home/USER/prism-models/pocket2mol/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --center
+      - "{center_x}"
+      - "{center_y}"
+      - "{center_z}"
+      - --bbox-size
+      - "{bbox_size}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --beam-size
+      - "300"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 7200
+
+  pocketxmol:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-pocketxmol"
+    model_commit: "65488cf635c856101dbe703ac97e2f10f58e005c"
+    default_reference_radius: 10.0
+    default_center_radius: 15.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:55:00"
+      gpus: 1
+      cpus_per_task: 2
+      memory: 32G
+      job_name: prism-pocketxmol-bench
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/pocketxmol/weights/data/trained_models/pxm/checkpoints/pocketxmol.ckpt"
+        sha256: "76d918122e598a3c53c77727898659f059d217e680834b7d223b0205c2715c3a"
+      train_config:
+        path: "/public/home/USER/prism-models/pocketxmol/weights/data/trained_models/pxm/train_config/train.yml"
+        sha256: "7225ef261d7bf20afeec6b41760a7dda8608110a37cb3361395ab49c49a0963d"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/pocketxmol.py"
+      - --pocketxmol-root
+      - "/public/home/USER/prism-models/pocketxmol/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --train-config
+      - "{train_config}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --center
+      - "{center_x}"
+      - "{center_y}"
+      - "{center_z}"
+      - --radius
+      - "{pocketxmol_radius}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "10"
+      - --mode
+      - simple
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600
+
+  molcraft:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-molcraft"
+    model_commit: "743dfb5198c44ca0cec180822bd54258f9d386f1"
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "01:00:00"
+      gpus: 1
+      cpus_per_task: 4
+      memory: 32G
+      job_name: prism-molcraft
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/molcraft/checkpoints/molcraft.ckpt"
+        sha256: "0a54f9bfb847ea87e7aec538df90a009c8c49d12a7b5d09947d04b7f9444e024"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/molcraft.py"
+      - --molcraft-root
+      - "/public/home/USER/prism-models/molcraft/source/MolCRAFT"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "16"
+      - --sample-steps
+      - "100"
+      - --sample-num-atoms
+      - prior
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600
+
+  flowr:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-flowr"
+    model_commit: "bbb8bfb4e8d8dd16bff1d56a7f96246920e643ba"
+    pocket_cutoff: 6.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "02:00:00"
+      gpus: 1
+      cpus_per_task: 6
+      memory: 48G
+      job_name: prism-flowr
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/flowr/checkpoints/flowr_noHs.ckpt"
+        sha256: "1e26e06181fa0d6850a159a12acac36847853f979f76b8fdaa148ed3b502a077"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/flowr.py"
+      - --flowr-root
+      - "/public/home/USER/prism-models/flowr/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --pocket-mode
+      - "{flowr_pocket_mode}"
+      - --pocket-cutoff
+      - "{flowr_pocket_cutoff}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-cost
+      - "20"
+      - --num-workers
+      - "6"
+      - --integration-steps
+      - "100"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 7200
+
+  diffsbdd:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-molcraft"
+    model_commit: ""
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:45:00"
+      gpus: 1
+      cpus_per_task: 2
+      memory: 32G
+      job_name: prism-diffsbdd
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/diffsbdd/checkpoints/crossdocked_fullatom_cond.ckpt"
+        sha256: "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/diffsbdd.py"
+      - --diffsbdd-root
+      - "/public/home/USER/prism-models/diffsbdd/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "10"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600

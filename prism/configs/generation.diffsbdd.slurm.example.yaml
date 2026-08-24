@@ -1,0 +1,44 @@
+models:
+  diffsbdd:
+    enabled: true
+    backend: slurm
+    # DiffSBDD reuses the MolCRAFT environment (zero extra install; stubs
+    # wandb and imageio at import time).
+    environment: "/public/home/USER/conda-envs/prism-gen-molcraft"
+    model_commit: ""
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:45:00"
+      gpus: 1
+      cpus_per_task: 2
+      memory: 32G
+      job_name: prism-diffsbdd
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/diffsbdd/checkpoints/crossdocked_fullatom_cond.ckpt"
+        sha256: "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/diffsbdd.py"
+      - --diffsbdd-root
+      - "/public/home/USER/prism-models/diffsbdd/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "10"
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600

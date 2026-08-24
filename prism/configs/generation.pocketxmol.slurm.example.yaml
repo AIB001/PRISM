@@ -1,0 +1,57 @@
+models:
+  pocketxmol:
+    enabled: true
+    backend: slurm
+    environment: "/public/home/USER/conda-envs/prism-gen-pocketxmol"
+    model_commit: "65488cf635c856101dbe703ac97e2f10f58e005c"
+    default_reference_radius: 10.0
+    default_center_radius: 15.0
+    slurm:
+      executable: "/opt/gridview/slurm/bin/srun"
+      partition: debug
+      account: iqb
+      time: "00:55:00"
+      gpus: 1
+      cpus_per_task: 2
+      memory: 32G
+      job_name: prism-pocketxmol
+    artifacts:
+      checkpoint:
+        path: "/public/home/USER/prism-models/pocketxmol/weights/data/trained_models/pxm/checkpoints/pocketxmol.ckpt"
+        sha256: "76d918122e598a3c53c77727898659f059d217e680834b7d223b0205c2715c3a"
+      train_config:
+        path: "/public/home/USER/prism-models/pocketxmol/weights/data/trained_models/pxm/train_config/train.yml"
+        sha256: "7225ef261d7bf20afeec6b41760a7dda8608110a37cb3361395ab49c49a0963d"
+    command:
+      - python
+      - "/public/home/USER/PRISM/prism/generation/wrappers/pocketxmol.py"
+      - --pocketxmol-root
+      - "/public/home/USER/prism-models/pocketxmol/source"
+      - --checkpoint
+      - "{checkpoint}"
+      - --train-config
+      - "{train_config}"
+      - --protein
+      - "{protein}"
+      - --reference-ligand
+      - "{reference_ligand}"
+      - --center
+      - "{center_x}"
+      - "{center_y}"
+      - "{center_z}"
+      - --radius
+      - "{pocketxmol_radius}"
+      - --output
+      - "{output}"
+      - --num-samples
+      - "{num_samples}"
+      - --seed
+      - "{seed}"
+      - --device
+      - "{device}"
+      - --batch-size
+      - "16"
+      - --mode
+      - simple
+    output_patterns: ["raw/sdf/*.sdf"]
+    timeout_seconds: 3600

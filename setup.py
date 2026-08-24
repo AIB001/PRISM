@@ -110,14 +110,17 @@ setup(
     extras_require=extras_require,
     entry_points={
         "console_scripts": [
-            "prism=prism.builder:main",
+            "prism=prism.cli:main",
             "prism-builder=prism.builder:main",
+            "prism-generate=prism.generation.cli:main",
         ],
     },
     include_package_data=True,
     package_data={
         "prism": [
             "configs/*.yaml",
+            "generation/environments/*/*.md",
+            "generation/environments/*/Dockerfile",
             # The equilibrated bilayer patches are read at build time through
             # prism.membrane.patch.patch_data_dir(); without them a non-editable
             # install raises PatchNotAvailableError on every membrane build.

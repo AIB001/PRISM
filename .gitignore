@@ -107,6 +107,7 @@ test/*
 .qoder
 .playwright*
 .history
+.prism-build/
 
 prism/*/*.backup
 prism/*/*/*.backup
