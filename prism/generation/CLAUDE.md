@@ -364,38 +364,41 @@ not-available error instead of a `FileNotFoundError`.
 
 | Route | Field(s) | Used for |
 |---|---|---|
-| PRISM mirror | `mirror_asset` | TargetDiff, Pocket2Mol, MolCRAFT |
-| publisher | `download_url` | FLOWR, DiffSBDD |
-| publisher bundle | `archive` + `archive_member` | PocketXMol (both artifacts) |
+| PRISM mirror | `mirror_asset` | **all seven artifacts** |
+| publisher | `download_url` | nothing shipped; still supported |
+| publisher bundle | `archive` + `archive_member` | nothing shipped; still supported |
 
 No route at all means the user places the file by hand, and `upstream_url` /
 `upstream_instructions` say how. Two routes on one artifact raises at manifest
 load: it is not a richer manifest, it is an unanswered question about which one
 is authoritative.
 
-**The split is about the host, not the licence.** All six licences permit
-redistribution. TargetDiff, Pocket2Mol and MolCRAFT publish through Google
-Drive, which cannot be scripted — virus-scan interstitials on large files, a
-per-file quota that locks out for a day once tripped, and no access at all from
-some networks. Those three are mirrored. The other three are on Zenodo, which
-serves stable direct URLs, so mirroring them would only add a copy to keep in
-step with upstream. Mirroring is the fallback, not the default; if a publisher
-moves to a scriptable host, its asset should leave the mirror.
+**Everything is mirrored, and the reason is throughput, not licence.** All six
+licences permit redistribution. TargetDiff, Pocket2Mol and MolCRAFT publish
+through Google Drive, which cannot be scripted at all — virus-scan
+interstitials on large files, a per-file quota that locks out for a day once
+tripped, and no access at all from some networks. PocketXMol, FLOWR and
+DiffSBDD are on Zenodo, which *is* scriptable, and were fetched from there for
+one iteration. The measurement that ended it: Zenodo delivered ~15 KB/s with
+mid-transfer drops, against all 966 MiB from the GitHub release CDN in 261 s —
+~3.7 MB/s sustained — on the same network. That is eleven hours for FLOWR's
+600 MiB alone instead of under three minutes for everything. A publisher route
+is not a correctness problem, which is exactly why it is worth a test — nobody
+files a bug for "install is slow".
 
-An earlier version mirrored all seven artifacts (966 MiB). The hybrid cuts the
-upload to 117 MiB — the three unscriptable checkpoints happen to be the three
-smallest. The measured counter-argument, recorded because it is a real cost:
-on the development network Zenodo delivered 11.5–16.3 KB/s and dropped
-connections mid-transfer, against 28.4–47.8 KB/s from the GitHub release CDN.
-Where bandwidth to Zenodo is poor, `PRISM_MODELS_MIRROR` pointed at a local or
-institutional copy is the answer, not widening the mirror.
+Two throughput figures in this file have been wrong. An early estimate put the
+release CDN at 28.4–47.8 KB/s, which was off by two orders of magnitude. It was
+then replaced by ~7 MB/s, from a 117 MiB burst that ran in 16 s — optimistic:
+the full 966 MiB sustained 3.7 MB/s. Treat single-sample throughput figures
+here as indicative only, and prefer the full-run number.
 
-**PocketXMol costs more to fetch than it occupies.** Zenodo publishes every
-trained model in one 611 MiB bundle; PRISM wants 232 MiB of it. Both members
-are taken in a single pass, each verified against its own SHA256, and the
-bundle is deleted once nothing needs it. The CLI states the bundle size before
-starting, because watching 611 MiB arrive for a "232 MiB missing" artifact
-otherwise reads as a bug.
+The two unused routes stay in the loader and keep their tests. `download_url`
+is what a future publisher on a fast host would use, and `archive` is how
+PocketXMol would come back: Zenodo publishes its 232 MiB checkpoint only inside
+a 611 MiB bundle, and the extractor takes both members in a single pass,
+verifies each against its own SHA256, and deletes the bundle once nothing needs
+it. Mirroring is a fallback that should shrink when publishers make it
+unnecessary.
 
 ### Rules that are enforced, not documented
 

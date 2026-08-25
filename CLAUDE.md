@@ -222,7 +222,7 @@ other — never mix them.**
 | What | Repository | Account | Remote |
 |---|---|---|---|
 | PRISM source, docs, tests, the weights **manifest** | `AIB001/PRISM`, branch `main` | AIB001 | `git@github.com:AIB001/PRISM.git` |
-| The mirrored **checkpoints** (3 of 6, ~117 MiB) | `AIB002/PRISM_Model_Weights`, release assets | AIB002 | `git@github-aib002:AIB002/PRISM_Model_Weights.git` |
+| The mirrored **checkpoints** (all 7 artifacts, ~966 MiB) | `AIB002/PRISM_Model_Weights`, release assets | AIB002 | `git@github-aib002:AIB002/PRISM_Model_Weights.git` |
 
 Rules:
 
@@ -230,10 +230,13 @@ Rules:
    `*.ckpt`, `*.pt`, `*.pth`, `*.part` under `prism/data/model_weights/` and the
    `prism-models/` trees. Only `prism/data/model_weights/manifest.json` — which
    describes the weights — is tracked in `AIB001/PRISM`.
-2. **Only what cannot be fetched from its publisher is mirrored.** TargetDiff,
-   Pocket2Mol and MolCRAFT publish through Google Drive, which defeats scripted
-   download, so PRISM hosts those three. PocketXMol, FLOWR and DiffSBDD serve
-   stable Zenodo URLs and are fetched directly — do not add them to the mirror.
+2. **Every artifact is served from the mirror.** TargetDiff, Pocket2Mol and
+   MolCRAFT publish through Google Drive, which defeats scripted download at
+   all. PocketXMol, FLOWR and DiffSBDD are scriptable on Zenodo but measured
+   ~15 KB/s, against all 966 MiB from the release CDN in 261 s — eleven hours
+   for FLOWR alone instead — so they are mirrored too. Giving an artifact a `download_url`
+   instead of a `mirror_asset` does not fail any check; it just makes that
+   model unbearably slow to install.
 3. **Weights are uploaded as GitHub release assets**, not committed. Files over
    100 MiB cannot be pushed to a git tree at all. Release assets allow 2 GiB
    each.

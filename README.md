@@ -242,7 +242,7 @@ each one belongs, its SHA256, and its licence; the bytes are fetched on demand.
 ```bash
 prism weights list                        # what is needed, what is present
 prism weights list --verify               # re-hash everything that is present
-prism weights download                    # fetch all six (~966 MiB, mirror + publishers)
+prism weights download                    # fetch all six (~966 MiB)
 prism weights download --model molcraft   # or just one
 prism weights path --model molcraft       # where a checkpoint belongs
 prism weights verify --model flowr        # exit non-zero if unusable
@@ -252,23 +252,27 @@ Weights are stored in `~/.cache/prism/models` by default (`$XDG_CACHE_HOME` is
 honored). Set `PRISM_MODELS_DIR` to keep them elsewhere or to point PRISM at a
 tree that already exists — a shared cluster directory, for instance.
 
-Each checkpoint is fetched from wherever it can actually be fetched from, which
-`prism weights list` shows in its SOURCE column:
+Every checkpoint comes from the [PRISM mirror](https://github.com/AIB002/PRISM_Model_Weights),
+which redistributes each one unmodified under its upstream licence:
 
-| Weights | Fetched from | Licence | Implication |
-|---|---|---|---|
-| TargetDiff, Pocket2Mol | [PRISM mirror](https://github.com/AIB002/PRISM_Model_Weights) | MIT | attribution |
-| MolCRAFT | [PRISM mirror](https://github.com/AIB002/PRISM_Model_Weights) | CC BY-NC-SA 4.0 | **NonCommercial**, ShareAlike |
-| PocketXMol, FLOWR, DiffSBDD | Zenodo, directly | CC BY 4.0 | attribution |
+| Weights | Licence | Implication |
+|---|---|---|
+| TargetDiff, Pocket2Mol | MIT | attribution |
+| PocketXMol, FLOWR, DiffSBDD | CC BY 4.0 | attribution |
+| MolCRAFT | CC BY-NC-SA 4.0 | **NonCommercial**, ShareAlike |
 
-All six licences permit redistribution; what differs is the host. The three
-mirrored ones publish through Google Drive, which defeats scripted download
-(virus-scan interstitials, per-file quotas, and no access at all from some
-networks). The Zenodo three serve stable direct URLs, so PRISM fetches them from
-the publisher and mirrors nothing. PocketXMol ships one 611 MiB bundle for a
-232 MiB checkpoint; PRISM extracts what it needs and deletes the bundle, and
-says so before starting. Mirrored or not, each artifact keeps its upstream
-licence, which `prism weights download` prints as it fetches.
+All six licences permit redistribution, and mirroring does not relicense
+anything: each artifact keeps its upstream terms, which `prism weights
+download` prints as it fetches. Credit the model authors, not PRISM.
+
+The mirror exists because the publishers are hard to fetch from. TargetDiff,
+Pocket2Mol and MolCRAFT publish through Google Drive, which defeats scripted
+download outright (virus-scan interstitials, per-file quotas, and no access at
+all from some networks). The other three are on Zenodo, which is scriptable but
+was measured at roughly 15 KB/s, against 966 MiB pulled from the mirror in
+261 s (~3.7 MB/s sustained) on the same network — an eleven-hour download for
+FLOWR's 600 MiB rather than under three minutes. PocketXMol is worse still at
+the source: its 232 MiB checkpoint is published only inside a 611 MiB bundle.
 
 Download integrity is enforced by SHA256 against the manifest, so a truncated
 or tampered file is discarded instead of installed. Transfers resume from what

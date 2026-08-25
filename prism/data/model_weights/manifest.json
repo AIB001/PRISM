@@ -89,30 +89,18 @@
       "attribution": "PocketXMol model release, Zenodo record 17801271, version 1.0.0, licensed CC BY 4.0. The source repository is MIT; the weights carry the Zenodo licence.",
       "upstream_url": "https://zenodo.org/records/17801271",
       "upstream_instructions": "Zenodo record 17801271; download model_weights.tar.gz and unpack it so that data/trained_models/pxm/ lands under <models_dir>/pocketxmol/weights/.",
-      "archives": {
-        "weights": {
-          "url": "https://zenodo.org/records/17801271/files/model_weights.tar.gz?download=1",
-          "size_bytes": 640300872,
-          "md5": "d92f279750f4e4a2ee63fc5b9dbed3ae",
-          "note": "Zenodo publishes every trained model in one bundle. PRISM downloads it once, extracts only the two files below, verifies each against its SHA256, and deletes the bundle -- 611 MiB in to keep 232 MiB."
-        }
-      },
       "artifacts": {
         "checkpoint": {
           "relpath": "pocketxmol/weights/data/trained_models/pxm/checkpoints/pocketxmol.ckpt",
           "sha256": "76d918122e598a3c53c77727898659f059d217e680834b7d223b0205c2715c3a",
           "size_bytes": 243496215,
-          "mirror_asset": null,
-          "archive": "weights",
-          "archive_member": "data/trained_models/pxm/checkpoints/pocketxmol.ckpt"
+          "mirror_asset": "pocketxmol-pocketxmol.ckpt"
         },
         "train_config": {
           "relpath": "pocketxmol/weights/data/trained_models/pxm/train_config/train.yml",
           "sha256": "7225ef261d7bf20afeec6b41760a7dda8608110a37cb3361395ab49c49a0963d",
           "size_bytes": 10293,
-          "mirror_asset": null,
-          "archive": "weights",
-          "archive_member": "data/trained_models/pxm/train_config/train.yml"
+          "mirror_asset": "pocketxmol-train.yml"
         }
       }
     },
@@ -134,8 +122,7 @@
           "relpath": "flowr/checkpoints/flowr_noHs.ckpt",
           "sha256": "1e26e06181fa0d6850a159a12acac36847853f979f76b8fdaa148ed3b502a077",
           "size_bytes": 629067043,
-          "mirror_asset": null,
-          "download_url": "https://zenodo.org/records/15737419/files/flowr_noHs.ckpt?download=1"
+          "mirror_asset": "flowr-flowr_noHs.ckpt"
         }
       }
     },
@@ -157,8 +144,7 @@
           "relpath": "diffsbdd/checkpoints/crossdocked_fullatom_cond.ckpt",
           "sha256": "07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c",
           "size_bytes": 17861341,
-          "mirror_asset": null,
-          "download_url": "https://zenodo.org/record/8183747/files/crossdocked_fullatom_cond.ckpt?download=1"
+          "mirror_asset": "diffsbdd-crossdocked_fullatom_cond.ckpt"
         }
       }
     }

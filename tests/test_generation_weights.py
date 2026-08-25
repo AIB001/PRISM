@@ -185,24 +185,34 @@ def test_publisher_downloads_go_over_https():
                 )
 
 
-def test_mirroring_is_reserved_for_what_cannot_be_fetched_from_the_publisher():
-    """PRISM hosts only the checkpoints whose publisher defeats scripted download.
+def test_every_artifact_is_served_from_the_mirror():
+    """All seven come from one host, so none may quietly fall back to a publisher.
 
-    Every mirrored byte is one PRISM has to store, serve and keep in step with
-    upstream, so the mirror is the fallback and not the default. A new
-    ``mirror_asset`` on a model that already had a working publisher URL is the
-    regression this guards against.
+    Zenodo measured about 15 KB/s against this release CDN's ~7 MB/s, which is
+    an eleven-hour download for FLOWR's 600 MiB instead of roughly a minute. A
+    publisher route reintroduced here would not fail any check at runtime; it
+    would just make one model unbearably slow to install, which is the kind of
+    regression nobody reports as a bug.
     """
-    mirrored = {
-        spec.model
-        for spec in weights.model_specs()
-        for artifact in spec.artifacts.values()
-        if artifact.mirror_asset
-    }
-    assert mirrored == {"targetdiff", "pocket2mol", "molcraft"}, (
-        "these three publish through Google Drive, which cannot be scripted; "
-        "the other three serve stable Zenodo URLs and must not be mirrored"
-    )
+    for spec in weights.model_specs():
+        for artifact in spec.artifacts.values():
+            assert artifact.mirror_asset, (
+                f"{spec.model}/{artifact.name} is not served from the mirror; "
+                "upload it as a release asset before giving it another route"
+            )
+
+
+def test_mirrored_assets_are_named_after_their_model():
+    """A release namespace is flat, so the model prefix is what keeps it apart.
+
+    Two models publishing a bare ``model.ckpt`` would collide on upload, and
+    the second would silently win.
+    """
+    for spec in weights.model_specs():
+        for artifact in spec.artifacts.values():
+            assert artifact.mirror_asset.startswith(f"{spec.model}-"), (
+                f"{artifact.mirror_asset} does not start with '{spec.model}-'"
+            )
 
 
 def test_the_shipped_manifest_points_at_a_mirror(monkeypatch):
@@ -237,10 +247,26 @@ def test_manifest_rejects_a_mirror_asset_on_a_non_redistributable_model(tmp_path
         weights.load_manifest(_manifest_with(tmp_path, revoke))
 
 
+def _clear_routes(raw, model, artifact="checkpoint"):
+    """Strip an artifact's route and hand it back for the test to rebuild.
+
+    The shipped manifest now serves everything from the mirror, so tests about
+    the publisher and archive routes have to construct their own starting
+    point rather than adjust one that happens to be there.
+    """
+    entry = raw["models"][model]["artifacts"][artifact]
+    entry["mirror_asset"] = None
+    entry.pop("download_url", None)
+    entry.pop("archive", None)
+    entry.pop("archive_member", None)
+    return entry
+
+
 def test_manifest_rejects_two_acquisition_routes(tmp_path):
     def double_up(raw):
-        artifact = raw["models"]["flowr"]["artifacts"]["checkpoint"]
+        artifact = _clear_routes(raw, "flowr")
         artifact["mirror_asset"] = "flowr-flowr_noHs.ckpt"
+        artifact["download_url"] = "https://zenodo.org/records/15737419/files/flowr_noHs.ckpt"
 
     with pytest.raises(ConfigurationError, match="more than one acquisition route"):
         weights.load_manifest(_manifest_with(tmp_path, double_up))
@@ -248,9 +274,9 @@ def test_manifest_rejects_two_acquisition_routes(tmp_path):
 
 def test_manifest_rejects_an_archive_that_is_not_declared(tmp_path):
     def dangle(raw):
-        raw["models"]["flowr"]["artifacts"]["checkpoint"].pop("download_url")
-        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive"] = "weights"
-        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive_member"] = "flowr.ckpt"
+        artifact = _clear_routes(raw, "flowr")
+        artifact["archive"] = "weights"
+        artifact["archive_member"] = "flowr.ckpt"
 
     with pytest.raises(ConfigurationError, match="which flowr does not declare"):
         weights.load_manifest(_manifest_with(tmp_path, dangle))
@@ -258,7 +284,7 @@ def test_manifest_rejects_an_archive_that_is_not_declared(tmp_path):
 
 def test_manifest_rejects_an_archive_member_with_no_archive(tmp_path):
     def orphan(raw):
-        raw["models"]["flowr"]["artifacts"]["checkpoint"]["archive_member"] = "flowr.ckpt"
+        _clear_routes(raw, "flowr")["archive_member"] = "flowr.ckpt"
 
     with pytest.raises(ConfigurationError, match="without naming an 'archive'"):
         weights.load_manifest(_manifest_with(tmp_path, orphan))
@@ -268,7 +294,7 @@ def test_manifest_rejects_an_insecure_publisher_url(tmp_path):
     """The scheme rule applies to publisher URLs, not only to the mirror."""
 
     def downgrade(raw):
-        raw["models"]["flowr"]["artifacts"]["checkpoint"]["download_url"] = (
+        _clear_routes(raw, "flowr")["download_url"] = (
             "http://zenodo.org/records/15737419/files/flowr_noHs.ckpt"
         )
 
@@ -278,7 +304,14 @@ def test_manifest_rejects_an_insecure_publisher_url(tmp_path):
 
 def test_manifest_rejects_an_insecure_bundle_url(tmp_path):
     def downgrade(raw):
-        raw["models"]["pocketxmol"]["archives"]["weights"]["url"] = "ftp://example.invalid/bundle.tar.gz"
+        _clear_routes(raw, "pocketxmol")
+        raw["models"]["pocketxmol"]["archives"] = {
+            "weights": {
+                "url": "ftp://example.invalid/bundle.tar.gz",
+                "size_bytes": 1,
+                "md5": "0" * 32,
+            }
+        }
 
     with pytest.raises(ConfigurationError, match="Refusing to download"):
         weights.load_manifest(_manifest_with(tmp_path, downgrade))
@@ -807,21 +840,31 @@ def _write_bundle(path, members, prefix="./model_weights/"):
 
 
 def _bundle_manifest(tmp_path, served, members, **overrides):
-    """A manifest whose PocketXMol bundle is the local tarball."""
+    """A manifest whose PocketXMol artifacts come out of the local tarball.
+
+    The archive route is built here rather than adjusted: nothing shipped uses
+    it now that the mirror serves everything, but it stays supported for the
+    day a publisher's bundle is worth fetching again.
+    """
 
     def rewrite(raw):
         entry = raw["models"]["pocketxmol"]
-        entry["archives"]["weights"] = {
-            "url": served["url"],
-            "size_bytes": len(served["bytes"]),
-            "md5": hashlib.md5(served["bytes"]).hexdigest(),
-            "note": "test bundle",
-            **overrides,
+        entry["archives"] = {
+            "weights": {
+                "url": served["url"],
+                "size_bytes": len(served["bytes"]),
+                "md5": hashlib.md5(served["bytes"]).hexdigest(),
+                "note": "test bundle",
+                **overrides,
+            }
         }
         for name, member in (("checkpoint", _CKPT_MEMBER), ("train_config", _CONFIG_MEMBER)):
             payload = members[member]
-            entry["artifacts"][name]["sha256"] = hashlib.sha256(payload).hexdigest()
-            entry["artifacts"][name]["size_bytes"] = len(payload)
+            artifact = _clear_routes(raw, "pocketxmol", name)
+            artifact["sha256"] = hashlib.sha256(payload).hexdigest()
+            artifact["size_bytes"] = len(payload)
+            artifact["archive"] = "weights"
+            artifact["archive_member"] = member
 
     return _manifest_with(tmp_path, rewrite)
 
