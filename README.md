@@ -57,7 +57,7 @@ PRISM is a comprehensive tool for building protein-ligand systems for molecular 
    make -j${nproc}
    make check # Optional but recommended
    sudo make install
-   source /mnt/data/zf/gromacs-2024.3/bin/GMXRC
+   source ~/gromacs-2025.1/bin/GMXRC   # match CMAKE_INSTALL_PREFIX above
    
    # install bioconda
    conda install -c bioconda

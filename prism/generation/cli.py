@@ -256,7 +256,7 @@ def build_weights_parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("list", "Show every artifact with its size, licence and local status"),
         ("path", "Print the local path of each artifact"),
-        ("download", "Fetch the artifacts PRISM is licensed to mirror"),
+        ("download", "Fetch every artifact that is missing or fails its hash"),
         ("verify", "Re-hash every present artifact and report corruption"),
     ):
         sub = subparsers.add_parser(name, help=help_text, description=help_text)
