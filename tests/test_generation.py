@@ -738,7 +738,7 @@ def test_pocket2mol_wrapper_writes_config_and_collects_sdf(tmp_path, monkeypatch
 
 def test_pocket2mol_wrapper_stages_every_molecule_in_numeric_order(tmp_path, monkeypatch):
     """Pocket2Mol writes 0.sdf..14.sdf, so lexicographic order drops molecules."""
-    from prism.generation.wrappers.pocket2mol import _UNBOUNDED_SAMPLES, main
+    from prism.generation.wrappers.pocket2mol import main
 
     root = tmp_path / "pocket2mol"
     script = root / "sample_for_pdb.py"
@@ -898,7 +898,7 @@ def test_pocket2mol_unbounded_sampling_replaces_the_stopping_condition(tmp_path,
 
 def test_pocket2mol_completion_mode_preserves_the_upstream_contract(tmp_path, monkeypatch):
     """The old behavior stays reachable for reproducing earlier runs."""
-    from prism.generation.wrappers.pocket2mol import _UNBOUNDED_SAMPLES, main
+    from prism.generation.wrappers.pocket2mol import main
 
     root = tmp_path / "pocket2mol"
     (root).mkdir(parents=True)

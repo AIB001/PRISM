@@ -15,7 +15,7 @@ from . import weights
 from .adapters.base import ModelAdapter
 from .errors import CapabilityError, ConfigurationError, GenerationError, InputError
 from .pocket import normalize_pocket
-from .postprocess import QC_REPORT_FIELDS, collect_candidates, write_qc_report
+from .postprocess import collect_candidates, write_qc_report
 from .quality import QualityContext, load_protein_coordinates, rdkit_available
 from .registry import build_adapters
 from .types import (

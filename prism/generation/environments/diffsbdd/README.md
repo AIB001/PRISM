@@ -5,15 +5,23 @@ contract in `prism/configs/generation.diffsbdd.slurm.example.yaml`.
 
 ## Pinned upstream contract
 
-- Repository: `https://github.com/luost26/DiffSBDD`
+- Repository: `https://github.com/arneschneuing/DiffSBDD`
 - Checkpoint: `crossdocked_fullatom_cond.ckpt` from the upstream release
 - Checkpoint SHA256:
   `07f86764bf569aafbc40a9c15fc02de8e2550437dd0f17f657eab3abe66c372c`
 
 The upstream checkout used on the integration cluster was copied without its
-`.git` directory, so no source commit is recorded here; pin one locally before
-regenerating. The checkout carries no `LICENSE` file; clarify upstream terms
-before redistribution.
+`.git` directory, so no source commit is recorded here and `model_commit` is
+empty in every DiffSBDD config. That is provenance only -- the run manifest
+records what it was given and nothing validates it -- but it means a fresh
+clone tracks upstream `main`, so pin a commit locally before you rely on a run
+being reproducible.
+
+The source repository is MIT (`Copyright (c) 2022 Arne Schneuing, Yuanqi Du,
+Charles Harris`). An earlier note here said the checkout carried no `LICENSE`;
+that was the incomplete copy, not upstream. The checkpoint is governed
+separately by Zenodo record 8183747 under CC BY 4.0, which is what PRISM
+mirrors and what `prism weights list` reports.
 
 ## Environment
 

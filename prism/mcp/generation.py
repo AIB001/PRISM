@@ -8,7 +8,6 @@ configured backend.
 
 import json
 import traceback
-from typing import Optional
 
 from ._common import _StdoutToStderr, _ensure_prism_importable, logger
 
