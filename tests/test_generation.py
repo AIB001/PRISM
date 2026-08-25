@@ -943,6 +943,24 @@ def test_pocket2mol_completion_mode_preserves_the_upstream_contract(tmp_path, mo
     assert len(list((output / "sdf").glob("*.sdf"))) == 3
 
 
+class _FinishedEntry:
+    """A Pocket2Mol pool entry as upstream pickles it into samples_*.pt.
+
+    Module level on purpose: pickle stores a class by qualified name, so one
+    defined inside the test would be unpicklable and torch.save would fail
+    before the test could exercise anything. rdkit is imported per instance to
+    keep collection free of the dependency, and AllChem explicitly because
+    rdkit only binds it onto Chem as a side effect of some other import.
+    """
+
+    def __init__(self, smiles):
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+
+        self.rdmol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+        AllChem.EmbedMolecule(self.rdmol, randomSeed=7)
+
+
 def test_pocket2mol_recovers_finished_molecules_when_upstream_crashes(tmp_path, monkeypatch):
     """Upstream dies in np.random.choice once its beam queue drains.
 
@@ -951,7 +969,7 @@ def test_pocket2mol_recovers_finished_molecules_when_upstream_crashes(tmp_path, 
     only surviving copy of the finished molecules.
     """
     pytest.importorskip("torch")
-    from rdkit import Chem
+    pytest.importorskip("rdkit")
 
     from prism.generation.wrappers.pocket2mol import main
 
@@ -961,11 +979,7 @@ def test_pocket2mol_recovers_finished_molecules_when_upstream_crashes(tmp_path, 
     checkpoint = _write(tmp_path / "model.pt", "checkpoint")
     protein = _write(tmp_path / "protein.pdb", PDB)
     output = tmp_path / "raw"
-
-    class FinishedEntry:
-        def __init__(self, smiles):
-            self.rdmol = Chem.AddHs(Chem.MolFromSmiles(smiles))
-            Chem.AllChem.EmbedMolecule(self.rdmol, randomSeed=7)
+    FinishedEntry = _FinishedEntry
 
     def fake_run(command, cwd, env, check):  # noqa: ARG001
         import torch
