@@ -221,10 +221,31 @@ def register(mcp):
                     selection=selection,
                 )
 
-                # rmsd_data shape: (n_frames, 3) — [frame, time, rmsd]
-                # RMSD values are in Angstroms from MDAnalysis, convert to nm
-                rmsd_values = rmsd_data[:, 2] / 10.0  # Å -> nm
-                times = rmsd_data[:, 1]  # ps
+                # calculate_rmsd already extracts the RMSD column, so this is a
+                # 1-D array of Angstroms -- not the (n_frames, 3) MDAnalysis
+                # results table. Indexing it as 2-D raised IndexError on every
+                # call, which is why this tool had never returned a value.
+                rmsd_values = np.asarray(rmsd_data, dtype=float).ravel() / 10.0
+
+                # The time axis is not part of that return, so it is rebuilt from
+                # the trajectory's own frame spacing rather than guessed at. The
+                # output says which way it was derived, because a constant step is
+                # an assumption about the file and not a property of every file.
+                import MDAnalysis as mda
+
+                times_source = "trajectory_dt"
+                try:
+                    universe = mda.Universe(topology, trajectory)
+                    dt = float(universe.trajectory.dt)
+                    if universe.trajectory.n_frames != len(rmsd_values) or not dt > 0:
+                        raise ValueError("frame count or dt does not match the RMSD series")
+                    times = np.arange(len(rmsd_values), dtype=float) * dt
+                except Exception:
+                    # Frame indices rather than a fabricated time axis: a consumer
+                    # can still plot the series, and nothing claims a unit it does
+                    # not have.
+                    times = np.arange(len(rmsd_values), dtype=float)
+                    times_source = "frame_index"
 
             result = convert_numpy_types({
                 "success": True,
@@ -237,6 +258,7 @@ def register(mcp):
                     "max_nm": float(np.max(rmsd_values)),
                 },
                 "time_ps": times.tolist(),
+                "time_axis_source": times_source,
                 "rmsd_nm": rmsd_values.tolist(),
             })
             return json.dumps(result, indent=2)
