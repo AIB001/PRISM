@@ -1,0 +1,12 @@
+{
+  "schema": "prism-design-planner-config/1",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-flash",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "timeout_seconds": 60,
+  "max_output_tokens": 4096,
+  "max_attempts": 1,
+  "temperature": 0.2,
+  "json_mode": true,
+  "request_options": {"thinking": {"type": "disabled"}}
+}

@@ -1,0 +1,39 @@
+{
+  "backend_config": "./design.flowr_root.local.json",
+  "manifest": "/data/m1_dataset/native_records.jsonl",
+  "split": "/data/m1_dataset/native_split.json",
+  "text_encoder": {
+    "model_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "local_path": "/models/paraphrase-multilingual-MiniLM-L12-v2/e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "max_length": 128
+  },
+  "output": "/runs/prism_m1_adapter",
+  "seed": 20261013,
+  "device": "cuda",
+  "max_steps": 500,
+  "batch_size": 1,
+  "gradient_accumulation": 8,
+  "adapter_lr": 0.0001,
+  "lora_lr": 1e-05,
+  "weight_decay": 0.01,
+  "warmup_steps": 25,
+  "clip_grad_norm": 1.0,
+  "text_dropout": 0.1,
+  "self_condition_probability": 0.5,
+  "precision": "float32",
+  "validation_interval": 25,
+  "validation_limit": 0,
+  "early_stopping_patience": 10,
+  "heads": 4,
+  "lora_targets": [],
+  "lora_rank": 8,
+  "lora_alpha": 16.0,
+  "rotate": true,
+  "loss_weights": {
+    "coords": 1.0,
+    "atomics": 1.0,
+    "charges": 1.0,
+    "bonds": 1.0
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "base_url", "model", "api_key_env"],
+  "properties": {
+    "schema": {"const": "prism-design-planner-config/1"},
+    "base_url": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1, "maxLength": 200},
+    "api_key_env": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}]},
+    "timeout_seconds": {"type": "number", "minimum": 1, "maximum": 60},
+    "max_output_tokens": {"type": "integer", "minimum": 128, "maximum": 16384},
+    "max_attempts": {"type": "integer", "minimum": 1, "maximum": 3},
+    "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+    "json_mode": {"type": "boolean"},
+    "request_options": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "thinking": {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"enum": ["enabled", "disabled"]}}},
+        "enable_thinking": {"type": "boolean"},
+        "reasoning_effort": {"enum": ["low", "medium", "high", "max"]}
+      }
+    }
+  }
+}

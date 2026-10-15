@@ -191,6 +191,21 @@ The documentation includes:
 
 ## Quick Start
 
+### PRISM-Design: constrained local editing and text-conditioned training
+
+M1 adds reviewed nonpeptide reconstruction datasets, a frozen multilingual text encoder,
+trainable adapters and optional LoRA inside native FLOWR sampling. See the
+[M1 training architecture](prism/design/M1_TRAINING_ARCHITECTURE.md) for the data
+contract, training commands, validation protocol and current limitations.
+
+`prism design` compiles reviewed DesignSpecs into local fragment replacement or
+growth requests, runs a pinned FLOWR.root backend, and independently checks every
+raw sample before exporting candidates through the existing `prepare-md` workflow.
+Install `pip install -e '.[design]'`; the model runs in its own environment.
+See the [PRISM-Design guide](prism/design/README.md) for setup, commands, constraints,
+output records, and tests. This pilot uses existing weights and makes no measured
+affinity-improvement claim.
+
 ### Protein-pocket ligand generation (experimental)
 
 PRISM provides an orchestration layer for Pocket2Mol, TargetDiff, PocketXMol,

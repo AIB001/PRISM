@@ -1,0 +1,811 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "prism-design-annotation/0.1"
+    },
+    "design_id": {
+      "type": "string"
+    },
+    "complex_id": {
+      "type": "string",
+      "pattern": "^[0-9][a-z0-9]{3}$"
+    },
+    "selection_rank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "parent_design_id": {
+      "type": "null"
+    },
+    "language": {
+      "const": "zh-CN"
+    },
+    "illustrative_fixture": {
+      "const": false
+    },
+    "stage": {
+      "enum": [
+        "grounded_draft",
+        "input_review_only"
+      ]
+    },
+    "task": {
+      "enum": [
+        "fragment_replacement",
+        "fragment_growing",
+        "input_review"
+      ]
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "objective": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "local_shape",
+            "reduce_flex",
+            "lower_logp",
+            "small_growth",
+            "input_curation"
+          ]
+        },
+        "description_zh": {
+          "type": "string"
+        },
+        "claim_scope": {
+          "const": "unverified_design_requirement"
+        },
+        "biological_activity_claim": {
+          "const": false
+        },
+        "improvement_observed": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "code",
+        "description_zh",
+        "claim_scope",
+        "biological_activity_claim",
+        "improvement_observed"
+      ],
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "properties": {
+        "receptor": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "pocket": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "reference_ligand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/file_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "atom_mapping": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/file_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "original_ligand_sdf": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "original_ligand_mol2": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "coordinate_unit": {
+          "const": "angstrom"
+        },
+        "coordinate_frame_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chemical_state_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receptor_state_id": {
+          "type": "string"
+        },
+        "pose_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "receptor",
+        "pocket",
+        "reference_ligand",
+        "atom_mapping",
+        "evidence",
+        "original_ligand_sdf",
+        "original_ligand_mol2",
+        "coordinate_unit",
+        "coordinate_frame_id",
+        "chemical_state_id",
+        "receptor_state_id",
+        "pose_id"
+      ],
+      "additionalProperties": false
+    },
+    "selectors": {
+      "type": "object",
+      "properties": {
+        "core": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference_heavy_atom_maps"
+            },
+            "atom_maps": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "atom_maps"
+          ],
+          "additionalProperties": false
+        },
+        "editable": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference_heavy_atom_maps"
+            },
+            "atom_maps": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "atom_maps"
+          ],
+          "additionalProperties": false
+        },
+        "growth_site": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "reference_heavy_atom_maps"
+            },
+            "atom_maps": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "atom_maps"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "editing": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "fixed_selector": {
+              "const": "core"
+            },
+            "editable_selector": {
+              "const": "editable"
+            },
+            "growth_site_selector": {
+              "enum": [
+                "growth_site",
+                null
+              ]
+            },
+            "fixed_graph": {
+              "const": true
+            },
+            "fixed_coordinates": {
+              "const": false
+            },
+            "preserve_specified_stereochemistry": {
+              "const": true
+            },
+            "heavy_atoms_only": {
+              "const": true
+            },
+            "hydrogen_policy": {
+              "type": "string"
+            },
+            "new_fragment_heavy_atoms_range": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "attachment_rules": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "retained_atom_map": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "replaced_atom_map": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "allowed_bond_orders": {
+                    "const": [
+                      1
+                    ]
+                  },
+                  "maximum_new_connections": {
+                    "const": 1
+                  },
+                  "reference_boundary_vector_A": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        },
+                        "minItems": 3,
+                        "maxItems": 3
+                      }
+                    ]
+                  },
+                  "vector_is_measured_replacement_hint_not_new_pose": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "retained_atom_map",
+                  "replaced_atom_map",
+                  "allowed_bond_orders",
+                  "maximum_new_connections",
+                  "reference_boundary_vector_A",
+                  "vector_is_measured_replacement_hint_not_new_pose"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "fixed_selector",
+            "editable_selector",
+            "growth_site_selector",
+            "fixed_graph",
+            "fixed_coordinates",
+            "preserve_specified_stereochemistry",
+            "heavy_atoms_only",
+            "hydrogen_policy",
+            "new_fragment_heavy_atoms_range",
+            "attachment_rules"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fixed_subgraph",
+              "single_attachment_boundary",
+              "formal_charge",
+              "new_unspecified_stereocenter_count",
+              "core_rmsd",
+              "descriptor_delta",
+              "new_fragment_heavy_atoms",
+              "chemical_validity"
+            ]
+          },
+          "priority": {
+            "enum": [
+              "hard",
+              "soft"
+            ]
+          },
+          "operator": {
+            "enum": [
+              "eq",
+              "le",
+              "between"
+            ]
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            ]
+          },
+          "unit": {
+            "enum": [
+              "boolean",
+              "count",
+              "elementary_charge",
+              "angstrom",
+              "dimensionless"
+            ]
+          },
+          "descriptor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selector_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evaluation_context": {
+            "enum": [
+              "chemical_graph",
+              "raw_generated_pose"
+            ]
+          },
+          "verifier_protocol_ref": {
+            "type": "string"
+          },
+          "missing_policy": {
+            "const": "reject_or_mark_unknown_never_pass"
+          },
+          "origin": {
+            "const": "assistant_proposed_pilot_requirement"
+          },
+          "calibration_status": {
+            "const": "pilot_policy_not_experimentally_calibrated"
+          },
+          "source_evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "priority",
+          "operator",
+          "value",
+          "unit",
+          "descriptor",
+          "selector_ref",
+          "evaluation_context",
+          "verifier_protocol_ref",
+          "missing_policy",
+          "origin",
+          "calibration_status",
+          "source_evidence_refs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "null"
+        },
+        "source_commit": {
+          "type": "null"
+        },
+        "checkpoint_sha256": {
+          "type": "null"
+        },
+        "capability_check": {
+          "const": "not_run"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "atom_indexing": {
+          "const": "adapter_must_resolve_atom_maps_to_backend_indices"
+        }
+      },
+      "required": [
+        "id",
+        "source_commit",
+        "checkpoint_sha256",
+        "capability_check",
+        "required_capabilities",
+        "atom_indexing"
+      ],
+      "additionalProperties": false
+    },
+    "sampling": {
+      "type": "object",
+      "properties": {
+        "requested_slots": {
+          "const": 0
+        },
+        "status": {
+          "const": "not_run"
+        },
+        "proposed_pilot_slots_after_integration": {
+          "const": 16
+        },
+        "seed_base": {
+          "const": 20261013
+        }
+      },
+      "required": [
+        "requested_slots",
+        "status",
+        "proposed_pilot_slots_after_integration",
+        "seed_base"
+      ],
+      "additionalProperties": false
+    },
+    "postprocessing": {
+      "type": "object",
+      "properties": {
+        "preserve_raw_output": {
+          "const": true
+        },
+        "allow_silent_graph_repair": {
+          "const": false
+        },
+        "allow_untracked_coordinate_change": {
+          "const": false
+        }
+      },
+      "required": [
+        "preserve_raw_output",
+        "allow_silent_graph_repair",
+        "allow_untracked_coordinate_change"
+      ],
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "review_record": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "review_tier": {
+          "enum": [
+            "candidate_for_m0_pilot",
+            "needs_review",
+            "outside_mvp",
+            "blocked"
+          ]
+        },
+        "rationale_zh": {
+          "type": "string"
+        },
+        "case_specific_checks_zh": {
+          "type": "string"
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "semantic_review_status": {
+          "const": "current_assistant_reviewed_extracted_evidence"
+        },
+        "expert_review_status": {
+          "const": "not_performed"
+        },
+        "assay_metadata_status": {
+          "const": "local_companion_csv_unverified"
+        },
+        "design_feasibility_status": {
+          "const": "not_tested"
+        }
+      },
+      "required": [
+        "review_record",
+        "review_tier",
+        "rationale_zh",
+        "case_specific_checks_zh",
+        "quality_flags",
+        "semantic_review_status",
+        "expert_review_status",
+        "assay_metadata_status",
+        "design_feasibility_status"
+      ],
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "selection_manifest": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "manual_decisions": {
+          "$ref": "#/$defs/file_ref"
+        },
+        "label_origin": {
+          "const": "assistant_proposed_design_plus_program_measured_evidence"
+        },
+        "requested_model": {
+          "const": "gpt-6-astra"
+        },
+        "runtime_model_id": {
+          "const": "not_exposed_to_artifact_builder"
+        },
+        "separate_model_api_invoked": {
+          "const": false
+        },
+        "rdkit_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "selection_manifest",
+        "manual_decisions",
+        "label_origin",
+        "requested_model",
+        "runtime_model_id",
+        "separate_model_api_invoked",
+        "rdkit_version"
+      ],
+      "additionalProperties": false
+    },
+    "use_policy": {
+      "type": "object",
+      "properties": {
+        "executable_in_current_prism": {
+          "const": false
+        },
+        "optimization_pair_available": {
+          "const": false
+        },
+        "affinity_training_eligible": {
+          "const": false
+        },
+        "reconstruction_mask_candidate": {
+          "type": "boolean"
+        },
+        "train_validation_test_split": {
+          "type": "null"
+        },
+        "leakage_review_required": {
+          "const": true
+        }
+      },
+      "required": [
+        "executable_in_current_prism",
+        "optimization_pair_available",
+        "affinity_training_eligible",
+        "reconstruction_mask_candidate",
+        "train_validation_test_split",
+        "leakage_review_required"
+      ],
+      "additionalProperties": false
+    },
+    "execution_blockers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "design_id",
+    "complex_id",
+    "selection_rank",
+    "parent_design_id",
+    "language",
+    "illustrative_fixture",
+    "stage",
+    "task",
+    "prompt",
+    "objective",
+    "inputs",
+    "selectors",
+    "editing",
+    "constraints",
+    "backend",
+    "sampling",
+    "postprocessing",
+    "review",
+    "provenance",
+    "use_policy",
+    "execution_blockers"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:prism-design:annotation:0.1",
+  "title": "PRISM-Design first100 annotation draft; not an implemented CLI contract",
+  "$defs": {
+    "file_ref": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "const": "input_review"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "input_review_only"
+          },
+          "editing": {
+            "type": "null"
+          },
+          "selectors": {
+            "maxProperties": 0
+          },
+          "constraints": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "stage": {
+            "const": "grounded_draft"
+          },
+          "editing": {
+            "type": "object"
+          },
+          "selectors": {
+            "required": [
+              "core",
+              "editable"
+            ]
+          },
+          "constraints": {
+            "minItems": 6
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "const": "fragment_growing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "selectors": {
+            "required": [
+              "growth_site"
+            ],
+            "properties": {
+              "editable": {
+                "properties": {
+                  "atom_maps": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "task": {
+            "const": "fragment_replacement"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "selectors": {
+            "properties": {
+              "editable": {
+                "properties": {
+                  "atom_maps": {
+                    "minItems": 2
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

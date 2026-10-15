@@ -15,10 +15,7 @@ def _parse_bool(value: str) -> bool:
         return True
     if normalized in _FALSE_VALUES:
         return False
-    raise ValueError(
-        "--generation expects true or false "
-        "(accepted aliases: 1/0, yes/no, on/off)"
-    )
+    raise ValueError("--generation expects true or false " "(accepted aliases: 1/0, yes/no, on/off)")
 
 
 def _extract_generation_flag(argv: Sequence[str]) -> Tuple[Optional[bool], List[str]]:
@@ -60,6 +57,11 @@ def _forwarded_argv(argv: Sequence[str]) -> Iterator[None]:
 def main(argv: Optional[Sequence[str]] = None):
     """Route generation commands and preserve the existing Builder CLI."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+
+    if arguments and arguments[0] == "design":
+        from .design.cli import main as design_main
+
+        return design_main(arguments[1:])
 
     if arguments and arguments[0] == "generate":
         from .generation.cli import main as generation_main

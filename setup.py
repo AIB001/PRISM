@@ -24,6 +24,7 @@ install_requires = [
 
 # Optional requirements for different force fields and advanced features
 extras_require = {
+    "design": ["rdkit>=2025.3.2", "jsonschema>=4.17"],
     "gaff": [
         "acpype>=2021.0",
     ],
@@ -113,12 +114,17 @@ setup(
             "prism=prism.cli:main",
             "prism-builder=prism.builder:main",
             "prism-generate=prism.generation.cli:main",
+            "prism-design=prism.design.cli:main",
         ],
     },
     include_package_data=True,
     package_data={
         "prism": [
             "configs/*.yaml",
+            "configs/*.json",
+            "design/schemas/*.json",
+            "design/*.md",
+            "design/m1/requirements.txt",
             "generation/environments/*/*.md",
             "generation/environments/*/Dockerfile",
             # The equilibrated bilayer patches are read at build time through

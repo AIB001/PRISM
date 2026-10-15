@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:prism-design:edit-proposal:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "context_sha256", "decision", "summary", "evidence_ids", "operations", "uncertainties", "unfulfilled_goals"],
+  "properties": {
+    "schema": {"const": "prism-design-edit-proposal/1"},
+    "context_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "decision": {"enum": ["propose", "abstain"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 3000},
+    "evidence_ids": {"type": "array", "uniqueItems": true, "maxItems": 100, "items": {"type": "string", "maxLength": 200}},
+    "uncertainties": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+    "unfulfilled_goals": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+    "operations": {
+      "type": "array", "maxItems": 48,
+      "items": {"oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["op", "atom_map", "element", "formal_charge"], "properties": {
+          "op": {"enum": ["add_atom", "mutate_atom"]}, "atom_map": {"$ref": "#/$defs/atom_map"},
+          "element": {"enum": ["C", "N", "O", "F", "P", "S", "Cl", "Br", "I"]},
+          "formal_charge": {"type": "integer", "minimum": -1, "maximum": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["op", "atom_map"], "properties": {
+          "op": {"const": "delete_atom"}, "atom_map": {"$ref": "#/$defs/atom_map"}}},
+        {"type": "object", "additionalProperties": false, "required": ["op", "atom_maps", "order"], "properties": {
+          "op": {"enum": ["add_bond", "change_bond"]}, "atom_maps": {"$ref": "#/$defs/pair"}, "order": {"enum": [1, 2, 3]}}},
+        {"type": "object", "additionalProperties": false, "required": ["op", "atom_maps"], "properties": {
+          "op": {"const": "delete_bond"}, "atom_maps": {"$ref": "#/$defs/pair"}}}
+      ]}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"decision": {"const": "propose"}}},
+     "then": {"properties": {"operations": {"minItems": 1}, "evidence_ids": {"minItems": 1}}},
+     "else": {"properties": {"operations": {"maxItems": 0}}}}
+  ],
+  "$defs": {
+    "atom_map": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "pair": {"type": "array", "items": {"$ref": "#/$defs/atom_map"}, "minItems": 2, "maxItems": 2, "uniqueItems": true}
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism.local/schema/m1-record-v1",
+  "title": "PRISM Design M1 observed fragment reconstruction record",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "prism-design-m1-record/1"
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "complex_group": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "const": "fragment_reconstruction"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "label_kind": {
+      "const": "observed_structure_caption"
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "completed"
+        },
+        "decision": {
+          "const": "nonpeptide"
+        },
+        "quality_pass": {
+          "const": true
+        },
+        "reviewer_kind": {
+          "type": "string"
+        },
+        "human_reviewed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status",
+        "decision",
+        "quality_pass",
+        "reviewer_kind",
+        "human_reviewed"
+      ],
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "pocket": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "protein": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reference",
+        "pocket",
+        "protein"
+      ],
+      "additionalProperties": false
+    },
+    "atom_maps": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "mask_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fixed": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "variable": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "attachment_fixed": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "attachment_variable": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "fixed",
+          "variable",
+          "attachment_fixed",
+          "attachment_variable"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "split_keys": {
+      "type": "object",
+      "properties": {
+        "chemical_identity": {
+          "type": "string"
+        },
+        "scaffold": {
+          "type": "string"
+        },
+        "protein_groups": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "chemical_identity",
+        "scaffold",
+        "protein_groups"
+      ],
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "record_id",
+    "complex_group",
+    "task",
+    "text",
+    "label_kind",
+    "review",
+    "files",
+    "atom_maps",
+    "mask_candidates",
+    "split_keys",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "$comment": "Also run prism.design.m1.data.validate_record for graph, masks, hashes, pocket-frame and split checks."
+}

@@ -1,0 +1,13 @@
+{
+  "backend": "flowr_root",
+  "python": "/path/to/flowr_root/.venv/bin/python",
+  "source": "/path/to/flowr_root",
+  "source_commit": "739a33c2aab74d074dd24605b9a2e34dc809ae9c",
+  "checkpoint": "/path/to/checkpoints/flowr_root_v2.2.ckpt",
+  "checkpoint_sha256": "b818f41dc12ffb6bc558bb0ad997055581e07cd9e49dcac1b794ed9993c46e4c",
+  "steps": 100,
+  "batch_cost": 1,
+  "grow_size": 2,
+  "device": "cuda",
+  "timeout_seconds": 1800
+}
